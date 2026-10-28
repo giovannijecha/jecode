@@ -1,16 +1,15 @@
-//! Conversation work receipts: question decisions and immutable plan snapshots.
+//! Conversation work receipts: question decisions and the call creating a plan.
 
 use super::{Card, Tool};
 use crate::{
     ask::Question,
-    todo::Plan,
     tui::{
         line::Line,
+        text,
         theme::{
-            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, BADGE_OTHER, BADGE_WARN, DIM, LIT, MUTED, STRONG,
-            Surface,
+            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, BADGE_OTHER, BADGE_WARN, BODY, DIM, LIT, MUTED,
+            STRONG, Surface,
         },
-        view,
     },
 };
 
@@ -136,79 +135,35 @@ pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
     Card { rows, hidden: true }
 }
 
+/// The call that creates a plan: an ordinary call row with ` TODO `, the
+/// plan title and its task count. It stays as written; later reads, updates
+/// and the end of the plan have no row, as the plan lives in `/todo`.
 pub(super) fn todo(tool: Tool<'_>, columns: usize) -> Card {
-    let action = tool
+    let status = super::Status::of(&tool);
+    let mut head = super::badge::badge("Todo", status);
+    let name = text::cells(&head.plain());
+    head.push(" ", BODY);
+    head.push(&text::clean(super::field(tool.arguments, "title")), BODY);
+    let count = tool
         .arguments
-        .get("action")
-        .and_then(crate::json::Value::as_str)
-        .unwrap_or("");
-    let plan = tool.result.and_then(|result| Plan::parse(result).ok());
-    let title = if action == "set" {
-        "Plan updated"
+        .get("tasks")
+        .and_then(crate::json::Value::as_array)
+        .map_or(0, <[crate::json::Value]>::len);
+    let fact = Line::new(&format!("  {}", text::counted(count, "task")), MUTED);
+    // The title shortens before the count, unless it would vanish.
+    let room = columns.saturating_sub(text::cells(&fact.plain()));
+    let head = if room > name + 2 {
+        head.shortened(room).append(fact)
     } else {
-        "Current plan"
+        head.shortened(columns)
     };
-    let surface = match tool.result {
-        None => BADGE_IDLE,
-        Some(result) if result.get("error").is_some() => BADGE_BAD,
-        _ => BADGE_OTHER,
-    };
-    let mut head = badge("TODO", surface);
-    head.push(&format!("  {title}"), STRONG);
-    let mut rows = head.wrap(columns.max(1), true);
-    if let Some(plan) = plan {
-        let counts = |status| {
-            plan.tasks
-                .iter()
-                .filter(|task| task.status == status)
-                .count()
-        };
-        append_wrapped(
-            &mut rows,
-            &format!("{} · revision {}", plan.title, plan.revision),
-            MUTED,
-            columns,
-        );
-        append_wrapped(
-            &mut rows,
-            &format!(
-                "{} done · {} active · {} waiting · {} pending · {} cancelled",
-                counts("done"),
-                counts("in_progress"),
-                counts("waiting"),
-                counts("pending"),
-                counts("cancelled")
-            ),
-            MUTED,
-            columns,
-        );
-        if tool.presentation.expanded {
-            for task in &plan.tasks {
-                let (_, style) = view::todo::state_label(&task.status);
-                append_wrapped(
-                    &mut rows,
-                    &format!("{} · {}  {}", task.status, task.id, task.title),
-                    style,
-                    columns,
-                );
-                if !task.note.is_empty() {
-                    append_wrapped(&mut rows, &task.note, MUTED, columns);
-                }
-            }
-        }
-    } else if tool
-        .result
-        .is_some_and(|result| result.get("revision") == Some(&crate::json::Value::number(0)))
-    {
-        append_wrapped(&mut rows, "No plan yet", DIM, columns);
-    } else if let Some(result) = tool.result {
-        let failure = result
-            .get("error")
-            .and_then(crate::json::Value::as_str)
-            .unwrap_or(tool.summary);
-        append_wrapped(&mut rows, failure, BAD, columns);
-    } else {
-        append_wrapped(&mut rows, "Updating the current plan", MUTED, columns);
+    let mut rows = vec![head.at_source(0)];
+    if status == super::Status::Failed {
+        rows.extend(super::failure::rows(&tool, columns, "  ⎿ "));
+        super::badge::hang(&mut rows[1..], true);
     }
-    Card { rows, hidden: true }
+    Card {
+        rows,
+        hidden: false,
+    }
 }

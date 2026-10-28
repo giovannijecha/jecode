@@ -126,10 +126,11 @@ fn plain_todo_reads_persisted_plan_without_a_model_request() {
         Vec::new(),
     )
     .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Todo · CSV export · 1 of 1 done\n 1  Inspect report  done"));
     assert!(
-        String::from_utf8(output)
-            .unwrap()
-            .contains("Filters verified.")
+        !output.contains("Filters verified."),
+        "notes stay for the model"
     );
     let id = first.sessions().unwrap().id();
     drop(first);

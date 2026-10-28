@@ -48,7 +48,7 @@ pub(super) fn todo() -> Value {
             (
                 "agent",
                 string(
-                    "Optional collaborator ID for display only. A returned report does not complete this task.",
+                    "Optional collaborator ID, such as a1, that works on this task. Its return shows the task as awaiting your review and its failure as failed until you mark the task; a returned report never completes it.",
                 ),
             ),
         ]),
@@ -56,7 +56,7 @@ pub(super) fn todo() -> Value {
     );
     super::tool(
         "todo_list",
-        "Own the current conversation's plan. get reads it; set atomically replaces the full task list and records a chronological snapshot. Keep existing task IDs when changing title, status or note; use cancelled for work removed by a decision. The model chooses when tasks are done. Collaborators keep separate plans. Calls run in order even with parallel:true.",
+        "Own the current conversation's plan; the user reads it in /todo. get reads it; set atomically replaces the full task list and records a chronological snapshot. Keep existing task IDs when changing title, status or note; use cancelled for work removed by a decision. Only the main agent marks its plan and decides when a task is done, after reviewing any collaborator's returned work. Collaborators keep their own plans and never complete the main agent's tasks. Calls run in order even with parallel:true.",
         Value::object([
             (
                 "action",

@@ -78,7 +78,7 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
     } else if let (Some(panel), Some(question)) = (&state.ask_panel, &state.question) {
         Some(ask::sheet(question, panel, columns))
     } else if let Some(panel) = &state.todo_panel {
-        Some(todo::sheet(state.todo_plan.as_ref(), panel, columns))
+        Some(todo::sheet(state, panel, columns))
     } else if let Some(info) = &state.information {
         Some(information::sheet(info, columns))
     } else if let Some(selector) = &state.selector {

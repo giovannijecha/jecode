@@ -90,6 +90,50 @@ pub(super) fn console(bash: &Path) {
     paint(ask.live, width, height);
 
     state.ask_panel = None;
+    // Only the call creating the plan has a row; the next set has none.
+    let mut plan = None;
+    for (id, status) in [("todo-1", "pending"), ("todo-2", "in_progress")] {
+        let arguments = crate::json::Value::object([
+            ("action", crate::json::Value::string("set")),
+            ("title", crate::json::Value::string("CSV export")),
+            (
+                "tasks",
+                crate::json::Value::Array(vec![crate::json::Value::object([
+                    ("id", crate::json::Value::string("t1")),
+                    ("title", crate::json::Value::string("Choose exported rows")),
+                    ("status", crate::json::Value::string(status)),
+                ])]),
+            ),
+        ]);
+        let next = Plan::set(&arguments, plan.as_ref()).unwrap();
+        state.event(Event::ToolStarted {
+            id: id.into(),
+            name: "todo_list".into(),
+            arguments,
+        });
+        state.event(Event::ToolFinished {
+            id: id.into(),
+            name: "todo_list".into(),
+            summary: crate::events::tool_summary("todo_list", &next.value()),
+            result: next.value(),
+        });
+        plan = Some(next);
+    }
+    let created: Vec<Line> = state
+        .rows()
+        .concat()
+        .into_iter()
+        .filter(|row| row.plain().contains("TODO"))
+        .collect();
+    assert_eq!(created.len(), 1);
+    assert!(created[0].plain().contains("CSV export  1 task"));
+    paint(created, width, height);
+
+    state.collaboration = vec![crate::json::Value::object([
+        ("id", crate::json::Value::string("a1")),
+        ("number", crate::json::Value::number(1)),
+        ("state", crate::json::Value::string("returned")),
+    ])];
     state.todo_plan = Some(Plan {
         title: "CSV export".into(),
         revision: 1,
@@ -118,6 +162,10 @@ pub(super) fn console(bash: &Path) {
             .iter()
             .any(|row| row.plain().contains("Choose exported rows"))
     );
+    assert!(todo.live.iter().any(|row| {
+        let row = row.plain();
+        row.contains("Check CSV encoding") && row.contains("AGENT 1") && row.contains("review")
+    }));
     assert_eq!(state.editor, draft);
     paint(todo.live, width, height);
     drop(terminal);

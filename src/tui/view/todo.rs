@@ -1,176 +1,208 @@
-use super::panel::{self, Field, Part, Sheet, key};
+//! `/todo`: the model's plan as a B5 menu, every task in plan order with its
+//! state and owner. There is nothing to select, open or type.
+
+use super::panel::{self, Part, Sheet, key};
 use crate::{
-    todo::{Plan, Task},
+    json::Value,
+    todo::{self, Phase, Plan},
     tui::{
+        cards,
         line::Line,
-        theme::{ACCENT, DIM, GOOD, MUTED, STRONG, WARNING},
+        state::State,
+        text,
+        theme::{ACCENT, BAD, BODY, DIM, FAINT, GOOD, MUTED, STRONG, Style, WARNING},
         todo::Panel,
     },
 };
 
-pub(in crate::tui) fn state_label(status: &str) -> (&'static str, crate::tui::theme::Style) {
-    match status {
-        "pending" => ("Pending", MUTED),
-        "in_progress" => ("In progress", ACCENT),
-        "waiting" => ("Waiting", WARNING),
-        "done" => ("Done", GOOD),
-        "cancelled" => ("Cancelled", DIM),
-        _ => ("Unknown", WARNING),
+/// Under this width the numbers leave and `awaiting review` shortens.
+const NARROW: usize = 64;
+pub(in crate::tui) const NO_PLAN: &str = "No plan yet. The model writes one for multi-step work.";
+
+/// A state's B3 mark, title and word styles, and its cell on the rule's
+/// strip; cancelled tasks have none.
+struct Look {
+    mark: (&'static str, Style),
+    title: Style,
+    word: Style,
+    strip: Option<(&'static str, Style)>,
+}
+
+fn look(phase: Phase) -> Look {
+    let (mark, title, word, strip) = match phase {
+        Phase::Done => (("☑ ", GOOD), MUTED, GOOD, Some(("▰", GOOD))),
+        Phase::InProgress => (
+            ("☐ ", ACCENT.bold()),
+            STRONG.bold(),
+            ACCENT,
+            Some(("▰", ACCENT)),
+        ),
+        Phase::Waiting | Phase::AwaitingReview => (
+            ("☐ ", WARNING.bold()),
+            STRONG,
+            WARNING,
+            Some(("▰", WARNING)),
+        ),
+        Phase::Failed => (("☐ ", BAD.bold()), STRONG, BAD, Some(("▰", BAD))),
+        Phase::NotStarted => (("☐ ", MUTED), BODY, MUTED, Some(("▱", FAINT))),
+        Phase::Cancelled => (("☐ ", FAINT), DIM.strike(), DIM, None),
+    };
+    Look {
+        mark,
+        title,
+        word,
+        strip,
     }
 }
 
-pub(super) fn detail_rows(task: &Task, columns: usize) -> Vec<Line> {
-    let width = panel::text_width(columns).max(1);
-    let mut rows = Vec::new();
-    for (text, style) in [
-        (task.title.as_str(), STRONG),
-        (task.id.as_str(), state_label(&task.status).1),
-        (task.agent.as_deref().unwrap_or(""), DIM),
-        (
-            task.note.as_str(),
-            if task.status == "waiting" {
-                WARNING
-            } else {
-                MUTED
-            },
-        ),
-    ] {
-        if text.is_empty() {
-            continue;
+/// One strip cell per task that still counts, then `N of M done`.
+fn aside(plan: &Plan, records: &[Value]) -> Line {
+    let mut strip = Line::default();
+    let (mut done, mut counted) = (0, 0);
+    for task in &plan.tasks {
+        let phase = Phase::of(task, todo::owner(task, records));
+        if let Some((cell, style)) = look(phase).strip {
+            strip.push(cell, style);
+            counted += 1;
+            done += usize::from(phase == Phase::Done);
         }
-        rows.extend(
-            Line::new(text, style)
-                .wrap(width, true)
-                .into_iter()
-                .map(|line| panel::indent(line, columns)),
-        );
     }
-    rows
+    if counted > 0 {
+        strip.push(&format!(" {done} of {counted} done"), MUTED);
+    }
+    strip
 }
 
-pub(super) fn sheet<'a>(
-    plan: Option<&'a Plan>,
-    panel_state: &'a Panel,
-    columns: usize,
-) -> Sheet<'a> {
-    let width = panel::text_width(columns);
-    if let Some(id) = &panel_state.detail_id {
-        let task = plan.and_then(|plan| plan.tasks.iter().find(|task| &task.id == id));
-        let label = task.map_or("Task", |task| task.title.as_str());
-        let rows = task
-            .map(|task| detail_rows(task, columns))
-            .unwrap_or_default();
-        let total = rows.len();
-        return Sheet {
-            title: panel::title(Some("Todo"), label, "read only"),
-            aside: Line::new(task.map_or("", |task| state_label(&task.status).0), MUTED),
-            field: None,
-            draft_caret: false,
-            head: vec![],
-            body: Box::new(move |room| {
-                let start = panel_state.offset.min(total.saturating_sub(room));
-                panel::window(
-                    rows.iter()
-                        .skip(start)
-                        .take(room)
-                        .cloned()
-                        .map(|line| (line, None))
-                        .collect(),
-                    start,
-                    total,
-                    room,
-                    columns,
-                )
-                .into_iter()
-                .enumerate()
-                .map(|(i, line)| (line, Part::Row(i)))
-                .collect()
-            }),
-            total: Some(total),
-            tail: Box::new(move |overflow| {
-                panel::keys(
-                    &[key("↑↓", "scroll").scrolling(), key("Esc", "back to tasks")],
-                    width,
-                    overflow,
-                )
-            }),
-            confirming: false,
-        };
-    }
-    let tasks = plan
-        .map(|plan| panel_state.filtered(plan))
-        .unwrap_or_default();
-    let total = tasks.len();
-    let (value, caret) = panel_state
-        .filter
-        .viewport(columns.saturating_sub(3).max(1), false);
-    Sheet {
-        title: panel::title(None, "Todo", "current conversation"),
-        aside: Line::new(
-            &format!("{} tasks", plan.map_or(0, |plan| plan.tasks.len())),
-            MUTED,
-        ),
-        field: Some(Field {
-            label: "Filter tasks".into(),
-            value,
-            caret,
-            placeholder: "",
-            suffix: "",
-        }),
-        draft_caret: false,
-        head: vec![],
-        body: Box::new(move |room| {
-            if total == 0 {
-                let empty = if plan.is_none() {
-                    "No plan yet"
+/// Plan-ordered rows: the number (dropped when narrow), the mark and title
+/// from column 2, then the owner badge and the state word in aligned
+/// columns, the state column ending two cells from the edge.
+pub(in crate::tui) fn rows(plan: &Plan, records: &[Value], columns: usize) -> Vec<Line> {
+    let narrow = columns < NARROW;
+    let tasks: Vec<_> = plan
+        .tasks
+        .iter()
+        .map(|task| {
+            let owner = todo::owner(task, records);
+            let lifecycle = owner
+                .and_then(|record| record.get("state").and_then(Value::as_str))
+                .unwrap_or("");
+            let badge =
+                todo::owner_label(task, owner).map(|label| cards::agent_badge(&label, lifecycle));
+            (task, Phase::of(task, owner), badge)
+        })
+        .collect();
+    let words = tasks
+        .iter()
+        .map(|(_, phase, _)| text::cells(phase.word(narrow)))
+        .max()
+        .unwrap_or(0);
+    let owners = tasks
+        .iter()
+        .filter_map(|(_, _, badge)| badge.as_ref().map(panel::cells))
+        .max()
+        .unwrap_or(0);
+    let right = words + if owners > 0 { owners + 2 } else { 0 };
+    let end = columns.saturating_sub(2);
+    let room = end.saturating_sub(right);
+    let mut number = 0;
+    tasks
+        .into_iter()
+        .map(|(task, phase, badge)| {
+            let look = look(phase);
+            let mut left = Line::new("  ", MUTED);
+            if !narrow {
+                let column = if phase == Phase::Cancelled {
+                    "    ".to_owned()
                 } else {
-                    "No matching tasks"
+                    number += 1;
+                    format!("{number:>2}  ")
                 };
-                return vec![(panel::indent(Line::new(empty, DIM), columns), Part::Keep)];
+                left.push(&column, DIM);
             }
-            let start = panel::start(panel_state.selected, total, room);
-            let rows = tasks
+            left.push(look.mark.0, look.mark.1);
+            left.push(&text::clean(&task.title), look.title);
+            let mut tail = Line::default();
+            if owners > 0 {
+                let badge = badge.unwrap_or_default();
+                let gap = owners - panel::cells(&badge) + 2;
+                tail = badge;
+                tail.push(&" ".repeat(gap), MUTED);
+            }
+            tail.push(phase.word(narrow), look.word);
+            let row = panel::fit(left.shortened(room.saturating_sub(2)), room, None).append(tail);
+            panel::fit(row, end, None)
+        })
+        .collect()
+}
+
+pub(super) fn sheet<'a>(state: &'a State, panel_state: &'a Panel, columns: usize) -> Sheet<'a> {
+    let Some(plan) = state.todo_plan.as_ref() else {
+        return message(panel::title(None, "Todo", ""), NO_PLAN, columns);
+    };
+    let title = panel::title(None, "Todo", &plan.title);
+    if plan.tasks.is_empty() {
+        return message(title, "This plan has no tasks.", columns);
+    }
+    let records = &state.collaboration;
+    let rows = rows(plan, records, columns);
+    let total = rows.len();
+    let width = panel::text_width(columns);
+    Sheet {
+        title,
+        aside: aside(plan, records),
+        field: None,
+        draft_caret: false,
+        head: Vec::new(),
+        body: Box::new(move |room| {
+            let start = panel_state.start(plan, records, room);
+            let shown = rows
                 .iter()
                 .skip(start)
                 .take(room)
-                .enumerate()
-                .map(|(offset, task)| {
-                    let index = start + offset;
-                    let on = index == panel_state.selected;
-                    let mut line = panel::marker(on, false);
-                    line.push(&task.title, STRONG);
-                    let (label, style) = state_label(&task.status);
-                    let right = Line::new(label, style);
-                    panel::choice(
-                        panel::spread(line, right, columns.saturating_sub(2), None),
-                        on,
-                        columns,
-                    )
-                })
+                .cloned()
+                .map(|line| (line, None))
                 .collect();
-            panel::window(rows, start, total, room, columns)
+            panel::window(shown, start, total, room, columns)
                 .into_iter()
                 .enumerate()
-                .map(|(offset, line)| {
-                    (
-                        line,
-                        Part::Row((start + offset).abs_diff(panel_state.selected)),
-                    )
-                })
+                .map(|(index, line)| (line, Part::Row(index)))
                 .collect()
         }),
         total: Some(total),
         tail: Box::new(move |overflow| {
             panel::keys(
-                &[
-                    key("↑↓", "move").scrolling(),
-                    key("Enter", "inspect"),
-                    key("Esc", "close"),
-                ],
+                &[key("↑↓", "scroll").scrolling(), key("Esc", "close")],
                 width,
                 overflow,
             )
         }),
+        confirming: false,
+    }
+}
+
+/// One dim line in place of the plan, and only the way out.
+fn message<'a>(title: Vec<Line>, value: &str, columns: usize) -> Sheet<'a> {
+    let width = panel::text_width(columns);
+    let rows: Vec<Line> = Line::new(value, DIM)
+        .wrap(width.max(1), true)
+        .into_iter()
+        .map(|line| panel::indent(line, columns))
+        .collect();
+    let total = rows.len();
+    Sheet {
+        title,
+        aside: Line::default(),
+        field: None,
+        draft_caret: false,
+        head: Vec::new(),
+        body: Box::new(move |_| {
+            rows.iter()
+                .cloned()
+                .map(|line| (line, Part::Keep))
+                .collect()
+        }),
+        total: Some(total),
+        tail: Box::new(move |overflow| panel::keys(&[key("Esc", "close")], width, overflow)),
         confirming: false,
     }
 }

@@ -113,6 +113,8 @@ pub struct State {
     pub ask_draft: Option<crate::ask::Draft>,
     pub todo_plan: Option<crate::todo::Plan>,
     pub todo_panel: Option<super::todo::Panel>,
+    /// Decides which todo_list calls create a plan; only those have a row.
+    pub todo_calls: super::todo::Calls,
     /// The engine's latest projection for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
     /// The recent conversations offered before the first prompt.
@@ -155,6 +157,7 @@ impl Default for State {
             ask_draft: None,
             todo_plan: None,
             todo_panel: None,
+            todo_calls: Default::default(),
             context: None,
             opening: Opening::default(),
             quitting: None,
@@ -318,12 +321,16 @@ impl State {
                 arguments,
             } => {
                 self.stream_prefix = None;
-                if let Some(last) = self.open_branch() {
-                    *last = Some(false);
-                }
                 self.status = "Working…".into();
                 if let Some(activity) = &mut self.activity {
                     activity.tools += 1;
+                }
+                // The plan lives in /todo; only the call creating one has a row.
+                if name == "todo_list" && !self.todo_calls.creates(&arguments) {
+                    return;
+                }
+                if let Some(last) = self.open_branch() {
+                    *last = Some(false);
                 }
                 self.items.push(Item::Tool {
                     id,
@@ -360,6 +367,9 @@ impl State {
                 summary,
                 result,
             } => {
+                if name == "todo_list" {
+                    self.todo_calls.finished(&result);
+                }
                 if let Some(index) = self.items.iter().rposition(|item| {
                     matches!(item, Item::Tool { id: candidate, name: tool, result: None, .. }
                         if candidate == &id && tool == &name)
@@ -442,6 +452,7 @@ impl State {
         self.ask_draft = None;
         self.todo_plan = None;
         self.todo_panel = None;
+        self.todo_calls = Default::default();
         self.collaboration.clear();
     }
     pub fn settled_len(&self) -> usize {

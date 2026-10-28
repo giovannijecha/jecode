@@ -117,6 +117,113 @@ impl Plan {
             ),
         ])
     }
+
+    /// Every task is done or cancelled; the next set starts a new plan.
+    pub fn finished(&self) -> bool {
+        self.tasks
+            .iter()
+            .all(|task| matches!(task.status.as_str(), "done" | "cancelled"))
+    }
+}
+
+/// Whether a todo_list call creates a plan after `current`: a set when there
+/// is no plan yet or the previous one finished. Reads, updates and replans
+/// of an open plan do not.
+pub fn creates(current: Option<&Plan>, arguments: &Value) -> bool {
+    arguments.get("action").and_then(Value::as_str) == Some("set")
+        && current.is_none_or(Plan::finished)
+}
+
+/// A task's phase as the user reads it: the main agent's mark, joined with its
+/// collaborator's lifecycle while the main agent has not marked the work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    NotStarted,
+    InProgress,
+    Waiting,
+    AwaitingReview,
+    Failed,
+    Done,
+    Cancelled,
+}
+
+impl Phase {
+    /// `owner` is the task's collaborator record from the runtime, if any.
+    pub fn of(task: &Task, owner: Option<&Value>) -> Self {
+        let lifecycle = owner.and_then(|record| record.get("state").and_then(Value::as_str));
+        match (task.status.as_str(), lifecycle) {
+            ("done", _) => Self::Done,
+            ("cancelled", _) => Self::Cancelled,
+            ("waiting", _) => Self::Waiting,
+            ("pending" | "in_progress", Some("returned")) => Self::AwaitingReview,
+            ("pending" | "in_progress", Some("failed")) => Self::Failed,
+            ("in_progress", _) => Self::InProgress,
+            _ => Self::NotStarted,
+        }
+    }
+
+    /// The state word; not started has none. `narrow` shortens review.
+    pub fn word(self, narrow: bool) -> &'static str {
+        match self {
+            Self::NotStarted => "",
+            Self::InProgress => "in progress",
+            Self::Waiting => "waiting",
+            Self::AwaitingReview if narrow => "review",
+            Self::AwaitingReview => "awaiting review",
+            Self::Failed => "failed",
+            Self::Done => "done",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn finished(self) -> bool {
+        matches!(self, Self::Done | Self::Cancelled)
+    }
+}
+
+/// The task's collaborator reference; blank means the main agent.
+fn agent(task: &Task) -> Option<&str> {
+    task.agent
+        .as_deref()
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+}
+
+/// The collaborator record a task names, by ID (`a2`) or number.
+pub fn owner<'a>(task: &Task, records: &'a [Value]) -> Option<&'a Value> {
+    let agent = agent(task)?;
+    let number = agent_number(agent);
+    records.iter().find(|record| {
+        record.get("id").and_then(Value::as_str) == Some(agent)
+            || number.is_some() && record.get("number").and_then(Value::as_usize) == number
+    })
+}
+
+/// `AGENT N` for a task's collaborator, or its own reference in capitals.
+pub fn owner_label(task: &Task, owner: Option<&Value>) -> Option<String> {
+    let agent = agent(task)?;
+    let number = owner
+        .and_then(|record| record.get("number").and_then(Value::as_usize))
+        .or_else(|| agent_number(agent));
+    Some(number.map_or_else(
+        || agent.chars().take(16).collect::<String>().to_uppercase(),
+        |number| format!("AGENT {number}"),
+    ))
+}
+
+/// `a3`, `AGENT 3`, `agent-3` and `3` name collaborator number 3.
+fn agent_number(agent: &str) -> Option<usize> {
+    let lower = agent.to_ascii_lowercase();
+    let digits = lower
+        .strip_prefix("agent")
+        .map(|rest| rest.trim_start_matches([' ', '-', '_']))
+        .or_else(|| lower.strip_prefix('a'))
+        .unwrap_or(&lower);
+    digits
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| digits.parse().ok())
+        .flatten()
 }
 
 fn required_text(value: &Value, key: &str, limit: usize) -> Result<String, String> {

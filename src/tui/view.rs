@@ -178,15 +178,6 @@ pub(super) fn todo_capacity(state: &State) -> usize {
     composer::panel_room(state)
 }
 
-pub(super) fn todo_detail_rows(state: &State) -> usize {
-    let (Some(panel), Some(plan)) = (&state.todo_panel, &state.todo_plan) else {
-        return 0;
-    };
-    panel
-        .current(plan)
-        .map_or(0, |task| todo::detail_rows(task, state.width.max(1)).len())
-}
-
 pub(super) fn agents_detail_rows(state: &State) -> usize {
     let Some(panel) = &state.agents_panel else {
         return 0;

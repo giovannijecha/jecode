@@ -1,39 +1,54 @@
-use super::{App, editor::Editor, terminal::Key};
-use crate::todo::{Plan, Task};
+//! `/todo` reads the model's plan; the conversation shows only the call that
+//! creates one.
 
+use super::{App, terminal::Key};
+use crate::{
+    json::Value,
+    todo::{self, Phase, Plan},
+};
+
+/// The open menu. Nothing is selected: the window follows the plan until
+/// the reader scrolls it.
 #[derive(Default)]
 pub struct Panel {
-    pub filter: Editor,
-    pub selected: usize,
-    pub detail_id: Option<String>,
-    pub offset: usize,
+    /// The first visible task once scrolled; `None` follows the plan.
+    pub offset: Option<usize>,
 }
 
 impl Panel {
-    pub fn filtered<'a>(&self, plan: &'a Plan) -> Vec<&'a Task> {
-        let query = self.filter.text.trim().to_lowercase();
-        plan.tasks
-            .iter()
-            .filter(|task| {
-                query.is_empty()
-                    || [
-                        task.id.as_str(),
-                        task.title.as_str(),
-                        task.status.as_str(),
-                        task.note.as_str(),
-                        task.agent.as_deref().unwrap_or(""),
-                    ]
+    /// The first of `room` visible rows. It opens one task above the first
+    /// unfinished one.
+    pub fn start(&self, plan: &Plan, records: &[Value], room: usize) -> usize {
+        let end = plan.tasks.len().saturating_sub(room);
+        self.offset
+            .unwrap_or_else(|| {
+                plan.tasks
                     .iter()
-                    .any(|part| part.to_lowercase().contains(&query))
+                    .position(|task| !Phase::of(task, todo::owner(task, records)).finished())
+                    .map_or(0, |first| first.saturating_sub(1))
             })
-            .collect()
+            .min(end)
+    }
+}
+
+/// The plan as the transcript's own todo_list results left it, in call order.
+/// It decides which calls create a plan and so have a conversation row.
+#[derive(Default)]
+pub struct Calls {
+    plan: Option<Plan>,
+}
+
+impl Calls {
+    pub fn creates(&self, arguments: &Value) -> bool {
+        todo::creates(self.plan.as_ref(), arguments)
     }
 
-    pub fn current<'a>(&self, plan: &'a Plan) -> Option<&'a Task> {
-        if let Some(id) = &self.detail_id {
-            plan.tasks.iter().find(|task| &task.id == id)
-        } else {
-            self.filtered(plan).get(self.selected).copied()
+    pub fn finished(&mut self, result: &Value) {
+        if result.get("error").is_none()
+            && let Ok(plan) = Plan::parse(result)
+            && plan.revision > 0
+        {
+            self.plan = Some(plan);
         }
     }
 }
@@ -51,15 +66,6 @@ impl App {
             return false;
         }
         self.state.todo_plan = plan;
-        if let Some(panel) = &mut self.state.todo_panel {
-            if let Some(plan) = &self.state.todo_plan {
-                panel.selected = panel
-                    .selected
-                    .min(panel.filtered(plan).len().saturating_sub(1));
-            } else {
-                panel.selected = 0;
-            }
-        }
         self.state.changed();
         true
     }
@@ -76,15 +82,6 @@ impl App {
         self.state.changed();
     }
 
-    pub(super) fn todo_text(&mut self, text: &str) {
-        if let Some(panel) = &mut self.state.todo_panel
-            && panel.detail_id.is_none()
-            && panel.filter.insert(text)
-        {
-            panel.selected = 0;
-        }
-    }
-
     pub(super) fn todo_scroll(&mut self, amount: i16) {
         for _ in 0..amount.unsigned_abs().min(30) {
             self.todo_key(Key {
@@ -95,60 +92,29 @@ impl App {
         }
     }
 
+    /// ↑↓, PgUp/PgDn and Home/End scroll; Esc closes.
     pub(super) fn todo_key(&mut self, key: Key) {
-        let room = super::view::todo_capacity(&self.state).max(1);
-        let count = super::view::todo_detail_rows(&self.state);
-        let Some(panel) = &mut self.state.todo_panel else {
-            return;
-        };
         if key.code == 27 || key.ctrl() && key.code == 67 {
-            if panel.detail_id.is_some() {
-                panel.detail_id = None;
-                panel.offset = 0;
-            } else {
-                self.state.todo_panel = None;
-            }
+            self.state.todo_panel = None;
             return;
         }
         if key.ctrl() || key.alt() {
             return;
         }
-        if panel.detail_id.is_some() {
-            let end = count.saturating_sub(room);
-            panel.offset = match key.code {
-                38 => panel.offset.saturating_sub(1),
-                40 => (panel.offset + 1).min(end),
-                33 => panel.offset.saturating_sub(room),
-                34 => (panel.offset + room).min(end),
-                36 => 0,
-                35 => end,
-                _ => panel.offset,
-            };
-            return;
-        }
-        let Some(plan) = &self.state.todo_plan else {
+        let room = super::view::todo_capacity(&self.state).max(1);
+        let (Some(panel), Some(plan)) = (&mut self.state.todo_panel, &self.state.todo_plan) else {
             return;
         };
-        if key.code == 13 {
-            panel.detail_id = panel.current(plan).map(|task| task.id.clone());
-            panel.offset = 0;
-            return;
-        }
-        if matches!(key.code, 8 | 46) {
-            if panel.filter.key(key) {
-                panel.selected = 0;
-            }
-            return;
-        }
-        let last = panel.filtered(plan).len().saturating_sub(1);
-        panel.selected = match key.code {
-            38 => panel.selected.saturating_sub(1),
-            40 => (panel.selected + 1).min(last),
-            33 => panel.selected.saturating_sub(room),
-            34 => (panel.selected + room).min(last),
+        let start = panel.start(plan, &self.state.collaboration, room);
+        let end = plan.tasks.len().saturating_sub(room);
+        panel.offset = Some(match key.code {
+            38 => start.saturating_sub(1),
+            40 => (start + 1).min(end),
+            33 => start.saturating_sub(room),
+            34 => (start + room).min(end),
             36 => 0,
-            35 => last,
-            _ => panel.selected,
-        };
+            35 => end,
+            _ => return,
+        });
     }
 }

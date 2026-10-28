@@ -48,6 +48,22 @@ pub(super) fn badge(name: &str, status: Status) -> Line {
     line
 }
 
+/// An `AGENT N` badge carrying a collaborator's lifecycle in the call-state
+/// grammar: running shimmers, returned takes the family surface, failed is
+/// red, stopped and unknown amber, queued quiet.
+pub(in crate::tui) fn agent(label: &str, lifecycle: &str) -> Line {
+    badge(
+        label,
+        match lifecycle {
+            "running" => Status::Running,
+            "returned" => Status::Done,
+            "failed" => Status::Failed,
+            "stopping" | "stopped" | "unknown" => Status::Stopped,
+            _ => Status::Background,
+        },
+    )
+}
+
 /// The status-row shimmer, same band and speed, across the name only; the
 /// padding stays on the quiet surface.
 fn running(name: &str) -> Line {

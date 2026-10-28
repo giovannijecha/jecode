@@ -48,9 +48,21 @@ explicitly records cancellation instead.
 
 ## Inspect a plan
 
-The model owns updates. `/todo` opens the current plan in a read-only panel with
-a filter and task details; ask for changes in the main conversation. It does not
-make a model request. In interactive `--plain`, `/todo` prints the plan.
+The plan belongs to the model; ask for changes in the main conversation. The
+conversation shows only the call that creates a plan: a `TODO` row with the plan
+title and its task count, which stays as written. Reads, later updates, replans
+and the end of the plan add no row. A `set` with no plan yet, or after every
+task of the previous plan is done or cancelled, creates a new plan and a new row.
+
+`/todo` opens the current plan below the composer and updates live. The rule
+shows the plan title, one progress cell per counted task and `N of M done`.
+Every task appears in plan order with its number, mark, title, owner and state:
+`done`, `in progress`, `waiting`, `awaiting review`, `failed` or `cancelled`;
+a task not started has no state word. Cancelled tasks keep their place without
+a number. Narrow terminals drop the numbers and shorten `awaiting review` to
+`review`. The menu has nothing to select or open: arrows scroll a long plan and
+Esc closes it. It does not make a model request. In interactive `--plain`,
+`/todo` prints the same information as text.
 
 `todo_list` with `action: "get"` returns the current plan, or revision zero with
 an empty task list when no plan exists. With `action: "set"`, it replaces the
@@ -70,15 +82,21 @@ complete plan and assigns the next revision:
 
 Task IDs remain stable when editing a task. Supported statuses are `pending`,
 `in_progress`, `waiting`, `done` and `cancelled`. `note` and `agent` are optional
-text; an agent reference is descriptive and does not connect task completion to
-the collaborator's state. A plan may contain up to 40 tasks. An empty `tasks`
-array clears its activities while retaining the new revision in history.
+text; notes are for the model and `/todo` does not show them. A plan may contain
+up to 40 tasks. An empty `tasks` array clears its activities while retaining the
+new revision in history.
 
-Every successful update returns the full plan with its revision. Earlier TODO
-cards keep their snapshots; `/todo` shows the latest successful update. Invalid
-updates leave the previous plan intact. There is no permanent Todo footer.
+`agent` names the collaborator working on a task, such as `a1`, and `/todo`
+shows it as an `AGENT N` badge with its lifecycle. While the main agent has not
+marked the task done, cancelled or waiting, a returned collaborator shows the
+task as `awaiting review` and a failed one as `failed`. Only the main agent marks
+its plan; a collaborator's return never completes a task, and collaborators keep
+their own plans.
+
+Every successful update returns the full plan with its revision; `/todo` shows
+the latest successful update. Invalid updates leave the previous plan intact.
+There is no permanent Todo footer.
 
 The plan survives resume, compaction and model changes, and is included in the
-conversation export. `/new` starts without a plan. Collaborators have independent
-plans; their returns never mark the main agent's tasks done. The plan records the
-model's account of progress; it does not enforce a completion gate.
+conversation export. `/new` starts without a plan. The plan records the model's
+account of progress; it does not enforce a completion gate.

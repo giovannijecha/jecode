@@ -198,8 +198,9 @@ is no second persisted copy. `todo::latest` pairs tool results with their adjace
 assistant batch, so reused provider call IDs cannot select an unrelated result.
 The request environment projects a bounded current plan from original history,
 including after compaction. `/todo` caches that projection until the transcript
-changes, while historical cards retain their own snapshots. Children have their
-own transcripts and plans.
+changes and joins delegated tasks with collaborator lifecycles. The TUI derives
+from its own tool events which `set` creates a plan; only that call has a row.
+Children have their own transcripts and plans.
 
 Both tools are serial boundaries. The TUI uses the existing sheet, composer,
 badge and card grammar. Ask has an independent editor, and Todo is read-only.

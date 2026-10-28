@@ -91,6 +91,7 @@ impl App {
                     self.todo_message_len = usize::MAX;
                     self.state.todo_plan = None;
                     self.state.todo_panel = None;
+                    self.state.todo_calls = Default::default();
                     self.state.question = None;
                     self.state.ask_panel = None;
                     self.state.ask_draft = None;

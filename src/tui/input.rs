@@ -35,8 +35,8 @@ impl App {
                 self.ask_text(&text);
                 return Ok(false);
             }
-            Decoded::Text(text) | Decoded::Paste(text) if self.state.todo_panel.is_some() => {
-                self.todo_text(&text);
+            // The Todo menu has nothing to type into.
+            Decoded::Text(_) | Decoded::Paste(_) if self.state.todo_panel.is_some() => {
                 return Ok(false);
             }
             Decoded::Error if self.state.agents_panel.is_some() => {

@@ -132,3 +132,85 @@ fn get_result_and_other_tool_results_do_not_create_a_plan() {
     assert_eq!(latest(&history), None);
     assert_eq!(Plan::parse(&Plan::empty().value()).unwrap(), Plan::empty());
 }
+
+#[test]
+fn only_a_set_without_an_open_plan_creates_one() {
+    let set = |title| {
+        let mut arguments = args(title, "pending");
+        if let Value::Object(fields) = &mut arguments {
+            fields.insert("action".into(), Value::string("set"));
+        }
+        arguments
+    };
+    let get = Value::object([("action", Value::string("get"))]);
+    let open = Plan::set(&args("Export", "in_progress"), None).unwrap();
+    let ended = Plan::set(&args("Export", "done"), Some(&open)).unwrap();
+    let dropped = Plan::set(&args("Export", "cancelled"), Some(&open)).unwrap();
+    assert!(creates(None, &set("Export")));
+    assert!(!creates(None, &get));
+    assert!(!creates(Some(&open), &set("Replan")));
+    assert!(!creates(Some(&ended), &get));
+    assert!(creates(Some(&ended), &set("Next")));
+    assert!(creates(Some(&dropped), &set("Next")));
+    assert!(creates(Some(&Plan::empty()), &set("Next")));
+}
+
+fn task(status: &str, agent: Option<&str>) -> Task {
+    Task {
+        id: "t1".into(),
+        title: "Review work".into(),
+        status: status.into(),
+        note: String::new(),
+        agent: agent.map(Into::into),
+    }
+}
+
+fn record(id: &str, number: usize, state: &str) -> Value {
+    Value::object([
+        ("id", Value::string(id)),
+        ("number", Value::number(number)),
+        ("state", Value::string(state)),
+    ])
+}
+
+#[test]
+fn collaborator_lifecycle_shows_until_the_main_agent_marks_the_task() {
+    let records = [
+        record("a1", 1, "returned"),
+        record("a2", 2, "failed"),
+        record("a3", 3, "running"),
+    ];
+    let phase = |status, agent| {
+        let task = task(status, agent);
+        Phase::of(&task, owner(&task, &records))
+    };
+    assert_eq!(phase("pending", None), Phase::NotStarted);
+    assert_eq!(phase("in_progress", None), Phase::InProgress);
+    assert_eq!(phase("waiting", Some("a1")), Phase::Waiting);
+    assert_eq!(phase("in_progress", Some("a1")), Phase::AwaitingReview);
+    assert_eq!(phase("pending", Some("AGENT 2")), Phase::Failed);
+    assert_eq!(phase("in_progress", Some("a3")), Phase::InProgress);
+    assert_eq!(phase("done", Some("a2")), Phase::Done);
+    assert_eq!(phase("cancelled", Some("a1")), Phase::Cancelled);
+    assert_eq!(phase("in_progress", Some("a9")), Phase::InProgress);
+    assert_eq!(Phase::AwaitingReview.word(false), "awaiting review");
+    assert_eq!(Phase::AwaitingReview.word(true), "review");
+    assert_eq!(Phase::NotStarted.word(false), "");
+}
+
+#[test]
+fn owners_resolve_by_id_or_number_and_label_in_capitals() {
+    let records = [record("a2", 2, "running")];
+    let label = |agent| {
+        let task = task("pending", agent);
+        owner_label(&task, owner(&task, &records))
+    };
+    assert_eq!(label(None), None);
+    assert_eq!(label(Some("  ")), None);
+    assert_eq!(label(Some("a2")), Some("AGENT 2".into()));
+    assert_eq!(label(Some("agent-2")), Some("AGENT 2".into()));
+    assert_eq!(label(Some("7")), Some("AGENT 7".into()));
+    assert_eq!(label(Some("reviewer")), Some("REVIEWER".into()));
+    let task = task("pending", Some("2"));
+    assert_eq!(owner(&task, &records), Some(&records[0]));
+}
