@@ -1,8 +1,8 @@
 # Questions and plans
 
 `ask_user` lets the main agent wait for a concrete answer. `todo_list` keeps a
-plan for the current conversation. Both appear as chronological tool cards and
-run in source order, even if a call includes `parallel: true`.
+plan for the current conversation. Both run in source order, even if a call
+includes `parallel: true`, and leave at most one row each in the conversation.
 
 ## Answer a question
 
