@@ -283,10 +283,6 @@ impl Context {
         size.saturating_mul(numerator).saturating_add(bytes - 1) / bytes
     }
     /// Estimates an already projected request together with the tool catalog.
-    #[cfg(test)]
-    pub(crate) fn estimate_projected(&self, messages: &[Value], inputs: Inputs) -> usize {
-        self.estimate_projected_for(messages, inputs, true)
-    }
     pub(crate) fn estimate_projected_for(
         &self,
         messages: &[Value],

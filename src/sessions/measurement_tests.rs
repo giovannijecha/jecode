@@ -142,7 +142,7 @@ fn session_history_and_listing() {
                 let projected = loaded.context.project(&loaded.messages, 0);
                 loaded
                     .context
-                    .estimate_projected(&projected, Default::default())
+                    .estimate_projected_for(&projected, Default::default(), true)
             });
             assert!(estimated > 0);
             row(&path, "context_estimate", size, repeat, elapsed, bytes);
