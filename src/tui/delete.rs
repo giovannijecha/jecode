@@ -99,6 +99,7 @@ impl App {
                     self.question_observer.set_available(true);
                     self.state.reset_tool_details();
                     self.state.items.clear();
+                    self.reset_agents_observer();
                     self.state.editor = self.state.history.draft(&self.state.editor).clone();
                     self.state.history = History::default();
                     self.edited();

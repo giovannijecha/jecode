@@ -88,10 +88,14 @@ pub(super) fn open_workspace(home: &Path, root: &Path) -> Result<PathBuf, String
     fs::canonicalize(directory).map_err(|e| e.to_string())
 }
 
+/// A staging file of the marker write; earlier versions named it `.write-…`.
 fn initialization_temporary(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
+    if crate::disk::temporary_name(name) {
+        return true;
+    }
     let Some(parts) = name
         .strip_prefix(".write-")
         .and_then(|name| name.strip_suffix(".tmp"))

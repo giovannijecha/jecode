@@ -344,6 +344,8 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Wait("NATIVE_FULL_WIDTH_VERIFIED");
                 pty.Wait("NATIVE_CARDS_VERIFIED");
                 pty.Wait("NATIVE_ACTIVITY_VERIFIED");
+                pty.Wait("NATIVE_AGENTS_VERIFIED");
+                pty.Wait("NATIVE_WORK_TOOLS_VERIFIED");
                 pty.Wait("Ask anything");
                 pty.Send("native prompt α🙂"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native row 099");

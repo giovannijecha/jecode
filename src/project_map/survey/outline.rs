@@ -256,7 +256,11 @@ fn mask_rust(text: &str, cancellation: &Cancellation) -> Result<String, String> 
         if let Some((quote, hashes, raw)) = quoted {
             output[index] = b' ';
             if !raw && current == b'\\' {
-                if let Some(next) = output.get_mut(index + 1) {
+                // A line continuation escapes the newline; keep it so source
+                // line numbers stay aligned.
+                if let Some(next) = output.get_mut(index + 1)
+                    && *next != b'\n'
+                {
                     *next = b' ';
                 }
                 index += 2;
@@ -387,5 +391,22 @@ mod tests {
                 .and_then(Value::as_usize),
             Some(4)
         );
+    }
+
+    #[test]
+    fn rust_string_line_continuation_keeps_lines() {
+        for newline in ["\n", "\r\n"] {
+            let source = format!(
+                "let text = \"first \\{newline}second\";{newline}fn visible() {{}}{newline}"
+            );
+            let (entries, _) = rust(&source, "src/lib.rs", &Cancellation::default()).unwrap();
+            assert_eq!(
+                entries[0].get("sources").and_then(Value::as_array).unwrap()[0]
+                    .get("line")
+                    .and_then(Value::as_usize),
+                Some(3),
+                "{newline:?}"
+            );
+        }
     }
 }

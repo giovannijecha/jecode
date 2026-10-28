@@ -386,3 +386,29 @@ fn recursive_discovery_lists_but_does_not_follow_symlinks_or_special_files() {
         Some(&Value::number(2))
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn recursive_discovery_lists_but_does_not_follow_junctions() {
+    let (_directory, root) = fixture();
+    let (_outside, outside) = fixture();
+    put(&outside, "outside.txt", "needle");
+    put(&root, "inside.txt", "needle");
+    for (name, target) in [("linked", &outside), ("cycle", &root)] {
+        let created = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(root.join(name))
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{created:?}");
+    }
+    let list = run(&root, "list", [("recursive", Value::Bool(true))]);
+    assert_eq!(paths(&list, "entries"), ["cycle", "inside.txt", "linked"]);
+    let search = run(&root, "search", [("query", Value::string("needle"))]);
+    assert_eq!(paths(&search, "matches"), ["inside.txt"]);
+    assert_eq!(
+        search.get("skipped").unwrap().get("links"),
+        Some(&Value::number(2))
+    );
+}

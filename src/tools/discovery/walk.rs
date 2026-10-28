@@ -189,7 +189,10 @@ impl<'a> Walk<'a> {
                     continue;
                 }
             };
-            let linked = crate::disk::linked(&metadata);
+            // On Windows, std reports only name-surrogate reparse points
+            // (symbolic links, junctions and mount points) as links. Other
+            // reparse points, such as cloud-file placeholders, are content.
+            let linked = metadata.file_type().is_symlink();
             let directory = metadata.is_dir() && !linked;
             let name = pending
                 .absolute

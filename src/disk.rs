@@ -19,6 +19,21 @@ pub fn temporary_beside(path: &Path) -> PathBuf {
     ))
 }
 
+/// Whether a file name has the form `temporary_beside` creates, so crash
+/// recovery can recognize an abandoned staging file.
+pub fn temporary_name(name: &str) -> bool {
+    let Some(parts) = name
+        .strip_prefix(".jecode-")
+        .and_then(|name| name.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let mut parts = parts.split('-');
+    parts.next().is_some_and(|part| part.parse::<u32>().is_ok())
+        && parts.next().is_some_and(|part| part.parse::<u64>().is_ok())
+        && parts.next().is_none()
+}
+
 /// Options for files only the current user may read: mode 0600 on Unix.
 pub fn private_options() -> OpenOptions {
     #[allow(unused_mut)]
