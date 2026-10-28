@@ -403,7 +403,8 @@ fn interrupt_uses_remapped_vintr() {
 
 #[test]
 fn resize_and_interrupt_bypass_saturated_input() {
-    let script = "stty -echo -icanon; printf 'READY\\n'; trap 'stty size; printf INTERRUPTED\\n; exit 130' INT; while :; do sleep 1; done";
+    // READY must only be visible once the interrupt handler is installed.
+    let script = "stty -echo -icanon; trap 'stty size; printf INTERRUPTED\\n; exit 130' INT; printf 'READY\\n'; while :; do sleep 1; done";
     let (mut bridge, mut input, mut control) = launch(script, None);
     let mut output = bridge.child.stdout.take().unwrap();
     let (sender, receiver) = mpsc::channel();
