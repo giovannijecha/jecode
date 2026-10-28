@@ -170,6 +170,9 @@ impl Workspace {
             return Ok(Value::object([("closed", Value::Bool(true))]));
         }
         self.verify_owner()?;
+        if self.root.exists() {
+            files::remove_links(&self.root)?;
+        }
         if self.root.exists() || git::registered(&self.project, &self.root)? {
             git::remove_worktree(&self.project, &self.root)?;
         }

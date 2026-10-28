@@ -136,13 +136,26 @@ pub(super) fn integrate(
         .iter()
         .filter(|entry| selected.contains(&entry.path))
     {
-        files::verify_content(
+        // Once a path is installed, report it with the failure.
+        let observed = files::verify_content(
             &workspace.storage.join("base"),
             &entry.path,
             &entry.baseline,
-        )?;
-        let current = files::observe(&workspace.project, &entry.path)?;
-        let child = files::observe(&workspace.root, &entry.path)?;
+        )
+        .and_then(|()| {
+            Ok((
+                files::observe(&workspace.project, &entry.path)?,
+                files::observe(&workspace.root, &entry.path)?,
+            ))
+        });
+        let (current, child) = match observed {
+            Ok(observed) => observed,
+            Err(error) if applied.is_empty() => return Err(error),
+            Err(error) => {
+                failed.push(issue(&entry.path, &error));
+                break;
+            }
+        };
         if current != entry.current || child != entry.child {
             conflicts.push(issue(&entry.path, "changed_since_review"));
             break;
@@ -155,12 +168,8 @@ pub(super) fn integrate(
             conflicts.push(issue(&entry.path, "project_changed_since_baseline"));
             continue;
         }
-        let result = install(workspace, entry);
-        if let Err(error) = result {
-            failed.push(Value::object([
-                ("path", Value::string(&entry.path)),
-                ("reason", Value::string(error)),
-            ]));
+        if let Err(error) = install(workspace, entry) {
+            failed.push(issue(&entry.path, &error));
             break;
         }
         applied.push(Value::string(&entry.path));

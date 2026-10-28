@@ -198,8 +198,12 @@ pub(super) fn inventory(root: &Path) -> Result<BTreeSet<String>, String> {
         .split(|byte| *byte == 0)
         .filter(|bytes| !bytes.is_empty())
     {
-        let name = String::from_utf8(bytes.to_vec())
+        let mut name = String::from_utf8(bytes.to_vec())
             .map_err(|_| "Git inventory contains a non-UTF-8 path")?;
+        // Git lists an untracked nested repository as one `name/` entry.
+        if name.ends_with('/') {
+            name.pop();
+        }
         names.insert(name);
     }
     Ok(names)

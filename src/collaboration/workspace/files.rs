@@ -250,7 +250,14 @@ pub(super) fn copy_entry(
     }
     match expected {
         Fingerprint::Absent => remove(&to)?,
-        Fingerprint::Directory => return Err(format!("Cannot copy directory entry {name}")),
+        // Submodules and nested repositories are separate repositories: the
+        // copy keeps their directory, not their contents.
+        Fingerprint::Directory => {
+            if observe(target, name)? != Fingerprint::Directory {
+                remove(&to)?;
+                fs::create_dir(&to).map_err(|error| error.to_string())?;
+            }
+        }
         Fingerprint::File { mode, .. } => {
             remove(&to)?;
             let staged = disk::temporary_beside(&to);
@@ -351,6 +358,35 @@ pub(super) fn remove_baseline(base: &Path) -> Result<(), String> {
             fs::remove_dir(&path).map_err(|error| error.to_string())?;
         } else {
             fs::remove_file(&path).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes the links a collaborator left in its copy without following them,
+/// so deleting the copy never depends on how Git treats links on this platform.
+pub(super) fn remove_links(root: &Path) -> Result<(), String> {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if kind.is_symlink() {
+                #[cfg(windows)]
+                let removed = if std::os::windows::fs::FileTypeExt::is_symlink_dir(&kind) {
+                    fs::remove_dir(&path)
+                } else {
+                    fs::remove_file(&path)
+                };
+                #[cfg(not(windows))]
+                let removed = fs::remove_file(&path);
+                removed.map_err(|error| {
+                    format!("Could not remove link {}: {error}", path.display())
+                })?;
+            } else if kind.is_dir() {
+                pending.push(path);
+            }
         }
     }
     Ok(())

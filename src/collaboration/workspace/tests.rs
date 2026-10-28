@@ -174,6 +174,75 @@ fn integration_requires_selected_paths_and_reports_overlap() {
 }
 
 #[test]
+fn isolated_workspace_accepts_submodules_and_nested_repositories() {
+    let (temp, project, storage) = fixture();
+    let (_other, library, _) = fixture();
+    git(
+        &project,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            &library.to_string_lossy(),
+            "library",
+        ],
+    );
+    git(
+        &project,
+        &[
+            "-c",
+            "user.name=Giovanni Jecha",
+            "-c",
+            "user.email=100841799+giovannijecha@users.noreply.github.com",
+            "commit",
+            "-qm",
+            "submodule",
+        ],
+    );
+    let nested = project.join("nested");
+    fs::create_dir(&nested).unwrap();
+    git(&nested, &["init", "-q"]);
+    fs::write(nested.join("inner.txt"), "inner\n").unwrap();
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    fs::write(workspace.root().join("tracked.txt"), "child\n").unwrap();
+    assert_eq!(changed(&workspace.inspect().unwrap()), vec!["tracked.txt"]);
+    workspace.close().unwrap();
+    drop(temp);
+}
+
+#[test]
+fn a_failure_after_an_applied_path_reports_what_was_applied() {
+    let (_temp, project, storage) = fixture();
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    fs::write(workspace.root().join("new.txt"), "child new\n").unwrap();
+    fs::write(workspace.root().join("tracked.txt"), "child\n").unwrap();
+    let review = workspace.inspect().unwrap();
+    let token = review.get("review_token").unwrap().as_str().unwrap();
+    // The saved baseline of the second path no longer matches its record.
+    fs::write(workspace.storage.join("base/tracked.txt"), "tampered\n").unwrap();
+    let result = workspace
+        .integrate(&["new.txt".into(), "tracked.txt".into()], token)
+        .unwrap();
+    assert_eq!(
+        result.get("applied").unwrap().as_array().unwrap(),
+        &[Value::string("new.txt")]
+    );
+    let failed = result.get("failed").unwrap().as_array().unwrap();
+    assert_eq!(failed[0].get("path"), Some(&Value::string("tracked.txt")));
+    assert_eq!(
+        fs::read_to_string(project.join("new.txt")).unwrap(),
+        "child new\n"
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("tracked.txt")).unwrap(),
+        "head\n"
+    );
+    workspace.close().unwrap();
+}
+
+#[test]
 fn changed_since_review_is_rejected_and_ownership_is_checked() {
     let (_temp, project, storage) = fixture();
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
@@ -233,13 +302,29 @@ fn ignored_agent_instructions_and_text_evidence_are_available() {
 #[test]
 fn failed_copy_cleans_owned_worktree_and_allows_retry() {
     let (_temp, project, storage) = fixture();
-    fs::remove_file(project.join("tracked.txt")).unwrap();
-    fs::create_dir(project.join("tracked.txt")).unwrap();
-    fs::write(project.join("tracked.txt").join("nested.txt"), "nested").unwrap();
+    // The copy fails after the worktree exists: the source cannot be read on
+    // Windows, and Unix allows a name the workspace cannot represent.
+    #[cfg(windows)]
+    let blocker = {
+        use std::os::windows::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(project.join("tracked.txt"))
+            .unwrap()
+    };
+    #[cfg(unix)]
+    let blocker = {
+        let path = project.join("bad\\name.txt");
+        fs::write(&path, "x").unwrap();
+        path
+    };
     assert!(Workspace::prepare(&project, &storage, "a1", Mode::Isolated).is_err());
     assert!(!storage.join("a1").exists());
-    fs::remove_dir_all(project.join("tracked.txt")).unwrap();
-    fs::write(project.join("tracked.txt"), "restored\n").unwrap();
+    #[cfg(windows)]
+    drop(blocker);
+    #[cfg(unix)]
+    fs::remove_file(blocker).unwrap();
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     workspace.close().unwrap();
 }
@@ -318,4 +403,42 @@ fn interrupted_worktree_with_missing_tree_can_retry_same_id() {
     fs::remove_dir_all(workspace.root()).unwrap();
     let recovered = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     recovered.close().unwrap();
+}
+
+fn link_directory(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let created = Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{created:?}");
+    }
+}
+
+#[test]
+fn closing_removes_links_without_touching_their_targets() {
+    let (temp, project, storage) = fixture();
+    let outside = temp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("canary.txt"), "keep\n").unwrap();
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    let nested = workspace.root().join("nested");
+    fs::create_dir(&nested).unwrap();
+    link_directory(&project, &workspace.root().join("project-link"));
+    link_directory(&outside, &nested.join("outside-link"));
+    workspace.close().unwrap();
+    assert!(!storage.join("a1").exists());
+    assert_eq!(
+        fs::read_to_string(outside.join("canary.txt")).unwrap(),
+        "keep\n"
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("tracked.txt")).unwrap(),
+        "head\n"
+    );
 }
