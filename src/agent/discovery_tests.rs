@@ -79,7 +79,10 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
         .iter()
         .map(|wrapper| wrapper.get("function").unwrap().clone())
         .collect::<Vec<_>>();
-    assert_eq!(&catalog_names(&catalog)[9..], &["list", "search", "map"]);
+    assert_eq!(
+        &catalog_names(&catalog)[9..],
+        &["list", "search", "map", "agent"]
+    );
     let next = requests[1]
         .body
         .get("messages")
@@ -201,7 +204,10 @@ fn openai_namespace_carries_empty_search_receipt_to_the_followup() {
         Some("jecode")
     );
     let catalog = namespace.get("tools").unwrap().as_array().unwrap();
-    assert_eq!(&catalog_names(catalog)[9..], &["list", "search", "map"]);
+    assert_eq!(
+        &catalog_names(catalog)[9..],
+        &["list", "search", "map", "agent"]
+    );
     assert!(
         catalog
             .iter()

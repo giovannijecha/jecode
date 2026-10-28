@@ -24,6 +24,7 @@ impl Agent {
         client.set_effort(effort);
         client.set_routing(routing);
         client.set_cancellation(self.cancellation.clone());
+        client.set_delegation(!self.child);
         Ok(client)
     }
 
@@ -77,6 +78,7 @@ impl Agent {
             .as_ref()
             .map(|handle| handle.store().temporary_area(&handle.id()))
             .transpose()?;
+        self.collaboration.stop_all();
         self.client = client;
         self.redactor.include(self.client.redactor());
         self.tools.include_credentials(self.redactor.clone());
@@ -84,6 +86,9 @@ impl Agent {
         self.clear();
         self.persistence = next;
         self.sync_conversation();
+        self.collaboration
+            .bind(self.archive(), self.persistence.clone())?;
+        self.collaboration_seen = 0;
         self.begin_checkpoints();
         if let Some(handle) = &self.persistence {
             self.tools.configure_session_output(
@@ -141,6 +146,7 @@ impl Agent {
             .transpose()?;
         let document = handle.snapshot();
         let temporary = handle.store().temporary_area(&document.id)?;
+        self.collaboration.stop_all();
         if let Some(client) = client {
             self.client = client;
         }
@@ -166,6 +172,9 @@ impl Agent {
         self.cancellation.reset();
         self.persistence = Some(handle);
         self.sync_conversation();
+        self.collaboration
+            .bind(self.archive(), self.persistence.clone())?;
+        self.collaboration_seen = self.collaboration.latest_return_sequence();
         self.begin_checkpoints();
         let handle = self.persistence.as_ref().unwrap();
         self.tools.configure_session_output(
@@ -221,6 +230,7 @@ impl Agent {
         )?;
         let next = Handle::new(store, document, self.redactor.clone());
         let live_attachments = next.snapshot().input.attachment_ids();
+        self.collaboration.stop_all();
         self.tools.stop_browsers();
         let report = current.delete(&live_attachments, || self.tools.stop_processes())?;
         self.client = client;
@@ -230,6 +240,9 @@ impl Agent {
         self.cancellation.reset();
         self.persistence = Some(next);
         self.sync_conversation();
+        self.collaboration
+            .bind(self.archive(), self.persistence.clone())?;
+        self.collaboration_seen = 0;
         self.begin_checkpoints();
         self.tools.configure_output_store(outputs);
         self.tools.configure_temporary(temporary);

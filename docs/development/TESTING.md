@@ -62,6 +62,11 @@ Pass a test-name filter after the Cargo options:
 ```text
 cargo test --locked --offline agent::routing_tests::
 cargo test --locked --offline agent::backend_tests::
+cargo test --locked --offline backend::delegation_tests::
+cargo test --locked --offline agent::collaboration::
+cargo test --locked --offline collaboration::workspace::tests::
+cargo test --locked --offline tui::agents::tests::
+cargo test --locked --offline session::agents::tests::
 cargo test --locked --offline backend::openrouter::calls::tests::
 cargo test --locked --offline auth::openai::
 cargo test --locked --offline backend::openai::
@@ -168,6 +173,21 @@ The Unix installer accepts an absolute root: `sh INSTALL.sh /absolute/test/root`
 Both installers build offline and print the installed executable's version.
 
 ## Native and manual checks
+
+Collaborator fixtures use isolated session homes, synthetic model services and
+local Git repositories. They cover provider catalogs, in-flight assignment
+updates, late returns resuming the main model, review, cancellation, recovery,
+dirty worktree baselines, conflict-aware integration and owned cleanup. The TUI
+suite covers read-only inspection, stable selection, draft/caret restoration,
+visible activity, readback and summary layout. No personal credentials or live
+provider inference are needed.
+
+The Windows fullscreen fixture also paints collaboration receipts, the `/agents`
+panel and the selected footer through the real Rust renderer into ConPTY:
+
+```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+```
 
 Interactive execution tests use original Rust fixtures and isolated native
 terminals. Unix PTY tests require `cc` on first use, plus `/proc` on Linux or

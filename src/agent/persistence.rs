@@ -34,6 +34,8 @@ impl Agent {
             self.context.reset_usage();
             self.persistence = Some(Handle::new(store, document, self.redactor.clone()));
             self.sync_conversation();
+            self.collaboration
+                .bind(self.archive(), self.persistence.clone())?;
             self.begin_checkpoints();
             self.checkpoint(Stage::Preserve)?;
         }
@@ -110,6 +112,7 @@ impl Agent {
     }
 
     pub(super) fn record_turn_error(&self, error: &str, partial: &str) {
+        let after_message = self.messages.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("turn_error")),
             ("error", Value::string(self.redact(error))),
@@ -122,10 +125,7 @@ impl Agent {
                 }),
             ),
             ("partial_text", Value::string(partial)),
-            (
-                "after_message",
-                Value::number(self.messages.lock().unwrap().len()),
-            ),
+            ("after_message", Value::number(after_message)),
         ]));
     }
 }

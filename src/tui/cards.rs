@@ -230,13 +230,13 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         "checkpoint" => "Checkpoint",
         "web" => "Web",
         "browser" => "Browser",
+        "agent" => "Agents",
         other => other,
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser" => {
-            crate::events::target(tool.name, tool.arguments)
-        }
+        "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
+        | "agent" => crate::events::target(tool.name, tool.arguments),
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
     (name, target)

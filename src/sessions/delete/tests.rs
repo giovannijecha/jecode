@@ -1,6 +1,128 @@
 use super::*;
 use crate::{effort::Effort, test_support::Directory};
 
+#[test]
+fn deleting_isolated_collaboration_keeps_owned_files_and_parent_record() {
+    use crate::{
+        collaboration::workspace::{Mode, Workspace},
+        json::Value,
+    };
+    use std::process::Command;
+
+    let (_home, project, store, mut document) = fixture();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    fs::write(project.path().join("file.txt"), "source\n").unwrap();
+    git(&["add", "file.txt"]);
+    git(&[
+        "-c",
+        "user.name=Giovanni Jecha",
+        "-c",
+        "user.email=100841799+giovannijecha@users.noreply.github.com",
+        "commit",
+        "-qm",
+        "initial",
+    ]);
+    let retained = store.bucket.join("collaboration").join(&document.id);
+    let workspace = Workspace::prepare(project.path(), &retained, "a1", Mode::Isolated).unwrap();
+    let record = Value::object([
+        ("id", Value::string("a1")),
+        ("number", Value::number(1)),
+        ("title", Value::string("Inspect")),
+        ("state", Value::string("returned")),
+        ("workspace", Value::string("isolated")),
+        ("workspace_info", workspace.value()),
+        (
+            "directory",
+            Value::string(workspace.root().to_string_lossy()),
+        ),
+        ("sent_version", Value::number(1)),
+        ("received_version", Value::number(1)),
+        (
+            "report",
+            Value::object([
+                ("version", Value::number(1)),
+                ("text", Value::string("Completed report")),
+            ]),
+        ),
+    ]);
+    document.events.push(Value::object([
+        ("type", Value::string("collaboration")),
+        ("sequence", Value::number(1)),
+        ("kind", Value::string("returned")),
+        ("records", Value::Array(vec![record])),
+        ("after_message", Value::number(document.messages.len())),
+    ]));
+    let journal = store.journal_path(&document.id);
+    let lease = store.acquire(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    drop(lease);
+
+    let report = store.delete(&document.id).unwrap();
+    assert_eq!(
+        report.retained_collaboration.as_deref(),
+        Some(retained.as_path())
+    );
+    assert!(!journal.exists());
+    assert!(workspace.root().is_dir());
+    let manifest =
+        crate::json::parse(&fs::read_to_string(retained.join("parent-1.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest.get("parent_session_id").and_then(Value::as_str),
+        Some(document.id.as_str())
+    );
+    assert_eq!(
+        manifest.get("working_directory").and_then(Value::as_str),
+        Some(document.directory.to_str().unwrap())
+    );
+    let saved = &manifest.get("records").and_then(Value::as_array).unwrap()[0];
+    assert_eq!(
+        saved.get("received_version").and_then(Value::as_usize),
+        Some(1)
+    );
+    assert_eq!(
+        saved
+            .get("report")
+            .and_then(|report| report.get("text"))
+            .and_then(Value::as_str),
+        Some("Completed report")
+    );
+}
+
+#[test]
+fn conflicting_retained_record_keeps_parent_journal_intact() {
+    let (_home, _project, store, document) = fixture();
+    let retained = store.bucket.join("collaboration").join(&document.id);
+    fs::create_dir_all(&retained).unwrap();
+    fs::write(retained.join("child.txt"), "owned child data").unwrap();
+    fs::write(retained.join("parent-0.json"), "foreign record").unwrap();
+    let journal = store.journal_path(&document.id);
+    let lease = store.acquire(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    drop(lease);
+    let before = fs::read(&journal).unwrap();
+
+    let error = store.delete(&document.id).unwrap_err();
+    assert!(error.contains("Retained collaborator record changed"));
+    assert_eq!(fs::read(&journal).unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(retained.join("child.txt")).unwrap(),
+        "owned child data"
+    );
+}
+
 fn fixture() -> (Directory, Directory, Store, Document) {
     let home = Directory::new();
     let project = Directory::new();

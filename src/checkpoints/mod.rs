@@ -3,7 +3,7 @@ pub mod actions;
 mod capture;
 mod clock;
 pub mod command;
-mod files;
+pub(crate) mod files;
 mod format;
 use crate::disk::hash;
 mod locks;

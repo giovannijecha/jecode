@@ -2,6 +2,9 @@ use crate::json::Value;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
+    Collaboration {
+        event: Value,
+    },
     Preparing,
     Waiting {
         model: String,

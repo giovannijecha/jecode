@@ -69,6 +69,7 @@ impl Agent {
         self.redactor.include(next.redactor());
         self.tools.include_credentials(self.redactor.clone());
         next.set_cancellation(self.cancellation.clone());
+        next.set_delegation(!self.child);
         if !changed {
             next.clone_routing_from(self.client.as_ref());
         } else {

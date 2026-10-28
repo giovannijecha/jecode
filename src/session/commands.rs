@@ -11,7 +11,7 @@ pub const GROUPS: [&str; 4] = ["Conversation", "Model", "Workspace", "Jecode"];
 impl Command {
     pub fn group(&self) -> &'static str {
         match self.name {
-            "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/exit" => GROUPS[0],
+            "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/agents" | "/exit" => GROUPS[0],
             "/backend" | "/model" | "/effort" | "/routing" => GROUPS[1],
             "/settings" | "/help" => GROUPS[3],
             _ => GROUPS[2],
@@ -27,7 +27,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 17] = [
+pub const COMMANDS: [Command; 18] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -117,6 +117,12 @@ pub const COMMANDS: [Command; 17] = [
         description: "Inspect, stop or type into a background process",
         tui_usage: "/terminal [ID]",
         plain_usage: Some("/terminal [ID]"),
+    },
+    Command {
+        name: "/agents",
+        description: "Inspect collaborators in this conversation",
+        tui_usage: "/agents",
+        plain_usage: Some("/agents"),
     },
     Command {
         name: "/drafts",

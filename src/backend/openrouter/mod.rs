@@ -43,6 +43,7 @@ pub struct OpenRouter {
     /// The model's input modalities from the catalog; None when unknown.
     inputs: Option<Vec<String>>,
     router: Router,
+    delegation: bool,
 }
 
 pub fn validate_key(key: &str) -> Result<(), String> {
@@ -125,6 +126,7 @@ impl OpenRouter {
             effort: Effort::Default,
             inputs: None,
             router: Router::new(Routing::Default),
+            delegation: true,
         })
     }
 
@@ -283,7 +285,7 @@ impl OpenRouter {
         ]);
         if let Value::Object(fields) = &mut body {
             if with_tools {
-                let definitions = tools::definitions();
+                let definitions = tools::definitions_for(self.delegation);
                 let wrapped = definitions
                     .as_array()
                     .unwrap_or(&[])

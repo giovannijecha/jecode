@@ -10,7 +10,18 @@ impl Agent {
     pub(super) fn refresh_project_instructions(&mut self) -> Result<(), String> {
         // Keep the source snapshot until the turn ends. Comparing before
         // redaction also catches edits between two differently masked secrets.
-        let instructions = load(self.tools.root())?;
+        let mut instructions = load(self.tools.root())?;
+        if let Some(inherited) = &self.inherited_project_instructions
+            && !inherited.is_empty()
+        {
+            instructions = if instructions.is_empty() {
+                inherited.clone()
+            } else if instructions == *inherited {
+                instructions
+            } else {
+                format!("{inherited}\n\n{instructions}")
+            };
+        }
         if instructions != self.project_instructions {
             self.project_instructions = instructions;
             // The measured prompt contained a different system projection.

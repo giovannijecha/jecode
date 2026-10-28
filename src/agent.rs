@@ -33,6 +33,10 @@ pub struct Agent {
     routing_preferences:
         Option<std::collections::BTreeMap<(String, String), crate::backend::Routing>>,
     charges: Mutex<crate::backend::Charges>,
+    collaboration: crate::collaboration::Observer,
+    child: bool,
+    inherited_project_instructions: Option<String>,
+    collaboration_seen: usize,
 }
 
 impl Agent {
@@ -79,6 +83,10 @@ impl Agent {
             inbox: crate::inbox::Inbox::default(),
             routing_preferences: None,
             charges: Mutex::default(),
+            collaboration: crate::collaboration::Observer::default(),
+            child: false,
+            inherited_project_instructions: None,
+            collaboration_seen: 0,
         };
         agent.register_backend(agent.client.services());
         agent.clear();
@@ -149,6 +157,10 @@ impl Agent {
         self.cancellation.clone()
     }
 
+    pub fn collaboration(&self) -> crate::collaboration::Observer {
+        self.collaboration.clone()
+    }
+
     /// Prompts submitted while this agent works; ordinary messages join the active turn.
     pub fn inbox(&self) -> crate::inbox::Inbox {
         self.inbox.clone()
@@ -166,7 +178,14 @@ impl Agent {
     ) -> Result<(), String> {
         let prompt = prompt.into();
         let mut partial = String::new();
-        let result = self.turn(&prompt, &mut |event| {
+        let observer = self.collaboration();
+        let mut receipt_cursor = observer.events_since(0).0;
+        let mut result = self.turn(&prompt, &mut |event| {
+            let (next, receipts) = observer.events_since(receipt_cursor);
+            receipt_cursor = next;
+            for receipt in receipts {
+                events.emit(Event::Collaboration { event: receipt })?;
+            }
             match &event {
                 Event::Streaming { text } => partial = text.clone(),
                 Event::Message { .. }
@@ -177,6 +196,15 @@ impl Agent {
             }
             events.emit(event)
         });
+        let (_, receipts) = observer.events_since(receipt_cursor);
+        for receipt in receipts {
+            if let Err(error) = events.emit(Event::Collaboration { event: receipt }) {
+                if result.is_ok() {
+                    result = Err(error);
+                }
+                break;
+            }
+        }
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);
         }
@@ -199,6 +227,10 @@ impl Agent {
             self.prepare_turn(prompt)?;
         }
         self.prepared = None;
+        self.drive_turn(events)
+    }
+
+    fn drive_turn(&mut self, events: &mut impl EventSink) -> Result<(), String> {
         // Endpoint refresh may wait on the network. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
         *self.charges.lock().unwrap() = crate::backend::Charges::default();
@@ -324,9 +356,10 @@ impl Agent {
     }
 
     fn unmeasured_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        context.estimate_projected(
+        context.estimate_projected_for(
             &self.projected_context(context, messages),
             self.client.inputs(),
+            !self.child,
         )
     }
 
@@ -356,6 +389,7 @@ impl Agent {
         kind: &str,
         details: &[(String, String)],
     ) {
+        let after_message = self.messages.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("local_command")),
             ("command", Value::string(self.redact(command))),
@@ -377,17 +411,23 @@ impl Agent {
             ),
             ("model", Value::string(self.model())),
             ("effort", Value::string(self.effort().name())),
-            (
-                "after_message",
-                Value::number(self.messages.lock().unwrap().len()),
-            ),
+            ("after_message", Value::number(after_message)),
         ]));
+    }
+}
+
+impl Drop for Agent {
+    fn drop(&mut self) {
+        self.collaboration.stop_all();
+        self.tools.stop_processes();
     }
 }
 
 mod backend;
 pub(crate) mod checkpoints;
+mod collaboration;
 mod compaction;
+mod continuation;
 mod environment;
 mod execution;
 mod history;

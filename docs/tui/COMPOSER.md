@@ -32,7 +32,7 @@ or `Prompt history`. Attachment labels are chips edited as one unit. See
 | `Ctrl+P` / `Ctrl+N` | Browse up to 50 sent prompts; commands are excluded. |
 | `Alt+V` | Attach the clipboard image. `Ctrl+V` remains the terminal's text paste. |
 | `Alt+Up` | Open pending drafts. |
-| `Ctrl+O` | Expand or collapse every tool in the latest finished execution turn. |
+| `Ctrl+O` | Expand or collapse the latest collaboration receipt, or tools in the latest finished execution turn. |
 | `Ctrl+Q` | Quit; while work runs, ask first. |
 
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
@@ -51,6 +51,14 @@ the new turn finishes. Expansion is temporary. Resumed sessions start compact
 and retain execution-turn boundaries, including messages accepted during
 generation. The keycap on the turn's last hidden card, the first-run startup
 row and `/help` name the shortcut.
+
+If a collaboration receipt is newer than the last ordinary tool card, `Ctrl+O`
+toggles that receipt's historical assignment snapshots. `/agents` opens a
+read-only list immediately, including during generation. Enter opens Activity,
+Assignment and Result tabs. Esc returns detail → list → main draft, preserving
+the draft and caret. Activity follows output until scrolled; End resumes
+following. Inspecting a result never marks it reviewed. See
+[collaborating agents](../usage/COLLABORATION.md).
 
 ## Activity and queue
 

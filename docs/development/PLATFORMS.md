@@ -32,6 +32,23 @@ Windows runs, along with ConPTY and Linux PTY checks. Loopback regressions cover
 requests above 10 MiB, literal `@` data, exact image bytes, a native write followed
 by `avanti`, incomplete stdin diagnostics and Windows child environment overrides.
 
+## Collaborator workspace boundary
+
+Shared collaborators use the current project and need no Git installation.
+Isolated assignments require installed `git`, a repository root and an existing
+`HEAD`. Git creates and removes local detached worktrees; Jecode copies the
+current tracked and non-ignored untracked contents and owns review/integration.
+The copy is not an operating-system sandbox. Native Windows verification covers
+dirty baselines, concurrent-edit conflicts, missing and foreign ownership markers,
+and interrupted setup recovery. New collaborator behavior has no native Linux
+or macOS execution evidence from the October 28, 2026 implementation pass.
+
+That Windows pass completed offline build, formatting, all-target Clippy and
+1533 ordinary tests (44 ignored), plus the separately executed fullscreen ConPTY
+fixture. Its collaboration checks paint receipts, `/agents`, footer badge and
+gauge through the native renderer. A real configured-model run also completed
+two assignments, an in-flight revision, selected-path integration and review.
+
 ## Interactive command boundary
 
 `exec` launches literal executable arguments through the existing process

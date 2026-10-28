@@ -259,6 +259,9 @@ impl Rows {
                 .map(|(index, line)| line.indent(if index == 0 { "✕ " } else { "  " }, BAD.bold()))
                 .collect(),
             Item::Local { .. } | Item::Text { .. } => Vec::new(),
+            Item::Collaboration { event, expanded } => {
+                crate::tui::view::agents::receipt(event, *expanded, columns)
+            }
             Item::Tool { .. } => {
                 tool_card(items, index, columns, keycap).map_or_else(Vec::new, |card| card.rows)
             }

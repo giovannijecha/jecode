@@ -54,6 +54,10 @@ pub enum Item {
         last: Option<bool>,
         presentation: Presentation,
     },
+    Collaboration {
+        event: Value,
+        expanded: bool,
+    },
 }
 impl Item {
     pub fn is_visible(&self) -> bool {
@@ -80,6 +84,8 @@ pub struct State {
     pub revision: u64,
     /// Visible conversation output, independent of presentation-only reflow.
     pub output_revision: u64,
+    /// Assistant text already placed before an interleaved collaboration receipt.
+    pub stream_prefix: Option<String>,
     pub tool_revision: u64,
     pub tool_details: tools::ToolDetails,
     pub width: usize,
@@ -100,6 +106,8 @@ pub struct State {
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
+    pub collaboration: Vec<Value>,
+    pub agents_panel: Option<super::agents::Panel>,
     /// The engine's latest projection for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
     /// The recent conversations offered before the first prompt.
@@ -116,6 +124,7 @@ impl Default for State {
             generation: 0,
             revision: 0,
             output_revision: 0,
+            stream_prefix: None,
             tool_revision: 0,
             tool_details: tools::ToolDetails::default(),
             width: 80,
@@ -134,6 +143,8 @@ impl Default for State {
             information: None,
             selector: None,
             processes: None,
+            collaboration: Vec::new(),
+            agents_panel: None,
             context: None,
             opening: Opening::default(),
             quitting: None,
@@ -176,10 +187,12 @@ impl State {
                 | Event::ToolChanged { .. }
                 | Event::ToolNote { .. }
                 | Event::ToolFinished { .. }
+                | Event::Collaboration { .. }
         ) {
             self.changed();
         }
         match event {
+            Event::Collaboration { event } => self.collaboration_event(event),
             Event::Recovering {
                 attempt,
                 delay,
@@ -228,6 +241,7 @@ impl State {
                 self.message(Kind::Notice, &text);
             }
             Event::Preparing => {
+                self.stream_prefix = None;
                 self.backend_failure = None;
                 self.status = "Preparing request…".into();
             }
@@ -249,6 +263,7 @@ impl State {
             }
             Event::Streaming { text } => {
                 self.status = "Writing the response…".into();
+                let text = self.stream_prefix.as_ref().and_then(|prefix| text.strip_prefix(prefix)).unwrap_or(&text).to_string();
                 // Updates contain the entire response so far. Its leading whitespace
                 // remains available when visible content arrives in a later update.
                 if text.trim().is_empty() {
@@ -266,6 +281,7 @@ impl State {
                 }
             }
             Event::Message { text } => {
+                let text = self.stream_prefix.take().as_ref().and_then(|prefix| text.strip_prefix(prefix)).unwrap_or(&text).to_string();
                 if let Some(Item::Streaming { text: current }) = self.items.last() {
                     let changed = *current != text;
                     *self.items.last_mut().unwrap() = Item::Text {
@@ -284,6 +300,7 @@ impl State {
                 name,
                 arguments,
             } => {
+                self.stream_prefix = None;
                 if let Some(last) = self.open_branch() {
                     *last = Some(false);
                 }
@@ -345,6 +362,35 @@ impl State {
             }
         }
     }
+    pub fn collaboration_event(&mut self, event: Value) {
+        if let Some(Item::Streaming { text }) = self.items.last() {
+            let prefix = self.stream_prefix.get_or_insert_with(String::new);
+            prefix.push_str(text);
+            self.finish_stream();
+        }
+        self.changed();
+        self.output_changed();
+        self.items.push(Item::Collaboration {
+            event,
+            expanded: false,
+        });
+    }
+    pub fn toggle_collaboration(&mut self) -> bool {
+        let Some(index) = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, Item::Collaboration { .. }))
+        else {
+            return false;
+        };
+        if let Item::Collaboration { expanded, .. } = &mut self.items[index] {
+            *expanded = !*expanded;
+        }
+        self.changed();
+        self.output_changed();
+        self.tool_changed_from(index);
+        true
+    }
     fn open_branch(&mut self) -> Option<&mut Option<bool>> {
         self.items.iter_mut().rev().find_map(|item| match item {
             Item::Tool { last, .. } if last.is_none() => Some(last),
@@ -361,6 +407,7 @@ impl State {
         self.finish_stream();
         self.close_tools();
         self.items.clear();
+        self.stream_prefix = None;
         self.tool_details = tools::ToolDetails::default();
         self.generation = self.generation.wrapping_add(1);
         self.changed();
@@ -372,6 +419,8 @@ impl State {
         self.backend_failure = None;
         self.information = None;
         self.processes = None;
+        self.agents_panel = None;
+        self.collaboration.clear();
     }
     pub fn settled_len(&self) -> usize {
         self.items

@@ -27,6 +27,14 @@ impl App {
                 self.warn("Input exceeds 1 MiB · terminal input rejected");
                 return Ok(false);
             }
+            Decoded::Text(text) | Decoded::Paste(text) if self.state.agents_panel.is_some() => {
+                self.agents_text(&text);
+                return Ok(false);
+            }
+            Decoded::Error if self.state.agents_panel.is_some() => {
+                self.warn("Input exceeds 1 MiB · agent filter unchanged");
+                return Ok(false);
+            }
             Decoded::Paste(text) => {
                 if self.state.selector.is_none()
                     && self.deletion_job.is_none()
@@ -118,6 +126,10 @@ impl App {
         }
         if self.state.processes.is_some() {
             return self.process_key(key);
+        }
+        if self.state.agents_panel.is_some() {
+            self.agents_key(key);
+            return Ok(false);
         }
         if self.state.information.is_some() {
             if key.code == 27
@@ -264,6 +276,8 @@ impl App {
         }
         if self.state.processes.is_some() {
             self.process_scroll(amount);
+        } else if self.state.agents_panel.is_some() {
+            self.agents_scroll(amount);
         } else if self.state.information.is_some() {
             for _ in 0..amount.unsigned_abs().min(30) {
                 super::view::scroll_information(&mut self.state, if amount < 0 { 38 } else { 40 });
@@ -326,6 +340,8 @@ impl App {
     }
     pub(super) fn stop(&mut self) {
         if let Some(worker) = &self.worker {
+            self.collaboration_auto_resume = false;
+            self.collaboration_return_pending = false;
             worker.cancel();
             if let Some(activity) = &mut self.state.activity {
                 activity.stopping = true;

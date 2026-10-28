@@ -1,5 +1,5 @@
 use super::{
-    footer, information, menus,
+    agents, footer, information, menus,
     panel::{self, Part, Sheet},
     processes, status,
 };
@@ -71,6 +71,8 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
         Some(super::quit::sheet(state, work, columns))
     } else if let Some(panel) = &state.processes {
         Some(processes::sheet(panel, columns))
+    } else if let Some(panel) = &state.agents_panel {
+        Some(agents::sheet(state, panel, columns))
     } else if let Some(info) = &state.information {
         Some(information::sheet(info, columns))
     } else if let Some(selector) = &state.selector {

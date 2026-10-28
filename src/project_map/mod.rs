@@ -34,6 +34,11 @@ impl Map {
     pub fn configure(&mut self, home: &Path) {
         self.store.configure(home);
     }
+    /// Use the parent's project notes while surveying this working copy.
+    pub fn share_notes(&mut self, home: &Path, project_root: &Path) {
+        self.store = storage::Store::new(project_root.to_path_buf());
+        self.store.configure(home);
+    }
     pub fn include_credentials(&mut self, redactor: Redactor) {
         self.redactor.include(redactor);
     }

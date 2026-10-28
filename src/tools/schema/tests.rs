@@ -9,7 +9,7 @@ fn tool_catalog_and_encoded_size_are_reused() {
 #[test]
 fn every_tool_advertises_optional_parallel_boolean() {
     let tools = definitions().as_array().unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 13);
     for tool in tools {
         let name = tool.get("name").and_then(Value::as_str).unwrap();
         let parameters = tool.get("parameters").unwrap();
@@ -198,7 +198,7 @@ fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum()
 fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     let tools = definitions();
     let functions = tools.as_array().unwrap();
-    assert_eq!(functions.len(), 12);
+    assert_eq!(functions.len(), 13);
     assert!(functions.iter().all(|tool| tool.get("function").is_none()));
     for (name, action) in [("web", "crawl"), ("browser", "cdp")] {
         let function = functions
@@ -468,7 +468,8 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             "exec",
             "list",
             "search",
-            "map"
+            "map",
+            "agent"
         ]
     );
     for (name, required, limit_max, context_max) in [

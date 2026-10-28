@@ -51,7 +51,7 @@ impl State {
         }
     }
 
-    fn tool_changed_from(&mut self, first: usize) {
+    pub(super) fn tool_changed_from(&mut self, first: usize) {
         self.tool_revision = self.tool_revision.wrapping_add(1);
         if let Some((index, count)) = self.tool_details.changes.back_mut()
             && *index == first

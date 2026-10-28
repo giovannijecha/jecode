@@ -251,6 +251,10 @@ impl Document {
         self.messages
             .iter()
             .any(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+            || self
+                .events
+                .iter()
+                .any(|event| event.get("type").and_then(Value::as_str) == Some("collaboration"))
             || !self.input.attachment_ids().is_empty()
     }
 

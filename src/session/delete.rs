@@ -40,6 +40,12 @@ pub(crate) fn message(title: &str, report: &DeleteReport, current: bool) -> Stri
     if current {
         text.push_str(" · new conversation opened");
     }
+    if let Some(path) = &report.retained_collaboration {
+        text.push_str(&format!(
+            "; Collaborator files retained at {}; close isolated workspaces before deleting to discard them",
+            path.display()
+        ));
+    }
     text
 }
 

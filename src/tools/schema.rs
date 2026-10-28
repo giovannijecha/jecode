@@ -1,5 +1,6 @@
 use crate::json::Value;
 use std::sync::OnceLock;
+mod collaboration;
 
 /// Executable tools in Jecode's neutral name, description and parameters shape.
 /// Each backend owns the wrapper required by its request protocol.
@@ -11,6 +12,34 @@ pub fn definitions() -> &'static Value {
 pub fn encoded_size() -> usize {
     static SIZE: OnceLock<usize> = OnceLock::new();
     *SIZE.get_or_init(|| definitions().encode().len())
+}
+
+pub fn definitions_for(delegation: bool) -> &'static Value {
+    static WORKING: OnceLock<Value> = OnceLock::new();
+    if delegation {
+        definitions()
+    } else {
+        WORKING.get_or_init(|| {
+            Value::Array(
+                definitions()
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|tool| tool.get("name").and_then(Value::as_str) != Some("agent"))
+                    .cloned()
+                    .collect(),
+            )
+        })
+    }
+}
+
+pub fn encoded_size_for(delegation: bool) -> usize {
+    static WORKING_SIZE: OnceLock<usize> = OnceLock::new();
+    if delegation {
+        encoded_size()
+    } else {
+        *WORKING_SIZE.get_or_init(|| definitions_for(false).encode().len())
+    }
 }
 
 fn build_definitions() -> Value {
@@ -32,6 +61,7 @@ fn build_definitions() -> Value {
     let mut tools = base_definitions(string, integer, boolean, strings);
     tools.extend(super::discovery::definitions());
     tools.extend(crate::project_map::definitions());
+    tools.push(collaboration::definition());
     Value::Array(tools)
 }
 

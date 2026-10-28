@@ -197,6 +197,10 @@ impl App {
                         .collect(),
                 );
                 self.state.effort = document.effort.name().into();
+                self.collaboration_seen.clear();
+                self.collaboration_receipt_calls.clear();
+                self.collaboration_return_pending = false;
+                self.collaboration_auto_resume = true;
                 let mut turn_recorded = false;
                 for record in document.records() {
                     match record {
@@ -220,6 +224,16 @@ impl App {
                             result,
                             change,
                         } => {
+                            if name == "agent" && super::agents::receipt_replaces_tool(&arguments) {
+                                if result
+                                    .get("error")
+                                    .and_then(crate::json::Value::as_str)
+                                    .is_some()
+                                {
+                                    self.state.diagnostic(&self.archive.redactor.text(&summary));
+                                }
+                                continue;
+                            }
                             self.state.event(Event::ToolStarted {
                                 id: id.clone(),
                                 name: name.clone(),
@@ -256,9 +270,24 @@ impl App {
                                 },
                             });
                         }
+                        Record::Collaboration { event } => {
+                            let sequence = super::agents::number(&event, "sequence");
+                            if self.collaboration_seen.insert(sequence) {
+                                self.state
+                                    .collaboration_event(self.archive.redactor.value(&event));
+                            }
+                        }
                     }
                 }
                 self.state.close_tools();
+                self.collaboration_observer = agent.collaboration();
+                self.collaboration_cursor = self.collaboration_observer.events_since(0).0;
+                self.state.collaboration = self
+                    .collaboration_observer
+                    .snapshot()
+                    .into_iter()
+                    .map(|record| self.archive.redactor.value(&record))
+                    .collect();
                 // Saved records do not contain execution timings.
                 if turn_recorded {
                     self.state.finish_tool_turn();

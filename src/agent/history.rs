@@ -25,6 +25,15 @@ impl Agent {
                 change: None,
             };
         }
+        if call.name == "agent" {
+            let result = json::parse(&call.arguments)
+                .and_then(|arguments| self.agent_tool(&arguments))
+                .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
+            return crate::tools::Execution {
+                result,
+                change: None,
+            };
+        }
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
             && arguments

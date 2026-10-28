@@ -29,6 +29,7 @@ impl<'a, O: Write, E: Write> Console<'a, O, E> {
 impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
     fn emit(&mut self, event: Event) -> Result<(), String> {
         let text = match event {
+            Event::Collaboration { event } => collaboration_line(&event),
             Event::Message { text } => {
                 return writeln!(self.output, "{text}")
                     .and_then(|_| self.output.flush())
@@ -115,10 +116,43 @@ fn clean(value: &str) -> String {
         .collect()
 }
 
+pub(crate) fn collaboration_line(event: &crate::json::Value) -> String {
+    let text = |key| {
+        event
+            .get(key)
+            .and_then(crate::json::Value::as_str)
+            .unwrap_or("")
+    };
+    let label = text("id")
+        .strip_prefix('a')
+        .map_or_else(|| "AGENTS".to_owned(), |number| format!("AGENT {number}"));
+    clean(&format!("[{label}: {}] {}", text("title"), text("summary")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::json::Value;
+
+    #[test]
+    fn collaborator_calls_show_actions_and_numbered_identity() {
+        let (mut output, mut status) = (Vec::new(), Vec::new());
+        let mut console = Console::new(&mut output, &mut status);
+        console
+            .emit(Event::ToolStarted {
+                id: "call".into(),
+                name: "agent".into(),
+                arguments: Value::object([
+                    ("action", Value::string("inspect")),
+                    ("id", Value::string("a2")),
+                ]),
+            })
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(status).unwrap(),
+            "[tool: agent] inspect AGENT 2\n"
+        );
+    }
 
     #[test]
     fn overlapping_finishes_name_their_targets_in_completion_order() {

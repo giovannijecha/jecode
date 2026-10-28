@@ -11,6 +11,11 @@ file records that the path was absent. An edit that finds no unique match does
 not create a checkpoint. Successful and failed calls have the same expiry;
 Jecode cannot infer whether a successful command produced the intended result.
 
+`agent integrate` captures the selected main-project paths before applying an
+isolated collaborator's changes. Its result includes the same checkpoint receipt
+and capture diagnostics. Collaborators have their own checkpoint stores for
+their file and command tools; see [collaboration](COLLABORATION.md).
+
 Bash can modify several files, so the model declares its protection scope:
 
 ```json

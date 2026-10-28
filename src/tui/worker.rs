@@ -169,6 +169,24 @@ pub struct Worker {
     inbox: crate::inbox::Inbox,
 }
 impl Worker {
+    pub fn continue_collaboration(mut agent: Agent) -> Self {
+        let cancellation = agent.cancellation();
+        let inbox = agent.inbox();
+        let (sender, events) = event_channel();
+        let token = cancellation.clone();
+        let task = thread::spawn(move || {
+            let result = agent
+                .continue_collaboration(&mut |event| sender.send(event, &token))
+                .map(|_| ());
+            (agent, result)
+        });
+        Self {
+            events,
+            task: Some(task),
+            cancellation,
+            inbox,
+        }
+    }
     pub fn start(mut agent: Agent, prompt: crate::attachments::Prompt) -> Self {
         let cancellation = agent.cancellation();
         let inbox = agent.inbox();

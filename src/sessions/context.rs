@@ -129,7 +129,8 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
         }
     }
     for event in document.events.iter().skip(validated.events) {
-        if let Some(kind) = event.get("kind")
+        if event.get("type").and_then(Value::as_str) != Some("collaboration")
+            && let Some(kind) = event.get("kind")
             && !matches!(kind.as_str(), Some("notice" | "warning" | "error"))
         {
             return Err("Invalid saved event kind".into());
@@ -138,6 +139,26 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             return Err("Saved event is outside the conversation".into());
         }
         match string(event, "type")? {
+            "collaboration" => {
+                let kind = string(event, "kind")?;
+                if !matches!(
+                    kind,
+                    "created"
+                        | "sent"
+                        | "received"
+                        | "returned"
+                        | "stopped"
+                        | "reviewed"
+                        | "unknown"
+                ) {
+                    return Err("Invalid collaborator receipt kind".into());
+                }
+                integer(event, "sequence")?;
+                event
+                    .get("records")
+                    .and_then(Value::as_array)
+                    .ok_or("Invalid collaborator records")?;
+            }
             "turn_start" => {
                 let index = integer(event, "after_message")? as usize;
                 if messages

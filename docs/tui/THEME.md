@@ -72,6 +72,12 @@ The dock holds, top to bottom: queued drafts, the status row, the composer
 The header reads `>_ jecode <version>`, with `>_` bold `ACCENT`, `jecode`
 bold `STRONG` and the version `MUTED`, shortened from the right. The model,
 effort and folder sit in the footer, so each appears once on screen.
+With active collaborators or pending review, the same footer row replaces the
+folder with a quiet `AGENTS` badge (`LIT` on `BADGE_IDLE`) and readable state
+counts. Failed work uses the existing error roles; uncertain outcomes use
+`WARNING`. An accent `/agents` hint appears when space permits. The context
+gauge remains and model details yield at narrow widths. The normal footer
+returns once nothing needs attention; the dock keeps its height.
 Until the conversation shows its first item, the space below lists
 `Recent in this folder` in `DIM`: up to three other conversations of this
 folder with compact ages such as `2h`, then a ` /resume ` keycap for all
@@ -134,9 +140,16 @@ call keeps its family colour, a running one shimmers on `BADGE_IDLE`, a
 background one shows a `LIT` name on `BADGE_IDLE`, a failed one turns
 `BADGE_BAD` and a stopped one `BADGE_WARN`. The names are READ, SKILL (a
 `read` of a skill's `SKILL.md`), UPDATE (the `edit` tool), WRITE, BASH, EXEC,
-PROCESS, CHECKPOINT, WEB, BROWSER, LIST, SEARCH and MAP. List, Search and Map use the
+PROCESS, CHECKPOINT, WEB, BROWSER, LIST, SEARCH, MAP and AGENTS. List, Search and Map use the
 read-family Violet surface; an optional description keeps the concrete target
 on the following tree row.
+
+Collaboration creation, sent/received assignments, returned reports, review and
+closure use immutable chronological receipts. Creation expands from `AGENTS` to
+complete numbered badges such as `AGENT 1`; identity never appears as a detached
+`a1`. Current state belongs to `/agents`. Inspection, wait, diff and integration
+calls retain standard `AGENTS` tool cards with their action and target; calls
+already represented by receipts avoid duplicate cards. Errors remain visible.
 
 Result rows hang under the title on a `DIM` tree: `│` on every row, `└` on the
 last, wrapped continuations included. Diffs run from column 2 without a tree.

@@ -1,5 +1,5 @@
 use super::{Document, Store, same_directory, valid_id};
-use crate::{output, scratch};
+use crate::{json::Value, output, scratch};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::ErrorKind;
@@ -9,6 +9,13 @@ use std::path::{Path, PathBuf};
 pub(crate) struct DeleteReport {
     pub files: usize,
     pub directories: usize,
+    pub retained_collaboration: Option<PathBuf>,
+}
+
+struct RetainedCollaboration {
+    directory: PathBuf,
+    manifest: PathBuf,
+    bytes: Vec<u8>,
 }
 
 pub(crate) struct Removal {
@@ -17,6 +24,7 @@ pub(crate) struct Removal {
     durable: Option<PathBuf>,
     output: output::Removal,
     scratch: Option<scratch::Removal>,
+    collaboration: Option<RetainedCollaboration>,
     /// Attachments the deleted conversation sent; no grace period applies.
     released: BTreeSet<String>,
 }
@@ -78,6 +86,7 @@ impl Store {
         let output =
             output::prepare_removal(&self.output_directory(), &self.directory, id, document)?;
         let scratch = self.temporary_area(id)?.prepare_removal()?;
+        let collaboration = RetainedCollaboration::prepare(&self.bucket, document)?;
         // Draft attachments are left to the regular grace period: a fresh
         // conversation may inherit the draft before its first save.
         let released = document
@@ -92,6 +101,7 @@ impl Store {
             durable,
             output,
             scratch,
+            collaboration,
         })
     }
 }
@@ -106,6 +116,10 @@ impl Removal {
         live_attachments: &BTreeSet<String>,
     ) -> Result<DeleteReport, String> {
         let mut report = DeleteReport::default();
+        if let Some(collaboration) = &self.collaboration {
+            collaboration.save()?;
+            report.retained_collaboration = Some(collaboration.directory.clone());
+        }
         let output = self.output.remove().map_err(incomplete)?;
         report.files += output.files;
         report.directories += output.directories;
@@ -129,6 +143,116 @@ impl Removal {
             .unwrap_or(0);
         Ok(report)
     }
+}
+
+impl RetainedCollaboration {
+    fn prepare(bucket: &Path, document: &Document) -> Result<Option<Self>, String> {
+        let directory = bucket.join("collaboration").join(&document.id);
+        inspect_parent(&directory)?;
+        let Some(metadata) = crate::disk::metadata_if_present(&directory)
+            .map_err(|error| format!("Could not inspect collaborator files: {error}"))?
+        else {
+            return Ok(None);
+        };
+        if !crate::disk::ordinary_directory(&metadata) {
+            return Err("Collaborator storage is not an owned directory".into());
+        }
+        if !contains_file(&directory)? {
+            return Ok(None);
+        }
+        let last = document
+            .events
+            .iter()
+            .rev()
+            .find(|event| event.get("type").and_then(Value::as_str) == Some("collaboration"));
+        let sequence = last
+            .and_then(|event| event.get("sequence"))
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        let records = last
+            .and_then(|event| event.get("records"))
+            .and_then(Value::as_array)
+            .unwrap_or(&[])
+            .iter()
+            .map(|record| {
+                let field = |name| record.get(name).cloned().unwrap_or(Value::Null);
+                Value::object([
+                    ("id", field("id")),
+                    ("number", field("number")),
+                    ("title", field("title")),
+                    ("state", field("state")),
+                    ("workspace", field("workspace")),
+                    ("workspace_info", field("workspace_info")),
+                    ("directory", field("directory")),
+                    ("workspace_closed", field("workspace_closed")),
+                    ("sent_version", field("sent_version")),
+                    ("received_version", field("received_version")),
+                    ("report", field("report")),
+                    ("reviewed", field("reviewed")),
+                    ("error", field("error")),
+                ])
+            })
+            .collect();
+        let manifest = directory.join(format!("parent-{sequence}.json"));
+        let bytes = Value::object([
+            ("format", Value::string("jecode.collaboration.retained")),
+            ("format_version", Value::number(1)),
+            ("parent_session_id", Value::string(&document.id)),
+            (
+                "working_directory",
+                Value::string(document.directory.to_string_lossy()),
+            ),
+            ("receipt_sequence", Value::number(sequence)),
+            ("records", Value::Array(records)),
+        ])
+        .encode()
+        .into_bytes();
+        Ok(Some(Self {
+            directory,
+            manifest,
+            bytes,
+        }))
+    }
+
+    fn save(&self) -> Result<(), String> {
+        inspect_parent(&self.directory)?;
+        match crate::disk::metadata_if_present(&self.manifest)
+            .map_err(|error| format!("Could not inspect retained collaborator record: {error}"))?
+        {
+            Some(metadata) => {
+                if crate::disk::linked(&metadata) || !metadata.is_file() {
+                    return Err("Retained collaborator record is not an ordinary file".into());
+                }
+                if fs::read(&self.manifest).map_err(|error| error.to_string())? != self.bytes {
+                    return Err(
+                        "Retained collaborator record changed; session was not deleted".into(),
+                    );
+                }
+            }
+            None => crate::disk::atomic_write(&self.manifest, &self.bytes)
+                .map_err(|error| format!("Could not retain collaborator record: {error}"))?,
+        }
+        Ok(())
+    }
+}
+
+fn contains_file(directory: &Path) -> Result<bool, String> {
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)
+            .map_err(|error| format!("Could not inspect collaborator files: {error}"))?
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let metadata = fs::symlink_metadata(entry.path())
+                .map_err(|error| format!("Could not inspect collaborator file: {error}"))?;
+            if crate::disk::ordinary_directory(&metadata) {
+                pending.push(entry.path());
+            } else {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn incomplete(message: impl AsRef<str>) -> String {

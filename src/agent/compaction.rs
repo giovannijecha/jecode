@@ -47,7 +47,9 @@ impl Agent {
             // Summarization and event delivery can take time. Include restores
             // observed during that work before constructing the next request.
             self.reload_restored_instructions();
+            let seen = self.collaboration.latest_return_sequence();
             let messages = self.transport_messages();
+            self.collaboration_seen = seen;
             let output_tokens = limits.and_then(|limits| {
                 limits.output.map(|_| {
                     let limits = Limits {
@@ -106,7 +108,7 @@ impl Agent {
                     }
                     self.context.calibrate(
                         self.context_bytes(&messages)
-                            .saturating_add(crate::tools::encoded_size()),
+                            .saturating_add(crate::tools::encoded_size_for(!self.child)),
                     );
                     return Ok(completion);
                 }
@@ -245,7 +247,7 @@ impl Agent {
         next.summary = " ".into();
         let fixed = next.estimate_bytes(
             self.context_bytes(&self.projected_context(&next, &original))
-                .saturating_add(crate::tools::encoded_size())
+                .saturating_add(crate::tools::encoded_size_for(!self.child))
                 .saturating_add(self.request_environment().len())
                 .saturating_add(768),
         );

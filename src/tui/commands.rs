@@ -109,6 +109,8 @@ impl App {
             self.state.activity = Some(Activity::new());
             self.state.backend_failure = None;
             self.process_observer = self.agent.as_ref().unwrap().processes();
+            self.collaboration_auto_resume = true;
+            self.collaboration_return_pending = false;
             self.worker = Some(Worker::start(self.agent.take().unwrap(), execution));
             self.state.status = "Starting...".into();
             return Ok(false);
@@ -437,6 +439,12 @@ impl App {
             }
         } else if name.eq_ignore_ascii_case("/terminal") {
             self.open_processes(arguments);
+        } else if name.eq_ignore_ascii_case("/agents") {
+            if arguments.is_empty() {
+                self.open_agents();
+            } else {
+                self.warn("Usage: /agents");
+            }
         } else {
             return self.copy_command(text);
         }
@@ -446,7 +454,7 @@ impl App {
 
 /// Commands that run at once, even while a turn is busy.
 pub(super) fn immediate(name: &str) -> bool {
-    ["/copy", "/drafts", "/terminal"]
+    ["/copy", "/drafts", "/terminal", "/agents"]
         .iter()
         .any(|command| name.eq_ignore_ascii_case(command))
 }

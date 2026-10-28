@@ -1,6 +1,7 @@
 # Tools
 
-Jecode offers twelve tools to the model. An assistant message describing a command
+Jecode offers thirteen tools to the main model and twelve operational tools to
+collaborators, which cannot delegate. An assistant message describing a command
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
@@ -14,8 +15,9 @@ model can correct the call.
 
 ## Tool arguments
 
-All twelve tools also accept an optional boolean `parallel` argument. The table
-lists their other arguments.
+All tools accept an optional boolean `parallel` argument. The `agent` control
+tool always runs in order; its workers run independently after creation. The
+table lists the other arguments.
 
 | Tool | Required arguments | Optional arguments | Result or constraint |
 | --- | --- | --- | --- |
@@ -32,6 +34,8 @@ lists their other arguments.
 | `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Finds literal text in UTF-8 project files; returns line numbers, context and byte offsets. |
 | `map` | None | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources`, `work`, `description` | Surveys the project on demand and manages source-backed project notes. `action` defaults to `overview`; `remember` requires `title`, `summary` and `sources` at execution. |
 
+| `agent` | `action`; action-specific fields below | `tasks`, `id`, `instructions`, `context`, `timeout_ms`, `report_version`, `note`, `paths`, `expected_review_token`, `path`, `offset`, `limit` | Main agent only: create, update, inspect, wait, stop, review, compare, integrate or close collaborators. See [collaboration](COLLABORATION.md). |
+
 ## Parallel calls
 
 Set `parallel: true` on each adjacent call whose inputs and effects are
@@ -40,7 +44,7 @@ waves. A call without `parallel: true` ends that declared group and waits for it
 to finish. `parallel: false` always runs in order. With the argument omitted,
 eligible reads keep their automatic batching and modifying calls run in order.
 Declared groups and automatic read groups never merge. `history:` and `skill:`
-reads remain ordered even with `parallel: true`.
+reads and `agent` control calls remain ordered even with `parallel: true`.
 
 The model must consider shared files, interfaces, generated output, processes
 and external state before declaring independence. Different paths alone do not

@@ -1,6 +1,8 @@
 //! Model inference and account services independent of a provider's wire format.
 
 mod charges;
+#[cfg(test)]
+mod delegation_tests;
 mod failure;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
@@ -258,6 +260,8 @@ pub trait Backend: Send {
     fn model(&self) -> &str;
     fn effort(&self) -> Effort;
     fn set_effort(&mut self, effort: Effort);
+    /// Collaborators retain working tools but never receive delegation tools.
+    fn set_delegation(&mut self, _enabled: bool) {}
     fn inputs(&self) -> Inputs;
     fn limits(&mut self) -> Result<Option<Limits>, Failure>;
     fn known_limits(&self) -> Option<Limits>;

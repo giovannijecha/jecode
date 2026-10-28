@@ -9,6 +9,9 @@ pub(super) enum Mode {
 }
 
 pub(super) fn mode(call: &ToolCall) -> Mode {
+    if call.name == "agent" {
+        return Mode::Serial;
+    }
     let Ok(arguments) = json::parse(&call.arguments) else {
         return Mode::Serial;
     };

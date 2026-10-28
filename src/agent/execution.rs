@@ -189,12 +189,10 @@ impl Agent {
     }
 
     fn record_tool_change(&self, call: &ToolCall, change: &crate::file_change::Change) {
+        let after_message = self.messages.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("tool_change")),
-            (
-                "after_message",
-                Value::number(self.messages.lock().unwrap().len()),
-            ),
+            ("after_message", Value::number(after_message)),
             ("tool_call_id", Value::string(self.redact(&call.id))),
             ("change", change.value()),
         ]));

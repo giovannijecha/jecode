@@ -142,7 +142,9 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
     ]));
     agent.context.observe(
         Some(&crate::backend::Usage {
-            input_tokens: Some(22000),
+            input_tokens: Some(
+                22000 + crate::tools::encoded_size() - crate::tools::encoded_size_for(false),
+            ),
             ..Default::default()
         }),
         2,

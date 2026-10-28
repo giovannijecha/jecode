@@ -14,6 +14,7 @@ Paths are relative to `src/`.
 | Settings, credentials and model effort | `config/`, `auth/`, `auth/openai/`, `effort.rs` |
 | Agent, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
+| Collaborator workers, receipts and working copies | `collaboration/`, `agent/collaboration.rs`, `agent/continuation.rs` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
 | Native file discovery and shared path filtering | `tools/discovery/`, `path_filter.rs`, `path_filter/` |
@@ -181,6 +182,52 @@ cursors. It cannot keep a process alive. Successful conversation switches, live
 session deletion and agent drop stop and join registered processes. See
 [tools](../usage/TOOLS.md) for the model-facing contract.
 
+## Collaborating agents
+
+The main loop intercepts the `agent` control tool. It remains a serialized
+boundary even in a declared parallel group. `collaboration::Observer` owns live
+records, append-only receipts and worker handles; each child runs an ordinary
+`Agent` on its own thread with an independent backend, tool resources, input
+queue and saved conversation. Focused instructions and context replace whole
+parent-conversation inheritance. Shared project-map notes and personal skills
+retain the parent project's identity.
+
+OpenRouter and OpenAI requests select the catalog for the agent's role. Child
+catalogs omit `agent`, and agent dispatch rejects child delegation independently
+of provider behavior. Existing workers keep the model, effort and routing with
+which they were created.
+
+Versioned assignment updates use the existing input queue at model boundaries.
+Sent and received receipts are separate. Visible messages, tool activity and
+returned reports populate inspectable records; hidden reasoning is not included.
+The main agent records review explicitly against the latest returned version.
+
+Receipts append to the parent session even while its main model is idle. The TUI
+drains worker events and observer receipts with sequence deduplication, keeping
+historical snapshots immutable. Its `/agents` panel reads current snapshots;
+opening a result does not review it. A new live return can start
+`Agent::continue_collaboration` through the ordinary model loop without a
+synthetic user message. Queued input wins, explicit cancellation suppresses the
+continuation, and restored receipts are already seen. Plain stdin remains
+line-based and does not poll idle workers.
+
+Storage lives under the parent project bucket's `collaboration/<session-id>/`.
+Child histories have a separate `child-home` so the main conversation picker
+cannot open them as delegating agents. Session changes stop workers before
+replacing the observer. Interrupted running work restores as unknown and is
+never replayed. Closing a workspace preserves its historical record; missing or
+invalid workspace ownership becomes a record diagnostic rather than breaking
+the parent session.
+
+Shared work uses current project files. Isolated work uses a detached native Git
+worktree, overlaid with the current tracked and non-ignored untracked files,
+including local instruction files. Owned baseline bytes and fingerprints make
+review independent of Git's committed state. Comparison produces bounded evidence
+and a token over baseline, child and current states; integration rechecks selected
+paths and reports partial outcomes. File isolation does not restrict commands or
+external effects. See [collaboration](../usage/COLLABORATION.md) for the user
+contract and limitations.
+
 ## Session storage
 
 `sessions/` stores conversations in buckets derived from the canonical project
@@ -290,6 +337,7 @@ unsafe Rust FFI.
 | Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
 | Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
 | Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |
+| Isolated collaborator workspaces | Installed `git` provides local inventory and detached worktree creation/removal. Requires launch at a repository root with an existing `HEAD`. Jecode owns copying the dirty baseline, comparison and selective file integration; no remote, branch or commit is created. |
 
 Process guardians stop owned descendants on cancellation, timeout or owner loss.
 Unix children that create another process group or session leave that cleanup

@@ -1,3 +1,4 @@
+mod agents;
 mod attach;
 mod checkpoints;
 pub mod commands;
@@ -140,6 +141,7 @@ fn chat_inner(
                     .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
             ("/terminal", _) => processes::print(agent, terminal_arguments, output),
+            ("/agents", _) => agents::print(agent, arguments, output),
             ("/tmp", _) => temporary::print(agent, arguments, output),
             ("/checkpoints", _) => checkpoints::print(agent, arguments, output),
             ("/resume", _) => {

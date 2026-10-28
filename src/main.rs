@@ -10,6 +10,7 @@ mod checkpoint_bench;
 mod checkpoints;
 mod cli;
 mod clipboard;
+mod collaboration;
 mod config;
 mod console;
 mod context;

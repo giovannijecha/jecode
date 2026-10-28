@@ -88,7 +88,9 @@ fn openrouter_map_note_reaches_model_changes_with_source_and_survives_resume() {
     let catalog = requests[0].body.get("tools").unwrap().as_array().unwrap();
     assert_eq!(
         catalog
-            .last()
+            .iter()
+            .rev()
+            .nth(1)
             .unwrap()
             .get("function")
             .unwrap()
@@ -287,7 +289,13 @@ fn openai_namespace_map_note_and_overview_reach_followup_requests() {
     let namespace = &requests[0].body.get("tools").unwrap().as_array().unwrap()[0];
     let catalog = namespace.get("tools").unwrap().as_array().unwrap();
     assert_eq!(
-        catalog.last().unwrap().get("name").and_then(Value::as_str),
+        catalog
+            .iter()
+            .rev()
+            .nth(1)
+            .unwrap()
+            .get("name")
+            .and_then(Value::as_str),
         Some("map")
     );
     let saved = output(&requests[1].body, "openai-remember");

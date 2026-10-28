@@ -1,3 +1,4 @@
+pub(in crate::tui) mod agents;
 mod commands;
 mod composer;
 mod footer;
@@ -131,6 +132,7 @@ pub(super) fn lower_with_chrome(mut live: Vec<Line>, height: usize, mut chrome: 
 pub(super) fn panel_open(state: &State) -> bool {
     state.quitting.is_some()
         || state.processes.is_some()
+        || state.agents_panel.is_some()
         || state.selector.is_some()
         || state.information.is_some()
         || state.suggestions.panel
@@ -162,6 +164,19 @@ pub(super) fn process_width(state: &State) -> usize {
 /// Process list entries visible at once.
 pub(super) fn process_capacity(state: &State) -> usize {
     composer::panel_room(state)
+}
+
+pub(super) fn agents_capacity(state: &State) -> usize {
+    composer::panel_room(state)
+}
+
+pub(super) fn agents_detail_rows(state: &State) -> usize {
+    let Some(panel) = &state.agents_panel else {
+        return 0;
+    };
+    panel.current(&state.collaboration).map_or(0, |record| {
+        agents::detail_rows(record, panel.tab, panel::text_width(state.width.max(1))).len()
+    })
 }
 
 /// Total and visible rows of the open process stream.

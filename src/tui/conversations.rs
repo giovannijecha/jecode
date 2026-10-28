@@ -58,6 +58,7 @@ impl App {
         self.persistence = agent.sessions();
         self.state.effort = agent.effort().name().into();
         self.state.clear();
+        self.reset_agents_observer();
         self.refresh_context();
         self.local_start("/new");
         self.local_finish(

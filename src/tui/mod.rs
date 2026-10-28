@@ -1,4 +1,5 @@
 mod activity;
+mod agents;
 mod attach;
 mod backend_command;
 mod cards;
@@ -54,6 +55,7 @@ use feedback::Feedback;
 use jobs::Job;
 use keys::{Decoded, Decoder};
 use state::{Kind, State};
+use std::collections::HashSet;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use std::time::Instant;
@@ -98,6 +100,12 @@ struct App {
     settings_parent: Option<selector::Setting>,
     /// Reads the current conversation's processes, including while a worker owns the agent.
     process_observer: crate::tools::processes::Observer,
+    collaboration_observer: crate::collaboration::Observer,
+    collaboration_cursor: usize,
+    collaboration_seen: HashSet<usize>,
+    collaboration_receipt_calls: HashSet<String>,
+    collaboration_return_pending: bool,
+    collaboration_auto_resume: bool,
     #[cfg(test)]
     copied_text: Option<String>,
     #[cfg(test)]
@@ -118,6 +126,12 @@ impl App {
             started: Instant::now(),
             archive: agent.archive(),
             process_observer: agent.processes(),
+            collaboration_observer: agent.collaboration(),
+            collaboration_cursor: 0,
+            collaboration_seen: HashSet::new(),
+            collaboration_receipt_calls: HashSet::new(),
+            collaboration_return_pending: false,
+            collaboration_auto_resume: true,
             agent: Some(agent),
             worker: None,
             submission: None,
@@ -152,6 +166,7 @@ impl App {
             clipboard_image: None,
         };
         app.recent_sessions();
+        app.refresh_agents();
         app.refresh_context();
         app
     }

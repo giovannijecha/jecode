@@ -128,6 +128,8 @@ impl App {
             }
         }
         dirty |= self.refresh_processes(false);
+        dirty |= self.refresh_agents();
+        dirty |= self.start_collaboration_continuation();
         Ok(dirty)
     }
 }
@@ -142,7 +144,7 @@ impl App {
         self.worker.as_ref()?.events.try_recv().ok()
     }
 
-    fn worker_event(&mut self, event: Event) {
+    pub(super) fn worker_event(&mut self, event: Event) {
         if let Some(submission) = &mut self.submission {
             submission.observe(&event);
         }
@@ -154,6 +156,31 @@ impl App {
                     .inbox()
                     .with(|entries| entries.acknowledge(count));
                 self.show_accepted(prompts);
+            }
+            Event::Collaboration { event } => {
+                self.show_collaboration(event);
+            }
+            Event::ToolStarted {
+                id,
+                name,
+                arguments,
+            } if name == "agent" && super::agents::receipt_replaces_tool(&arguments) => {
+                self.collaboration_receipt_calls.insert(id);
+            }
+            Event::ToolFinished {
+                id,
+                name,
+                summary,
+                result,
+                ..
+            } if name == "agent" && self.collaboration_receipt_calls.remove(&id) => {
+                if result
+                    .get("error")
+                    .and_then(crate::json::Value::as_str)
+                    .is_some()
+                {
+                    self.state.diagnostic(&self.archive.redactor.text(&summary));
+                }
             }
             event => self.state.event(event),
         }

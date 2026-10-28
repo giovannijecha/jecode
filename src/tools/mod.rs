@@ -11,7 +11,9 @@ mod shell;
 
 pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
-pub use schema::{definitions, encoded_size};
+#[cfg(test)]
+pub use schema::encoded_size;
+pub use schema::{definitions, definitions_for, encoded_size_for};
 pub use shell::find_bash;
 
 use crate::cancel::Cancellation;
@@ -112,6 +114,9 @@ impl Tools {
 
     pub fn configure_project_map(&mut self, home: &Path) {
         self.project_map.configure(home);
+    }
+    pub fn share_project_map_notes(&mut self, home: &Path, project_root: &Path) {
+        self.project_map.share_notes(home, project_root);
     }
 
     pub fn configure_attachments(&mut self, pool: crate::attachments::Pool) {
