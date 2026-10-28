@@ -1,5 +1,6 @@
 //! Session-scoped collaborator receipts and live workers.
 
+mod log;
 mod runtime;
 #[cfg(test)]
 mod tests;
@@ -76,6 +77,10 @@ struct Record {
     updates: Vec<String>,
     updates_truncated: bool,
     tools: Vec<Value>,
+    /// Assignments, messages, calls and returns in the order they happened.
+    log: Vec<log::Entry>,
+    /// Message ordinals handed out; the latest `updates` keep their text.
+    messages: usize,
     files: Vec<String>,
     checks: Vec<String>,
     report: Option<(usize, String)>,
@@ -123,6 +128,10 @@ impl Record {
             ),
             ("updates_truncated", Value::Bool(self.updates_truncated)),
             ("tools", Value::Array(self.tools.clone())),
+            (
+                "log",
+                log::value(&self.log, self.messages, self.updates.len()),
+            ),
             (
                 "files",
                 Value::Array(self.files.iter().map(Value::string).collect()),
@@ -173,6 +182,18 @@ impl Record {
                 report.get("text")?.as_str()?.to_owned(),
             ))
         });
+        let tools = value
+            .get("tools")
+            .and_then(Value::as_array)
+            .unwrap_or(&[])
+            .to_vec();
+        let persisted = value
+            .get("updates")
+            .and_then(Value::as_array)
+            .map_or(0, |updates| {
+                updates.iter().filter_map(Value::as_str).count()
+            });
+        let (log, messages) = log::restore(value, persisted, tools.len());
         let workspace_info = value.get("workspace_info").cloned().unwrap_or(Value::Null);
         let workspace_closed = value.get("workspace_closed") == Some(&Value::Bool(true));
         let (workspace, workspace_error) = if workspace_closed {
@@ -241,11 +262,9 @@ impl Record {
                     .get("updates")
                     .and_then(Value::as_array)
                     .is_some_and(|updates| updates.len() > MAX_UPDATES),
-            tools: value
-                .get("tools")
-                .and_then(Value::as_array)
-                .unwrap_or(&[])
-                .to_vec(),
+            tools,
+            log,
+            messages,
             files: value
                 .get("files")
                 .and_then(Value::as_array)
@@ -479,6 +498,7 @@ impl Observer {
                 .filter(|record| record.state == "stopping")
                 .map(|record| {
                     record.state = "stopped";
+                    record.log.push(log::Entry::Stopped);
                     (
                         record.id.clone(),
                         record.received_version,

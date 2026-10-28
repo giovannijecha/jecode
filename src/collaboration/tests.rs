@@ -323,3 +323,144 @@ fn removed_isolated_workspace_can_be_closed_after_failed_receipt_and_resume() {
     assert!(observer.snapshot().is_empty());
     assert_eq!(fixture.finish().len(), 1);
 }
+
+fn log_entries(snapshot: &Value) -> Vec<String> {
+    snapshot
+        .get("log")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            let kind = entry.get("kind").and_then(Value::as_str).unwrap();
+            match entry.get("index").or_else(|| entry.get("version")) {
+                Some(position) => format!("{kind} {}", position.encode()),
+                None => kind.to_owned(),
+            }
+        })
+        .collect()
+}
+
+fn shared_seed(project: &Directory, storage: &Directory, fields: Vec<(&str, Value)>) -> Value {
+    let workspace = Workspace::prepare(
+        project.path(),
+        storage.path(),
+        "a1",
+        workspace::Mode::Shared,
+    )
+    .unwrap();
+    let mut seed = vec![
+        ("id", Value::string("a1")),
+        ("number", Value::number(1)),
+        ("workspace", Value::string("shared")),
+        ("workspace_info", workspace.value()),
+        ("directory", Value::string(project.path().to_string_lossy())),
+    ];
+    seed.extend(fields);
+    Value::Object(
+        seed.into_iter()
+            .map(|(key, value)| (key.into(), value))
+            .collect(),
+    )
+}
+
+#[test]
+fn ordered_log_interleaves_messages_and_calls_and_survives_resume() {
+    let (project, storage) = (Directory::new(), Directory::new());
+    let seed = shared_seed(
+        &project,
+        &storage,
+        vec![
+            ("state", Value::string("running")),
+            ("received_version", Value::number(1)),
+            ("instructions", Value::string("Search")),
+        ],
+    );
+    let observer = Observer::default();
+    observer
+        .0
+        .state
+        .lock()
+        .unwrap()
+        .records
+        .push(Record::from_value(&seed).unwrap());
+    observer.message("a1", "Looking");
+    let arguments = Value::object([("path", Value::string("src/a.rs"))]);
+    observer.tool_started("a1", "c1", "edit", &arguments);
+    let change = crate::file_change::Change {
+        added: 2,
+        removed: 1,
+        created: false,
+        hunks: Vec::new(),
+        ending_change: None,
+        final_newline: None,
+    };
+    observer.tool_changed("a1", "c1", &change);
+    observer.tool_finished("a1", "c1", "edit", "updated", &Value::object([]));
+    observer.message("a1", "Done");
+    let snapshot = observer.snapshot().remove(0);
+    assert_eq!(
+        log_entries(&snapshot),
+        ["assignment 1", "message 0", "tool 0", "message 1"]
+    );
+    let tool = &snapshot.get("tools").and_then(Value::as_array).unwrap()[0];
+    let counts = tool.get("change").unwrap();
+    assert_eq!(counts.get("added").and_then(Value::as_usize), Some(2));
+    assert_eq!(counts.get("removed").and_then(Value::as_usize), Some(1));
+    let recovered = Record::from_value(&snapshot).unwrap().value();
+    assert_eq!(recovered.get("log"), snapshot.get("log"));
+    for _ in 0..MAX_UPDATES {
+        observer.message("a1", "More");
+    }
+    let bounded = log_entries(&observer.snapshot()[0]);
+    // Messages that left the bounded updates keep their place without text.
+    assert_eq!(bounded[1], "message");
+    assert_eq!(
+        bounded.last().unwrap(),
+        &format!("message {}", MAX_UPDATES - 1)
+    );
+}
+
+#[test]
+fn records_saved_before_the_log_restore_calls_messages_and_outcome() {
+    let (project, storage) = (Directory::new(), Directory::new());
+    let tool = |id: &str| {
+        Value::object([
+            ("id", Value::string(id)),
+            ("name", Value::string("read")),
+            ("state", Value::string("done")),
+        ])
+    };
+    let saved = shared_seed(
+        &project,
+        &storage,
+        vec![
+            ("state", Value::string("returned")),
+            ("received_version", Value::number(2)),
+            ("instructions", Value::string("Search again")),
+            ("tools", Value::Array(vec![tool("c1"), tool("c2")])),
+            (
+                "updates",
+                Value::Array(vec![Value::string("One"), Value::string("Two")]),
+            ),
+            (
+                "report",
+                Value::object([
+                    ("version", Value::number(2)),
+                    ("text", Value::string("Two")),
+                ]),
+            ),
+        ],
+    );
+    let restored = Record::from_value(&saved).unwrap().value();
+    assert_eq!(
+        log_entries(&restored),
+        [
+            "assignment 2",
+            "tool 0",
+            "tool 1",
+            "message 0",
+            "message 1",
+            "returned 2"
+        ]
+    );
+}

@@ -1,5 +1,5 @@
 mod control;
-use super::{Assignment, Observer, Record, Spec, State, Worker, workspace::Workspace};
+use super::{Assignment, Observer, Record, Spec, State, Worker, log::Entry, workspace::Workspace};
 use crate::{agent::Agent, attachments::Prompt, events::Event, json::Value};
 use std::{
     collections::VecDeque,
@@ -84,6 +84,8 @@ impl Observer {
             updates: vec![],
             updates_truncated: false,
             tools: vec![],
+            log: vec![],
+            messages: 0,
             files: vec![],
             checks: vec![],
             report: None,
@@ -199,7 +201,10 @@ impl Observer {
                         summary,
                         result,
                     } => self.tool_finished(&id, &call_id, &name, &summary, &result),
-                    Event::ToolChanged { id: call_id, .. } => self.tool_changed(&id, &call_id),
+                    Event::ToolChanged {
+                        id: call_id,
+                        change,
+                    } => self.tool_changed(&id, &call_id, &change),
                     Event::Accepted { prompts } => {
                         let mut accepted = Vec::new();
                         {
@@ -240,6 +245,7 @@ impl Observer {
                 };
                 if record.state == "stopping" {
                     record.state = "stopped";
+                    record.log.push(Entry::Stopped);
                     (
                         "stopped",
                         record.received_version,
@@ -248,6 +254,7 @@ impl Observer {
                     )
                 } else {
                     let version = record.received_version;
+                    record.log.push(Entry::Returned(version));
                     record.report = Some((version, report.clone()));
                     record.reviewed = false;
                     record.activity = if result.is_ok() {
@@ -288,6 +295,7 @@ impl Observer {
                 .and_then(|record| {
                     if record.state == "stopping" {
                         record.state = "stopped";
+                        record.log.push(Entry::Stopped);
                         Some((record.received_version, record.title.clone()))
                     } else {
                         None
@@ -313,6 +321,10 @@ impl Observer {
             record.context = assignment.context.clone();
             record.state = "running";
             record.activity = "Working".into();
+            record.log.push(Entry::Assignment {
+                version: assignment.version,
+                instructions: assignment.instructions.clone(),
+            });
             record.title.clone()
         };
         self.receipt("received", Some(id), assignment.version, &title, vec![])
@@ -349,14 +361,17 @@ impl Observer {
             record
                 .updates
                 .push(text.chars().take(super::UPDATE_CHARS).collect());
+            record.log.push(Entry::Message(Some(record.messages)));
+            record.messages += 1;
             self.0.changed.notify_all();
         }
     }
 
-    fn tool_started(&self, id: &str, call_id: &str, name: &str, arguments: &Value) {
+    pub(super) fn tool_started(&self, id: &str, call_id: &str, name: &str, arguments: &Value) {
         let mut state = self.0.state.lock().unwrap();
         if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
             record.activity = format!("{name}: running");
+            record.log.push(Entry::Tool(record.tools.len()));
             record.tools.push(Value::object([
                 ("id", Value::string(call_id)),
                 ("name", Value::string(name)),
@@ -368,7 +383,14 @@ impl Observer {
         }
     }
 
-    fn tool_finished(&self, id: &str, call_id: &str, name: &str, summary: &str, result: &Value) {
+    pub(super) fn tool_finished(
+        &self,
+        id: &str,
+        call_id: &str,
+        name: &str,
+        summary: &str,
+        result: &Value,
+    ) {
         let mut state = self.0.state.lock().unwrap();
         if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
             record.activity = format!("{name}: {summary}");
@@ -396,14 +418,39 @@ impl Observer {
         }
     }
 
-    fn tool_changed(&self, id: &str, call_id: &str) {
+    /// Records the changed path and its line counts, for receipts that list
+    /// changed files with `+` / `−` counts.
+    pub(super) fn tool_changed(
+        &self,
+        id: &str,
+        call_id: &str,
+        change: &crate::file_change::Change,
+    ) {
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.iter_mut().find(|record| record.id == id)
-            && let Some(tool) = record
-                .tools
-                .iter()
-                .rev()
-                .find(|tool| tool.get("id").and_then(Value::as_str) == Some(call_id))
+        let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+            return;
+        };
+        if let Some(Value::Object(tool)) = record
+            .tools
+            .iter_mut()
+            .rev()
+            .find(|tool| tool.get("id").and_then(Value::as_str) == Some(call_id))
+        {
+            tool.insert(
+                "change".into(),
+                Value::object([
+                    ("added", Value::number(change.added)),
+                    ("removed", Value::number(change.removed)),
+                    ("created", Value::Bool(change.created)),
+                ]),
+            );
+            self.0.changed.notify_all();
+        }
+        if let Some(tool) = record
+            .tools
+            .iter()
+            .rev()
+            .find(|tool| tool.get("id").and_then(Value::as_str) == Some(call_id))
             && let Some(path) = tool
                 .get("arguments")
                 .and_then(|arguments| arguments.get("path"))
