@@ -295,6 +295,64 @@ impl Observer {
     }
 
     pub(crate) fn close(&self, id: &str) -> Result<Value, String> {
+        let already_closed = {
+            let state = self.0.state.lock().unwrap();
+            state
+                .records
+                .iter()
+                .find(|record| record.id == id)
+                .ok_or("Unknown collaborator")?
+                .workspace_closed
+        };
+        if already_closed {
+            return self.finish_close(id, Value::object([("closed", Value::Bool(true))]));
+        }
+        let missing_after_restart = {
+            let state = self.0.state.lock().unwrap();
+            let record = state.records.iter().find(|record| record.id == id).unwrap();
+            record.workspace.is_none() && !state.workers.iter().any(|worker| worker.id == id)
+        };
+        if missing_after_restart {
+            let managed = self
+                .0
+                .parent
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|(_, handle)| handle.as_ref())
+                .map(|handle| {
+                    handle
+                        .store()
+                        .bucket()
+                        .join("collaboration")
+                        .join(handle.id())
+                })
+                .ok_or("Collaborators require session storage")?;
+            let info = {
+                let state = self.0.state.lock().unwrap();
+                state
+                    .records
+                    .iter()
+                    .find(|record| record.id == id)
+                    .unwrap()
+                    .workspace_info
+                    .clone()
+            };
+            if !Workspace::already_removed(&info, id, &managed)? {
+                return Err("Collaborator workspace is unavailable; owned files may remain".into());
+            }
+            {
+                let mut state = self.0.state.lock().unwrap();
+                let record = state
+                    .records
+                    .iter_mut()
+                    .find(|record| record.id == id)
+                    .unwrap();
+                record.state = "stopped";
+                record.workspace_closed = true;
+            }
+            return self.finish_close(id, Value::object([("closed", Value::Bool(true))]));
+        }
         let worker = {
             let mut state = self.0.state.lock().unwrap();
             let index = state.workers.iter().position(|w| w.id == id);
@@ -303,7 +361,7 @@ impl Observer {
                 .iter_mut()
                 .find(|r| r.id == id)
                 .ok_or("Unknown collaborator")?;
-            if index.is_some() {
+            if index.is_some() && record.state == "running" {
                 record.state = "stopping";
             }
             index.map(|index| {
@@ -319,15 +377,34 @@ impl Observer {
         }
         let workspace = self.workspace(id)?;
         let result = workspace.close()?;
-        let title = {
+        {
             let mut state = self.0.state.lock().unwrap();
             let record = state.records.iter_mut().find(|r| r.id == id).unwrap();
             record.state = "stopped";
             record.workspace_closed = true;
             record.workspace = None;
-            record.title.clone()
+        }
+        self.finish_close(id, result)
+    }
+
+    fn finish_close(&self, id: &str, result: Value) -> Result<Value, String> {
+        let (title, version) = {
+            let state = self.0.state.lock().unwrap();
+            let record = state
+                .records
+                .iter()
+                .find(|record| record.id == id)
+                .ok_or("Unknown collaborator")?;
+            (record.title.clone(), record.received_version)
         };
-        self.receipt("stopped", Some(id), 0, &title, vec![])?;
+        self.receipt("closed", Some(id), version, &title, vec![])?;
+        self.0
+            .state
+            .lock()
+            .unwrap()
+            .records
+            .retain(|record| record.id != id);
+        self.0.changed.notify_all();
         Ok(result)
     }
 }

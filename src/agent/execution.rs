@@ -87,10 +87,23 @@ impl Agent {
             return Err(error);
         }
         let executing = Instant::now();
-        let outcome = self.execute_tool_with_change(call, begun);
+        let outcome = if call.name == "ask_user" {
+            Execution {
+                result: self.ask_tool(call, events),
+                change: None,
+            }
+        } else {
+            self.execute_tool_with_change(call, begun)
+        };
+        if call.name == "ask_user" && self.questions.is_suspended() {
+            return Err("Question saved for resume".into());
+        }
         let timing = clock.finish(executing);
         let result = &outcome.result;
         self.tool_result(call, result);
+        if call.name == "ask_user" {
+            self.questions.complete(&call.id);
+        }
         self.record_tool_timing(call, timing);
         let change = outcome.change.map(|change| change.redacted(&self.redactor));
         if let Some(change) = &change {
@@ -198,7 +211,7 @@ impl Agent {
         ]));
     }
 
-    fn finished_event(&self, call: &ToolCall, result: &Value) -> Event {
+    pub(super) fn finished_event(&self, call: &ToolCall, result: &Value) -> Event {
         Event::ToolFinished {
             id: self.redact(&call.id),
             name: self.redact(&call.name),

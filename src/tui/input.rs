@@ -31,8 +31,20 @@ impl App {
                 self.agents_text(&text);
                 return Ok(false);
             }
+            Decoded::Text(text) | Decoded::Paste(text) if self.state.ask_panel.is_some() => {
+                self.ask_text(&text);
+                return Ok(false);
+            }
+            Decoded::Text(text) | Decoded::Paste(text) if self.state.todo_panel.is_some() => {
+                self.todo_text(&text);
+                return Ok(false);
+            }
             Decoded::Error if self.state.agents_panel.is_some() => {
                 self.warn("Input exceeds 1 MiB · agent filter unchanged");
+                return Ok(false);
+            }
+            Decoded::Error if self.state.ask_panel.is_some() || self.state.todo_panel.is_some() => {
+                self.warn("Input exceeds 1 MiB · panel input unchanged");
                 return Ok(false);
             }
             Decoded::Paste(text) => {
@@ -129,6 +141,14 @@ impl App {
         }
         if self.state.agents_panel.is_some() {
             self.agents_key(key);
+            return Ok(false);
+        }
+        if self.state.ask_panel.is_some() {
+            self.ask_key(key);
+            return Ok(false);
+        }
+        if self.state.todo_panel.is_some() {
+            self.todo_key(key);
             return Ok(false);
         }
         if self.state.information.is_some() {
@@ -278,6 +298,10 @@ impl App {
             self.process_scroll(amount);
         } else if self.state.agents_panel.is_some() {
             self.agents_scroll(amount);
+        } else if self.state.todo_panel.is_some() {
+            self.todo_scroll(amount);
+        } else if self.state.ask_panel.is_some() {
+            self.ask_scroll(amount);
         } else if self.state.information.is_some() {
             for _ in 0..amount.unsigned_abs().min(30) {
                 super::view::scroll_information(&mut self.state, if amount < 0 { 38 } else { 40 });

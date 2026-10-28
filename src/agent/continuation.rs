@@ -5,10 +5,31 @@ use crate::{
 };
 
 impl Agent {
+    /// Restored, unfinished orchestration belongs to the main agent as well.
+    /// A historical receipt alone does not reopen an assignment already closed.
+    pub fn has_open_collaboration_report(&self) -> bool {
+        self.collaboration.snapshot().iter().any(|record| {
+            matches!(
+                record.get("state").and_then(crate::json::Value::as_str),
+                Some("returned" | "failed")
+            ) && record
+                .get("report")
+                .and_then(|report| report.get("version"))
+                == record.get("sent_version")
+                && record.get("report").is_some_and(|report| {
+                    report
+                        .get("version")
+                        .and_then(crate::json::Value::as_usize)
+                        .is_some()
+                })
+        })
+    }
+
     /// Continue the main conversation after a live collaborator return.
     /// No synthetic user request is added to the transcript.
     pub fn continue_collaboration(&mut self, events: &mut impl EventSink) -> Result<bool, String> {
         if self.child
+            || self.has_pending_question()
             || self.cancellation.requested()
             || self.collaboration.latest_return_sequence() <= self.collaboration_seen
         {
@@ -47,6 +68,9 @@ impl Agent {
                 }
                 break;
             }
+        }
+        if self.questions.is_suspended() {
+            return self.checkpoint(Stage::Preserve).map(|()| true);
         }
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);

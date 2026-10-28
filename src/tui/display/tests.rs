@@ -117,6 +117,9 @@ fn contextual_escape_actions_use_alt_end_in_the_badge() {
     state.suggestions.panel = true;
     assert!(back_to_bottom_uses_alt_end(&state));
     state.suggestions.panel = false;
+    state.agents_panel = Some(crate::tui::agents::Panel::default());
+    assert!(back_to_bottom_uses_alt_end(&state));
+    state.agents_panel = None;
     state.quitting = Some(Vec::new());
     assert!(back_to_bottom_uses_alt_end(&state));
     state.quitting = None;
@@ -127,6 +130,33 @@ fn contextual_escape_actions_use_alt_end_in_the_badge() {
             .plain()
             .contains("Alt+End  back to bottom")
     );
+}
+
+#[test]
+fn agents_panel_during_readback_offers_one_escape_action_and_alt_end() {
+    let mut state = State::default();
+    state.message(
+        Kind::Assistant,
+        &(0..60)
+            .map(|index| format!("Row {index:02}  \n"))
+            .collect::<String>(),
+    );
+    state.activity = Some(crate::tui::activity::Activity::new());
+    state.agents_panel = Some(crate::tui::agents::Panel::default());
+    let mut display = Display::new((state.width, state.height));
+    ready(&mut display, &state);
+    display.scroll(Scroll::Page(true));
+    let reading = display.update(&state, "fixture/model", "fixture", Instant::now());
+    assert!(reading.contains(" Alt+End "), "{reading}");
+    let panel = view::composer_frame(&state, "fixture/model", "fixture")
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(panel.contains("Esc  close"), "{panel}");
+    assert!(!panel.contains("Esc interrupt"), "{panel}");
+    assert_eq!(panel.matches("Esc").count(), 1, "{panel}");
 }
 
 #[test]

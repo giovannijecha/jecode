@@ -265,7 +265,7 @@ pub(in crate::tui) fn detail_rows(record: &Value, tab: usize, width: usize) -> V
                     if reviewed {
                         "Reviewed by main agent"
                     } else {
-                        "Awaiting main-agent review"
+                        "Pending review by main agent"
                     },
                     width,
                     if reviewed { MUTED } else { WARNING },
@@ -297,7 +297,7 @@ fn list_rows(state: &State, panel_state: &Panel, columns: usize, room: usize) ->
             panel::indent(
                 Line::new(
                     if state.collaboration.is_empty() {
-                        "No collaborators in this session"
+                        "No open assignments"
                     } else {
                         "No matching agents"
                     },
@@ -364,7 +364,7 @@ pub(super) fn sheet<'a>(state: &'a State, panel_state: &'a Panel, columns: usize
         let room = columns.saturating_sub(3).max(1);
         let (value, caret) = panel_state.filter.viewport(room, false);
         return Sheet {
-            title: panel::title(None, "Agents", "current session"),
+            title: panel::title(None, "Agents", "open assignments"),
             aside: Line::new(&format!("{} agents", state.collaboration.len()), MUTED),
             field: Some(Field {
                 label: "Filter agents".into(),
@@ -450,7 +450,7 @@ pub(super) fn sheet<'a>(state: &'a State, panel_state: &'a Panel, columns: usize
                     key("←→", "tabs"),
                     key("↑↓", "scroll").scrolling(),
                     key("End", "follow").optional(),
-                    key("Esc", "back"),
+                    key("Esc", "back to agents"),
                 ],
                 width,
                 overflow,

@@ -8,11 +8,13 @@ mod persistence;
 mod processes;
 mod settings;
 pub(crate) mod temporary;
+mod todo;
 pub use settings::SessionConfig;
 
 use crate::agent::Agent;
 use crate::attachments::{Attachment, Prompt};
 use crate::console::Console;
+use crate::events::{Event, EventSink};
 use crate::input::read_line;
 use std::io::{BufRead, Write};
 
@@ -60,6 +62,12 @@ fn chat_inner(
         .map_err(|error| error.to_string())?;
     if let Some(id) = resume {
         persistence::resume(agent, config, id.as_deref(), input, output, status)?;
+        if agent.has_pending_question() {
+            run_plain(agent, Work::Question, input, output, status)?;
+        }
+        if agent.has_open_collaboration_report() {
+            run_plain(agent, Work::Collaboration, input, output, status)?;
+        }
     } else {
         persistence::hint(agent, output)?;
     }
@@ -68,6 +76,12 @@ fn chat_inner(
         attach::announce(&staged, output)?;
     }
     loop {
+        if agent.has_pending_question() {
+            run_plain(agent, Work::Question, input, output, status)?;
+        }
+        if agent.has_open_collaboration_report() {
+            run_plain(agent, Work::Collaboration, input, output, status)?;
+        }
         write!(output, "\n> ")
             .and_then(|_| output.flush())
             .map_err(|error| error.to_string())?;
@@ -142,6 +156,7 @@ fn chat_inner(
             }
             ("/terminal", _) => processes::print(agent, terminal_arguments, output),
             ("/agents", _) => agents::print(agent, arguments, output),
+            ("/todo", "") => todo::print(agent, output),
             ("/tmp", _) => temporary::print(agent, arguments, output),
             ("/checkpoints", _) => checkpoints::print(agent, arguments, output),
             ("/resume", _) => {
@@ -177,7 +192,7 @@ fn chat_inner(
             ("/model", _) => config.change_model(agent, Some(arguments), input, output),
             ("/init", "") => {
                 let prompt = Prompt::plain(commands::INIT_PROMPT);
-                agent.run_turn(prompt, &mut Console::new(output, status))
+                run_plain(agent, Work::Turn(prompt), input, output, status)
             }
             (name, _) if name.starts_with('/') => {
                 agent.record_local_details(line, &commands::unknown(line), "error", &[]);
@@ -187,7 +202,7 @@ fn chat_inner(
             _ => {
                 let prompt = Prompt::new(line.to_owned(), staged.clone());
                 let before = agent.archive().messages.lock().unwrap().len();
-                let result = agent.run_turn(prompt.clone(), &mut Console::new(output, status));
+                let result = run_plain(agent, Work::Turn(prompt.clone()), input, output, status);
                 let accepted =
                     agent.archive().messages.lock().unwrap().get(before) == Some(&prompt.message());
                 if accepted {
@@ -217,6 +232,74 @@ fn chat_inner(
     }
 }
 
+enum Work {
+    Turn(Prompt),
+    Question,
+    Collaboration,
+}
+
+fn run_plain(
+    agent: &mut Agent,
+    work: Work,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+    status: &mut impl Write,
+) -> Result<(), String> {
+    let questions = agent.questions();
+    questions.set_available(true);
+    let mut console = Console::new(output, status);
+    let mut sink = |event: Event| -> Result<(), String> {
+        if let Event::UserQuestion { request } = &event {
+            let request = request.clone();
+            console.emit(event)?;
+            loop {
+                let Some(line) = read_line(input)? else {
+                    questions.suspend();
+                    return Ok(());
+                };
+                let answer = line.trim_end_matches(['\r', '\n']);
+                let result = if answer == "/dismiss" {
+                    questions.dismiss(&request.id)
+                } else {
+                    let choice = answer
+                        .trim()
+                        .parse::<usize>()
+                        .ok()
+                        .filter(|number| *number > 0)
+                        .and_then(|number| request.question.options.get(number - 1))
+                        .map(|option| option.id.clone());
+                    questions.answer(
+                        &request.id,
+                        choice.clone(),
+                        if choice.is_some() {
+                            String::new()
+                        } else {
+                            answer.to_owned()
+                        },
+                    )
+                };
+                match result {
+                    Ok(()) => return Ok(()),
+                    Err(error) => {
+                        console.emit(Event::Maintenance { text: error })?;
+                        console.emit(Event::UserQuestion {
+                            request: request.clone(),
+                        })?;
+                    }
+                }
+            }
+        }
+        console.emit(event)
+    };
+    let result = match work {
+        Work::Turn(prompt) => agent.run_turn(prompt, &mut sink),
+        Work::Question => agent.continue_question(&mut sink).map(|_| ()),
+        Work::Collaboration => agent.continue_collaboration(&mut sink).map(|_| ()),
+    };
+    questions.set_available(false);
+    result
+}
+
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
@@ -225,3 +308,5 @@ mod persistence_tests;
 mod temporary_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod work_tests;

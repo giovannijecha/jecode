@@ -32,7 +32,9 @@ impl App {
         let plain = !key.ctrl() && !key.alt() && !key.shift();
         if plain && key.code == 13 || key.ctrl() && key.code == 81 {
             self.state.quitting = None;
-            self.stop();
+            if self.state.question.is_none() {
+                self.stop();
+            }
             return true;
         }
         if key.code == 27 || key.ctrl() && key.code == 67 {

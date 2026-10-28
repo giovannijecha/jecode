@@ -24,8 +24,7 @@ impl Observer {
             mode,
         } = spec;
         let (id, number, store) = {
-            let state = self.0.state.lock().unwrap();
-            let number = state.records.len() + 1;
+            let mut state = self.0.state.lock().unwrap();
             let store = self
                 .0
                 .parent
@@ -41,6 +40,8 @@ impl Observer {
                         .join(handle.id())
                 })
                 .ok_or("Collaborators require session storage")?;
+            state.last_number += 1;
+            let number = state.last_number;
             (format!("a{number}"), number, store)
         };
         let workspace = Workspace::prepare(project, &store, &id, mode)?;

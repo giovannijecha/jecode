@@ -63,6 +63,7 @@ impl Draft {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Input {
     pub draft: Draft,
+    pub question: Option<crate::ask::Draft>,
     /// Attachments staged by the line-based chat for its next message.
     pub staged: Vec<Attachment>,
     pub queued: Vec<Prompt>,
@@ -132,6 +133,15 @@ impl Input {
             |prompt: &Prompt| Prompt::new(redactor.text(&prompt.text), prompt.attachments.clone());
         Self {
             draft: draft(&self.draft),
+            question: self.question.as_ref().map(|question| {
+                let (text, cursor) = redactor.text_cursor(&question.text, question.cursor);
+                crate::ask::Draft {
+                    id: redactor.text(&question.id),
+                    text,
+                    cursor,
+                    choice: question.choice.as_ref().map(|choice| redactor.text(choice)),
+                }
+            }),
             staged: self.staged.clone(),
             queued: self.queued.iter().map(prompt).collect(),
             paused: self.paused.iter().map(draft).collect(),
@@ -143,6 +153,12 @@ impl Input {
     fn value(&self) -> Value {
         Value::object([
             ("draft", self.draft.value()),
+            (
+                "question",
+                self.question
+                    .as_ref()
+                    .map_or(Value::Null, crate::ask::Draft::value),
+            ),
             (
                 "staged",
                 Value::Array(self.staged.iter().map(Attachment::value).collect()),
@@ -172,6 +188,10 @@ impl Input {
         let history = prompt_list(value, "history", 50)?;
         Ok(Self {
             draft: Draft::parse(required(value, "draft")?)?,
+            question: match value.get("question") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(crate::ask::Draft::parse(value)?),
+            },
             staged: match value.get("staged") {
                 None => Vec::new(),
                 Some(Value::Array(values)) => values

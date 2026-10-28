@@ -3,7 +3,7 @@ use crate::{
     backend::{ToolCall, openrouter::OpenRouter},
     collaboration::{Spec, workspace::Mode},
     events::Event,
-    test_support::{Directory, HttpFixture, completion},
+    test_support::{Directory, HttpFixture, completion, tool_call},
 };
 use std::{fs, process::Command};
 
@@ -146,10 +146,13 @@ pub(super) fn repository() -> (Directory, std::path::PathBuf) {
 }
 
 #[test]
-fn closed_isolated_workspace_keeps_historical_report_after_resume() {
+fn closed_isolated_workspace_leaves_history_but_not_active_context_after_resume() {
     let (_temp, project) = repository();
     let home = Directory::new();
-    let fixture = HttpFixture::new(vec![(200, completion("Completed report", vec![]))]);
+    let fixture = HttpFixture::new(vec![
+        (200, completion("Completed report", vec![])),
+        (200, completion("Next report", vec![])),
+    ]);
     let mut parent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(&project).unwrap(),
@@ -165,6 +168,28 @@ fn closed_isolated_workspace_keeps_historical_report_after_resume() {
         )
         .unwrap();
     parent.agent_tool(&action("close")).unwrap();
+    assert!(parent.collaboration().snapshot().is_empty());
+    assert!(!parent.request_environment().contains("a1 Inspect"));
+    let close_event = parent
+        .collaboration()
+        .events_since(0)
+        .1
+        .into_iter()
+        .find(|event| event.get("kind").and_then(Value::as_str) == Some("closed"))
+        .unwrap();
+    assert_eq!(close_event.get("version"), Some(&Value::number(1)));
+    let closed = &close_event
+        .get("records")
+        .and_then(Value::as_array)
+        .unwrap()[0];
+    assert_eq!(closed.get("workspace_closed"), Some(&Value::Bool(true)));
+    assert_eq!(
+        closed
+            .get("report")
+            .and_then(|report| report.get("text"))
+            .and_then(Value::as_str),
+        Some("Completed report")
+    );
     let id = parent.sessions().unwrap().id();
     parent.save_session().unwrap();
     drop(parent);
@@ -175,17 +200,90 @@ fn closed_isolated_workspace_keeps_historical_report_after_resume() {
     );
     resumed.enable_sessions(home.path()).unwrap();
     resumed.resume(&id).unwrap();
-    let record = &resumed.collaboration().snapshot()[0];
-    assert_eq!(record.get("state").and_then(Value::as_str), Some("stopped"));
-    assert_eq!(record.get("workspace_closed"), Some(&Value::Bool(true)));
+    assert!(resumed.collaboration().snapshot().is_empty());
+    assert!(!resumed.request_environment().contains("a1 Inspect"));
+    let created = resumed.agent_tool(&create("isolated")).unwrap();
     assert_eq!(
-        record
-            .get("report")
-            .and_then(|v| v.get("text"))
+        created
+            .get("created")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("id"))
             .and_then(Value::as_str),
-        Some("Completed report")
+        Some("a2")
     );
-    assert_eq!(fixture.finish().len(), 1);
+    resumed
+        .collaboration()
+        .wait(
+            Some("a2"),
+            Duration::from_secs(5),
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap();
+    assert_eq!(resumed.collaboration().snapshot().len(), 1);
+    resumed
+        .agent_tool(&Value::object([
+            ("action", Value::string("close")),
+            ("id", Value::string("a2")),
+        ]))
+        .unwrap();
+    assert!(resumed.collaboration().snapshot().is_empty());
+    assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
+fn closing_idle_child_stops_its_persistent_process() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "heartbeat",
+                    "bash",
+                    Value::object([
+                        (
+                            "command",
+                            Value::string("while :; do printf x >> heartbeat; sleep 0.05; done"),
+                        ),
+                        ("wait_ms", Value::number(0)),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Heartbeat started", vec![])),
+    ]);
+    let mut parent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    parent.enable_sessions(home.path()).unwrap();
+    parent.agent_tool(&create("shared")).unwrap();
+    parent
+        .collaboration()
+        .wait(
+            Some("a1"),
+            Duration::from_secs(5),
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap();
+    let heartbeat = project.path().join("heartbeat");
+    let started = std::time::Instant::now();
+    while std::fs::metadata(&heartbeat).is_err() {
+        assert!(started.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let running_size = std::fs::metadata(&heartbeat).unwrap().len();
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(std::fs::metadata(&heartbeat).unwrap().len() > running_size);
+    parent.agent_tool(&action("close")).unwrap();
+    let stopped_size = std::fs::metadata(&heartbeat).unwrap().len();
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(std::fs::metadata(&heartbeat).unwrap().len(), stopped_size);
+    assert!(parent.collaboration().snapshot().is_empty());
+    assert_eq!(fixture.finish().len(), 2);
 }
 
 #[test]

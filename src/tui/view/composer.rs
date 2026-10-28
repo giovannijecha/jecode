@@ -1,15 +1,17 @@
 use super::{
-    agents, footer, information, menus,
+    agents, ask, footer, information, menus,
     panel::{self, Part, Sheet},
-    processes, status,
+    processes, status, todo,
 };
+mod editor;
 use crate::tui::{
     drafts::Slot,
     line::Line,
     state::State,
     text,
-    theme::{ACCENT, BADGE_IDLE, CURSOR, DIM, FAINT, LIT, MUTED, STRONG, Style, WARNING},
+    theme::{ACCENT, CURSOR, DIM, FAINT, MUTED, STRONG, Style, WARNING},
 };
+use editor::{input, input_editor};
 
 /// Queued drafts shown above the status row at most.
 const QUEUE_ROWS: usize = 8;
@@ -73,6 +75,10 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
         Some(processes::sheet(panel, columns))
     } else if let Some(panel) = &state.agents_panel {
         Some(agents::sheet(state, panel, columns))
+    } else if let (Some(panel), Some(question)) = (&state.ask_panel, &state.question) {
+        Some(ask::sheet(question, panel, columns))
+    } else if let Some(panel) = &state.todo_panel {
+        Some(todo::sheet(state.todo_plan.as_ref(), panel, columns))
     } else if let Some(info) = &state.information {
         Some(information::sheet(info, columns))
     } else if let Some(selector) = &state.selector {
@@ -88,9 +94,41 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
 /// between the rules, the panel's title on the bottom rule.
 fn top(state: &State, sheet: &Sheet, status: Line, columns: usize) -> Rows {
     let style = rule_style(state);
-    let mut parts = vec![(status, Part::Chrome)];
+    let mut parts = vec![(
+        status,
+        if state.question.is_some() {
+            Part::Keep
+        } else {
+            Part::Chrome
+        },
+    )];
     let mut caret = None;
-    if let Some(field) = &sheet.field {
+    if let Some(answer) = state.ask_panel.as_ref().filter(|_| {
+        state.quitting.is_none() && state.processes.is_none() && state.agents_panel.is_none()
+    }) {
+        let input = input_editor(
+            &answer.editor,
+            "Type your answer…",
+            columns,
+            ACCENT,
+            STRONG,
+            window(state),
+            !answer.choices_focused,
+        );
+        parts.push((
+            rule(
+                columns,
+                style,
+                &[Line::new("Your answer", MUTED)],
+                &Line::new(&input.position, MUTED),
+            ),
+            Part::Chrome,
+        ));
+        if !answer.choices_focused {
+            caret = Some((parts.len() + input.cursor.0, input.cursor.1));
+        }
+        parts.extend(input.lines.into_iter().map(|line| (line, Part::Draft)));
+    } else if let Some(field) = &sheet.field {
         let label = [Line::new(&field.label, MUTED)];
         parts.push((rule(columns, style, &label, &Line::default()), Part::Chrome));
         // At extreme widths the field needs every cell, as the draft does.
@@ -422,87 +460,4 @@ fn draft(
         });
     }
     (lines, Some((input.cursor.0 + 1, input.cursor.1)))
-}
-
-pub(super) struct Input {
-    pub lines: Vec<Line>,
-    pub cursor: (usize, usize),
-    pub position: String,
-}
-
-/// `› ` bold on the first visible row, the draft in `foreground` with
-/// attachment chips, the caret's row centred in the window. The caret shows
-/// only while the draft has the focus.
-pub(super) fn input(
-    state: &State,
-    columns: usize,
-    marker: Style,
-    foreground: Style,
-    limit: usize,
-    focused: bool,
-) -> Input {
-    let caret = |line: Line, column: usize| {
-        if focused {
-            line.caret(column, CURSOR)
-        } else {
-            line
-        }
-    };
-    if columns < 7 {
-        // At extreme widths the editor gets the entire row, including its caret.
-        // The logical draft/caret are unchanged and regain multiline layout later.
-        let (value, column) = state.editor.viewport(columns, false);
-        let line = if state.editor.text.is_empty() {
-            caret(Line::new(&text::clip("Ask anything…", columns), MUTED), 0)
-        } else {
-            caret(Line::new(&value, foreground), column)
-        };
-        let caret = column;
-        return Input {
-            lines: vec![line],
-            cursor: (0, caret),
-            position: String::new(),
-        };
-    }
-    let layout = state.editor.layout(columns.saturating_sub(3));
-    let total = layout.rows.len();
-    let limit = limit.clamp(1, window(state));
-    let start = layout
-        .cursor
-        .0
-        .saturating_sub(limit / 2)
-        .min(total.saturating_sub(limit));
-    let end = (start + limit).min(total);
-    let mut lines = Vec::new();
-    let mut cursor = (0, 0);
-    for index in start..end {
-        let mut line = if index == start {
-            Line::new("› ", marker.bold())
-        } else {
-            Line::new("  ", marker)
-        };
-        if state.editor.text.is_empty() {
-            line.push(&text::ellipsize("Ask anything…", columns - 3), MUTED);
-        } else {
-            let row = &layout.rows[index];
-            let mut at = 0;
-            for label in &row.labels {
-                line.push(&row.text[at..label.start], foreground);
-                line.push_on(&row.text[label.clone()], LIT, BADGE_IDLE);
-                at = label.end;
-            }
-            line.push(&row.text[at..], foreground);
-        }
-        if index == layout.cursor.0 {
-            let column = layout.cursor.1 + 2;
-            line = caret(line, column);
-            cursor = (lines.len(), column);
-        }
-        lines.push(line);
-    }
-    Input {
-        lines,
-        cursor,
-        position: panel::position(start, end, total),
-    }
 }

@@ -5,13 +5,15 @@
 A terminal coding agent in Rust.
 
 Jecode connects to OpenRouter with an API key or to OpenAI through your ChatGPT
-account. It works in your project through thirteen tools: `read`, `list`,
+account. It works in your project through fifteen tools: `read`, `list`,
 `search`, `map`, `write`, `edit`, `bash`, `exec`, `process`, `checkpoint`, `web`,
-`browser` and `agent`. `map` surveys code structure and can save or forget sourced
+`browser`, `agent`, `ask_user` and `todo_list`. `map` surveys code structure and can save or forget sourced
 notes; `list` and `search` discover files and matching lines.
 The main agent can delegate focused work to collaborators with the same operational
 tools and separate contexts. Collaborators never delegate. See
 [collaborating agents](docs/usage/COLLABORATION.md).
+The main agent can ask for an explicit answer and maintain a saved conversation
+plan. See [questions and plans](docs/usage/WORK_TOOLS.md).
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system
@@ -134,7 +136,9 @@ complete tool cards inline for the latest finished turn; see
 | `/init` | Inspect this project and create or update its `AGENTS.md`. |
 | `/skills` | List personal skills available to the model. |
 | `/checkpoints` | Inspect or recover files from a tool call. |
-| `/agents` | Inspect this conversation's collaborators, assignments and results without changing their work. |
+| `/agents` | Inspect open collaborator assignments and results; review and closure belong to the main agent. |
+| `/ask` | Return to a pending question in the TUI. |
+| `/todo` | Inspect this conversation's current plan, without changing it or calling the model. |
 | `/help` | Show commands and controls. |
 | `/exit` | Quit when the active turn finishes. |
 

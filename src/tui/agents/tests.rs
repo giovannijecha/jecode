@@ -143,6 +143,7 @@ fn panel_filter_tabs_and_nested_escape_keep_the_exact_main_draft() {
     app.state.editor.insert("unsent main instruction");
     app.state.editor.cursor = 6;
     let draft = app.state.editor.clone();
+    app.state.activity = Some(crate::tui::activity::Activity::new());
     app.open_agents();
     app.state.collaboration = vec![record(1, "running"), record(2, "returned")];
     app.input(Decoded::Text("agent 2".into())).unwrap();
@@ -177,10 +178,35 @@ fn panel_filter_tabs_and_nested_escape_keep_the_exact_main_draft() {
             .iter()
             .any(|line| line.plain().contains("Search implemented"))
     );
+    let detail = shown
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(detail.matches("Esc").count(), 1, "{detail}");
+    assert!(detail.contains("Esc  back to agents"), "{detail}");
+    assert!(!detail.contains("Esc interrupt"), "{detail}");
     key(&mut app, 27);
     assert!(!app.state.agents_panel.as_ref().unwrap().detail);
+    assert!(!app.state.activity.as_ref().unwrap().stopping);
+    let list = view::composer_frame(&app.state, "fixture/model", "fixture")
+        .live
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(list.matches("Esc").count(), 1, "{list}");
+    assert!(list.contains("Esc  close"), "{list}");
     key(&mut app, 27);
     assert!(app.state.agents_panel.is_none());
+    assert!(!app.state.activity.as_ref().unwrap().stopping);
+    let main = view::composer_frame(&app.state, "fixture/model", "fixture")
+        .live
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(main.contains("Esc interrupt"), "{main}");
     assert_eq!(app.state.editor, draft);
     let created = receipt(vec![record(1, "running")]);
     assert!(app.show_collaboration(created.clone()));
@@ -212,7 +238,7 @@ fn returned_report_does_not_become_reviewed_when_opened() {
     let rows = view::composer_frame(&state, "fixture/model", "fixture").live;
     assert!(
         rows.iter()
-            .any(|line| line.plain().contains("Awaiting main-agent review"))
+            .any(|line| line.plain().contains("Pending review by main agent"))
     );
     assert_eq!(
         state.collaboration[0].get("reviewed"),
@@ -242,10 +268,10 @@ fn footer_keeps_context_and_critical_counts_in_its_existing_row() {
     assert!(
         row.contains("AGENTS")
             && row.contains("1 running")
-            && row.contains("1 to review")
+            && row.contains("1 for main agent review")
             && row.contains("1 unknown")
     );
-    assert!(row.contains("34%") && row.contains("/agents"));
+    assert!(row.contains("34%") && row.contains("/agents"), "{row}");
     state.width = 40;
     let narrow = view::composer_frame(&state, "provider/model", "fixture");
     let row = narrow.live.last().unwrap().plain();
@@ -294,6 +320,42 @@ fn inspected_identity_stays_fixed_when_live_state_changes_the_filter() {
 }
 
 #[test]
+fn closed_selected_assignment_returns_to_the_open_list_without_selecting_another_detail() {
+    let mut records = vec![record(1, "returned"), record(2, "running")];
+    let mut panel = Panel {
+        detail: true,
+        detail_id: Some("a1".into()),
+        tab: 2,
+        selected: 1,
+        ..Panel::default()
+    };
+    records.remove(0);
+    panel.reconcile(&records);
+    assert!(!panel.detail);
+    assert!(panel.detail_id.is_none());
+    assert_eq!(panel.tab, 0);
+    assert_eq!(panel.selected, 0);
+    assert_eq!(value(panel.current(&records).unwrap(), "id"), "a2");
+    let mut state = State {
+        width: 80,
+        height: 24,
+        collaboration: records,
+        agents_panel: Some(panel),
+        ..State::default()
+    };
+    state.editor.insert("unsent main instruction");
+    let shown = view::composer_frame(&state, "fixture/model", "fixture")
+        .live
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(shown.contains("Search part 2"), "{shown}");
+    assert!(!shown.contains("Search part 1"), "{shown}");
+    assert_eq!(state.editor.text, "unsent main instruction");
+}
+
+#[test]
 fn activity_follows_new_rows_until_the_reader_pauses() {
     let mut agent = record(1, "running");
     let tools = (0..30)
@@ -328,7 +390,7 @@ fn activity_follows_new_rows_until_the_reader_pauses() {
 }
 
 #[test]
-fn reviewed_records_remain_inspectable_without_a_pending_footer() {
+fn reviewed_open_records_remain_inspectable_without_a_pending_footer() {
     let mut reviewed = record(1, "returned");
     if let Value::Object(fields) = &mut reviewed {
         fields.insert("reviewed".into(), Value::Bool(true));

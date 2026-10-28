@@ -59,11 +59,13 @@ impl Agent {
             document.backend = backend.into();
             document.routing = routing;
             document.input = input.clone();
+            document.input.question = None;
             document.messages = vec![self.system_message()];
             let next = Handle::new(old.store(), document, self.redactor.clone());
             next.flush()?;
             old.input(Input {
                 history: input.history.clone(),
+                question: input.question.clone(),
                 ..Input::default()
             });
             if let Err(error) = old.flush() {
@@ -79,6 +81,7 @@ impl Agent {
             .map(|handle| handle.store().temporary_area(&handle.id()))
             .transpose()?;
         self.collaboration.stop_all();
+        self.questions.bind(self.archive(), None);
         self.client = client;
         self.redactor.include(self.client.redactor());
         self.tools.include_credentials(self.redactor.clone());
@@ -88,6 +91,8 @@ impl Agent {
         self.sync_conversation();
         self.collaboration
             .bind(self.archive(), self.persistence.clone())?;
+        self.questions
+            .bind(self.archive(), self.persistence.clone());
         self.collaboration_seen = 0;
         self.begin_checkpoints();
         if let Some(handle) = &self.persistence {
@@ -147,6 +152,7 @@ impl Agent {
         let document = handle.snapshot();
         let temporary = handle.store().temporary_area(&document.id)?;
         self.collaboration.stop_all();
+        self.questions.bind(self.archive(), None);
         if let Some(client) = client {
             self.client = client;
         }
@@ -174,7 +180,13 @@ impl Agent {
         self.sync_conversation();
         self.collaboration
             .bind(self.archive(), self.persistence.clone())?;
-        self.collaboration_seen = self.collaboration.latest_return_sequence();
+        self.questions
+            .bind(self.archive(), self.persistence.clone());
+        self.collaboration_seen = if self.has_open_collaboration_report() {
+            0
+        } else {
+            self.collaboration.latest_return_sequence()
+        };
         self.begin_checkpoints();
         let handle = self.persistence.as_ref().unwrap();
         self.tools.configure_session_output(
@@ -221,6 +233,7 @@ impl Agent {
         document.routing = routing;
         document.input = current.snapshot().input;
         document.input.history.clear();
+        document.input.question = None;
         let temporary = store.temporary_area(&document.id)?;
         let outputs = crate::output::Store::for_session(
             store.output_directory(),
@@ -245,6 +258,8 @@ impl Agent {
         self.collaboration_seen = 0;
         self.begin_checkpoints();
         self.tools.configure_output_store(outputs);
+        self.questions
+            .bind(self.archive(), self.persistence.clone());
         self.tools.configure_temporary(temporary);
         Ok((report, true))
     }

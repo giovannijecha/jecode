@@ -257,6 +257,46 @@ impl Workspace {
         Ok(workspace)
     }
 
+    /// Prove that an isolated copy was fully removed before its closure receipt
+    /// could be saved. This never removes a path or accepts partial leftovers.
+    pub fn already_removed(
+        value: &Value,
+        expected_id: &str,
+        managed_storage: &Path,
+    ) -> Result<bool, String> {
+        let field = |key| {
+            value
+                .get(key)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("Missing workspace {key}"))
+        };
+        if field("mode")? != "isolated" {
+            return Ok(false);
+        }
+        valid_id(expected_id)?;
+        if field("id")? != expected_id {
+            return Err("Workspace assignment identity changed".into());
+        }
+        let project = PathBuf::from(field("project")?);
+        let storage = PathBuf::from(field("storage")?);
+        let managed = fs::canonicalize(managed_storage)
+            .map_err(|error| format!("Could not resolve managed workspace storage: {error}"))?;
+        if storage != managed.join(expected_id)
+            || fs::canonicalize(&project).map_err(|error| error.to_string())? != project
+            || project.starts_with(&managed)
+            || managed.starts_with(&project)
+        {
+            return Err("Workspace ownership path is invalid".into());
+        }
+        if crate::disk::metadata_if_present(&storage)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        Ok(!git::registered(&project, &storage.join("tree"))?)
+    }
+
     fn save(&self, ready: bool) -> Result<(), String> {
         let entries = self
             .baseline

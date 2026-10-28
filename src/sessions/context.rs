@@ -86,6 +86,14 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
     if !outstanding.is_empty() && !document.pending.active {
         return Err("Finished session has unresolved tool calls".into());
     }
+    if let Some(draft) = &document.input.question
+        && !document.events.iter().any(|event| {
+            event.get("type").and_then(Value::as_str) == Some("user_question")
+                && event.get("tool_call_id").and_then(Value::as_str) == Some(&draft.id)
+        })
+    {
+        return Err("Question draft does not match the saved question".into());
+    }
     if let Some(id) = &document.pending.tool
         && (!document.pending.active || !outstanding.contains(id))
     {
@@ -128,7 +136,7 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             return Err("Completed batch call does not match the pending batch".into());
         }
     }
-    for event in document.events.iter().skip(validated.events) {
+    for (event_index, event) in document.events.iter().enumerate().skip(validated.events) {
         if event.get("type").and_then(Value::as_str) != Some("collaboration")
             && let Some(kind) = event.get("kind")
             && !matches!(kind.as_str(), Some("notice" | "warning" | "error"))
@@ -139,6 +147,28 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             return Err("Saved event is outside the conversation".into());
         }
         match string(event, "type")? {
+            "user_question" => {
+                let id = string(event, "tool_call_id")?;
+                crate::ask::Question::parse(
+                    event.get("question").ok_or("Missing saved question")?,
+                )?;
+                if !messages.iter().any(|message| {
+                    message
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .is_some_and(|calls| {
+                            calls.iter().any(|call| {
+                                ToolCall::parse(call)
+                                    .is_ok_and(|call| call.id == id && call.name == "ask_user")
+                            })
+                        })
+                }) {
+                    return Err("Saved question has no matching tool call".into());
+                }
+            }
+            "user_answer" => {
+                crate::ask::validate_answer(event, &document.events[..event_index])?;
+            }
             "collaboration" => {
                 let kind = string(event, "kind")?;
                 if !matches!(
@@ -149,6 +179,7 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
                         | "returned"
                         | "stopped"
                         | "reviewed"
+                        | "closed"
                         | "unknown"
                 ) {
                     return Err("Invalid collaborator receipt kind".into());
@@ -249,6 +280,8 @@ impl Document {
     pub(super) fn recover(&mut self) -> bool {
         let interrupted = self.pending.active;
         if interrupted {
+            let question =
+                crate::ask::recovery(&self.messages, &self.events).map(|(request, _)| request.id);
             let mut calls = Vec::new();
             let mut answered = BTreeSet::new();
             for message in self.messages.iter().rev() {
@@ -270,6 +303,9 @@ impl Document {
             for call in calls {
                 let id = call.get("id").and_then(Value::as_str).unwrap();
                 if answered.contains(id) {
+                    continue;
+                }
+                if question.as_deref() == Some(id) {
                     continue;
                 }
                 if let Some(receipt) = self
@@ -329,14 +365,20 @@ impl Document {
                     ("content", Value::string(result.encode())),
                 ]));
             }
-            self.events.push(Value::object([
+            if question.is_none() {
+                self.events.push(Value::object([
                 ("type", Value::string("turn_error")),
                 ("kind", Value::string("warning")),
                 ("error", Value::string("Recovered an interrupted turn. Partial output is incomplete; send a new request to continue.")),
                 ("partial_text", Value::string(&self.pending.partial)),
                 ("after_message", Value::number(self.messages.len())),
             ]));
-            self.pending = Pending::default();
+            }
+            self.pending = question.map_or_else(Pending::default, |id| Pending {
+                active: true,
+                tool: Some(id),
+                ..Pending::default()
+            });
         }
         self.input.recover();
         interrupted

@@ -102,6 +102,7 @@ impl App {
                 paused,
                 previous: None,
                 history: self.state.history.snapshot(),
+                question: self.state.ask_draft.clone(),
             });
         });
     }
@@ -169,6 +170,7 @@ impl App {
             Ok(status) => {
                 let agent = self.agent.as_ref().unwrap();
                 self.archive = agent.archive();
+                self.todo_message_len = usize::MAX;
                 self.persistence = agent.sessions();
                 let document = self.persistence.as_ref().unwrap().snapshot();
                 let title = document.title();
@@ -216,6 +218,19 @@ impl App {
                             "assistant" => self.state.message(Kind::Assistant, &text),
                             _ => {}
                         },
+                        Record::Question { request } => {
+                            if !self.state.items.iter().any(|item| {
+                                matches!(item,
+                                Item::Tool { id, name, result: None, .. }
+                                if id == &request.id && name == "ask_user")
+                            }) {
+                                self.state.event(Event::ToolStarted {
+                                    id: request.id,
+                                    name: "ask_user".into(),
+                                    arguments: request.question.value(),
+                                });
+                            }
+                        }
                         Record::Tool {
                             id,
                             name,
@@ -234,11 +249,17 @@ impl App {
                                 }
                                 continue;
                             }
-                            self.state.event(Event::ToolStarted {
-                                id: id.clone(),
-                                name: name.clone(),
-                                arguments,
-                            });
+                            if !self.state.items.iter().any(|item| {
+                                matches!(item,
+                                Item::Tool { id: existing, name: tool, result: None, .. }
+                                if existing == &id && tool == &name)
+                            }) {
+                                self.state.event(Event::ToolStarted {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    arguments,
+                                });
+                            }
                             if let Some(change) = change {
                                 self.state.event(Event::ToolChanged {
                                     id: id.clone(),
@@ -281,6 +302,8 @@ impl App {
                 }
                 self.state.close_tools();
                 self.collaboration_observer = agent.collaboration();
+                self.question_observer = agent.questions();
+                self.question_observer.set_available(true);
                 self.collaboration_cursor = self.collaboration_observer.events_since(0).0;
                 self.state.collaboration = self
                     .collaboration_observer
@@ -288,6 +311,7 @@ impl App {
                     .into_iter()
                     .map(|record| self.archive.redactor.value(&record))
                     .collect();
+                self.collaboration_return_pending = agent.has_open_collaboration_report();
                 // Saved records do not contain execution timings.
                 if turn_recorded {
                     self.state.finish_tool_turn();
@@ -303,7 +327,16 @@ impl App {
                 self.state.editor.cursor = cursor;
                 self.state.history.restore(document.input.history);
                 self.state.suggestions.refresh(&self.state.editor.text);
+                let pending_question = agent.has_pending_question();
                 self.restore_staged();
+                self.refresh_question();
+                self.refresh_todo();
+                if pending_question {
+                    self.state.begin_tool_turn();
+                    self.state.activity = Some(super::activity::Activity::new());
+                    self.worker =
+                        Some(super::Worker::continue_question(self.agent.take().unwrap()));
+                }
                 self.local_start(&format!("/resume {id}"));
                 self.local_finish(Kind::Notice, &format!("Resumed {title} · {status}"), vec![]);
                 self.refresh_context();

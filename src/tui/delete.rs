@@ -88,6 +88,14 @@ impl App {
             Ok((report, current)) => {
                 if current {
                     self.cancel_copy();
+                    self.todo_message_len = usize::MAX;
+                    self.state.todo_plan = None;
+                    self.state.todo_panel = None;
+                    self.state.question = None;
+                    self.state.ask_panel = None;
+                    self.state.ask_draft = None;
+                    self.question_observer = self.agent.as_ref().unwrap().questions();
+                    self.question_observer.set_available(true);
                     self.state.reset_tool_details();
                     self.state.items.clear();
                     self.state.editor = self.state.history.draft(&self.state.editor).clone();

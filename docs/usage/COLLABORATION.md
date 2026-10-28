@@ -3,7 +3,9 @@
 The main agent can use `agent` to delegate focused assignments, revise them while
 work is in progress, inspect evidence and review the result. You continue talking
 to the main agent. `/agents` provides read-only inspection without making a model
-request or marking a result reviewed.
+request or marking a result reviewed. Review belongs to the main agent; you do
+not have a review queue. The panel lists open assignments, including returned
+work still being assessed by the main agent.
 
 Each collaborator starts with its own conversation and the main agent's current
 model, effort and routing. It receives the assignment, supplied context, scoped
@@ -52,14 +54,14 @@ main-agent tools, even with `parallel:true`. The workers continue independently.
 | --- | --- |
 | `create` | `tasks`, each with `title`, `instructions`, `workspace`; optional focused `context`. |
 | `update` | `id`, `instructions`; optional `context`. Sends a new version during work or starts follow-up work on an available returned worker. |
-| `list` | Returns current session records. |
+| `list` | Returns open assignments in the current conversation. |
 | `inspect` | `id`. Returns activity, assignment versions and report evidence; does not review it. |
 | `wait` | Optional `id` and `timeout_ms` (0–60000). Waits for selected running work, remaining cancellable. |
 | `stop` | `id`. Requests cancellation; a request is distinct from a confirmed stop. |
 | `review` | `id`, `report_version`, `note`. Records the main agent's assessment of the latest returned assignment. |
 | `diff` | `id`. Compares an isolated workspace against its starting state and the current main project. Optional `path`, byte `offset` and `limit` page before/after content. |
 | `integrate` | `id`, explicit `paths`, `expected_review_token` from `diff`. Applies selected changes with conflict checks. |
-| `close` | `id`. Stops the worker and removes its owned isolated copy, retaining the historical session record. Close after preserving needed work. |
+| `close` | `id`. Releases the worker and its tool resources, removes its owned isolated copy and removes the assignment from the active list. A chronological `closed` receipt retains the final record. Close after preserving needed work. |
 
 Supply the complete revised assignment in `update`. An update being sent does
 not mean it has been received. Running workers consume
@@ -69,6 +71,10 @@ older work and cannot review a newer active assignment.
 
 Returned work still needs the main agent's inspection, correction and verification.
 `review` records that assessment; it does not run tests or imply integration.
+After any needed correction or integration, the main agent calls `close` to
+finish the assignment. Reading or summarizing a report does not perform either
+action. A closed collaborator cannot receive more work; create a new assignment
+when needed. Agent numbers are not reused in the conversation.
 The TUI receives return events while the main agent is idle and resumes the main
 model to examine new work without inserting a user message. Queued user input
 takes priority. Explicitly stopping the main turn suppresses this automatic
@@ -118,17 +124,27 @@ Creation appears as an `AGENTS` group, expandable with the existing `Ctrl+O`
 interaction. Sent updates, received instructions and returned work produce new
 chronological receipts. Earlier receipts retain their original snapshots.
 
-`/agents` opens a filterable list below the composer. Enter opens a record;
+`/agents` opens a filterable list of open assignments below the composer. Enter opens a record;
 Activity, Assignment and Result tabs show visible progress, tool activity,
 instructions, working space and reported evidence. Activity follows new output;
 scrolling pauses it and End resumes following. Esc returns from detail to list,
-then restores the main draft and caret. There is no child chat or task-control UI.
+then restores the main draft and caret. The detail hint says `Esc back to agents`;
+the list says `Esc close`. While a panel is open, Esc does not interrupt the main
+turn, and the readback shortcut is Alt+End. There is no child chat or task-control
+UI. If the main agent closes the inspected assignment, the view returns to the
+remaining open assignments.
 
 While work is running or needs attention, the existing footer shows a quiet
 `AGENTS` badge and counts. Failed and uncertain outcomes remain visible. The
 context gauge stays; model details yield on narrow terminals. No extra footer row
 is added. The normal footer returns once no work or review is pending; completed
-records remain accessible through `/agents`.
+assignments leave `/agents` when the main agent closes them. Their creation,
+return, review and closure receipts remain at their original points in history.
+
+Resuming a conversation with returned reports in open assignments lets the main
+agent continue their review and closure. This also handles older sessions whose
+results were returned without a recorded close. Resume does not mark reports as
+reviewed itself. Closed assignments stay in history and do not restart the model.
 
 In `--plain`, `/agents` prints the list and `/agents <number>` prints an individual
 record. The line-based interface does not poll while waiting for stdin; live
@@ -144,8 +160,10 @@ collaboration storage and do not appear as independently resumable main sessions
 
 After an interrupted process, a saved running assignment becomes `unknown`;
 Jecode does not replay it or restart the worker. Inspect its files and saved
-evidence before deciding what to retry. Closed or unavailable workspaces retain
-historical records; an unavailable copy is reported rather than preventing the
+evidence before deciding what to retry. Closed assignments are not restored to
+the active list or repeated in the model's current collaborator context. Their
+historical receipts and saved child histories remain on disk. An unavailable copy
+is reported rather than preventing the
 parent conversation from opening. An interrupted workspace setup can be retried
 only after verifying ownership of the incomplete copy. Complete copies and
 foreign directories are preserved.

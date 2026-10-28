@@ -18,6 +18,7 @@ mod rhythm;
 mod streams;
 mod summary;
 mod title;
+mod work;
 pub(in crate::tui) use badge::hang;
 pub use chapter::{
     activities as chapter_activities, exception as chapter_exception,
@@ -102,7 +103,11 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
 
 /// One card. `keycap` names Ctrl+O on the row that counts hidden lines.
 pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
-    let mut card = if matches!(tool.name, "read" | "write" | "edit") {
+    let mut card = if tool.name == "ask_user" {
+        work::ask(tool, columns)
+    } else if tool.name == "todo_list" {
+        work::todo(tool, columns)
+    } else if matches!(tool.name, "read" | "write" | "edit") {
         file_card(tool, columns, keycap)
     } else {
         rhythm::card(tool, columns, keycap)

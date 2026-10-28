@@ -12,6 +12,8 @@ mod flow_tests;
 mod native_smoke;
 mod project_instruction_tests;
 mod quit_tests;
+mod work_tests;
+mod work_todo_tests;
 
 pub(super) fn config(directory: &Directory) -> SessionConfig {
     SessionConfig {

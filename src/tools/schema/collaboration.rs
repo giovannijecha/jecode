@@ -53,7 +53,7 @@ pub(super) fn definition() -> Value {
     ]);
     super::tool(
         "agent",
-        "Coordinate collaborators with the same working tools and separate contexts. Only the main agent can delegate. Create assignments, update them during work, inspect returned evidence and review/integrate it. Returns arrive asynchronously; sent and received instructions are distinct. Inspection never marks work reviewed. Calls are serialized with other tools.",
+        "Coordinate collaborators with the same working tools and separate contexts. Only the main agent can delegate and review. After checking a returned or failed report, record the main agent's assessment with review (id, report_version, note); inspection or a text summary does not mark it reviewed. After any follow-up or integration, close the collaborator to release its resources and remove it from the active list. Returns arrive asynchronously; sent and received instructions are distinct. Calls are serialized with other tools.",
         Value::object([
             (
                 "action",
@@ -130,7 +130,7 @@ pub(super) fn definition() -> Value {
                     (
                         "description",
                         Value::string(
-                            "The returned assignment version that the main agent has checked, required for review.",
+                            "Exact report.version of the latest returned assignment checked by the main agent; required for review.",
                         ),
                     ),
                 ]),
@@ -138,7 +138,7 @@ pub(super) fn definition() -> Value {
             (
                 "note",
                 string(
-                    "Review evidence or reason for stopping/closing. Close disposes the agent's owned isolated workspace; inspect and integrate needed changes first.",
+                    "Main agent's review evidence or assessment for review. Close disposes the agent's owned isolated workspace; inspect and integrate needed changes first.",
                 ),
             ),
             (

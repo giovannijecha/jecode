@@ -36,6 +36,8 @@ impl Agent {
             self.sync_conversation();
             self.collaboration
                 .bind(self.archive(), self.persistence.clone())?;
+            self.questions
+                .bind(self.archive(), self.persistence.clone());
             self.begin_checkpoints();
             self.checkpoint(Stage::Preserve)?;
         }
@@ -84,6 +86,9 @@ impl Agent {
         prompt: impl Into<crate::attachments::Prompt>,
     ) -> Result<(), String> {
         let prompt = prompt.into();
+        if self.has_pending_question() {
+            return Err("Answer or dismiss the pending question before starting a new turn".into());
+        }
         if prompt.is_empty() {
             return Err("The prompt must not be empty".into());
         }

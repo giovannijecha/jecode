@@ -99,7 +99,9 @@ pub(super) fn console(bash: &Path) {
     state.toggle_collaboration();
     let expanded = crate::tui::view::frame(&state, "fixture/model", "fixture");
     let footer = expanded.live.last().unwrap();
-    assert!(footer.plain().contains("AGENTS") && footer.plain().contains("1 to review"));
+    assert!(
+        footer.plain().contains("AGENTS") && footer.plain().contains("1 for main agent review")
+    );
     assert!(footer.plain().contains("34%"));
     assert!(footer.spans.iter().any(|span| span.text == " AGENTS "
         && span.style == LIT

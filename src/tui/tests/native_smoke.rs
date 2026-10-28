@@ -123,3 +123,82 @@ fn interactive_windows_smoke() {
         "exports keep captured output beyond the preview"
     );
 }
+
+#[test]
+#[ignore = "requires a real interactive Windows console and manual Ask/Todo input"]
+fn work_tools_windows_smoke() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::with_wait(
+        vec![
+            (
+                200,
+                completion(
+                    "I will track this work and confirm the export scope.",
+                    vec![tool_call(
+                        "plan-1",
+                        "todo_list",
+                        Value::object([
+                            ("action", Value::string("set")),
+                            ("title", Value::string("CSV export")),
+                            (
+                                "tasks",
+                                Value::Array(vec![Value::object([
+                                    ("id", Value::string("t1")),
+                                    ("title", Value::string("Choose exported rows")),
+                                    ("status", Value::string("waiting")),
+                                ])]),
+                            ),
+                        ]),
+                    )],
+                ),
+            ),
+            (
+                200,
+                completion(
+                    "",
+                    vec![tool_call(
+                        "ask-1",
+                        "ask_user",
+                        Value::object([
+                            ("title", Value::string("Export scope")),
+                            (
+                                "question",
+                                Value::string("Which rows should the CSV include?"),
+                            ),
+                            (
+                                "options",
+                                Value::Array(vec![
+                                    Value::object([
+                                        ("id", Value::string("visible")),
+                                        ("label", Value::string("Visible rows")),
+                                        ("recommended", Value::Bool(true)),
+                                    ]),
+                                    Value::object([
+                                        ("id", Value::string("all")),
+                                        ("label", Value::string("All report rows")),
+                                    ]),
+                                ]),
+                            ),
+                        ]),
+                    )],
+                ),
+            ),
+            (
+                200,
+                completion(
+                    "Answer recorded. Inspect /todo and the expanded receipts, then quit with Ctrl+Q.",
+                    vec![],
+                ),
+            ),
+        ],
+        Duration::from_secs(180),
+    );
+    let agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    // Send a prompt, leave Ask with Esc, inspect /todo, reopen with /ask,
+    // then choose or type an answer and submit explicitly with Enter.
+    launch(agent, config(&directory), None, Default::default(), None).unwrap();
+    assert_eq!(fixture.finish().len(), 3);
+}

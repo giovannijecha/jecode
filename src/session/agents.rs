@@ -10,7 +10,7 @@ pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> 
 fn render(records: &[Value], arguments: &str, output: &mut impl Write) -> Result<(), String> {
     if arguments.is_empty() {
         if records.is_empty() {
-            return writeln!(output, "No agents in this conversation.").map_err(|e| e.to_string());
+            return writeln!(output, "No open assignments.").map_err(|e| e.to_string());
         }
         for record in records {
             writeln!(
@@ -36,7 +36,7 @@ fn render(records: &[Value], arguments: &str, output: &mut impl Write) -> Result
     let record = records
         .iter()
         .find(|r| number(r) == id)
-        .ok_or("Agent not found in this conversation")?;
+        .ok_or("Agent not found among open assignments")?;
     writeln!(
         output,
         "AGENT {id} — {}\n{}\nWorkspace: {}\nDirectory: {}\nAssignment v{}:\n{}",
@@ -51,10 +51,6 @@ fn render(records: &[Value], arguments: &str, output: &mut impl Write) -> Result
         text(record, "instructions")
     )
     .map_err(|e| e.to_string())?;
-    if record.get("workspace_closed") == Some(&Value::Bool(true)) {
-        writeln!(output, "Workspace closed; historical record retained.")
-            .map_err(|e| e.to_string())?;
-    }
     if !text(record, "context").is_empty() {
         writeln!(output, "Assignment context:\n{}", text(record, "context"))
             .map_err(|e| e.to_string())?;
@@ -127,7 +123,9 @@ fn state(record: &Value) -> String {
     if record.get("reviewed") == Some(&Value::Bool(true)) {
         "Reviewed by the main agent".into()
     } else if text(record, "state") == "returned" {
-        "Returned · awaiting main-agent review".into()
+        "Returned · pending review by main agent".into()
+    } else if text(record, "state") == "failed" {
+        "Failed · pending review by main agent".into()
     } else {
         text(record, "state").into()
     }
@@ -168,6 +166,7 @@ mod tests {
         let text = String::from_utf8(output).unwrap();
         for expected in [
             "AGENT 2",
+            "Failed · pending review by main agent",
             "Check empty input",
             "not yet received",
             "Found the empty-query path",
@@ -187,9 +186,6 @@ mod tests {
     fn plain_empty_inspection_explains_current_scope() {
         let mut output = Vec::new();
         render(&[], "", &mut output).unwrap();
-        assert_eq!(
-            String::from_utf8(output).unwrap(),
-            "No agents in this conversation.\n"
-        );
+        assert_eq!(String::from_utf8(output).unwrap(), "No open assignments.\n");
     }
 }

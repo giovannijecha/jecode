@@ -1,4 +1,5 @@
 mod agent;
+mod ask;
 mod attachments;
 mod auth;
 mod backend;
@@ -37,6 +38,7 @@ mod session;
 mod sessions;
 mod setup;
 mod skills;
+mod todo;
 mod tools;
 mod tui;
 mod utf8;

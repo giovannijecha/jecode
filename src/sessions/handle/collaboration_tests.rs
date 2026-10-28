@@ -108,3 +108,57 @@ fn asynchronous_receipt_saves_before_unsaved_tool_result_without_corrupting_pend
     let (resumed, _) = Handle::open(store, &id, redactor).unwrap();
     assert_eq!(resumed.snapshot().events.len(), 2);
 }
+
+#[test]
+fn closed_collaborator_receipt_survives_journal_reload() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let store = Store::new(home.path().to_path_buf(), project.path()).unwrap();
+    let mut document = Document::new(
+        project.path().to_path_buf(),
+        "fixture/model".into(),
+        Effort::High,
+    )
+    .unwrap();
+    document.messages.push(Value::object([
+        ("role", Value::string("system")),
+        ("content", Value::string("fixture")),
+    ]));
+    let redactor = Redactor::empty();
+    let archive = Archive {
+        backend: "openrouter".into(),
+        legacy_origin: None,
+        model: "fixture/model".into(),
+        directory: project.path().to_path_buf(),
+        messages: Arc::new(Mutex::new(document.messages.clone())),
+        redactor: redactor.clone(),
+        effort: "high".into(),
+        events: Arc::new(Mutex::new(vec![])),
+    };
+    let handle = Handle::new(store.clone(), document, redactor.clone());
+    let id = handle.id();
+    handle
+        .checkpoint(
+            &archive,
+            0,
+            &crate::context::Context::default(),
+            &Routing::Default,
+            false,
+            Stage::Ready,
+        )
+        .unwrap();
+    let closed = Value::object([
+        ("type", Value::string("collaboration")),
+        ("kind", Value::string("closed")),
+        ("id", Value::string("a24")),
+        ("number", Value::number(24)),
+        ("sequence", Value::number(96)),
+        ("version", Value::number(2)),
+        ("records", Value::Array(vec![])),
+        ("after_message", Value::number(1)),
+    ]);
+    let saved = handle.append_event(&archive, closed).unwrap();
+    drop(handle);
+    let (resumed, _) = Handle::open(store, &id, redactor).unwrap();
+    assert_eq!(resumed.snapshot().events, vec![saved]);
+}

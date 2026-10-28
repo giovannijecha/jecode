@@ -30,10 +30,16 @@ pub(super) fn sheet<'a>(
         .into_iter()
         .collect();
     work.extend(processes.iter().cloned());
-    let question = match work.len() {
-        0 | 1 => "Stop it and quit?",
-        2 => "Stop both and quit?",
-        _ => "Stop all and quit?",
+    let question = if state.question.is_some() && processes.is_empty() {
+        "Keep the question for resume and quit?"
+    } else if state.question.is_some() {
+        "Stop background work, keep the question, and quit?"
+    } else {
+        match work.len() {
+            0 | 1 => "Stop it and quit?",
+            2 => "Stop both and quit?",
+            _ => "Stop all and quit?",
+        }
     };
     let width = panel::text_width(columns);
     Sheet {

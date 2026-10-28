@@ -51,10 +51,10 @@ pub(super) fn status(record: &Value) -> &'static str {
                 .filter_map(|check| check.as_str())
                 .any(|check| check.to_ascii_lowercase().contains("fail")) =>
         {
-            "Failed check · awaiting review"
+            "Failed check · pending review by main agent"
         }
-        "returned" => "Awaiting review",
-        "failed" => "Failed",
+        "returned" => "Pending review by main agent",
+        "failed" => "Failed · pending review by main agent",
         "stopping" => "Stop requested",
         "stopped" => "Stopped",
         "unknown" => "Outcome unknown",
@@ -63,6 +63,19 @@ pub(super) fn status(record: &Value) -> &'static str {
 }
 
 impl Panel {
+    fn reconcile(&mut self, records: &[Value]) {
+        if self.detail && self.current(records).is_none() {
+            self.detail = false;
+            self.detail_id = None;
+            self.tab = 0;
+            self.offset = 0;
+            self.follow = true;
+        }
+        self.selected = self
+            .selected
+            .min(self.filtered(records).len().saturating_sub(1));
+    }
+
     pub fn filtered(&self, records: &[Value]) -> Vec<usize> {
         let query = self.filter.text.trim().to_lowercase();
         records
@@ -119,6 +132,7 @@ impl App {
             || self.state.queue.is_editing()
             || self.state.selector.is_some()
             || self.state.quitting.is_some()
+            || self.state.question.is_some()
         {
             return false;
         }
@@ -147,12 +161,7 @@ impl App {
             let room = super::view::agents_capacity(&self.state).max(1);
             let end = super::view::agents_detail_rows(&self.state).saturating_sub(room);
             if let Some(panel) = &mut self.state.agents_panel {
-                panel.selected = panel.selected.min(
-                    panel
-                        .filtered(&self.state.collaboration)
-                        .len()
-                        .saturating_sub(1),
-                );
+                panel.reconcile(&self.state.collaboration);
                 if panel.detail && panel.tab == 0 && panel.follow {
                     panel.offset = end;
                 }
@@ -194,11 +203,13 @@ impl App {
         self.refresh_agents();
     }
     pub(super) fn open_agents(&mut self) {
+        self.close_ask();
         self.state.information = None;
         self.state.selector = None;
         self.state.processes = None;
         self.state.suggestions.dismiss();
         self.state.agents_panel = Some(Panel::default());
+        self.state.todo_panel = None;
         self.refresh_agents();
     }
 

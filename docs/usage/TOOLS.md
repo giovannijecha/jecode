@@ -35,6 +35,8 @@ table lists the other arguments.
 | `map` | None | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources`, `work`, `description` | Surveys the project on demand and manages source-backed project notes. `action` defaults to `overview`; `remember` requires `title`, `summary` and `sources` at execution. |
 
 | `agent` | `action`; action-specific fields below | `tasks`, `id`, `instructions`, `context`, `timeout_ms`, `report_version`, `note`, `paths`, `expected_review_token`, `path`, `offset`, `limit` | Main agent only: create, update, inspect, wait, stop, review, compare, integrate or close collaborators. See [collaboration](COLLABORATION.md). |
+| `ask_user` | `title`, `question` | `context`, `options` | Ask one question with optional choices and free text; wait for an explicit answer. Main agent only. See [questions and plans](WORK_TOOLS.md). |
+| `todo_list` | `action`; `title` and `tasks` for `set` | None | Get or atomically replace this conversation's plan. Successful updates create immutable numbered revisions. See [questions and plans](WORK_TOOLS.md). |
 
 ## Parallel calls
 

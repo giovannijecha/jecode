@@ -29,6 +29,41 @@ impl<'a, O: Write, E: Write> Console<'a, O, E> {
 impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
     fn emit(&mut self, event: Event) -> Result<(), String> {
         let text = match event {
+            Event::UserQuestion { request } => {
+                let question = &request.question;
+                writeln!(self.output, "\n{}\n{}", question.title, question.question)
+                    .map_err(|error| error.to_string())?;
+                if !question.context.is_empty() {
+                    writeln!(self.output, "{}", question.context)
+                        .map_err(|error| error.to_string())?;
+                }
+                for (index, choice) in question.options.iter().enumerate() {
+                    let recommended = if choice.recommended {
+                        " (recommended)"
+                    } else {
+                        ""
+                    };
+                    writeln!(
+                        self.output,
+                        "{}. {}{}",
+                        index + 1,
+                        choice.label,
+                        recommended
+                    )
+                    .map_err(|error| error.to_string())?;
+                    if !choice.description.is_empty() {
+                        writeln!(self.output, "   {}", choice.description)
+                            .map_err(|error| error.to_string())?;
+                    }
+                }
+                write!(
+                    self.output,
+                    "Answer (number or free text; /dismiss to skip): "
+                )
+                .and_then(|_| self.output.flush())
+                .map_err(|error| error.to_string())?;
+                return Ok(());
+            }
             Event::Collaboration { event } => collaboration_line(&event),
             Event::Message { text } => {
                 return writeln!(self.output, "{text}")

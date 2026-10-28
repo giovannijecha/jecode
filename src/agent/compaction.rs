@@ -207,7 +207,7 @@ impl Agent {
                 && after < before
                 && self
                     .projected_estimate(&preview, &original)
-                    .saturating_add(self.request_environment().len())
+                    .saturating_add(self.request_environment_for(&original).len())
                     < input_budget
             {
                 // Keep every conversation group and its proof. A native preview
@@ -248,7 +248,7 @@ impl Agent {
         let fixed = next.estimate_bytes(
             self.context_bytes(&self.projected_context(&next, &original))
                 .saturating_add(crate::tools::encoded_size_for(!self.child))
-                .saturating_add(self.request_environment().len())
+                .saturating_add(self.request_environment_for(&original).len())
                 .saturating_add(768),
         );
         let limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
@@ -291,7 +291,7 @@ impl Agent {
         let original = self.messages.lock().unwrap();
         if self
             .projected_estimate(&next, &original)
-            .saturating_add(self.request_environment().len())
+            .saturating_add(self.request_environment_for(&original).len())
             >= input_budget
         {
             return Err(format!(

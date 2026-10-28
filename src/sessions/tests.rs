@@ -190,6 +190,7 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
 #[test]
 fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
     let mut input = Input {
+        question: None,
         staged: vec![],
         draft: Draft {
             text: "edited latest".into(),

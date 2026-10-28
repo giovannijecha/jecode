@@ -108,6 +108,11 @@ pub struct State {
     pub processes: Option<super::processes::Panel>,
     pub collaboration: Vec<Value>,
     pub agents_panel: Option<super::agents::Panel>,
+    pub question: Option<crate::ask::Request>,
+    pub ask_panel: Option<super::ask::Panel>,
+    pub ask_draft: Option<crate::ask::Draft>,
+    pub todo_plan: Option<crate::todo::Plan>,
+    pub todo_panel: Option<super::todo::Panel>,
     /// The engine's latest projection for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
     /// The recent conversations offered before the first prompt.
@@ -145,6 +150,11 @@ impl Default for State {
             processes: None,
             collaboration: Vec::new(),
             agents_panel: None,
+            question: None,
+            ask_panel: None,
+            ask_draft: None,
+            todo_plan: None,
+            todo_panel: None,
             context: None,
             opening: Opening::default(),
             quitting: None,
@@ -188,6 +198,7 @@ impl State {
                 | Event::ToolNote { .. }
                 | Event::ToolFinished { .. }
                 | Event::Collaboration { .. }
+                | Event::UserQuestion { .. }
         ) {
             self.changed();
         }
@@ -255,6 +266,12 @@ impl State {
             }
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}
+            Event::UserQuestion { request } => {
+                if self.question.as_ref().is_none_or(|current| current.id != request.id) {
+                    self.ask_panel = Some(super::ask::Panel::new(&request, self.ask_draft.as_ref()));
+                }
+                self.question = Some(request);
+            }
             Event::Context(status) => self.context = Some(status),
             Event::Generated { tokens } => {
                 if let Some(activity) = &mut self.activity {
@@ -420,6 +437,11 @@ impl State {
         self.information = None;
         self.processes = None;
         self.agents_panel = None;
+        self.question = None;
+        self.ask_panel = None;
+        self.ask_draft = None;
+        self.todo_plan = None;
+        self.todo_panel = None;
         self.collaboration.clear();
     }
     pub fn settled_len(&self) -> usize {

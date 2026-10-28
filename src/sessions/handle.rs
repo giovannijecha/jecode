@@ -161,11 +161,31 @@ impl Handle {
             .iter()
             .map(|receipt| redactor.value(receipt))
             .collect();
+        document.input.question = document.input.question.map(|mut draft| {
+            let (text, cursor) = redactor.text_cursor(&draft.text, draft.cursor);
+            draft.id = redactor.text(&draft.id);
+            draft.text = text;
+            draft.cursor = cursor;
+            draft.choice = draft.choice.map(|choice| redactor.text(&choice));
+            draft
+        });
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;
         let handle = Self::with_lease(store, document, redactor, Some(Arc::new(lease)));
         handle.flush()?;
+        let awaiting_question = {
+            let saved = handle.snapshot();
+            saved.pending.tool.as_ref().is_some_and(|id| {
+                saved.events.iter().any(|event| {
+                    event.get("type").and_then(crate::json::Value::as_str) == Some("user_question")
+                        && event
+                            .get("tool_call_id")
+                            .and_then(crate::json::Value::as_str)
+                            == Some(id)
+                })
+            })
+        };
         Ok((
             handle,
             format!(
@@ -175,7 +195,9 @@ impl Handle {
                 } else {
                     ""
                 },
-                if interrupted {
+                if awaiting_question {
+                    "Question awaits your answer."
+                } else if interrupted {
                     "Interrupted work recovered; ready for a new request."
                 } else {
                     "Ready for a new request."
@@ -284,7 +306,19 @@ impl Handle {
                 let receipt = live.redactor.value(&receipt);
                 live.document.pending.completed.push(receipt);
             }
-            Stage::ToolFinished => live.document.pending.tool = None,
+            Stage::ToolFinished => {
+                if live
+                    .document
+                    .input
+                    .question
+                    .as_ref()
+                    .is_some_and(|draft| Some(&draft.id) == live.document.pending.tool.as_ref())
+                {
+                    live.document.input.question = None;
+                    live.last_ui_input = None;
+                }
+                live.document.pending.tool = None;
+            }
             Stage::ReadBatchFinished => live.document.pending.reads.clear(),
             Stage::ToolBatchFinished => {
                 live.document.pending.reads.clear();

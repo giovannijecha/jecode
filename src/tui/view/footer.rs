@@ -128,11 +128,15 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
                 if short { "run" } else { "running" }
             ));
         }
-        if review > failed {
+        if review > 0 {
             parts.push(format!(
                 "{} {}",
-                review - failed,
-                if short { "review" } else { "to review" }
+                review,
+                if short {
+                    "main review"
+                } else {
+                    "for main agent review"
+                }
             ));
         }
         if unknown > 0 {
@@ -182,7 +186,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
             let Some(gap) = columns.checked_sub(left_cells + right_cells) else {
                 continue;
             };
-            if gap < 2 {
+            if gap < 2 || (gap < 11 && model_chip.is_some()) {
                 continue;
             }
             if gap >= 11 {

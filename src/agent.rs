@@ -34,6 +34,7 @@ pub struct Agent {
         Option<std::collections::BTreeMap<(String, String), crate::backend::Routing>>,
     charges: Mutex<crate::backend::Charges>,
     collaboration: crate::collaboration::Observer,
+    questions: crate::ask::Observer,
     child: bool,
     inherited_project_instructions: Option<String>,
     collaboration_seen: usize,
@@ -46,7 +47,7 @@ impl Agent {
         // to the conversation whose compaction the test exercises.
         let fixed = self.current_system_message().encode().len()
             + crate::tools::encoded_size()
-            + self.request_environment().len();
+            + self.request_environment_for(&[]).len();
         (fixed + headroom)
             .saturating_mul(100)
             .div_ceil(usize::from(auto_percent))
@@ -84,6 +85,7 @@ impl Agent {
             routing_preferences: None,
             charges: Mutex::default(),
             collaboration: crate::collaboration::Observer::default(),
+            questions: crate::ask::Observer::default(),
             child: false,
             inherited_project_instructions: None,
             collaboration_seen: 0,
@@ -161,6 +163,10 @@ impl Agent {
         self.collaboration.clone()
     }
 
+    pub fn questions(&self) -> crate::ask::Observer {
+        self.questions.clone()
+    }
+
     /// Prompts submitted while this agent works; ordinary messages join the active turn.
     pub fn inbox(&self) -> crate::inbox::Inbox {
         self.inbox.clone()
@@ -204,6 +210,9 @@ impl Agent {
                 }
                 break;
             }
+        }
+        if self.questions.is_suspended() {
+            return self.checkpoint(crate::sessions::Stage::Preserve);
         }
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);
@@ -306,7 +315,7 @@ impl Agent {
     fn transport_messages(&self) -> Vec<Value> {
         let original = self.messages.lock().unwrap();
         let mut messages = self.projected_context(&self.context, &original);
-        let temporary = self.request_environment();
+        let temporary = self.request_environment_for(&original);
         if !temporary.is_empty()
             && let Some(Value::Object(system)) = messages.first_mut()
         {
@@ -374,7 +383,7 @@ impl Agent {
                 .estimate_growth(messages, tokens, self.client.inputs()),
             None => self
                 .unmeasured_estimate(&self.context, messages)
-                .saturating_add(self.request_environment().len()),
+                .saturating_add(self.request_environment_for(messages).len()),
         }
     }
 
@@ -423,6 +432,7 @@ impl Drop for Agent {
     }
 }
 
+mod ask;
 mod backend;
 pub(crate) mod checkpoints;
 mod collaboration;
@@ -443,6 +453,7 @@ mod streaming;
 mod summary;
 mod temporary;
 mod timing;
+mod todo;
 
 #[cfg(test)]
 mod attachment_tests;

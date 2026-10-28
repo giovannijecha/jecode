@@ -62,6 +62,12 @@ fn collaborator_returns_and_followup_keeps_versions_and_review_explicit() {
         Some(1)
     );
     assert_eq!(first[0].get("reviewed"), Some(&Value::Bool(false)));
+    let context = parent.request_environment();
+    assert!(context.contains("Only you, the main agent, review"));
+    assert!(context.contains("action=review, id, report_version"));
+    assert!(context.contains(
+        "a1 Inspect source: returned, received assignment v1, report v1, awaiting main-agent review"
+    ));
     parent
         .agent_tool(&Value::object([
             ("action", Value::string("update")),
@@ -107,6 +113,11 @@ fn collaborator_returns_and_followup_keeps_versions_and_review_explicit() {
         observer.snapshot()[0].get("reviewed"),
         Some(&Value::Bool(true))
     );
+    assert!(
+        parent
+            .request_environment()
+            .contains("report v2, reviewed; close when finished")
+    );
     let receipts = observer.events_since(0).1;
     assert_eq!(
         receipts
@@ -118,6 +129,12 @@ fn collaborator_returns_and_followup_keeps_versions_and_review_explicit() {
         ]
     );
     observer.close("a1").unwrap();
+    assert!(observer.snapshot().is_empty());
+    assert!(
+        !parent
+            .request_environment()
+            .contains("Active collaborators")
+    );
     assert_eq!(fixture.finish().len(), 2);
 }
 

@@ -14,6 +14,14 @@ pub fn description(name: &str, arguments: &Value) -> String {
 
 /// The invocation target, independently of an optional display description.
 pub fn target(name: &str, arguments: &Value) -> String {
+    if matches!(name, "ask_user" | "todo_list") {
+        return arguments
+            .get("title")
+            .and_then(Value::as_str)
+            .or_else(|| arguments.get("action").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_owned();
+    }
     if name == "agent" {
         let action = arguments
             .get("action")

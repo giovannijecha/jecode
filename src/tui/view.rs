@@ -1,4 +1,5 @@
 pub(in crate::tui) mod agents;
+mod ask;
 mod commands;
 mod composer;
 mod footer;
@@ -10,6 +11,7 @@ pub(super) mod processes;
 mod quit;
 mod routing;
 mod status;
+pub(in crate::tui) mod todo;
 #[cfg(test)]
 use super::text;
 use super::{line::Line, state::State};
@@ -133,6 +135,8 @@ pub(super) fn panel_open(state: &State) -> bool {
     state.quitting.is_some()
         || state.processes.is_some()
         || state.agents_panel.is_some()
+        || state.ask_panel.is_some()
+        || state.todo_panel.is_some()
         || state.selector.is_some()
         || state.information.is_some()
         || state.suggestions.panel
@@ -168,6 +172,19 @@ pub(super) fn process_capacity(state: &State) -> usize {
 
 pub(super) fn agents_capacity(state: &State) -> usize {
     composer::panel_room(state)
+}
+
+pub(super) fn todo_capacity(state: &State) -> usize {
+    composer::panel_room(state)
+}
+
+pub(super) fn todo_detail_rows(state: &State) -> usize {
+    let (Some(panel), Some(plan)) = (&state.todo_panel, &state.todo_plan) else {
+        return 0;
+    };
+    panel
+        .current(plan)
+        .map_or(0, |task| todo::detail_rows(task, state.width.max(1)).len())
 }
 
 pub(super) fn agents_detail_rows(state: &State) -> usize {

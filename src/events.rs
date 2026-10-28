@@ -2,6 +2,9 @@ use crate::json::Value;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
+    UserQuestion {
+        request: crate::ask::Request,
+    },
     Collaboration {
         event: Value,
     },
@@ -148,6 +151,31 @@ fn counted(count: usize, noun: &str) -> String {
 fn outcome_summary(name: &str, result: &Value) -> String {
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("error: {error}");
+    }
+    if name == "ask_user" {
+        return match result.get("outcome").and_then(Value::as_str) {
+            Some("answered") => "Answer received",
+            Some("dismissed") => "No answer supplied",
+            Some("cancelled") => "Question cancelled",
+            Some("unavailable") => "Interactive input unavailable",
+            _ => "Question finished",
+        }
+        .into();
+    }
+    if name == "todo_list" {
+        let revision = result
+            .get("revision")
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        return if revision == 0 {
+            "No plan yet".into()
+        } else {
+            let count = result
+                .get("tasks")
+                .and_then(Value::as_array)
+                .map_or(0, <[Value]>::len);
+            format!("{} · revision {revision}", counted(count, "task"))
+        };
     }
     if name == "map" {
         match result.get("action").and_then(Value::as_str) {

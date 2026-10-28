@@ -31,6 +31,7 @@ struct State {
     records: Vec<Record>,
     receipts: Vec<Value>,
     workers: Vec<Worker>,
+    last_number: usize,
 }
 
 struct Worker {
@@ -380,10 +381,21 @@ impl Observer {
         *parent = Some((archive.clone(), handle));
         state.records.clear();
         state.receipts.clear();
+        state.last_number = 0;
         let mut latest = None;
         for event in archive.events.lock().unwrap().iter() {
             if event.get("type").and_then(Value::as_str) == Some("collaboration") {
                 state.receipts.push(event.clone());
+                state.last_number = state
+                    .last_number
+                    .max(event.get("number").and_then(Value::as_usize).unwrap_or(0));
+                if let Some(records) = event.get("records").and_then(Value::as_array) {
+                    for record in records {
+                        state.last_number = state
+                            .last_number
+                            .max(record.get("number").and_then(Value::as_usize).unwrap_or(0));
+                    }
+                }
                 latest = event
                     .get("records")
                     .and_then(Value::as_array)
@@ -404,6 +416,7 @@ impl Observer {
                 .collect();
             state.records = latest
                 .iter()
+                .filter(|record| record.get("workspace_closed") != Some(&Value::Bool(true)))
                 .map(Record::from_value)
                 .collect::<Result<_, _>>()?;
         }

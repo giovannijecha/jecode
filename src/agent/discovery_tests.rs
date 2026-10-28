@@ -81,7 +81,7 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
         .collect::<Vec<_>>();
     assert_eq!(
         &catalog_names(&catalog)[9..],
-        &["list", "search", "map", "agent"]
+        &["list", "search", "map", "agent", "todo_list", "ask_user"]
     );
     let next = requests[1]
         .body
@@ -206,7 +206,7 @@ fn openai_namespace_carries_empty_search_receipt_to_the_followup() {
     let catalog = namespace.get("tools").unwrap().as_array().unwrap();
     assert_eq!(
         &catalog_names(catalog)[9..],
-        &["list", "search", "map", "agent"]
+        &["list", "search", "map", "agent", "todo_list", "ask_user"]
     );
     assert!(
         catalog

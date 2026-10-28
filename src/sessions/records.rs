@@ -7,6 +7,9 @@ use crate::{
 use std::collections::{BTreeSet, HashMap};
 
 pub enum Record {
+    Question {
+        request: crate::ask::Request,
+    },
     Collaboration {
         event: Value,
     },
@@ -119,6 +122,21 @@ fn hidden(event: &Value, index: usize, returned: &BTreeSet<usize>) -> bool {
 
 fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<usize>) {
     match event.get("type").and_then(Value::as_str) {
+        Some("user_question") => {
+            if let (Some(id), Some(question)) = (
+                event.get("tool_call_id").and_then(Value::as_str),
+                event
+                    .get("question")
+                    .and_then(|value| crate::ask::Question::parse(value).ok()),
+            ) {
+                records.push(Record::Question {
+                    request: crate::ask::Request {
+                        id: id.into(),
+                        question,
+                    },
+                });
+            }
+        }
         Some("collaboration") => records.push(Record::Collaboration {
             event: event.clone(),
         }),

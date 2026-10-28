@@ -129,6 +129,8 @@ impl App {
         }
         dirty |= self.refresh_processes(false);
         dirty |= self.refresh_agents();
+        dirty |= self.refresh_question();
+        dirty |= self.refresh_todo();
         dirty |= self.start_collaboration_continuation();
         Ok(dirty)
     }
@@ -159,6 +161,9 @@ impl App {
             }
             Event::Collaboration { event } => {
                 self.show_collaboration(event);
+            }
+            Event::UserQuestion { request } => {
+                self.state.event(Event::UserQuestion { request });
             }
             Event::ToolStarted {
                 id,

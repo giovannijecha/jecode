@@ -1,5 +1,6 @@
 mod activity;
 mod agents;
+mod ask;
 mod attach;
 mod backend_command;
 mod cards;
@@ -45,6 +46,7 @@ mod terminal;
 mod terminal_output;
 mod text;
 mod theme;
+mod todo;
 mod transcript;
 mod view;
 mod viewport;
@@ -101,6 +103,8 @@ struct App {
     /// Reads the current conversation's processes, including while a worker owns the agent.
     process_observer: crate::tools::processes::Observer,
     collaboration_observer: crate::collaboration::Observer,
+    question_observer: crate::ask::Observer,
+    todo_message_len: usize,
     collaboration_cursor: usize,
     collaboration_seen: HashSet<usize>,
     collaboration_receipt_calls: HashSet<String>,
@@ -127,6 +131,8 @@ impl App {
             archive: agent.archive(),
             process_observer: agent.processes(),
             collaboration_observer: agent.collaboration(),
+            question_observer: agent.questions(),
+            todo_message_len: usize::MAX,
             collaboration_cursor: 0,
             collaboration_seen: HashSet::new(),
             collaboration_receipt_calls: HashSet::new(),
@@ -167,6 +173,9 @@ impl App {
         };
         app.recent_sessions();
         app.refresh_agents();
+        app.question_observer.set_available(true);
+        app.refresh_question();
+        app.refresh_todo();
         app.refresh_context();
         app
     }
@@ -356,6 +365,16 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        if self
+            .state
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.stopping)
+        {
+            self.question_observer.set_available(false);
+        } else {
+            self.question_observer.suspend();
+        }
         if let Some(worker) = &self.worker {
             worker.cancel();
         }

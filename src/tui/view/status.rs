@@ -31,6 +31,14 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     if let Some(notice) = shown_notice(state) {
         return notice_row(notice, columns);
     }
+    if state.question.is_some()
+        && !state
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.stopping)
+    {
+        return super::ask::status(columns, state.ask_panel.is_none());
+    }
     let running = state
         .activity
         .as_ref()

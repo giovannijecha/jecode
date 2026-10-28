@@ -1,6 +1,7 @@
 use crate::json::Value;
 use std::sync::OnceLock;
 mod collaboration;
+mod work;
 
 /// Executable tools in Jecode's neutral name, description and parameters shape.
 /// Each backend owns the wrapper required by its request protocol.
@@ -25,7 +26,12 @@ pub fn definitions_for(delegation: bool) -> &'static Value {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .filter(|tool| tool.get("name").and_then(Value::as_str) != Some("agent"))
+                    .filter(|tool| {
+                        !matches!(
+                            tool.get("name").and_then(Value::as_str),
+                            Some("agent" | "ask_user")
+                        )
+                    })
                     .cloned()
                     .collect(),
             )
@@ -62,6 +68,8 @@ fn build_definitions() -> Value {
     tools.extend(super::discovery::definitions());
     tools.extend(crate::project_map::definitions());
     tools.push(collaboration::definition());
+    tools.push(work::todo());
+    tools.push(work::ask_user());
     Value::Array(tools)
 }
 

@@ -445,6 +445,18 @@ impl App {
             } else {
                 self.warn("Usage: /agents");
             }
+        } else if name.eq_ignore_ascii_case("/ask") {
+            if arguments.is_empty() {
+                self.open_ask();
+            } else {
+                self.warn("Usage: /ask");
+            }
+        } else if name.eq_ignore_ascii_case("/todo") {
+            if arguments.is_empty() {
+                self.open_todo();
+            } else {
+                self.warn("Usage: /todo");
+            }
         } else {
             return self.copy_command(text);
         }
@@ -454,7 +466,7 @@ impl App {
 
 /// Commands that run at once, even while a turn is busy.
 pub(super) fn immediate(name: &str) -> bool {
-    ["/copy", "/drafts", "/terminal", "/agents"]
+    ["/copy", "/drafts", "/terminal", "/agents", "/ask", "/todo"]
         .iter()
         .any(|command| name.eq_ignore_ascii_case(command))
 }

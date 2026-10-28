@@ -89,8 +89,12 @@ fn openrouter_map_note_reaches_model_changes_with_source_and_survives_resume() {
     assert_eq!(
         catalog
             .iter()
-            .rev()
-            .nth(1)
+            .find(|tool| {
+                tool.get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    == Some("map")
+            })
             .unwrap()
             .get("function")
             .unwrap()
@@ -291,8 +295,7 @@ fn openai_namespace_map_note_and_overview_reach_followup_requests() {
     assert_eq!(
         catalog
             .iter()
-            .rev()
-            .nth(1)
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some("map"))
             .unwrap()
             .get("name")
             .and_then(Value::as_str),

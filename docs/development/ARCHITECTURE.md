@@ -182,6 +182,29 @@ cursors. It cannot keep a process alive. Successful conversation switches, live
 session deletion and agent drop stop and join registered processes. See
 [tools](../usage/TOOLS.md) for the model-facing contract.
 
+## Questions and conversation plans
+
+`ask::Observer` connects the terminal's input surface to the main worker without
+putting rendering in the agent loop. A `user_question` journal event identifies
+the original tool call. Submitting or dismissing appends a durable `user_answer`
+before the waiting worker can consume it. The session input stores a separate
+answer draft and caret. A closed surface suspends an unanswered call; explicit
+cancellation resolves it without an answer. Recovery finishes the same call and
+does not replay unrelated tool effects. Headless input and child calls return
+unavailable. Plain chat uses the same observer through its synchronous event sink.
+
+Each successful `todo_list` set result contains the entire numbered plan. There
+is no second persisted copy. `todo::latest` pairs tool results with their adjacent
+assistant batch, so reused provider call IDs cannot select an unrelated result.
+The request environment projects a bounded current plan from original history,
+including after compaction. `/todo` caches that projection until the transcript
+changes, while historical cards retain their own snapshots. Children have their
+own transcripts and plans.
+
+Both tools are serial boundaries. The TUI uses the existing sheet, composer,
+badge and card grammar. Ask has an independent editor, and Todo is read-only.
+See [questions and plans](../usage/WORK_TOOLS.md) for the public contract.
+
 ## Collaborating agents
 
 The main loop intercepts the `agent` control tool. It remains a serialized
@@ -193,7 +216,7 @@ parent-conversation inheritance. Shared project-map notes and personal skills
 retain the parent project's identity.
 
 OpenRouter and OpenAI requests select the catalog for the agent's role. Child
-catalogs omit `agent`, and agent dispatch rejects child delegation independently
+catalogs omit `agent` and `ask_user`, and agent dispatch rejects child delegation independently
 of provider behavior. Existing workers keep the model, effort and routing with
 which they were created.
 
@@ -201,6 +224,9 @@ Versioned assignment updates use the existing input queue at model boundaries.
 Sent and received receipts are separate. Visible messages, tool activity and
 returned reports populate inspectable records; hidden reasoning is not included.
 The main agent records review explicitly against the latest returned version.
+The current request environment identifies the main agent as the review owner,
+includes each report's version and assessment state, and names the review and
+close actions. A textual completion does not change collaborator state.
 
 Receipts append to the parent session even while its main model is idle. The TUI
 drains worker events and observer receipts with sequence deduplication, keeping
@@ -208,14 +234,23 @@ historical snapshots immutable. Its `/agents` panel reads current snapshots;
 opening a result does not review it. A new live return can start
 `Agent::continue_collaboration` through the ordinary model loop without a
 synthetic user message. Queued input wins, explicit cancellation suppresses the
-continuation, and restored receipts are already seen. Plain stdin remains
-line-based and does not poll idle workers.
+continuation. Resume schedules one continuation for returned reports in still-open
+assignments, including sessions saved before explicit closure was used. The main
+agent makes the review and closure decisions; restoration never fabricates a
+review. Closed historical receipts do not trigger inference. Plain stdin remains
+line-based and does not poll idle workers, but handles unfinished review on resume.
 
 Storage lives under the parent project bucket's `collaboration/<session-id>/`.
 Child histories have a separate `child-home` so the main conversation picker
 cannot open them as delegating agents. Session changes stop workers before
 replacing the observer. Interrupted running work restores as unknown and is
-never replayed. Closing a workspace preserves its historical record; missing or
+never replayed. Successful close joins the worker, releases its tool resources,
+saves a final `closed` receipt and removes the live record. Restore excludes
+already closed records, including legacy records with `workspace_closed=true`.
+A monotonic counter reconstructed from receipts keeps IDs unique after removal.
+The active snapshot and repeated model context therefore depend on open work;
+the durable chronological archive still grows with the conversation. Closing a
+workspace preserves its historical record; missing or
 invalid workspace ownership becomes a record diagnostic rather than breaking
 the parent session.
 
