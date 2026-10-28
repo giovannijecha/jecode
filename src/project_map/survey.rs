@@ -59,7 +59,9 @@ pub(super) fn collect(
                     for row in result.entries {
                         offer(&mut landmarks, row, &query, &mut truncated);
                     }
-                } else if let Some(role) = landmark_role(&entry.relative) {
+                } else if let Some(role) =
+                    landmark_role(&entry.relative, scope != "." && entry.depth == 1)
+                {
                     let source = if excerpt_files < MAX_EXCERPT_FILES {
                         excerpt_files += 1;
                         match excerpt(&entry.absolute) {
@@ -180,7 +182,7 @@ fn row(
     ])
 }
 
-fn landmark_role(path: &str) -> Option<&'static str> {
+fn landmark_role(path: &str, scoped_child: bool) -> Option<&'static str> {
     let name = path.rsplit('/').next()?.to_ascii_lowercase();
     if matches!(
         name.as_str(),
@@ -208,7 +210,9 @@ fn landmark_role(path: &str) -> Option<&'static str> {
         || name.ends_with("_spec.rs")
     {
         Some("Tests by filename (candidate)")
-    } else if path.starts_with("src/") && path.matches('/').count() <= 1 && name.ends_with(".rs") {
+    } else if name.ends_with(".rs")
+        && (scoped_child || path.starts_with("src/") && path.matches('/').count() <= 1)
+    {
         Some("Source module by path (candidate)")
     } else {
         None
@@ -247,14 +251,56 @@ mod tests {
     #[test]
     fn filename_roles_remain_candidates() {
         assert_eq!(
-            landmark_role("src/main.rs"),
+            landmark_role("src/main.rs", false),
             Some("Entrypoint by filename (candidate)")
         );
         assert_eq!(
-            landmark_role("src/engine.rs"),
+            landmark_role("src/engine.rs", false),
             Some("Source module by path (candidate)")
         );
-        assert_eq!(landmark_role("assets/logo.png"), None);
+        assert_eq!(landmark_role("assets/logo.png", false), None);
+        assert_eq!(landmark_role("src/feature/worker.rs", false), None);
+        assert_eq!(
+            landmark_role("src/feature/worker.rs", true),
+            Some("Source module by path (candidate)")
+        );
+    }
+
+    #[test]
+    fn scoped_source_directory_shows_its_immediate_rust_modules() {
+        let directory = Directory::new();
+        let root = fs::canonicalize(directory.path()).unwrap();
+        let scope = root.join("src/feature");
+        fs::create_dir_all(&scope).unwrap();
+        for name in ["mod.rs", "settings.rs", "worker.rs"] {
+            fs::write(
+                scope.join(name),
+                "//! Feature implementation.\npub fn run() {}\n",
+            )
+            .unwrap();
+        }
+        let result = super::collect(
+            &root,
+            &Value::object([
+                ("path", Value::string("src/feature")),
+                ("pattern", Value::string("**/*.rs")),
+            ]),
+            &Cancellation::default(),
+        )
+        .unwrap();
+        assert_eq!(result.files, 3);
+        for name in ["mod.rs", "settings.rs", "worker.rs"] {
+            let expected = format!("src/feature/{name}");
+            assert!(
+                result
+                    .entries
+                    .iter()
+                    .any(|entry| entry.get("path").and_then(Value::as_str)
+                        == Some(expected.as_str())),
+                "scoped module {expected} missing: {:?}",
+                result.entries
+            );
+        }
     }
 
     #[test]

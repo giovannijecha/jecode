@@ -120,6 +120,10 @@ starting model context. The overview surveys candidate paths and extracts a
 focused lexical outline from Rust and Markdown files. It identifies areas,
 landmarks and symbols without claiming a language-wide call graph.
 
+The root overview stays coarse. Selecting a directory also reveals its
+immediate Rust source files as module candidates, so follow an area with
+`path` before focusing an individual file for its outline.
+
 ```json
 {"action":"overview","path":"src","query":"config","limit":50}
 ```
