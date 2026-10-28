@@ -187,10 +187,13 @@ session deletion and agent drop stop and join registered processes. See
 `ask::Observer` connects the terminal's input surface to the main worker without
 putting rendering in the agent loop. A `user_question` journal event identifies
 the original tool call. Submitting or dismissing appends a durable `user_answer`
-before the waiting worker can consume it. The session input stores a separate
-answer draft and caret. A closed surface suspends an unanswered call; explicit
-cancellation resolves it without an answer. Recovery finishes the same call and
-does not replay unrelated tool effects. Headless input and child calls return
+before the waiting worker can consume it. One call carries up to four questions;
+journal events written in the earlier single-question form load as one question.
+The session input stores a separate answer draft per question, with its caret
+and cursor row. A closed surface suspends an unanswered call and records later
+calls of the turn as not executed; explicit cancellation resolves it without an
+answer. Recovery finishes the same call and does not replay unrelated tool
+effects. Headless input and child calls return
 unavailable. Plain chat uses the same observer through its synchronous event sink.
 
 Each successful `todo_list` set result contains the entire numbered plan. There

@@ -6,45 +6,73 @@ run in source order, even if a call includes `parallel: true`.
 
 ## Answer a question
 
-In an interactive terminal, a question opens below the composer. It can include
-context and up to six choices. Free text is always available, including when
-choices are present. A recommendation is a suggestion; it is never submitted
-automatically. Submit a selected choice, text, or both explicitly.
-Tab switches between text and choices, arrows move through choices, and Enter
-submits. Ctrl+D explicitly dismisses the question. Ctrl+C stops the active turn.
+In an interactive terminal, the questions take the composer's place under a
+`Waiting for you` marker; the conversation gains nothing until they are
+answered. One call asks up to four questions, answered one at a time and sent
+together. Each question can include context and up to six options, as single
+or multiple choice. `Other` is always the last answer and takes the user's own
+words; a question without options takes words only. Nothing is preselected,
+and a recommendation is a suggestion that is never submitted automatically.
 
-Esc returns to the main chat while leaving the question pending. `/ask` reopens
-it. The answer draft and the main draft keep separate text and carets. Dismissing
-a question is a separate explicit action and tells the model that no answer was
-supplied. The main agent waits; existing collaborators and processes can keep
-working, and `/agents` and `/todo` remain available for inspection.
+Arrows move the cursor without choosing. Space selects the highlighted option
+(several, for multiple choice); typing fills `Other`, and Ctrl+J adds a line.
+Enter chooses the highlighted single-choice option, then moves to the next
+question; on the last question it sends every answer. Tab, Shift+Tab, or ←→
+outside typed words switch questions, and a step row shows which are answered.
+Long questions scroll with the cursor, the wheel and Page Up/Down. Ctrl+D
+explicitly dismisses the questions. Ctrl+C stops the active turn.
+
+Esc returns to the main chat while leaving the questions pending. `/ask`
+reopens them. Answers in progress and the main draft keep separate text and
+carets. Dismissing is a separate explicit action and tells the model that no
+answer was supplied. The main agent waits; existing collaborators and processes
+can keep working, and `/agents` and `/todo` remain available for inspection.
 
 The tool accepts:
 
 ```json
 {
-  "title": "Export format",
-  "question": "Which format should the export use?",
-  "context": "The current exporter produces one file.",
-  "options": [
-    {"id": "csv", "label": "CSV", "description": "Open in a spreadsheet", "recommended": true},
-    {"id": "json", "label": "JSON", "description": "Keep nested fields"}
+  "questions": [
+    {
+      "id": "format",
+      "title": "Format",
+      "question": "Which format should the export use?",
+      "context": "The current exporter produces one file.",
+      "options": [
+        {"id": "csv", "label": "CSV", "description": "Open in a spreadsheet", "recommended": true},
+        {"id": "json", "label": "JSON", "description": "Keep nested fields"}
+      ]
+    },
+    {
+      "id": "fields",
+      "title": "Fields",
+      "question": "Which fields should be included?",
+      "multiple": true,
+      "options": [
+        {"id": "dates", "label": "Dates"},
+        {"id": "owners", "label": "Owners"}
+      ]
+    }
   ]
 }
 ```
 
 The result distinguishes an answer from dismissal, cancellation or unavailable
-interactive input. Answered results include the selected choice ID, when any,
-and the entered text. Single-prompt and piped invocations return unavailable
-without blocking. Interactive `--plain` chat accepts answers through stdin.
+interactive input. An answered result lists, for each question ID, the chosen
+option IDs and the typed text. Single-prompt and piped invocations return
+unavailable without blocking. Interactive `--plain` chat asks each question in
+turn on stdin: a number chooses an option, a list such as `1,3` chooses several
+for multiple choice, other text is the user's own words, and `/dismiss` skips.
 Collaborators do not receive this tool; they report questions to the main agent.
 
-Pending questions and answer drafts survive `/resume`. A saved answer remains
-associated with its original tool call, including if Jecode closes before the
-model continues. Restoring a question does not replay earlier file or command
-effects. Old ASK cards retain the answer that was actually submitted.
-Closing the input surface preserves a pending question; stopping the turn
-explicitly records cancellation instead.
+Pending questions and answers in progress survive `/resume`; questions saved
+by earlier versions in the single-question form still resume. A saved answer
+remains associated with its original tool call, including if Jecode closes
+before the model continues. Restoring a question does not replay earlier file
+or command effects, and later tool calls from the same turn are recorded as not
+executed. After answering, the conversation shows one `ASK USER` row with the
+answers that were actually submitted. Closing the input surface preserves a
+pending question; stopping the turn explicitly records cancellation instead.
 
 ## Inspect a plan
 

@@ -159,27 +159,16 @@ fn work_tools_windows_smoke() {
                     vec![tool_call(
                         "ask-1",
                         "ask_user",
-                        Value::object([
-                            ("title", Value::string("Export scope")),
-                            (
-                                "question",
-                                Value::string("Which rows should the CSV include?"),
-                            ),
-                            (
-                                "options",
-                                Value::Array(vec![
-                                    Value::object([
-                                        ("id", Value::string("visible")),
-                                        ("label", Value::string("Visible rows")),
-                                        ("recommended", Value::Bool(true)),
-                                    ]),
-                                    Value::object([
-                                        ("id", Value::string("all")),
-                                        ("label", Value::string("All report rows")),
-                                    ]),
-                                ]),
-                            ),
-                        ]),
+                        json::parse(
+                            r#"{"questions":[{"id":"scope","title":"Export scope",
+                            "question":"Which rows should the CSV include?","options":[
+                            {"id":"visible","label":"Visible rows","recommended":true},
+                            {"id":"all","label":"All report rows"}]},
+                            {"id":"formats","title":"Formats","question":"Which formats?",
+                            "multiple":true,"options":[{"id":"csv","label":"CSV"},
+                            {"id":"xlsx","label":"XLSX"}]}]}"#,
+                        )
+                        .unwrap(),
                     )],
                 ),
             ),

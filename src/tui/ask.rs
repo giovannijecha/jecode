@@ -1,59 +1,14 @@
-use super::{App, editor::Editor, terminal::Key};
-use crate::ask::{Draft, Request};
+//! Ask user in the composer's place: keys move the cursor, Space and Enter
+//! choose, typing fills `Other`, and the last Enter sends every answer.
 
-/// A question owns its answer editor. The chat editor is never swapped out.
-pub struct Panel {
-    pub editor: Editor,
-    pub choice: Option<String>,
-    pub selected: usize,
-    pub choices_focused: bool,
-}
+use super::{App, terminal::Key, viewport::Scroll};
+use crate::ask::Request;
 
-impl Panel {
-    pub fn new(request: &Request, saved: Option<&Draft>) -> Self {
-        let saved = saved.filter(|draft| draft.id == request.id);
-        let mut editor = Editor::default();
-        if let Some(draft) = saved {
-            editor.replace(draft.text.clone());
-            editor.cursor = draft.cursor.min(editor.text.len());
-            while !editor.text.is_char_boundary(editor.cursor) {
-                editor.cursor -= 1;
-            }
-        }
-        let choice = saved.and_then(|draft| draft.choice.clone()).filter(|id| {
-            request
-                .question
-                .options
-                .iter()
-                .any(|option| &option.id == id)
-        });
-        let selected = choice
-            .as_ref()
-            .and_then(|id| {
-                request
-                    .question
-                    .options
-                    .iter()
-                    .position(|option| &option.id == id)
-            })
-            .unwrap_or(0);
-        Self {
-            editor,
-            choice,
-            selected,
-            choices_focused: false,
-        }
-    }
+mod panel;
+pub use panel::{Entry, Panel};
 
-    pub fn draft(&self, id: &str) -> Draft {
-        Draft {
-            id: id.into(),
-            text: self.editor.text.clone(),
-            cursor: self.editor.cursor,
-            choice: self.choice.clone(),
-        }
-    }
-}
+#[cfg(test)]
+mod tests;
 
 impl App {
     pub(super) fn refresh_question(&mut self) -> bool {
@@ -104,17 +59,18 @@ impl App {
         self.state.changed();
     }
 
+    /// Space selects an option; any other text, or Space in the typed
+    /// words, goes to `Other`.
     pub(super) fn ask_text(&mut self, text: &str) {
-        if let Some(panel) = &mut self.state.ask_panel {
-            panel.choices_focused = false;
-            if text.len() > (64_usize * 1024).saturating_sub(panel.editor.text.len())
-                || !panel.editor.insert(text)
-            {
-                self.warn("Answer exceeds 64 KiB");
-            }
-            self.save_ask_draft();
-            self.capture_input();
+        let (Some(panel), Some(request)) = (&mut self.state.ask_panel, &self.state.question) else {
+            return;
+        };
+        let question = &request.questions[panel.step];
+        let selected = text == " " && panel.select(question);
+        if !selected && !panel.type_text(question, text) {
+            self.warn("Answer exceeds 64 KiB");
         }
+        self.ask_changed();
     }
 
     pub(super) fn close_ask(&mut self) {
@@ -125,33 +81,37 @@ impl App {
 
     fn save_ask_draft(&mut self) {
         if let (Some(panel), Some(request)) = (&self.state.ask_panel, &self.state.question) {
-            self.state.ask_draft = Some(panel.draft(&request.id));
+            self.state.ask_draft = Some(panel.draft(request));
         }
     }
 
+    fn ask_changed(&mut self) {
+        self.save_ask_draft();
+        self.capture_input();
+        self.state.changed();
+    }
+
+    /// The wheel scrolls a block taller than its room, else the conversation.
     pub(super) fn ask_scroll(&mut self, amount: i16) {
-        if let Some(panel) = &mut self.state.ask_panel {
-            let len = self
-                .state
-                .question
-                .as_ref()
-                .map_or(0, |r| r.question.options.len());
-            if len > 0 {
-                panel.choices_focused = true;
-                panel.selected = if amount < 0 {
-                    panel.selected.saturating_sub(1)
-                } else {
-                    (panel.selected + 1).min(len - 1)
-                };
-                panel.choice = self
-                    .state
-                    .question
-                    .as_ref()
-                    .map(|r| r.question.options[panel.selected].id.clone());
-                self.save_ask_draft();
-                self.capture_input();
-            }
+        if !self.scroll_ask(isize::from(amount)) {
+            self.renderer.scroll(Scroll::Rows(amount.into()));
         }
+    }
+
+    fn scroll_ask(&mut self, amount: isize) -> bool {
+        let Some(window) = super::view::ask_window(&self.state) else {
+            return false;
+        };
+        let Some(panel) = self.state.ask_panel.as_mut() else {
+            return false;
+        };
+        if window.total <= window.room {
+            return false;
+        }
+        let last = window.total - window.room;
+        panel.top = Some(window.start.saturating_add_signed(amount).min(last));
+        self.state.changed();
+        true
     }
 
     pub(super) fn ask_key(&mut self, key: Key) {
@@ -163,12 +123,11 @@ impl App {
             self.close_ask();
             return;
         }
-        let Some(request) = self.state.question.as_ref() else {
+        let Some(request) = self.state.question.clone() else {
             return;
         };
         if key.ctrl() && key.code == 68 && !key.alt() {
-            let id = request.id.clone();
-            if let Err(error) = self.question_observer.dismiss(&id) {
+            if let Err(error) = self.question_observer.dismiss(&request.id) {
                 self.warn(&error);
             } else {
                 self.state.ask_panel = None;
@@ -177,63 +136,110 @@ impl App {
             }
             return;
         }
+        let window = super::view::ask_window(&self.state);
         let Some(panel) = self.state.ask_panel.as_mut() else {
             return;
         };
-        if key.code == 9 && !key.ctrl() && !key.alt() {
-            panel.choices_focused = !panel.choices_focused && !request.question.options.is_empty();
-            return;
-        }
-        if panel.choices_focused
-            && !request.question.options.is_empty()
-            && matches!(key.code, 38 | 40)
-        {
-            let last = request.question.options.len() - 1;
-            panel.selected = if key.code == 38 {
-                panel.selected.saturating_sub(1)
-            } else {
-                (panel.selected + 1).min(last)
-            };
-            panel.choice = Some(request.question.options[panel.selected].id.clone());
-            self.save_ask_draft();
-            self.capture_input();
-            return;
-        }
-        if key.code == 13 && !key.shift() && !key.alt() && !key.ctrl() {
-            if panel.choice.is_none() && panel.editor.text.trim().is_empty() {
-                self.warn("Choose an option or type an answer before submitting");
+        let question = &request.questions[panel.step];
+        let typing = panel.entry().in_text(question);
+        // ←→ move the caret through typed words, else between questions.
+        let words = typing && !panel.entry().editor.text.is_empty();
+        let plain = !key.ctrl() && !key.alt() && !key.shift();
+        match key.code {
+            13 if plain => return self.ask_enter(&request),
+            9 if !key.ctrl() && !key.alt() => {
+                if panel.switch(&request, !key.shift()) {
+                    self.ask_changed();
+                }
                 return;
             }
-            let (id, choice, text) = (
-                request.id.clone(),
-                panel.choice.clone(),
-                panel.editor.text.clone(),
-            );
-            if let Err(error) = self.question_observer.answer(&id, choice, text) {
-                self.warn(&error);
-            } else {
-                self.state.ask_panel = None;
-                self.refresh_question();
-                self.capture_input();
+            37 | 39 if plain && !words => {
+                if panel.switch(&request, key.code == 39) {
+                    self.ask_changed();
+                }
+                return;
             }
+            38 | 40 if plain => {
+                let up = key.code == 38;
+                let moved = if question.options.is_empty() {
+                    let columns = window.map_or(1, |window| window.text);
+                    panel.entries[panel.step].editor.vertical(up, columns)
+                } else {
+                    panel.move_row(question, up)
+                };
+                if moved {
+                    self.ask_changed();
+                }
+                return;
+            }
+            33 | 34 if !key.ctrl() && !key.alt() => {
+                let page = window.map_or(1, |window| window.room.saturating_sub(1).max(1));
+                let amount = if key.code == 33 { -1 } else { 1 } * page as isize;
+                if !self.scroll_ask(amount) {
+                    self.renderer.scroll(Scroll::Page(key.code == 33));
+                }
+                return;
+            }
+            _ => {}
+        }
+        if !typing {
             return;
         }
-        if panel.choices_focused && key.code == 32 && !request.question.options.is_empty() {
-            panel.choice = Some(request.question.options[panel.selected].id.clone());
-            self.save_ask_draft();
-            self.capture_input();
-            return;
-        }
-        let before = (panel.editor.text.clone(), panel.editor.cursor);
-        if panel.editor.text.len() >= 64 * 1024
-            && (key.code == 13 && (key.shift() || key.alt()) || key.ctrl() && key.code == 74)
-        {
+        let before = panel.entry().editor.clone();
+        if !panel.edit(question, key) {
             self.warn("Answer exceeds 64 KiB");
             return;
         }
-        panel.editor.key(key);
-        if (panel.editor.text.clone(), panel.editor.cursor) != before {
-            self.save_ask_draft();
+        if panel.entry().editor != before {
+            self.ask_changed();
+        }
+    }
+
+    /// Enter chooses the cursor row of a single choice, or keeps what is
+    /// selected, then moves to the next question; the last sends them all.
+    fn ask_enter(&mut self, request: &Request) {
+        let Some(panel) = self.state.ask_panel.as_mut() else {
+            return;
+        };
+        let question = &request.questions[panel.step];
+        let chosen = if question.is_multiple() {
+            true
+        } else {
+            panel.choose(question)
+        };
+        if !chosen || panel.entry().answer(question).is_none() {
+            self.ask_changed();
+            self.warn(if question.is_multiple() {
+                "Select an answer with Space, or type your own"
+            } else if question.options.is_empty() {
+                "Type your answer, or press Ctrl+D to dismiss"
+            } else {
+                "Type your own answer, or choose an option"
+            });
+            return;
+        }
+        if panel.step + 1 < request.questions.len() {
+            panel.switch(request, true);
+            self.ask_changed();
+            return;
+        }
+        let answers = match panel.answers(request) {
+            Ok(answers) => answers,
+            Err(index) => {
+                panel.step = index;
+                panel.top = None;
+                let title = request.questions[index].title.clone();
+                self.ask_changed();
+                self.warn(&format!("Answer {title} before sending"));
+                return;
+            }
+        };
+        self.ask_changed();
+        if let Err(error) = self.question_observer.answer(&request.id, answers) {
+            self.warn(&error);
+        } else {
+            self.state.ask_panel = None;
+            self.refresh_question();
             self.capture_input();
         }
     }

@@ -1,6 +1,6 @@
 use super::Agent;
 use crate::{
-    ask::{Question, Request},
+    ask::Request,
     backend::ToolCall,
     events::{Event, EventSink},
     json::{self, Value},
@@ -16,16 +16,12 @@ impl Agent {
         if self.child {
             return unavailable("Only the main agent can ask the user");
         }
-        let question = match json::parse(&call.arguments).and_then(|value| {
+        let request = match json::parse(&call.arguments).and_then(|value| {
             crate::tools::parallel(&value)?;
-            Question::parse(&self.redactor.value(&value))
+            Request::parse(&call.id, &self.redactor.value(&value))
         }) {
-            Ok(question) => question,
+            Ok(request) => request,
             Err(error) => return Value::object([("error", Value::string(error))]),
-        };
-        let request = Request {
-            id: call.id.clone(),
-            question,
         };
         match self.questions.begin(request.clone()) {
             Ok(true) => {}

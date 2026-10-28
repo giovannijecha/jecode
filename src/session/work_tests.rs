@@ -39,25 +39,26 @@ fn tool_result(agent: &Agent, id: &str) -> Value {
 
 #[test]
 fn plain_question_accepts_explicit_choice_free_text_and_dismissal() {
-    for (answer, outcome, choice, text) in [
-        ("1", "answered", Some("csv"), ""),
-        ("Use JSON", "answered", None, "Use JSON"),
-        ("/dismiss", "dismissed", None, ""),
+    for (answer, outcome, answers) in [
+        (
+            "1",
+            "answered",
+            Some(r#"[{"choices":["csv"],"id":"format","text":""}]"#),
+        ),
+        (
+            "Use JSON",
+            "answered",
+            Some(r#"[{"choices":[],"id":"format","text":"Use JSON"}]"#),
+        ),
+        ("/dismiss", "dismissed", None),
     ] {
         let project = Directory::new();
         let home = Directory::new();
-        let question = Value::object([
-            ("title", Value::string("Format")),
-            ("question", Value::string("Which export format?")),
-            (
-                "options",
-                Value::Array(vec![Value::object([
-                    ("id", Value::string("csv")),
-                    ("label", Value::string("CSV")),
-                    ("recommended", Value::Bool(true)),
-                ])]),
-            ),
-        ]);
+        let question = json::parse(
+            r#"{"questions":[{"id":"format","title":"Format","question":"Which export format?",
+            "options":[{"id":"csv","label":"CSV","recommended":true}]}]}"#,
+        )
+        .unwrap();
         let fixture = HttpFixture::new(vec![
             (
                 200,
@@ -78,10 +79,7 @@ fn plain_question_accepts_explicit_choice_free_text_and_dismissal() {
         .unwrap();
         let result = tool_result(&agent, "ask-1");
         assert_eq!(result.get("outcome").and_then(Value::as_str), Some(outcome));
-        if outcome == "answered" {
-            assert_eq!(result.get("choice").and_then(Value::as_str), choice);
-            assert_eq!(result.get("text").and_then(Value::as_str), Some(text));
-        }
+        assert_eq!(result.get("answers").map(Value::encode).as_deref(), answers);
         assert!(
             String::from_utf8(output)
                 .unwrap()

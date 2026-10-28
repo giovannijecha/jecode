@@ -1,4 +1,4 @@
-use super::{Question, Reply, Request};
+use super::{Reply, Request};
 use crate::{conversation::ToolCall, json::Value};
 use std::collections::BTreeSet;
 
@@ -49,20 +49,14 @@ pub(crate) fn recovery(messages: &[Value], events: &[Value]) -> Option<(Request,
         }
         match event.get("type").and_then(Value::as_str) {
             Some("user_question") => {
-                let question = Question::parse(event.get("question")?).ok()?;
-                restored = Some((
-                    Request {
-                        id: id.into(),
-                        question,
-                    },
-                    None,
-                ));
+                restored = Some((Request::from_event(event).ok()?, None));
             }
             Some("user_answer") => {
                 if let Some((request, reply)) = &mut restored
                     && request.id == id
                 {
-                    *reply = Reply::parse(event.get("result")?);
+                    *reply = Reply::parse(event.get("result")?)
+                        .filter(|reply| matches(request, reply).is_ok());
                 }
             }
             _ => {}
@@ -85,18 +79,17 @@ pub(crate) fn validate_answer(event: &Value, events: &[Value]) -> Result<(), Str
             event.get("type").and_then(Value::as_str) == Some("user_question")
                 && event.get("tool_call_id").and_then(Value::as_str) == Some(id)
         })
-        .and_then(|event| event.get("question"))
         .ok_or("Saved answer has no question")?;
-    let question = Question::parse(question)?;
-    if let Reply::Answer { choice, text } = reply {
-        if text.len() > 64 * 1024 || choice.is_none() && text.trim().is_empty() {
-            return Err("Invalid saved answer text".into());
-        }
-        if choice.is_some_and(|id| !question.options.iter().any(|option| option.id == id)) {
-            return Err("Invalid saved answer choice".into());
-        }
+    matches(&Request::from_event(question)?, &reply)
+}
+
+fn matches(request: &Request, reply: &Reply) -> Result<(), String> {
+    match reply {
+        Reply::Answered(answers) => request
+            .check(answers)
+            .map_err(|error| format!("Invalid saved answer: {error}")),
+        Reply::Dismissed => Ok(()),
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -130,8 +123,24 @@ mod tests {
                 Value::object([
                     ("title", Value::string("Scope")),
                     ("question", Value::string("Which records?")),
+                    (
+                        "options",
+                        Value::Array(vec![Value::object([
+                            ("id", Value::string("all")),
+                            ("label", Value::string("All")),
+                        ])]),
+                    ),
                 ]),
             ),
+        ])
+    }
+
+    fn answer(result: Value) -> Value {
+        Value::object([
+            ("type", Value::string("user_answer")),
+            ("tool_call_id", Value::string("reused")),
+            ("after_message", Value::number(1)),
+            ("result", result),
         ])
     }
 
@@ -154,33 +163,50 @@ mod tests {
     }
 
     #[test]
+    fn an_earlier_single_question_and_answer_resume_as_one_question() {
+        let saved = answer(Value::object([
+            ("outcome", Value::string("answered")),
+            ("choice", Value::string("all")),
+            ("text", Value::string("")),
+        ]));
+        let events = vec![question(), saved.clone()];
+        validate_answer(&saved, &events).unwrap();
+        let (request, reply) = recovery(&[call()], &events).unwrap();
+        assert_eq!(request.questions.len(), 1);
+        assert_eq!(request.questions[0].id, crate::ask::LEGACY_ID);
+        assert_eq!(request.subject(), "Scope");
+        assert_eq!(
+            reply.unwrap(),
+            Reply::Answered(vec![crate::ask::Answer {
+                id: crate::ask::LEGACY_ID.into(),
+                choices: vec!["all".into()],
+                text: String::new(),
+            }])
+        );
+    }
+
+    #[test]
     fn malformed_answers_cannot_be_restored_as_human_input() {
-        let answer = |result| {
-            Value::object([
-                ("type", Value::string("user_answer")),
-                ("tool_call_id", Value::string("reused")),
-                ("result", result),
-            ])
-        };
         let events = vec![question()];
-        assert!(
-            validate_answer(
-                &answer(Value::object([("outcome", Value::string("answered"))])),
-                &events
-            )
-            .is_err()
-        );
-        assert!(
-            validate_answer(
-                &answer(Value::object([
-                    ("outcome", Value::string("answered")),
-                    ("choice", Value::Null),
-                    ("text", Value::string(" ")),
-                ])),
-                &events
-            )
-            .is_err()
-        );
+        for result in [
+            Value::object([("outcome", Value::string("answered"))]),
+            Value::object([
+                ("outcome", Value::string("answered")),
+                ("choice", Value::Null),
+                ("text", Value::string(" ")),
+            ]),
+            Value::object([
+                ("outcome", Value::string("answered")),
+                ("choice", Value::string("missing")),
+                ("text", Value::string("")),
+            ]),
+            Value::object([
+                ("outcome", Value::string("answered")),
+                ("answers", Value::Array(Vec::new())),
+            ]),
+        ] {
+            assert!(validate_answer(&answer(result), &events).is_err());
+        }
         assert!(
             validate_answer(
                 &answer(Value::object([("outcome", Value::string("dismissed"))])),

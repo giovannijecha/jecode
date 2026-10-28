@@ -161,14 +161,10 @@ impl Handle {
             .iter()
             .map(|receipt| redactor.value(receipt))
             .collect();
-        document.input.question = document.input.question.map(|mut draft| {
-            let (text, cursor) = redactor.text_cursor(&draft.text, draft.cursor);
-            draft.id = redactor.text(&draft.id);
-            draft.text = text;
-            draft.cursor = cursor;
-            draft.choice = draft.choice.map(|choice| redactor.text(&choice));
-            draft
-        });
+        document.input.question = document
+            .input
+            .question
+            .map(|draft| draft.redacted(&redactor));
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;

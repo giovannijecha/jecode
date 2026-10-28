@@ -14,6 +14,11 @@ pub fn description(name: &str, arguments: &Value) -> String {
 
 /// The invocation target, independently of an optional display description.
 pub fn target(name: &str, arguments: &Value) -> String {
+    if name == "ask_user"
+        && let Ok(request) = crate::ask::Request::parse("", arguments)
+    {
+        return request.subject();
+    }
     if matches!(name, "ask_user" | "todo_list") {
         return arguments
             .get("title")

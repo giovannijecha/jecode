@@ -1,7 +1,8 @@
 use super::{Terminal, probe};
 use crate::{
-    ask::{Choice, Question, Request},
+    ask::Request,
     events::Event,
+    json,
     todo::{Plan, Task},
     tui::{
         line::Line,
@@ -51,41 +52,45 @@ pub(super) fn console(bash: &Path) {
     state.editor.insert("main draft survives");
     state.editor.cursor = 4;
     let draft = state.editor.clone();
-    let request = Request {
-        id: "ask-1".into(),
-        question: Question {
-            title: "Export scope".into(),
-            question: "Which report rows should the CSV include?".into(),
-            context: "The current report is filtered by date.".into(),
-            options: vec![
-                Choice {
-                    id: "visible".into(),
-                    label: "Visible rows".into(),
-                    description: "Keep filters".into(),
-                    recommended: true,
-                },
-                Choice {
-                    id: "all".into(),
-                    label: "All rows".into(),
-                    description: "Ignore filters".into(),
-                    recommended: false,
-                },
-            ],
-        },
-    };
+    let arguments = json::parse(
+        r#"{"questions":[{"id":"scope","title":"Export scope",
+        "question":"Which report rows should the CSV include?",
+        "context":"The current report is filtered by date.","options":[
+        {"id":"visible","label":"Visible rows","description":"Keep filters","recommended":true},
+        {"id":"all","label":"All rows","description":"Ignore filters"}]},
+        {"id":"formats","title":"Formats","question":"Which formats?","multiple":true,
+        "options":[{"id":"csv","label":"CSV"},{"id":"xlsx","label":"XLSX"}]}]}"#,
+    )
+    .unwrap();
+    let request = Request::parse("ask-1", &arguments).unwrap();
     state.event(Event::ToolStarted {
         id: request.id.clone(),
         name: "ask_user".into(),
-        arguments: request.question.value(),
+        arguments: request.arguments(),
     });
     state.event(Event::UserQuestion { request });
     let ask = view::frame(&state, "fixture/model", "fixture");
+    let shown: Vec<String> = ask.live.iter().map(Line::plain).collect();
+    for expected in [
+        " ?  Waiting for you ",
+        "  Export scope   Formats",
+        "  Which report rows should the CSV include?",
+        "› ○ Visible rows",
+        "  ○ All rows",
+        "  ○ Other",
+        "Enter  next",
+    ] {
+        assert!(
+            shown.iter().any(|row| row.contains(expected)),
+            "{expected}\n{shown:#?}"
+        );
+    }
     assert!(
-        ask.live
+        shown
             .iter()
-            .any(|row| row.plain().contains("Waiting for you"))
+            .any(|row| row.trim_end().ends_with("recommended"))
     );
-    assert!(ask.live.iter().any(|row| row.plain().contains("Ctrl+D")));
+    assert!(!shown.iter().any(|row| row.contains("ASK USER")));
     assert_eq!(state.editor, draft);
     paint(ask.live, width, height);
 

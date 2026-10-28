@@ -133,15 +133,10 @@ impl Input {
             |prompt: &Prompt| Prompt::new(redactor.text(&prompt.text), prompt.attachments.clone());
         Self {
             draft: draft(&self.draft),
-            question: self.question.as_ref().map(|question| {
-                let (text, cursor) = redactor.text_cursor(&question.text, question.cursor);
-                crate::ask::Draft {
-                    id: redactor.text(&question.id),
-                    text,
-                    cursor,
-                    choice: question.choice.as_ref().map(|choice| redactor.text(choice)),
-                }
-            }),
+            question: self
+                .question
+                .as_ref()
+                .map(|question| question.redacted(redactor)),
             staged: self.staged.clone(),
             queued: self.queued.iter().map(prompt).collect(),
             paused: self.paused.iter().map(draft).collect(),

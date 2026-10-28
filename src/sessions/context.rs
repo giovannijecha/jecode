@@ -149,9 +149,7 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
         match string(event, "type")? {
             "user_question" => {
                 let id = string(event, "tool_call_id")?;
-                crate::ask::Question::parse(
-                    event.get("question").ok_or("Missing saved question")?,
-                )?;
+                crate::ask::Request::from_event(event)?;
                 if !messages.iter().any(|message| {
                     message
                         .get("tool_calls")

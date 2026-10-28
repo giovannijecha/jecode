@@ -11,7 +11,7 @@ use crate::tui::{
     text,
     theme::{ACCENT, CURSOR, DIM, FAINT, MUTED, STRONG, Style, WARNING},
 };
-use editor::{input, input_editor};
+use editor::input;
 
 /// Queued drafts shown above the status row at most.
 const QUEUE_ROWS: usize = 8;
@@ -27,13 +27,22 @@ pub(super) fn render(
     back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let contextual = state.queue.is_editing() || state.history.is_browsing();
-    let sheet = sheet(state, columns);
+    // A question takes the composer's place unless a panel opened over it.
+    let question = state
+        .question
+        .as_ref()
+        .zip(state.ask_panel.as_ref())
+        .filter(|_| {
+            state.quitting.is_none() && state.processes.is_none() && state.agents_panel.is_none()
+        });
+    let sheet = sheet(state, columns).filter(|_| question.is_none());
     // Esc interrupts only where nothing else holds it.
-    let escape = sheet.is_none() && !contextual && !back_to_bottom;
+    let escape = sheet.is_none() && question.is_none() && !contextual && !back_to_bottom;
     let status = status::row(state, columns, escape);
-    let (lines, cursor) = match sheet {
-        Some(sheet) => docked(state, &sheet, status, columns, height),
-        None => {
+    let (lines, cursor) = match (question, sheet) {
+        (Some((request, panel)), _) => ask::block(request, panel, status, columns, height),
+        (None, Some(sheet)) => docked(state, &sheet, status, columns, height),
+        (None, None) => {
             let (draft, cursor) = draft(state, model, directory, columns, height.saturating_sub(1));
             let mut lines = vec![status];
             lines.extend(draft);
@@ -75,8 +84,6 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
         Some(processes::sheet(panel, columns))
     } else if let Some(panel) = &state.agents_panel {
         Some(agents::sheet(state, panel, columns))
-    } else if let (Some(panel), Some(question)) = (&state.ask_panel, &state.question) {
-        Some(ask::sheet(question, panel, columns))
     } else if let Some(panel) = &state.todo_panel {
         Some(todo::sheet(state, panel, columns))
     } else if let Some(info) = &state.information {
@@ -103,32 +110,7 @@ fn top(state: &State, sheet: &Sheet, status: Line, columns: usize) -> Rows {
         },
     )];
     let mut caret = None;
-    if let Some(answer) = state.ask_panel.as_ref().filter(|_| {
-        state.quitting.is_none() && state.processes.is_none() && state.agents_panel.is_none()
-    }) {
-        let input = input_editor(
-            &answer.editor,
-            "Type your answer…",
-            columns,
-            ACCENT,
-            STRONG,
-            window(state),
-            !answer.choices_focused,
-        );
-        parts.push((
-            rule(
-                columns,
-                style,
-                &[Line::new("Your answer", MUTED)],
-                &Line::new(&input.position, MUTED),
-            ),
-            Part::Chrome,
-        ));
-        if !answer.choices_focused {
-            caret = Some((parts.len() + input.cursor.0, input.cursor.1));
-        }
-        parts.extend(input.lines.into_iter().map(|line| (line, Part::Draft)));
-    } else if let Some(field) = &sheet.field {
+    if let Some(field) = &sheet.field {
         let label = [Line::new(&field.label, MUTED)];
         parts.push((rule(columns, style, &label, &Line::default()), Part::Chrome));
         // At extreme widths the field needs every cell, as the draft does.

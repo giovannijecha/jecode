@@ -1,103 +1,198 @@
-use super::panel::{self, Part, Sheet, key};
+//! Ask user takes the composer's place: below the static `? Waiting for you`
+//! pill, between two `accent` rules, an optional step row and the question
+//! in front, then its keys where the footer was. A block taller than its
+//! room scrolls with the cursor.
+
+use super::panel::{self, Key, Part, key};
 use crate::{
     ask::Request,
     tui::{
         ask::Panel,
         line::Line,
+        state::State,
         text,
         theme::{ACCENT, DIM, MUTED, PILL_SURFACE, STRONG},
     },
 };
 
-fn detail(text: &str, style: crate::tui::theme::Style, columns: usize) -> Vec<Line> {
-    Line::new(text, style)
-        .wrap(panel::text_width(columns).max(1), true)
-        .into_iter()
-        .map(|line| panel::indent(line, columns))
-        .collect()
+mod body;
+use body::Body;
+
+/// The block's body rows, for scrolling and moving the caret.
+pub(in crate::tui) struct Window {
+    pub start: usize,
+    pub total: usize,
+    pub room: usize,
+    /// The columns the typed words wrap at.
+    pub text: usize,
 }
 
-pub(super) fn sheet<'a>(request: &'a Request, answer: &'a Panel, columns: usize) -> Sheet<'a> {
-    let width = panel::text_width(columns);
-    let mut rows = Vec::new();
-    let mut option_rows = Vec::new();
-    if !request.question.title.is_empty() {
-        rows.extend(detail(&request.question.title, STRONG, columns));
+struct Layout {
+    body: Body,
+    start: usize,
+    room: usize,
+    overflow: bool,
+}
+
+/// The body for `height` rows: one column narrower when a scrollbar is
+/// needed, starting where the user scrolled or where the caret shows.
+fn layout(request: &Request, panel: &Panel, columns: usize, height: usize) -> Layout {
+    let question = &request.questions[panel.step];
+    let entry = panel.entry();
+    let fixed = 4 + usize::from(request.questions.len() > 1);
+    let room = height.saturating_sub(fixed).max(1);
+    let mut body = body::body(question, entry, columns);
+    let overflow = body.rows.len() > room && columns >= 7;
+    if overflow {
+        body = body::body(question, entry, columns - 1);
     }
-    rows.extend(detail(&request.question.question, STRONG, columns));
-    if !request.question.context.is_empty() {
-        rows.extend(detail(&request.question.context, MUTED, columns));
+    let last = body.rows.len().saturating_sub(room);
+    let target = body
+        .caret
+        .map_or(body.focus.clone(), |(row, _)| row..row + 1);
+    let start = panel
+        .top
+        .unwrap_or_else(|| target.end.saturating_sub(room).min(target.start));
+    Layout {
+        start: start.min(last),
+        body,
+        room,
+        overflow,
     }
-    if !request.question.options.is_empty() {
-        rows.push(Line::default());
+}
+
+pub(super) fn window(state: &State) -> Option<Window> {
+    let (request, panel) = state.question.as_ref().zip(state.ask_panel.as_ref())?;
+    let layout = layout(
+        request,
+        panel,
+        state.width.max(1),
+        super::chrome_height(state).min(state.height),
+    );
+    Some(Window {
+        start: layout.start,
+        total: layout.body.rows.len(),
+        room: layout.room,
+        text: layout.body.text,
+    })
+}
+
+/// The status row, the rules around the step row and the question, and the
+/// keys, fitted to `height`.
+pub(super) fn block(
+    request: &Request,
+    panel: &Panel,
+    status: Line,
+    columns: usize,
+    height: usize,
+) -> (Vec<Line>, Option<(usize, usize)>) {
+    let Layout {
+        body,
+        start,
+        room,
+        overflow,
+    } = layout(request, panel, columns, height);
+    let rule = Line::new(&"─".repeat(columns), ACCENT);
+    let mut parts = vec![(status, Part::Chrome), (rule.clone(), Part::Chrome)];
+    if request.questions.len() > 1 {
+        parts.push((steps(request, panel, columns), Part::Header));
     }
-    for (index, option) in request.question.options.iter().enumerate() {
-        option_rows.push(rows.len());
-        let chosen = answer.choice.as_deref() == Some(option.id.as_str());
-        let focus = answer.choices_focused && answer.selected == index;
-        let mut row = Line::new(
-            if focus { "› " } else { "  " },
-            if focus { ACCENT } else { DIM },
-        );
-        row.push(
-            &format!("{}. {}", index + 1, option.label),
-            if chosen { ACCENT } else { STRONG },
-        );
-        if option.recommended {
-            row.push("  Recommended", ACCENT);
+    let first = parts.len();
+    let total = body.rows.len();
+    let end = (start + room).min(total);
+    let focus = body.caret.map_or(body.focus.start, |(row, _)| row);
+    for (index, row) in body.rows[start..end].iter().enumerate() {
+        let at = start + index;
+        let mut row = row.clone();
+        if overflow {
+            row = panel::fit(row, columns - 1, None);
+            let (glyph, style) = panel::scrollbar(index, start, total, room);
+            row.push(glyph, style);
         }
-        rows.push(panel::choice(row, focus, columns).0);
-        if focus && !option.description.is_empty() {
-            rows.extend(detail(&option.description, MUTED, columns));
+        let part = if body.focus.contains(&at) {
+            Part::Focus
+        } else {
+            Part::Row(at.abs_diff(focus))
+        };
+        parts.push((row, part));
+    }
+    let caret = body
+        .caret
+        .filter(|(row, _)| (start..end).contains(row))
+        .map(|(row, column)| (first + row - start, column));
+    parts.push((rule, Part::Chrome));
+    if columns >= 7 {
+        let keys = panel::row(&keys(request, panel), columns - 4).indent("  ", MUTED);
+        parts.push((keys, Part::Keep));
+    }
+    panel::fitted(parts, caret, height)
+}
+
+/// `☑` before each answered title, the current one in bold `accent`, and
+/// `N of M` in `dim` ending two cells from the edge.
+fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
+    let mut row = Line::new("  ", MUTED);
+    for (index, (question, entry)) in request.questions.iter().zip(&panel.entries).enumerate() {
+        if index > 0 {
+            row.push("   ", MUTED);
+        }
+        let title = text::clean(&question.title).replace('\n', " ");
+        if index == panel.step {
+            row.push(&title, ACCENT.bold());
+        } else if entry.answer(question).is_some() {
+            row.push("☑ ", ACCENT);
+            row.push(&title, MUTED);
+        } else {
+            row.push(&title, MUTED);
         }
     }
-    let total = rows.len();
-    let selected = option_rows.get(answer.selected).copied().unwrap_or(0);
-    Sheet {
-        title: panel::title(None, "Ask user", "answer required"),
-        aside: Line::new("Waiting for you", MUTED),
-        field: None,
-        draft_caret: false,
-        head: vec![],
-        body: Box::new(move |room| {
-            let start = if total > room && selected > 0 {
-                selected
-                    .saturating_sub(room.saturating_sub(1))
-                    .min(total - room)
-            } else {
-                0
-            };
-            rows.iter()
-                .skip(start)
-                .take(room)
-                .cloned()
-                .enumerate()
-                .map(|(index, line)| {
-                    let part = if answer.choices_focused && start + index == selected {
-                        Part::Focus
-                    } else {
-                        Part::Row((start + index).abs_diff(selected))
-                    };
-                    (line, part)
-                })
-                .collect()
-        }),
-        total: Some(total),
-        tail: Box::new(move |overflow| {
-            panel::keys(
-                &[
-                    key("Tab", "answer / choices"),
-                    key("↑↓", "choose").scrolling(),
-                    key("Enter", "send answer"),
-                    key("Ctrl+D", "dismiss"),
-                    key("Esc", "chat"),
-                ],
-                width,
-                overflow,
-            )
-        }),
-        confirming: false,
+    let count = format!("{} of {}", panel.step + 1, request.questions.len());
+    let count_cells = text::cells(&count);
+    let mut row = row.shortened(columns.saturating_sub(count_cells + 4));
+    let used = panel::cells(&row);
+    row.push(
+        &" ".repeat(columns.saturating_sub(count_cells + 2 + used)),
+        MUTED,
+    );
+    row.push(&count, DIM);
+    row.shortened(columns)
+}
+
+/// Enter chooses, moves on or sends; Space selects for a multiple choice;
+/// ←→ (or Tab inside typed words) move between several questions.
+fn keys(request: &Request, panel: &Panel) -> Vec<Key<'static>> {
+    let question = &request.questions[panel.step];
+    let entry = panel.entry();
+    let several = request.questions.len() > 1;
+    let typing = entry.in_text(question);
+    let free = question.options.is_empty();
+    let verb = if several && panel.step + 1 < request.questions.len() {
+        "next"
+    } else if !several && !typing && !question.is_multiple() {
+        "choose"
+    } else {
+        "send"
+    };
+    let mut keys = Vec::new();
+    if question.is_multiple() && !typing {
+        keys.push(key("Space", "select"));
     }
+    keys.push(key("Enter", verb));
+    if free {
+        keys.push(key("Ctrl+J", "new line"));
+    }
+    if several {
+        keys.push(if typing && !entry.editor.text.is_empty() {
+            key("Tab", "questions")
+        } else {
+            key("←→", "questions")
+        });
+    } else if !free {
+        keys.push(key("↑↓", "move"));
+    }
+    keys.push(key("Esc", "back to chat"));
+    keys.push(key("Ctrl+D", "dismiss"));
+    keys
 }
 
 pub(super) fn status(columns: usize, hidden: bool) -> Line {

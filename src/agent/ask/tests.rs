@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    ask::{Answer, AnswerDraft},
     backend::openrouter::OpenRouter,
     sessions::{Draft, Input},
     test_support::{Directory, HttpFixture, completion, tool_call},
@@ -7,18 +8,30 @@ use crate::{
 };
 
 fn arguments() -> Value {
-    Value::object([
-        ("title", Value::string("Export")),
-        ("question", Value::string("Which format?")),
-        (
-            "options",
-            Value::Array(vec![Value::object([
-                ("id", Value::string("csv")),
-                ("label", Value::string("CSV")),
-                ("recommended", Value::Bool(true)),
-            ])]),
-        ),
-    ])
+    Value::object([(
+        "questions",
+        Value::Array(vec![Value::object([
+            ("id", Value::string("format")),
+            ("title", Value::string("Export")),
+            ("question", Value::string("Which format?")),
+            (
+                "options",
+                Value::Array(vec![Value::object([
+                    ("id", Value::string("csv")),
+                    ("label", Value::string("CSV")),
+                    ("recommended", Value::Bool(true)),
+                ])]),
+            ),
+        ])]),
+    )])
+}
+
+fn answer(choices: &[&str], text: &str) -> Vec<Answer> {
+    vec![Answer {
+        id: "format".into(),
+        choices: choices.iter().map(|&choice| choice.into()).collect(),
+        text: text.into(),
+    }]
 }
 
 fn stage_question(agent: &mut Agent, other_call: bool) {
@@ -56,10 +69,7 @@ fn stage_question(agent: &mut Agent, other_call: bool) {
     assert!(
         agent
             .questions
-            .begin(Request {
-                id: "ask-1".into(),
-                question: Question::parse(&arguments()).unwrap()
-            })
+            .begin(Request::parse("ask-1", &arguments()).unwrap())
             .unwrap()
     );
 }
@@ -88,9 +98,14 @@ fn resume_question_keeps_drafts_and_delivers_saved_answer_once_without_replaying
             },
             question: Some(crate::ask::Draft {
                 id: "ask-1".into(),
-                text: "Keep dates".into(),
-                cursor: 5,
-                choice: Some("csv".into()),
+                step: 0,
+                answers: vec![AnswerDraft {
+                    choices: vec!["csv".into()],
+                    other: false,
+                    text: "Keep dates".into(),
+                    caret: 5,
+                    row: 1,
+                }],
             }),
             ..Default::default()
         });
@@ -98,7 +113,7 @@ fn resume_question_keeps_drafts_and_delivers_saved_answer_once_without_replaying
         if saved_answer {
             original
                 .questions
-                .answer("ask-1", Some("csv".into()), "Keep dates".into())
+                .answer("ask-1", answer(&["csv"], "Keep dates"))
                 .unwrap();
         }
         drop(original);
@@ -111,7 +126,8 @@ fn resume_question_keeps_drafts_and_delivers_saved_answer_once_without_replaying
         let doc = resumed.sessions().unwrap().snapshot();
         assert_eq!(doc.input.draft.text, "Unsent follow-up");
         assert_eq!(doc.input.draft.cursor, 4);
-        assert_eq!(doc.input.question.as_ref().unwrap().cursor, 5);
+        let draft = doc.input.question.as_ref().unwrap();
+        assert_eq!((draft.answers[0].caret, draft.answers[0].row), (5, 1));
         assert!(
             !doc.messages.iter().any(
                 |message| message.get("tool_call_id").and_then(Value::as_str) == Some("ask-1")
@@ -126,7 +142,7 @@ fn resume_question_keeps_drafts_and_delivers_saved_answer_once_without_replaying
                 .continue_question(&mut |event| {
                     if let Event::UserQuestion { request } = event {
                         asked += 1;
-                        observer.answer(&request.id, Some("csv".into()), "Keep dates".into())?;
+                        observer.answer(&request.id, answer(&["csv"], "Keep dates"))?;
                     }
                     Ok(())
                 })
@@ -147,10 +163,9 @@ fn resume_question_keeps_drafts_and_delivers_saved_answer_once_without_replaying
             answer.get("outcome").and_then(Value::as_str),
             Some("answered")
         );
-        assert_eq!(answer.get("choice").and_then(Value::as_str), Some("csv"));
         assert_eq!(
-            answer.get("text").and_then(Value::as_str),
-            Some("Keep dates")
+            answer.get("answers").map(Value::encode).as_deref(),
+            Some(r#"[{"choices":["csv"],"id":"format","text":"Keep dates"}]"#)
         );
         assert!(!doc.pending.active);
         assert_eq!(fixture.finish().len(), 1);
@@ -204,17 +219,24 @@ fn answer_save_failure_does_not_release_question_or_invent_answer() {
     );
     agent.enable_sessions(home.path()).unwrap();
     stage_question(&mut agent, false);
-    assert!(agent.questions.answer("ask-1", None, " ".into()).is_err());
+    for invalid in [
+        answer(&[], " "),
+        answer(&["missing"], ""),
+        answer(&["csv", "csv"], ""),
+        Vec::new(),
+    ] {
+        assert!(agent.questions.answer("ask-1", invalid).is_err());
+    }
     assert!(
         agent
             .questions
-            .answer("wrong", Some("csv".into()), "".into())
+            .answer("wrong", answer(&["csv"], ""))
             .is_err()
     );
     let mut broken = agent.archive();
     broken.messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     agent.questions.bind(broken, agent.sessions());
-    assert!(agent.questions.answer("ask-1", None, "CSV".into()).is_err());
+    assert!(agent.questions.answer("ask-1", answer(&[], "CSV")).is_err());
     assert!(agent.questions.pending().is_some());
     assert!(agent.questions.saved_reply().is_none());
     assert!(
@@ -295,7 +317,7 @@ fn deleting_the_conversation_rebinds_questions_to_the_replacement_session() {
     let observer = agent.questions();
     let mut respond = |event| {
         if let Event::UserQuestion { request } = event {
-            observer.answer(&request.id, None, "CSV".into())?;
+            observer.answer(&request.id, answer(&[], "CSV"))?;
         }
         Ok(())
     };

@@ -96,6 +96,8 @@ impl Agent {
             self.execute_tool_with_change(call, begun)
         };
         if call.name == "ask_user" && self.questions.is_suspended() {
+            // The question resumes alone; later calls in the turn never ran.
+            self.cancel_calls(remaining);
             return Err("Question saved for resume".into());
         }
         let timing = clock.finish(executing);

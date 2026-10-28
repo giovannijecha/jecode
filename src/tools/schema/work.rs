@@ -104,11 +104,10 @@ pub(super) fn ask_user() -> Value {
         ]),
         &["id", "label"],
     );
-    super::tool(
-        "ask_user",
-        "Ask one focused question and wait for an explicit answer. Options are optional and free text is always available. A recommendation is not an answer. If interactive input is unavailable or the question is dismissed, report that no answer was supplied; do not infer consent. Collaborators cannot ask the user directly. Calls run in order even with parallel:true.",
+    let question = object(
         Value::object([
-            ("title", string("Short question title.")),
+            ("id", string("Stable question ID in this call.")),
+            ("title", string("Short title shown in the question steps.")),
             (
                 "question",
                 string("One question requiring the user's decision or missing information."),
@@ -116,6 +115,16 @@ pub(super) fn ask_user() -> Value {
             (
                 "context",
                 string("Optional concise context for the decision."),
+            ),
+            (
+                "multiple",
+                Value::object([
+                    ("type", Value::string("boolean")),
+                    (
+                        "description",
+                        Value::string("True when the user may choose several options."),
+                    ),
+                ]),
             ),
             (
                 "options",
@@ -126,7 +135,21 @@ pub(super) fn ask_user() -> Value {
                 ]),
             ),
         ]),
-        &["title", "question"],
+        &["id", "title", "question"],
+    );
+    super::tool(
+        "ask_user",
+        "Ask the user one to four focused questions and wait for explicit answers; they are answered one at a time and sent together. Each question may offer single or multiple choice options, and the user can always answer in their own words. Nothing is preselected and a recommendation is not an answer. The result lists each question's chosen option IDs and typed text. If interactive input is unavailable or the questions are dismissed, report that no answer was supplied; do not infer consent. Collaborators cannot ask the user directly. Calls run in order even with parallel:true.",
+        Value::object([(
+            "questions",
+            Value::object([
+                ("type", Value::string("array")),
+                ("items", question),
+                ("minItems", Value::number(1)),
+                ("maxItems", Value::number(4)),
+            ]),
+        )]),
+        &["questions"],
     )
 }
 
@@ -154,7 +177,22 @@ mod tests {
                 .get("required")
                 .and_then(Value::as_array)
                 .unwrap(),
-            &[Value::string("title"), Value::string("question")]
+            &[Value::string("questions")]
+        );
+        let questions = ask_params
+            .get("properties")
+            .and_then(|properties| properties.get("questions"))
+            .unwrap();
+        assert_eq!(
+            questions.get("maxItems").map(Value::encode),
+            Some("4".into())
+        );
+        assert_eq!(
+            questions
+                .get("items")
+                .and_then(|item| item.get("required"))
+                .map(Value::encode),
+            Some(r#"["id","title","question"]"#.into())
         );
         let names = |delegation| {
             crate::tools::definitions_for(delegation)

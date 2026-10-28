@@ -1,4 +1,5 @@
 mod agents;
+mod ask;
 mod attach;
 mod checkpoints;
 pub mod commands;
@@ -63,7 +64,7 @@ fn chat_inner(
     if let Some(id) = resume {
         persistence::resume(agent, config, id.as_deref(), input, output, status)?;
         if agent.has_pending_question() {
-            run_plain(agent, Work::Question, input, output, status)?;
+            resume_question(agent, input, output, status)?;
         }
         if agent.has_open_collaboration_report() {
             run_plain(agent, Work::Collaboration, input, output, status)?;
@@ -77,7 +78,7 @@ fn chat_inner(
     }
     loop {
         if agent.has_pending_question() {
-            run_plain(agent, Work::Question, input, output, status)?;
+            resume_question(agent, input, output, status)?;
         }
         if agent.has_open_collaboration_report() {
             run_plain(agent, Work::Collaboration, input, output, status)?;
@@ -232,6 +233,23 @@ fn chat_inner(
     }
 }
 
+/// A failed answer or continuation is reported and the chat stays open.
+fn resume_question(
+    agent: &mut Agent,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+    status: &mut impl Write,
+) -> Result<(), String> {
+    let result =
+        run_plain(agent, Work::Question, input, output, status).and_then(|()| agent.save_session());
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            writeln!(status, "{}", agent.redact(&error)).map_err(|error| error.to_string())
+        }
+    }
+}
+
 enum Work {
     Turn(Prompt),
     Question,
@@ -250,44 +268,7 @@ fn run_plain(
     let mut console = Console::new(output, status);
     let mut sink = |event: Event| -> Result<(), String> {
         if let Event::UserQuestion { request } = &event {
-            let request = request.clone();
-            console.emit(event)?;
-            loop {
-                let Some(line) = read_line(input)? else {
-                    questions.suspend();
-                    return Ok(());
-                };
-                let answer = line.trim_end_matches(['\r', '\n']);
-                let result = if answer == "/dismiss" {
-                    questions.dismiss(&request.id)
-                } else {
-                    let choice = answer
-                        .trim()
-                        .parse::<usize>()
-                        .ok()
-                        .filter(|number| *number > 0)
-                        .and_then(|number| request.question.options.get(number - 1))
-                        .map(|option| option.id.clone());
-                    questions.answer(
-                        &request.id,
-                        choice.clone(),
-                        if choice.is_some() {
-                            String::new()
-                        } else {
-                            answer.to_owned()
-                        },
-                    )
-                };
-                match result {
-                    Ok(()) => return Ok(()),
-                    Err(error) => {
-                        console.emit(Event::Maintenance { text: error })?;
-                        console.emit(Event::UserQuestion {
-                            request: request.clone(),
-                        })?;
-                    }
-                }
-            }
+            return ask::answer(&questions, request, input, console.output());
         }
         console.emit(event)
     };
@@ -300,6 +281,8 @@ fn run_plain(
     result
 }
 
+#[cfg(test)]
+mod ask_tests;
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]

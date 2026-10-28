@@ -5,107 +5,15 @@ use crate::{cancel::Cancellation, export::Archive, json::Value, sessions::Handle
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+mod draft;
 mod persistence;
+mod question;
+mod reply;
+pub use draft::{AnswerDraft, Draft};
 pub(crate) use persistence::{recovery, validate_answer};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Choice {
-    pub id: String,
-    pub label: String,
-    pub description: String,
-    pub recommended: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Question {
-    pub title: String,
-    pub question: String,
-    pub context: String,
-    pub options: Vec<Choice>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Request {
-    pub id: String,
-    pub question: Question,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Draft {
-    pub id: String,
-    pub text: String,
-    pub cursor: usize,
-    pub choice: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Reply {
-    Answer {
-        choice: Option<String>,
-        text: String,
-    },
-    Dismissed,
-}
-
-impl Reply {
-    pub(crate) fn result(&self) -> Value {
-        match self {
-            Self::Answer { choice, text } => Value::object([
-                ("outcome", Value::string("answered")),
-                ("choice", choice.as_ref().map_or(Value::Null, Value::string)),
-                ("text", Value::string(text)),
-            ]),
-            Self::Dismissed => Value::object([("outcome", Value::string("dismissed"))]),
-        }
-    }
-}
-
-impl Draft {
-    pub(crate) fn value(&self) -> Value {
-        Value::object([
-            ("id", Value::string(&self.id)),
-            ("text", Value::string(&self.text)),
-            ("cursor", Value::number(self.cursor)),
-            (
-                "choice",
-                self.choice.as_ref().map_or(Value::Null, Value::string),
-            ),
-        ])
-    }
-
-    pub(crate) fn parse(value: &Value) -> Result<Self, String> {
-        let id = value
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("Invalid question draft ID")?;
-        let text = value
-            .get("text")
-            .and_then(Value::as_str)
-            .ok_or("Invalid question draft text")?;
-        let cursor = value
-            .get("cursor")
-            .and_then(Value::as_usize)
-            .ok_or("Invalid question draft cursor")?;
-        if id.is_empty()
-            || text.len() > 64 * 1024
-            || cursor > text.len()
-            || !text.is_char_boundary(cursor)
-        {
-            return Err("Invalid question draft".into());
-        }
-        let choice = match value.get("choice") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(value)) => Some(value.clone()),
-            _ => return Err("Invalid question draft choice".into()),
-        };
-        Ok(Self {
-            id: id.into(),
-            text: text.into(),
-            cursor,
-            choice,
-        })
-    }
-}
+pub use question::{LEGACY_ID, MAX_OPTIONS, MAX_QUESTIONS, Question, Request};
+pub(crate) use reply::Reply;
+pub use reply::{Answer, TEXT_LIMIT};
 
 #[derive(Default)]
 struct State {
@@ -153,28 +61,15 @@ impl Observer {
         self.0.0.lock().unwrap().request.clone()
     }
 
-    pub fn answer(&self, id: &str, choice: Option<String>, text: String) -> Result<(), String> {
-        if text.len() > 64 * 1024 {
-            return Err("Answer exceeds 64 KiB".into());
-        }
+    /// One answer per question, in order.
+    pub fn answer(&self, id: &str, answers: Vec<Answer>) -> Result<(), String> {
         let mut state = self.0.0.lock().unwrap();
         let request = state.request.as_ref().ok_or("No question is waiting")?;
         if request.id != id || state.reply.is_some() {
             return Err("This question is no longer waiting".into());
         }
-        if let Some(choice) = &choice
-            && !request
-                .question
-                .options
-                .iter()
-                .any(|option| &option.id == choice)
-        {
-            return Err("Unknown answer choice".into());
-        }
-        if choice.is_none() && text.trim().is_empty() {
-            return Err("Enter an answer or choose an option".into());
-        }
-        let reply = Reply::Answer { choice, text };
+        request.check(&answers)?;
+        let reply = Reply::Answered(answers);
         self.save_reply(&state, &reply)?;
         state.reply = Some(reply);
         self.0.1.notify_all();
@@ -241,16 +136,16 @@ impl Observer {
         if state.request.is_some() {
             return Err("Another question is already waiting".into());
         }
-        let event = Value::object([
-            ("type", Value::string("user_question")),
-            ("tool_call_id", Value::string(&request.id)),
-            ("question", request.question.value()),
-        ]);
+        let Value::Object(mut event) = request.arguments() else {
+            unreachable!()
+        };
+        event.insert("type".into(), Value::string("user_question"));
+        event.insert("tool_call_id".into(), Value::string(&request.id));
         state
             .handle
             .as_ref()
             .unwrap()
-            .append_event(state.archive.as_ref().unwrap(), event)?;
+            .append_event(state.archive.as_ref().unwrap(), Value::Object(event))?;
         state.request = Some(request);
         state.reply = None;
         state.suspended = false;
@@ -292,111 +187,5 @@ impl Observer {
     }
 }
 
-impl Question {
-    pub(crate) fn parse(value: &Value) -> Result<Self, String> {
-        let get = |key| value.get(key).and_then(Value::as_str);
-        let title = get("title").ok_or("title must be a string")?;
-        let question = get("question").ok_or("question must be a string")?;
-        let context = optional_text(value, "context")?;
-        if title.trim().is_empty()
-            || title.len() > 160
-            || question.trim().is_empty()
-            || question.len() > 4096
-            || context.len() > 4096
-        {
-            return Err("Question title, text or context is invalid".into());
-        }
-        let options = match value.get("options") {
-            None => &[][..],
-            Some(Value::Array(options)) if options.len() <= 6 => options.as_slice(),
-            _ => return Err("options must contain at most six choices".into()),
-        };
-        let mut parsed = Vec::new();
-        for option in options {
-            let id = option
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or("option id must be a string")?;
-            let label = option
-                .get("label")
-                .and_then(Value::as_str)
-                .ok_or("option label must be a string")?;
-            let description = optional_text(option, "description")?;
-            let recommended = match option.get("recommended") {
-                None | Some(Value::Bool(false)) => false,
-                Some(Value::Bool(true)) => true,
-                _ => return Err("recommended must be a boolean".into()),
-            };
-            if id.is_empty()
-                || id.len() > 80
-                || label.trim().is_empty()
-                || label.len() > 160
-                || description.len() > 512
-                || parsed.iter().any(|item: &Choice| item.id == id)
-            {
-                return Err("Question option is invalid or duplicated".into());
-            }
-            parsed.push(Choice {
-                id: id.into(),
-                label: label.into(),
-                description: description.into(),
-                recommended,
-            });
-        }
-        Ok(Self {
-            title: title.into(),
-            question: question.into(),
-            context: context.into(),
-            options: parsed,
-        })
-    }
-
-    pub(crate) fn value(&self) -> Value {
-        Value::object([
-            ("title", Value::string(&self.title)),
-            ("question", Value::string(&self.question)),
-            ("context", Value::string(&self.context)),
-            (
-                "options",
-                Value::Array(
-                    self.options
-                        .iter()
-                        .map(|item| {
-                            Value::object([
-                                ("id", Value::string(&item.id)),
-                                ("label", Value::string(&item.label)),
-                                ("description", Value::string(&item.description)),
-                                ("recommended", Value::Bool(item.recommended)),
-                            ])
-                        })
-                        .collect(),
-                ),
-            ),
-        ])
-    }
-}
-
-fn optional_text<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
-    match value.get(key) {
-        None => Ok(""),
-        Some(Value::String(text)) => Ok(text),
-        Some(_) => Err(format!("{key} must be a string")),
-    }
-}
-
-impl Reply {
-    fn parse(value: &Value) -> Option<Self> {
-        match value.get("outcome")?.as_str()? {
-            "answered" => Some(Self::Answer {
-                choice: match value.get("choice")? {
-                    Value::Null => None,
-                    Value::String(value) => Some(value.clone()),
-                    _ => return None,
-                },
-                text: value.get("text")?.as_str()?.into(),
-            }),
-            "dismissed" => Some(Self::Dismissed),
-            _ => None,
-        }
-    }
-}
+#[cfg(test)]
+mod tests;

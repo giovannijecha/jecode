@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    ask::{Choice, Question, Request},
+    ask::Request,
     tui::{keys::Decoded, terminal::Key},
 };
 
@@ -12,56 +12,65 @@ fn key(code: u16, modifiers: u8) -> Key {
     }
 }
 
-fn question() -> Question {
-    Question {
-        title: "Export scope".into(),
-        question: "Which rows should the CSV include?".into(),
-        context: "The report currently has active filters.".into(),
-        options: vec![
-            Choice {
-                id: "visible".into(),
-                label: "Visible rows".into(),
-                description: "Keep filters".into(),
-                recommended: true,
-            },
-            Choice {
-                id: "all".into(),
-                label: "All rows".into(),
-                description: "Ignore filters".into(),
-                recommended: false,
-            },
-        ],
-    }
+fn scope() -> Value {
+    json::parse(
+        r#"{"id":"scope","title":"Export scope","question":"Which rows should the CSV include?",
+        "context":"The report currently has active filters.","options":[
+        {"id":"visible","label":"Visible rows","description":"Keep filters","recommended":true},
+        {"id":"all","label":"All rows","description":"Ignore filters"}]}"#,
+    )
+    .unwrap()
 }
 
 fn question_args() -> Value {
-    Value::object([
-        ("title", Value::string("Export scope")),
-        (
-            "question",
-            Value::string("Which rows should the CSV include?"),
-        ),
-        (
-            "context",
-            Value::string("The report currently has active filters."),
-        ),
-        (
-            "options",
-            Value::Array(vec![
-                Value::object([
-                    ("id", Value::string("visible")),
-                    ("label", Value::string("Visible rows")),
-                    ("description", Value::string("Keep filters")),
-                    ("recommended", Value::Bool(true)),
-                ]),
-                Value::object([
-                    ("id", Value::string("all")),
-                    ("label", Value::string("All rows")),
-                    ("description", Value::string("Ignore filters")),
-                ]),
-            ]),
-        ),
-    ])
+    Value::object([("questions", Value::Array(vec![scope()]))])
+}
+
+fn several_args() -> Value {
+    let formats = json::parse(
+        r#"{"id":"formats","title":"Formats","question":"Which formats?","multiple":true,
+        "options":[{"id":"csv","label":"CSV"},{"id":"xlsx","label":"XLSX"},{"id":"json","label":"JSON"}]}"#,
+    )
+    .unwrap();
+    let delivery = json::parse(
+        r#"{"id":"delivery","title":"Delivery","question":"Where should exports go?"}"#,
+    )
+    .unwrap();
+    Value::object([("questions", Value::Array(vec![scope(), formats, delivery]))])
+}
+
+fn request(id: &str) -> Request {
+    Request::parse(id, &question_args()).unwrap()
+}
+
+fn ask_result(app: &App) -> Option<&Value> {
+    app.state.items.iter().find_map(|item| match item {
+        state::Item::Tool {
+            name,
+            result: Some(result),
+            ..
+        } if name == "ask_user" => Some(result),
+        _ => None,
+    })
+}
+
+fn conversation(state: &State) -> String {
+    state
+        .rows()
+        .iter()
+        .flatten()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn dock(state: &State) -> String {
+    view::composer_frame(state, "fixture", "folder")
+        .live
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -83,27 +92,33 @@ fn ask_waits_for_explicit_input_and_keeps_chat_draft_through_escape() {
     let mut app = App::new(agent, config(&directory), None);
     submit(&mut app, "Export the report");
     wait_until(&mut app, |app| app.state.question.is_some());
-    assert!(app.state.ask_panel.as_ref().unwrap().choice.is_none());
-    assert!(app.state.items.iter().any(|item| matches!(item,
-        state::Item::Tool { name, result: None, .. } if name == "ask_user")));
+    let entry = app.state.ask_panel.as_ref().unwrap().entry().clone();
+    assert!(
+        entry.picked.is_empty() && !entry.other,
+        "nothing preselected"
+    );
+    assert!(
+        !conversation(&app.state).contains("ASK USER"),
+        "nothing is added to the conversation while waiting"
+    );
 
     app.state.editor.insert("Keep keyboard shortcuts");
     app.state.editor.cursor = 4;
     let chat = app.state.editor.clone();
-    app.input(Decoded::Key(key(13, 0))).unwrap();
-    assert!(
-        app.state.question.is_some(),
-        "empty Enter must not submit a recommendation"
-    );
     app.input(Decoded::Text("Keep the date filter\n ".into()))
         .unwrap();
+    let entry = app.state.ask_panel.as_ref().unwrap().entry().clone();
+    assert!(
+        entry.other && entry.row == 2,
+        "typing fills and selects Other"
+    );
     app.input(Decoded::Key(key(27, 0))).unwrap();
     assert!(app.state.ask_panel.is_none());
     assert_eq!(app.state.editor, chat);
     app.persist_input(true);
     let saved = app.persistence.as_ref().unwrap().snapshot().input;
     assert_eq!(
-        saved.question.as_ref().unwrap().text,
+        saved.question.as_ref().unwrap().answers[0].text,
         "Keep the date filter\n "
     );
     assert_eq!(saved.draft.cursor, chat.cursor);
@@ -112,41 +127,33 @@ fn ask_waits_for_explicit_input_and_keeps_chat_draft_through_escape() {
     app.open_agents();
     app.input(Decoded::Key(key(27, 0))).unwrap();
     app.open_ask();
-    assert_eq!(
-        app.state.ask_panel.as_ref().unwrap().editor.text,
-        "Keep the date filter\n "
-    );
+    let panel = app.state.ask_panel.as_ref().unwrap();
+    assert_eq!(panel.entry().editor.text, "Keep the date filter\n ");
+
+    // Arrows and the wheel move the cursor only; Space selects without sending.
+    app.input(Decoded::Key(key(38, 0))).unwrap();
+    app.input(Decoded::Scroll(3)).unwrap();
+    let entry = app.state.ask_panel.as_ref().unwrap().entry().clone();
+    assert_eq!((entry.row, entry.picked.len(), entry.other), (1, 0, true));
+    app.input(Decoded::Text(" ".into())).unwrap();
+    let entry = app.state.ask_panel.as_ref().unwrap().entry().clone();
+    assert_eq!((entry.picked.clone(), entry.other), (vec![1], false));
+    assert!(app.state.question.is_some(), "Space must not send");
+    // Enter sends the highlighted row, not the earlier selection.
     app.input(Decoded::Key(key(9, 0))).unwrap();
-    app.input(Decoded::Key(key(40, 0))).unwrap();
-    assert_eq!(
-        app.state.ask_panel.as_ref().unwrap().choice.as_deref(),
-        Some("all")
-    );
-    assert!(
-        app.state.question.is_some(),
-        "selecting a row must not submit it"
-    );
+    app.input(Decoded::Key(key(38, 0))).unwrap();
     app.input(Decoded::Key(key(13, 0))).unwrap();
     finish(&mut app);
     assert!(app.state.question.is_none());
     assert_eq!(app.state.editor, chat);
-    let receipt = app
-        .state
-        .items
-        .iter()
-        .find_map(|item| match item {
-            state::Item::Tool {
-                name,
-                result: Some(result),
-                ..
-            } if name == "ask_user" => Some(result),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(receipt.get("choice").and_then(Value::as_str), Some("all"));
     assert_eq!(
-        receipt.get("text").and_then(Value::as_str),
-        Some("Keep the date filter\n ")
+        ask_result(&app).unwrap().get("answers").map(Value::encode),
+        Some(r#"[{"choices":["visible"],"id":"scope","text":""}]"#.into())
+    );
+    let receipt = conversation(&app.state);
+    assert!(
+        receipt.contains(" ASK USER  Export scope\n  └ Visible rows"),
+        "{receipt}"
     );
     let id = app.persistence.as_ref().unwrap().id();
     drop(app);
@@ -159,22 +166,10 @@ fn ask_waits_for_explicit_input_and_keeps_chat_draft_through_escape() {
     let mut resumed = App::new(next_agent, config(&directory), None);
     resumed.resume_session(&id);
     assert!(resumed.state.question.is_none());
-    let cards: Vec<_> = resumed
-        .state
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            state::Item::Tool {
-                name,
-                result: Some(result),
-                ..
-            } if name == "ask_user" => Some(result),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(cards.len(), 1);
     assert_eq!(
-        cards[0].get("outcome").and_then(Value::as_str),
+        ask_result(&resumed)
+            .and_then(|result| result.get("outcome"))
+            .and_then(Value::as_str),
         Some("answered")
     );
     drop(resumed);
@@ -186,67 +181,141 @@ fn ask_waits_for_explicit_input_and_keeps_chat_draft_through_escape() {
 }
 
 #[test]
+fn several_questions_are_answered_one_at_a_time_and_sent_together() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion("", vec![tool_call("ask-1", "ask_user", several_args())]),
+        ),
+        (200, completion("Export settings recorded.", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let mut app = App::new(agent, config(&directory), None);
+    app.state.width = 100;
+    submit(&mut app, "Export the report");
+    wait_until(&mut app, |app| app.state.question.is_some());
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert_eq!(app.state.ask_panel.as_ref().unwrap().step, 1);
+    let block = dock(&app.state);
+    assert!(
+        block.contains("☑ Export scope   Formats   Delivery"),
+        "{block}"
+    );
+    assert!(block.contains("2 of 3"), "{block}");
+    assert!(
+        block.contains(" Space  select    Enter  next    ←→  questions    Esc  back to chat"),
+        "{block}"
+    );
+    app.input(Decoded::Text(" ".into())).unwrap();
+    app.input(Decoded::Key(key(40, 0))).unwrap();
+    app.input(Decoded::Key(key(40, 0))).unwrap();
+    app.input(Decoded::Text(" ".into())).unwrap();
+    app.input(Decoded::Key(key(37, 0))).unwrap();
+    assert_eq!(app.state.ask_panel.as_ref().unwrap().step, 0);
+    app.input(Decoded::Key(key(39, 0))).unwrap();
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert_eq!(app.state.ask_panel.as_ref().unwrap().step, 2);
+    let block = dock(&app.state);
+    assert!(
+        block.contains("› Type your answer") && block.contains("Enter  send    Ctrl+J  new line"),
+        "{block}"
+    );
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert!(app.state.question.is_some(), "an empty answer is not sent");
+    app.input(Decoded::Text("Email the team lead".into()))
+        .unwrap();
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    finish(&mut app);
+    assert_eq!(
+        ask_result(&app).unwrap().get("answers").map(Value::encode),
+        Some(
+            r#"[{"choices":["visible"],"id":"scope","text":""},{"choices":["csv","json"],"id":"formats","text":""},{"choices":[],"id":"delivery","text":"Email the team lead"}]"#
+                .into()
+        )
+    );
+    let receipt = conversation(&app.state);
+    assert!(
+        receipt.contains(
+            " ASK USER  3 questions\n  │ Export scope  Visible rows\n  │ Formats  CSV, JSON\n  └ Delivery  Email the team lead"
+        ),
+        "{receipt}"
+    );
+    assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
 fn ask_dismissal_is_distinct_from_escape_and_answer() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
-    let request = Request {
-        id: "q".into(),
-        question: question(),
-    };
+    let request = request("q");
     app.state.question = Some(request.clone());
     app.state.ask_panel = Some(super::super::ask::Panel::new(&request, None));
     app.input(Decoded::Key(key(27, 0))).unwrap();
     assert!(app.state.question.is_some());
     assert!(app.state.ask_panel.is_none());
-    assert!(
-        view::composer_frame(&app.state, "fixture", "folder")
-            .live
-            .iter()
-            .any(|line| line.plain().contains("/ask answer"))
-    );
+    assert!(dock(&app.state).contains("/ask answer"));
     app.open_ask();
-    let frame = view::composer_frame(&app.state, "fixture", "folder");
-    let lines = frame
-        .live
-        .iter()
-        .map(|line| line.plain())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let lines = dock(&app.state);
     assert!(
-        lines.contains("Ctrl+D")
-            && lines.contains("dismiss")
-            && lines.contains("Esc")
-            && lines.contains("chat")
+        lines.contains("Ctrl+D  dismiss") && lines.contains("Esc  back to chat"),
+        "{lines}"
     );
-    assert!(lines.contains("Waiting for you"));
+    assert!(lines.contains("Waiting for you") && !lines.contains("/ask answer"));
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn the_wheel_reaches_the_question_in_front_of_todo() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_todo();
+    let Value::Object(mut question) = scope() else {
+        unreachable!()
+    };
+    question.insert(
+        "context".into(),
+        Value::string("Filters decide which rows appear. ".repeat(20)),
+    );
+    let arguments = Value::object([("questions", Value::Array(vec![Value::Object(question)]))]);
+    let request = Request::parse("q", &arguments).unwrap();
+    app.state.question = Some(request.clone());
+    app.state.ask_panel = Some(super::super::ask::Panel::new(&request, None));
+    app.state.width = 40;
+    app.state.height = 18;
+    assert!(app.state.todo_panel.is_some());
+    app.input(Decoded::Scroll(-2)).unwrap();
+    app.input(Decoded::Scroll(1)).unwrap();
+    let panel = app.state.ask_panel.as_ref().unwrap();
+    assert!(panel.top.is_some(), "the overflowing question scrolls");
+    assert!(panel.entry().picked.is_empty());
     assert!(fixture.finish().is_empty());
 }
 
 #[test]
 fn replayed_question_event_keeps_restored_answer_and_closed_panel() {
-    let request = Request {
-        id: "ask-1".into(),
-        question: question(),
-    };
+    let request = request("ask-1");
     let mut panel = super::super::ask::Panel::new(&request, None);
-    panel.editor.insert("keep the filters");
-    panel.editor.cursor = 4;
-    panel.choice = Some("visible".into());
-    let draft = panel.draft(&request.id);
+    assert!(panel.type_text(&request.questions[0], "keep the filters"));
+    panel.entries[0].editor.cursor = 4;
+    let draft = panel.draft(&request);
     let mut state = State {
         question: Some(request.clone()),
-        ask_panel: Some(panel),
-        ask_draft: Some(draft.clone()),
+        ask_panel: Some(panel.clone()),
+        ask_draft: Some(draft),
         ..State::default()
     };
     state.event(crate::events::Event::UserQuestion {
         request: request.clone(),
     });
-    let answer = state.ask_panel.as_ref().unwrap();
-    assert_eq!(answer.editor.text, draft.text);
-    assert_eq!(answer.editor.cursor, draft.cursor);
-    assert_eq!(answer.choice, draft.choice);
+    assert_eq!(state.ask_panel.as_ref(), Some(&panel));
     state.ask_panel = None;
     state.event(crate::events::Event::UserQuestion { request });
     assert!(
@@ -269,10 +338,8 @@ fn cancelled_question_card_says_no_answer_was_supplied() {
         summary: "complete".into(),
         result: Value::object([("outcome", Value::string("cancelled"))]),
     });
-    let text = state.rows()[0]
-        .iter()
-        .map(|line| line.plain())
-        .collect::<String>();
+    let text = conversation(&state);
+    assert!(text.contains(" ASK USER  Export scope"), "{text}");
     assert!(text.contains("Question cancelled") && text.contains("no answer supplied"));
 }
 
@@ -303,25 +370,12 @@ fn explicit_dismissal_returns_no_answer_to_the_model() {
     app.open_ask();
     app.input(Decoded::Key(key(68, 4))).unwrap();
     finish(&mut app);
-    let result = app
-        .state
-        .items
-        .iter()
-        .find_map(|item| match item {
-            state::Item::Tool {
-                name,
-                result: Some(result),
-                ..
-            } if name == "ask_user" => Some(result),
-            _ => None,
-        })
-        .unwrap();
+    let result = ask_result(&app).unwrap();
     assert_eq!(
         result.get("outcome").and_then(Value::as_str),
         Some("dismissed")
     );
-    assert!(result.get("choice").is_none());
-    assert!(result.get("text").is_none());
+    assert!(result.get("answers").is_none());
     assert_eq!(fixture.finish().len(), 2);
 }
 
@@ -346,7 +400,9 @@ fn quitting_with_a_question_restores_both_drafts_and_continues_the_same_tool_cal
     first
         .input(Decoded::Text("Keep the date filter".into()))
         .unwrap();
-    first.state.ask_panel.as_mut().unwrap().editor.cursor = 4;
+    first.state.ask_panel.as_mut().unwrap().entries[0]
+        .editor
+        .cursor = 4;
     first.close_ask();
     first.open_ask();
     let id = first.persistence.as_ref().unwrap().id();
@@ -371,15 +427,23 @@ fn quitting_with_a_question_restores_both_drafts_and_continues_the_same_tool_cal
     assert!(resumed.state.question.is_some());
     assert_eq!(resumed.state.editor.text, "Keep existing shortcuts");
     assert_eq!(resumed.state.editor.cursor, 5);
-    let answer = resumed.state.ask_panel.as_ref().unwrap();
-    assert_eq!(answer.editor.text, "Keep the date filter");
-    assert_eq!(answer.editor.cursor, 4);
+    let entry = resumed.state.ask_panel.as_ref().unwrap().entry();
+    assert_eq!(entry.editor.text, "Keep the date filter");
+    assert_eq!((entry.editor.cursor, entry.row, entry.other), (4, 2, true));
     resumed.poll().unwrap(); // The resumed worker may re-emit UserQuestion.
-    assert_eq!(resumed.state.ask_panel.as_ref().unwrap().editor.cursor, 4);
+    let entry = resumed.state.ask_panel.as_ref().unwrap().entry();
+    assert_eq!(entry.editor.cursor, 4);
     resumed.input(Decoded::Key(key(13, 0))).unwrap();
     finish(&mut resumed);
     assert!(resumed.state.question.is_none());
     assert_eq!(resumed.state.editor.cursor, 5);
+    assert_eq!(
+        ask_result(&resumed)
+            .unwrap()
+            .get("answers")
+            .map(Value::encode),
+        Some(r#"[{"choices":[],"id":"scope","text":"Keep the date filter"}]"#.into())
+    );
     assert_eq!(next_fixture.finish().len(), 1);
 }
 
@@ -414,57 +478,12 @@ fn explicit_stop_before_quit_cancels_the_question_instead_of_suspending_it() {
     let mut resumed = App::new(resumed_agent, config(&directory), None);
     resumed.resume_session(&id);
     assert!(resumed.state.question.is_none());
-    let result = resumed
-        .state
-        .items
-        .iter()
-        .find_map(|item| match item {
-            state::Item::Tool {
-                name,
-                result: Some(result),
-                ..
-            } if name == "ask_user" => Some(result),
-            _ => None,
-        })
-        .unwrap();
     assert_eq!(
-        result.get("outcome").and_then(Value::as_str),
+        ask_result(&resumed)
+            .and_then(|result| result.get("outcome"))
+            .and_then(Value::as_str),
         Some("cancelled")
     );
     drop(resumed);
     assert!(resumed_fixture.finish().is_empty());
-}
-
-#[test]
-fn long_question_keeps_the_selected_last_option_visible_in_the_native_sheet() {
-    let mut request = Request {
-        id: "q".into(),
-        question: question(),
-    };
-    request.question.context = "A long explanation about report filters and ordering. ".repeat(15);
-    request.question.options = (1..=6)
-        .map(|index| Choice {
-            id: format!("option-{index}"),
-            label: format!("Scope option {index} with a longer description"),
-            description: "This choice changes which rows appear in the export.".into(),
-            recommended: index == 1,
-        })
-        .collect();
-    let mut panel = super::super::ask::Panel::new(&request, None);
-    panel.choices_focused = true;
-    panel.selected = 5;
-    panel.choice = Some("option-6".into());
-    let state = State {
-        width: 32,
-        height: 15,
-        question: Some(request),
-        ask_panel: Some(panel),
-        ..State::default()
-    };
-    let frame = view::composer_frame(&state, "fixture", "folder");
-    assert!(
-        frame.live.iter().any(|line| line.plain().contains("6.")),
-        "last option must be reachable"
-    );
-    assert!(frame.live.len() <= 10);
 }

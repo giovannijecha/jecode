@@ -174,6 +174,11 @@ pub(super) fn agents_capacity(state: &State) -> usize {
     composer::panel_room(state)
 }
 
+/// The Ask block's body window while a question holds the composer.
+pub(super) fn ask_window(state: &State) -> Option<ask::Window> {
+    ask::window(state)
+}
+
 pub(super) fn todo_capacity(state: &State) -> usize {
     composer::panel_room(state)
 }

@@ -1,138 +1,122 @@
 //! Conversation work receipts: question decisions and the call creating a plan.
 
-use super::{Card, Tool};
+use super::{Card, Status, Tool};
 use crate::{
-    ask::Question,
+    ask::{Answer, Question, Reply, Request},
     tui::{
         line::Line,
         text,
-        theme::{
-            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, BADGE_OTHER, BADGE_WARN, BODY, DIM, LIT, MUTED,
-            STRONG, Surface,
-        },
+        theme::{BAD, BODY, DIM, MUTED, STRONG, Style},
     },
 };
 
-fn badge(label: &str, surface: Surface) -> Line {
-    let mut line = Line::new("› ", ACCENT.bold());
-    line.push_on(
-        &format!(" {label} "),
-        if surface == BADGE_IDLE { LIT } else { STRONG },
-        surface,
-    );
-    line
-}
-
-fn append_wrapped(
-    rows: &mut Vec<Line>,
-    value: &str,
-    style: crate::tui::theme::Style,
-    columns: usize,
-) {
-    let width = columns.saturating_sub(4).max(1);
-    let parts: Vec<_> = Line::new(value, style).wrap(width, true);
-    for (index, part) in parts.into_iter().enumerate() {
-        let gutter = if index == 0 { "  └ " } else { "    " };
-        rows.push(part.indent(gutter, DIM).shortened(columns));
-    }
-}
-
+/// Nothing while the question waits. Afterwards one `ASK USER` row, the
+/// question's title or `N questions`, with each question and its answer on
+/// the gutter.
 pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
-    let question = Question::parse(tool.arguments).ok();
-    let title = question
-        .as_ref()
-        .map_or("Question", |question| question.title.as_str());
-    let surface = match tool.result {
-        None => BADGE_IDLE,
-        Some(result) if result.get("error").is_some() => BADGE_BAD,
-        Some(result)
-            if matches!(
-                result.get("outcome").and_then(crate::json::Value::as_str),
-                Some("dismissed" | "unavailable" | "cancelled")
-            ) =>
-        {
-            BADGE_WARN
-        }
-        _ => BADGE_OTHER,
+    let Some(result) = tool.result else {
+        return Card {
+            rows: Vec::new(),
+            hidden: false,
+        };
     };
-    let mut head = badge("ASK USER", surface);
-    head.push(&format!("  {title}"), STRONG);
-    let mut rows = head.wrap(columns.max(1), true);
-    let summary = match tool.result {
-        None => "Main agent waiting · other work continues".to_owned(),
-        Some(result) => match result.get("outcome").and_then(crate::json::Value::as_str) {
-            Some("answered") => {
-                let choice = result
-                    .get("choice")
-                    .and_then(crate::json::Value::as_str)
-                    .and_then(|id| {
-                        question
-                            .as_ref()?
-                            .options
-                            .iter()
-                            .find(|option| option.id == id)
-                            .map(|option| option.label.as_str())
-                    });
-                let answer = result
-                    .get("text")
-                    .and_then(crate::json::Value::as_str)
-                    .unwrap_or("");
-                [choice.unwrap_or(""), answer]
-                    .into_iter()
-                    .filter(|part| !part.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            }
-            Some("dismissed") => "No answer supplied".into(),
-            Some("cancelled") => "Question cancelled · no answer supplied".into(),
-            Some("unavailable") => "Interactive input unavailable".into(),
-            _ if result.get("error").is_some() => result
-                .get("error")
-                .and_then(crate::json::Value::as_str)
-                .unwrap_or("Question failed")
-                .into(),
-            _ => tool.summary.into(),
-        },
+    let request = Request::parse("", tool.arguments).ok();
+    let error = result.get("error").and_then(crate::json::Value::as_str);
+    let reply = Reply::parse(result);
+    let status = match (&reply, error) {
+        (_, Some(_)) => Status::Failed,
+        (Some(Reply::Answered(_)), None) => Status::Done,
+        _ => Status::Stopped,
     };
-    append_wrapped(
-        &mut rows,
-        &summary,
-        if tool.result.is_some_and(|r| r.get("error").is_some()) {
-            BAD
-        } else {
-            MUTED
-        },
-        columns,
-    );
-    if tool.presentation.expanded
-        && let Some(question) = question
-    {
-        append_wrapped(&mut rows, &question.question, STRONG, columns);
-        if !question.context.is_empty() {
-            append_wrapped(&mut rows, &question.context, MUTED, columns);
-        }
-        for (index, option) in question.options.iter().enumerate() {
-            append_wrapped(
-                &mut rows,
-                &format!(
-                    "{}. {}{}",
-                    index + 1,
-                    option.label,
-                    if option.recommended {
-                        " · Recommended"
-                    } else {
-                        ""
+    let mut head = super::badge::badge("Ask user", status);
+    head.push(" ", BODY);
+    let subject = request.as_ref().map_or("Question".into(), Request::subject);
+    head.push(&text::clean(&subject).replace('\n', " "), BODY);
+    let mut rows = vec![head.shortened(columns)];
+    let items: Vec<Vec<(String, Style)>> = match (reply, &request) {
+        (Some(Reply::Answered(answers)), Some(request)) => {
+            let several = request.questions.len() > 1;
+            request
+                .questions
+                .iter()
+                .zip(&answers)
+                .map(|(question, answer)| {
+                    let mut item = Vec::new();
+                    if several {
+                        item.push((format!("{}  ", question.title), MUTED));
                     }
-                ),
-                ACCENT,
-                columns,
-            );
-            if !option.description.is_empty() {
-                append_wrapped(&mut rows, &option.description, MUTED, columns);
+                    item.push((answer_text(question, answer), STRONG));
+                    item
+                })
+                .collect()
+        }
+        _ => vec![vec![(
+            match (
+                error,
+                result.get("outcome").and_then(crate::json::Value::as_str),
+            ) {
+                (Some(error), _) => error.into(),
+                (None, Some("dismissed")) => "No answer supplied".into(),
+                (None, Some("cancelled")) => "Question cancelled · no answer supplied".into(),
+                (None, Some("unavailable")) => "Interactive input unavailable".into(),
+                _ => tool.summary.into(),
+            },
+            if error.is_some() { BAD } else { MUTED },
+        )]],
+    };
+    let count = items.len();
+    for (index, item) in items.into_iter().enumerate() {
+        tree(&mut rows, item, index + 1 == count, columns);
+    }
+    Card {
+        rows,
+        hidden: false,
+    }
+}
+
+/// The chosen labels, then the typed words after ` · `.
+fn answer_text(question: &Question, answer: &Answer) -> String {
+    let labels: Vec<&str> = answer
+        .choices
+        .iter()
+        .filter_map(|id| {
+            question
+                .options
+                .iter()
+                .find(|option| &option.id == id)
+                .map(|option| option.label.as_str())
+        })
+        .collect();
+    [labels.join(", "), answer.text.clone()]
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// One gutter item: `│` or `└` on its first row, wrapped two cells before
+/// the edge; its own line breaks start new rows.
+fn tree(rows: &mut Vec<Line>, item: Vec<(String, Style)>, last: bool, columns: usize) {
+    let mut lines = vec![Line::default()];
+    for (value, style) in item {
+        for (index, part) in text::clean(&value).split('\n').enumerate() {
+            if index > 0 {
+                lines.push(Line::default());
             }
+            lines.last_mut().unwrap().push(part, style);
         }
     }
-    Card { rows, hidden: true }
+    let parts = lines
+        .iter()
+        .flat_map(|line| line.wrap(columns.saturating_sub(4).max(1), true));
+    for (index, part) in parts.enumerate() {
+        let gutter = match (index, last) {
+            (0, true) => "  └ ",
+            (_, false) => "  │ ",
+            (_, true) => "    ",
+        };
+        rows.push(part.gutter(gutter, DIM).shortened(columns));
+    }
 }
 
 /// The call that creates a plan: an ordinary call row with ` TODO `, the

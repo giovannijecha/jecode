@@ -225,9 +225,9 @@ impl App {
                                 if id == &request.id && name == "ask_user")
                             }) {
                                 self.state.event(Event::ToolStarted {
+                                    arguments: request.arguments(),
                                     id: request.id,
                                     name: "ask_user".into(),
-                                    arguments: request.question.value(),
                                 });
                             }
                         }
