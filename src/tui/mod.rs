@@ -106,6 +106,8 @@ struct App {
     question_observer: crate::ask::Observer,
     todo_message_len: usize,
     collaboration_cursor: usize,
+    /// The record revisions `state.collaboration` shows.
+    collaboration_records: Vec<crate::collaboration::Seen>,
     collaboration_seen: HashSet<usize>,
     /// Running agent calls whose events replace their rows.
     collaboration_receipt_calls: HashSet<String>,
@@ -135,6 +137,7 @@ impl App {
             question_observer: agent.questions(),
             todo_message_len: usize::MAX,
             collaboration_cursor: 0,
+            collaboration_records: Vec::new(),
             collaboration_seen: HashSet::new(),
             collaboration_receipt_calls: HashSet::new(),
             collaboration_return_pending: false,
@@ -427,6 +430,8 @@ mod long_work_smoke;
 mod manual_tests;
 #[cfg(test)]
 mod measurement_tests;
+#[cfg(test)]
+mod measurement_work_tests;
 #[cfg(test)]
 mod persistence_smoke;
 #[cfg(test)]

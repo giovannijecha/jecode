@@ -65,7 +65,7 @@ fn visible_updates_and_recovered_snapshot_are_bounded() {
         .lock()
         .unwrap()
         .records
-        .push(Record::from_value(&seed).unwrap());
+        .push(Tracked::new(Record::from_value(&seed).unwrap()));
     for _ in 0..(MAX_UPDATES + 10) {
         observer.message("a1", &"x".repeat(UPDATE_CHARS + 10));
     }
@@ -207,7 +207,7 @@ fn failed_closed_receipt_keeps_record_visible_for_retry() {
         .lock()
         .unwrap()
         .records
-        .push(Record::from_value(&closed).unwrap());
+        .push(Tracked::new(Record::from_value(&closed).unwrap()));
     let parent_binding = observer.0.parent.lock().unwrap().take();
     assert_eq!(
         observer.close("a1").unwrap_err(),
@@ -382,7 +382,7 @@ fn ordered_log_interleaves_messages_and_calls_and_survives_resume() {
         .lock()
         .unwrap()
         .records
-        .push(Record::from_value(&seed).unwrap());
+        .push(Tracked::new(Record::from_value(&seed).unwrap()));
     observer.message("a1", "Looking");
     let arguments = Value::object([("path", Value::string("src/a.rs"))]);
     observer.tool_started("a1", "c1", "edit", &arguments);

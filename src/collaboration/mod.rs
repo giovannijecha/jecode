@@ -2,11 +2,16 @@
 
 mod changes;
 mod log;
+#[cfg(test)]
+mod numbering_tests;
 mod placement;
 mod restore;
 mod runtime;
 #[cfg(test)]
+mod snapshot_tests;
+#[cfg(test)]
 mod tests;
+mod tracked;
 pub mod workspace;
 
 const MAX_UPDATES: usize = 64;
@@ -18,12 +23,16 @@ use std::{
     sync::{Arc, Condvar, Mutex, mpsc},
     thread::JoinHandle,
 };
+use tracked::Tracked;
 use workspace::Workspace;
 
 /// Shared collaboration state. A handle made for one agent call carries that
 /// call's work label, which every receipt it writes records.
 #[derive(Clone, Default)]
 pub struct Observer(Arc<Shared>, Option<String>);
+
+/// A record as an observer last read it: its id and revision.
+pub type Seen = (String, u64);
 
 #[derive(Default)]
 struct Shared {
@@ -34,7 +43,7 @@ struct Shared {
 
 #[derive(Default)]
 struct State {
-    records: Vec<Record>,
+    records: Vec<Tracked<Record>>,
     receipts: Vec<Value>,
     workers: Vec<Worker>,
     last_number: usize,
@@ -42,6 +51,40 @@ struct State {
     /// whether one was.
     turns: usize,
     calls: usize,
+}
+
+impl State {
+    /// The record to change; taking it advances its revision.
+    fn record(&mut self, id: &str) -> Option<&mut Record> {
+        self.records
+            .iter_mut()
+            .find(|record| record.id == id)
+            .map(|record| &mut **record)
+    }
+
+    /// The lowest number no open collaborator shows.
+    fn free_number(&self) -> usize {
+        (1..)
+            .find(|number| {
+                !self
+                    .records
+                    .iter()
+                    .any(|record| !record.workspace_closed && record.number == *number)
+            })
+            .unwrap()
+    }
+}
+
+/// The sequence in a collaborator's ID (`a7`), which numbered it before
+/// shown numbers were reused.
+fn sequence(record: &Value) -> usize {
+    let id = record
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| id.strip_prefix('a'))
+        .and_then(|id| id.parse().ok());
+    let number = record.get("number").and_then(Value::as_usize);
+    id.max(number).unwrap_or(0)
 }
 
 struct Worker {
@@ -358,15 +401,40 @@ impl Observer {
     }
 
     pub fn snapshot(&self) -> Vec<Value> {
-        let values = self
-            .0
-            .state
-            .lock()
-            .unwrap()
-            .records
-            .iter()
-            .map(Record::value)
-            .collect::<Vec<_>>();
+        self.snapshot_since(&[])
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(_, value)| value)
+            .collect()
+    }
+
+    /// The records in order, when any changed since `seen`: each with its
+    /// revision, and its value only where `seen` lacks that revision.
+    /// Records carry every tool result, so unchanged ones are not copied.
+    pub fn snapshot_since(&self, seen: &[Seen]) -> Option<Vec<(Seen, Option<Value>)>> {
+        let records = {
+            let state = self.0.state.lock().unwrap();
+            if state.records.len() == seen.len()
+                && state
+                    .records
+                    .iter()
+                    .zip(seen)
+                    .all(|(record, (id, revision))| {
+                        record.id == *id && record.revision() == *revision
+                    })
+            {
+                return None;
+            }
+            state
+                .records
+                .iter()
+                .map(|record| {
+                    let key = (record.id.clone(), record.revision());
+                    let value = (!seen.contains(&key)).then(|| record.value());
+                    (key, value)
+                })
+                .collect::<Vec<_>>()
+        };
         let redactor = self
             .0
             .parent
@@ -374,14 +442,15 @@ impl Observer {
             .unwrap()
             .as_ref()
             .map(|(archive, _)| archive.redactor.clone());
-        values
-            .into_iter()
-            .map(|value| {
-                redactor
-                    .as_ref()
-                    .map_or_else(|| value.clone(), |redactor| redactor.value(&value))
-            })
-            .collect()
+        let Some(redactor) = redactor else {
+            return Some(records);
+        };
+        Some(
+            records
+                .into_iter()
+                .map(|(key, value)| (key, value.map(|value| redactor.value(&value))))
+                .collect(),
+        )
     }
 
     pub fn events_since(&self, cursor: usize) -> (usize, Vec<Value>) {

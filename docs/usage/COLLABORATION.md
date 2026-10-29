@@ -47,7 +47,10 @@ assignments together:
 ```
 
 `create` accepts one to eight assignments per call. It returns stable IDs such as
-`a1`; the interface displays `AGENT 1`. Each control call is serialized with other
+`a1`; the interface displays `AGENT 1`. IDs are never reused in a conversation.
+The displayed number is the lowest one no open collaborator holds, so a single
+assignment created after the previous one closed is `AGENT 1` again, while
+collaborators open at the same time keep distinct numbers. Each control call is serialized with other
 main-agent tools, even with `parallel:true`. The workers continue independently.
 
 | Action | Required fields and behavior |
@@ -74,7 +77,7 @@ Returned work still needs the main agent's inspection, correction and verificati
 After any needed correction or integration, the main agent calls `close` to
 finish the assignment. Reading or summarizing a report does not perform either
 action. A closed collaborator cannot receive more work; create a new assignment
-when needed. Agent numbers are not reused in the conversation.
+when needed; its ID is not reused, though its displayed number may be.
 The TUI receives return events while the main agent is idle and resumes the main
 model to examine new work without inserting a user message. Queued user input
 takes priority. Explicitly stopping the main turn suppresses this automatic
@@ -196,7 +199,7 @@ links inside without following them. Only the resumed conversation's own
 collaborator storage is examined, while its session lock keeps other
 conversations out, and copies of its saved assignments stay. A copy whose
 ownership marker does not name this project and assignment is left in place
-and reported in the resume status; new assignments skip its number.
+and reported in the resume status; new assignments skip its ID.
 
 Deleting a parent conversation retains its collaborator files, child histories
 and a recovery record at the location reported by the deletion result. This

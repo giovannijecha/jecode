@@ -193,10 +193,15 @@ fn agent(task: &Task) -> Option<&str> {
 pub fn owner<'a>(task: &Task, records: &'a [Value]) -> Option<&'a Value> {
     let agent = agent(task)?;
     let number = agent_number(agent);
-    records.iter().find(|record| {
-        record.get("id").and_then(Value::as_str) == Some(agent)
-            || number.is_some() && record.get("number").and_then(Value::as_usize) == number
-    })
+    records
+        .iter()
+        .find(|record| record.get("id").and_then(Value::as_str) == Some(agent))
+        .or_else(|| {
+            // A closed collaborator's number is reused; the latest holds it.
+            records.iter().rev().find(|record| {
+                number.is_some() && record.get("number").and_then(Value::as_usize) == number
+            })
+        })
 }
 
 /// `AGENT N` for a task's collaborator, or its own reference in capitals.

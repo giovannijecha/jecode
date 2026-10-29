@@ -93,7 +93,9 @@ pub(super) fn failed_check(record: &Value) -> Option<&str> {
 }
 
 fn failed_command(result: &Value) -> bool {
-    result.get("error").is_some()
+    result
+        .get("error")
+        .is_some_and(|error| error != &Value::Null)
         || result.get("cancelled") == Some(&Value::Bool(true))
         || result.get("timed_out") == Some(&Value::Bool(true))
         || matches!(
@@ -212,15 +214,62 @@ impl App {
     }
 
     pub(super) fn refresh_agents(&mut self) -> bool {
-        let records: Vec<Value> = self
+        let mut dirty = self.refresh_records();
+        let (cursor, events) = self
             .collaboration_observer
-            .snapshot()
-            .into_iter()
-            .map(|record| self.archive.redactor.value(&record))
+            .events_since(self.collaboration_cursor);
+        self.collaboration_cursor = cursor;
+        for event in events {
+            dirty |= self.show_collaboration(event);
+        }
+        dirty | self.refresh_agent_changes()
+    }
+
+    /// Copies only the records written since the last refresh: each one
+    /// carries every tool result of its collaborator.
+    fn refresh_records(&mut self) -> bool {
+        let Some(entries) = self
+            .collaboration_observer
+            .snapshot_since(&self.collaboration_records)
+        else {
+            return false;
+        };
+        let before: Vec<String> = self
+            .state
+            .collaboration
+            .iter()
+            .map(|record| value(record, "id").to_owned())
             .collect();
-        let mut dirty = self.state.collaboration != records;
-        if dirty {
-            self.state.collaboration = records;
+        let mut previous: std::collections::HashMap<String, Value> =
+            std::mem::take(&mut self.state.collaboration)
+                .into_iter()
+                .map(|record| (value(&record, "id").to_owned(), record))
+                .collect();
+        let mut changed = entries.len() != before.len();
+        let mut records = Vec::with_capacity(entries.len());
+        self.collaboration_records.clear();
+        for (index, ((id, revision), record)) in entries.into_iter().enumerate() {
+            changed |= before.get(index) != Some(&id);
+            let record = match record {
+                Some(record) => {
+                    let record = self.archive.redactor.value(&record);
+                    changed |= previous.get(&id) != Some(&record);
+                    record
+                }
+                None => match previous.remove(&id) {
+                    Some(record) => record,
+                    // Shown records were replaced elsewhere; read them all.
+                    None => {
+                        self.collaboration_records.clear();
+                        return self.refresh_records();
+                    }
+                },
+            };
+            self.collaboration_records.push((id, revision));
+            records.push(record);
+        }
+        self.state.collaboration = records;
+        if changed {
             let now = std::time::Instant::now();
             let clocks = &mut self.state.agent_clocks;
             clocks.retain(|id, _| {
@@ -239,14 +288,7 @@ impl App {
             }
             self.state.changed();
         }
-        let (cursor, events) = self
-            .collaboration_observer
-            .events_since(self.collaboration_cursor);
-        self.collaboration_cursor = cursor;
-        for event in events {
-            dirty |= self.show_collaboration(event);
-        }
-        dirty | self.refresh_agent_changes()
+        changed
     }
 
     /// Reads the open collaborator's changes again when it changed more
@@ -300,6 +342,7 @@ impl App {
             self.collaboration_observer = agent.collaboration();
         }
         self.collaboration_cursor = 0;
+        self.collaboration_records.clear();
         self.collaboration_seen.clear();
         self.collaboration_receipt_calls.clear();
         self.collaboration_return_pending = false;

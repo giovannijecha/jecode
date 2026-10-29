@@ -1,5 +1,5 @@
 //! Restoring a session's collaborators when the observer binds to it.
-use super::{Observer, Record, workspace::Workspace};
+use super::{Observer, Record, Tracked, workspace::Workspace};
 use crate::{export::Archive, json::Value, sessions::Handle};
 use std::fs;
 
@@ -24,9 +24,7 @@ impl Observer {
                     .max(event.get("number").and_then(Value::as_usize).unwrap_or(0));
                 if let Some(records) = event.get("records").and_then(Value::as_array) {
                     for record in records {
-                        state.last_number = state
-                            .last_number
-                            .max(record.get("number").and_then(Value::as_usize).unwrap_or(0));
+                        state.last_number = state.last_number.max(super::sequence(record));
                     }
                 }
                 latest = event
@@ -50,7 +48,7 @@ impl Observer {
             state.records = latest
                 .iter()
                 .filter(|record| record.get("workspace_closed") != Some(&Value::Bool(true)))
-                .map(Record::from_value)
+                .map(|record| Record::from_value(record).map(Tracked::new))
                 .collect::<Result<_, _>>()?;
         }
         let owned = state

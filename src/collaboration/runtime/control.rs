@@ -144,7 +144,7 @@ impl Observer {
             ),
             (
                 "records",
-                Value::Array(state.records.iter().map(Record::value).collect()),
+                Value::Array(state.records.iter().map(|record| record.value()).collect()),
             ),
             (
                 "after_message",
@@ -198,7 +198,7 @@ impl Observer {
             .records
             .iter()
             .filter(|r| id.is_none_or(|id| r.id == id))
-            .map(Record::value)
+            .map(|record| record.value())
             .collect())
     }
 
@@ -380,7 +380,7 @@ impl Observer {
         let result = workspace.close()?;
         {
             let mut state = self.0.state.lock().unwrap();
-            let record = state.records.iter_mut().find(|r| r.id == id).unwrap();
+            let record = state.record(id).unwrap();
             record.state = "stopped";
             record.workspace_closed = true;
             record.workspace = None;

@@ -350,6 +350,7 @@ impl App {
                 resume_collaboration(&mut self.state, &mut running, turn_recorded, &mut events);
                 self.state.close_tools();
                 self.collaboration_observer = agent.collaboration();
+                self.collaboration_records.clear();
                 self.question_observer = agent.questions();
                 self.question_observer.set_available(true);
                 self.collaboration_cursor = self.collaboration_observer.events_since(0).0;

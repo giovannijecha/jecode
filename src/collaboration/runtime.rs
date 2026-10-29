@@ -1,5 +1,7 @@
 mod control;
-use super::{Assignment, Observer, Record, Spec, State, Worker, log::Entry, workspace::Workspace};
+use super::{
+    Assignment, Observer, Record, Spec, State, Tracked, Worker, log::Entry, workspace::Workspace,
+};
 use crate::{agent::Agent, attachments::Prompt, events::Event, json::Value};
 use std::{
     collections::VecDeque,
@@ -23,7 +25,7 @@ impl Observer {
             context,
             mode,
         } = spec;
-        let (id, number, store) = {
+        let (id, store) = {
             let mut state = self.0.state.lock().unwrap();
             let store = self
                 .0
@@ -41,8 +43,7 @@ impl Observer {
                 })
                 .ok_or("Collaborators require session storage")?;
             state.last_number += 1;
-            let number = state.last_number;
-            (format!("a{number}"), number, store)
+            (format!("a{}", state.last_number), store)
         };
         let workspace = Workspace::prepare(project, &store, &id, mode)?;
         let child = match make_child(workspace.root()) {
@@ -59,7 +60,7 @@ impl Observer {
         let (wake, receive) = mpsc::channel();
         let record = Record {
             id: id.clone(),
-            number,
+            number: 0,
             title: title.clone(),
             child_session,
             session_events,
@@ -94,7 +95,17 @@ impl Observer {
             reviewed: false,
             error: None,
         };
-        self.0.state.lock().unwrap().records.push(record);
+        let number = {
+            // IDs stay unique. The shown number is the lowest no open
+            // collaborator holds, taken as it joins so concurrent creations
+            // never share one: after a closed one, the next is AGENT 1 again.
+            let mut state = self.0.state.lock().unwrap();
+            let number = state.free_number();
+            state
+                .records
+                .push(Tracked::new(Record { number, ..record }));
+            number
+        };
         // The child outlives this call; its receipts carry no call label.
         let observer = Self(Arc::clone(&self.0), None);
         let thread_id = id.clone();
@@ -112,7 +123,15 @@ impl Observer {
         let task = match task {
             Ok(task) => task,
             Err(error) => {
-                let record = self.0.state.lock().unwrap().records.pop().unwrap();
+                let record = self
+                    .0
+                    .state
+                    .lock()
+                    .unwrap()
+                    .records
+                    .pop()
+                    .unwrap()
+                    .into_inner();
                 if let Some(workspace) = record.workspace {
                     let _ = workspace.close();
                 }
@@ -139,7 +158,7 @@ impl Observer {
             }
             let assignment = {
                 let mut state = self.0.state.lock().unwrap();
-                let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+                let Some(record) = state.record(&id) else {
                     break;
                 };
                 if record.state == "stopping" {
@@ -212,9 +231,7 @@ impl Observer {
                         let mut accepted = Vec::new();
                         {
                             let mut state = self.0.state.lock().unwrap();
-                            if let Some(record) =
-                                state.records.iter_mut().find(|record| record.id == id)
-                            {
+                            if let Some(record) = state.record(&id) {
                                 for _ in prompts {
                                     if let Some(assignment) = record.pending.pop_front() {
                                         accepted.push(assignment);
@@ -243,7 +260,7 @@ impl Observer {
             }
             let (kind, version, title, details) = {
                 let mut state = self.0.state.lock().unwrap();
-                let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+                let Some(record) = state.record(&id) else {
                     break;
                 };
                 if record.state == "stopping" {
@@ -316,7 +333,7 @@ impl Observer {
     fn received(&self, id: &str, assignment: &Assignment) -> Result<(), String> {
         let title = {
             let mut state = self.0.state.lock().unwrap();
-            let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+            let Some(record) = state.record(id) else {
                 return Err("Unknown collaborator".into());
             };
             record.received_version = assignment.version;
@@ -337,7 +354,7 @@ impl Observer {
 
     fn persistence_failed(&self, id: &str, error: String) {
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
+        if let Some(record) = state.record(id) {
             record.state = "unknown";
             record.error = Some(format!("Could not save collaborator receipt: {error}"));
             record.activity = "Outcome could not be confirmed".into();
@@ -347,7 +364,7 @@ impl Observer {
 
     fn progress(&self, id: &str, text: &str) {
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
+        if let Some(record) = state.record(id) {
             record.activity = text.chars().take(200).collect();
             self.0.changed.notify_all();
         }
@@ -355,7 +372,7 @@ impl Observer {
 
     pub(super) fn message(&self, id: &str, text: &str) {
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
+        if let Some(record) = state.record(id) {
             record.activity = text.chars().take(200).collect();
             if record.updates.len() == super::MAX_UPDATES {
                 record.updates.remove(0);
@@ -372,7 +389,7 @@ impl Observer {
 
     pub(super) fn tool_started(&self, id: &str, call_id: &str, name: &str, arguments: &Value) {
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
+        if let Some(record) = state.record(id) {
             record.activity = format!("{name}: running");
             record.log.push(Entry::Tool(record.tools.len()));
             record.tools.push(Value::object([
@@ -395,7 +412,7 @@ impl Observer {
         result: &Value,
     ) {
         let mut state = self.0.state.lock().unwrap();
-        if let Some(record) = state.records.iter_mut().find(|record| record.id == id) {
+        if let Some(record) = state.record(id) {
             record.activity = format!("{name}: {summary}");
             if let Some(Value::Object(tool)) = record
                 .tools
@@ -430,7 +447,7 @@ impl Observer {
         change: &crate::file_change::Change,
     ) {
         let mut state = self.0.state.lock().unwrap();
-        let Some(record) = state.records.iter_mut().find(|record| record.id == id) else {
+        let Some(record) = state.record(id) else {
             return;
         };
         if let Some(Value::Object(tool)) = record

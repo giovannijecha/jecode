@@ -125,14 +125,7 @@ impl Redactor {
     }
 
     pub fn text(&self, text: &str) -> String {
-        let mut text = text.to_string();
-        for (secret, escaped) in &self.secrets() {
-            text = text.replace(secret, "[redacted]");
-            if escaped != secret {
-                text = text.replace(escaped, "[redacted]");
-            }
-        }
-        text
+        mask(text, &self.secrets())
     }
 
     pub fn include(&mut self, other: Self) {
@@ -166,20 +159,45 @@ impl Redactor {
         (text, cursor)
     }
 
+    /// Reads the secrets once for the whole tree; large tool results hold
+    /// thousands of strings.
     pub fn value(&self, value: &Value) -> Value {
-        match value {
-            Value::String(text) => Value::string(self.text(text)),
-            Value::Array(values) => {
-                Value::Array(values.iter().map(|value| self.value(value)).collect())
-            }
-            Value::Object(entries) => Value::Object(
-                entries
-                    .iter()
-                    .map(|(key, value)| (self.text(key), self.value(value)))
-                    .collect(),
-            ),
-            value => value.clone(),
+        let secrets = self.secrets();
+        if secrets.is_empty() {
+            return value.clone();
         }
+        mask_value(value, &secrets)
+    }
+}
+
+fn mask(text: &str, secrets: &[(String, String)]) -> String {
+    let mut text = text.to_string();
+    for (secret, escaped) in secrets {
+        for pattern in [secret, escaped] {
+            if text.contains(pattern.as_str()) {
+                text = text.replace(pattern.as_str(), "[redacted]");
+            }
+        }
+    }
+    text
+}
+
+fn mask_value(value: &Value, secrets: &[(String, String)]) -> Value {
+    match value {
+        Value::String(text) => Value::string(mask(text, secrets)),
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| mask_value(value, secrets))
+                .collect(),
+        ),
+        Value::Object(entries) => Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (mask(key, secrets), mask_value(value, secrets)))
+                .collect(),
+        ),
+        value => value.clone(),
     }
 }
 
