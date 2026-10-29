@@ -179,6 +179,21 @@ Both installers build offline and print the installed executable's version.
 
 ## Native and manual checks
 
+Required Windows confinement tests launch an original Rust probe inside the
+granted workspace. They verify selected environment variables, permitted file
+operations, denied reads and writes outside the workspace, inherited confinement
+in descendants and rejection of interactive terminals. PowerShell and .NET
+compatibility checks are additional opt-in tests because of the documented
+[PSEC session-0 limitation](../usage/PERMISSIONS.md#windows-commands). Run them
+from an interactive Windows user session:
+
+```text
+cargo test --locked --offline agent::execution::sandbox_tests::workspace_powershell_uses_installed_rust_tools_and_git_status -- --exact --ignored --test-threads=1
+cargo test --locked --offline process::windows::sandbox_tests::workspace_native_powershell_runs_without_user_profile -- --exact --ignored --test-threads=1
+cargo test --locked --offline process::windows::sandbox_tests::workspace_native_child_and_grandchild_enforce_file_policy -- --exact --ignored --test-threads=1
+cargo test --locked --offline tools::interactive::tests::windows::workspace_sandbox_runs_native_exec_and_rejects_interactive_terminal -- --exact --ignored --test-threads=1
+```
+
 Collaborator fixtures use isolated session homes, synthetic model services and
 local Git repositories. They cover provider catalogs, in-flight assignment
 updates, late returns resuming the main model, review, cancellation, recovery,

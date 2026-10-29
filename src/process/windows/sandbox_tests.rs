@@ -2,7 +2,7 @@ use crate::cancel::Cancellation;
 use crate::json::Value;
 use crate::permissions::Level;
 use crate::redact::Redactor;
-use crate::test_support::Directory;
+use crate::test_support::{Directory, sandbox as probe};
 use crate::tools::{Begun, Tools};
 use std::path::Path;
 use std::process::Command;
@@ -32,6 +32,60 @@ fn text<'a>(value: &'a Value, name: &str) -> &'a str {
 }
 
 #[test]
+fn workspace_rust_child_and_grandchild_enforce_file_policy() {
+    let root = Directory::new();
+    let outside = Directory::new();
+    let allowed = root.path().join("allowed.txt");
+    let private = outside.path().join("private.txt");
+    let escaped = outside.path().join("escaped.txt");
+    std::fs::write(&allowed, "allowed").unwrap();
+    std::fs::write(&private, "private").unwrap();
+    let fixture = probe::executable(root.path());
+    let mut tools = Tools::new(root.path()).unwrap();
+    tools.configure_output(root.path().join("logs"), Redactor::empty());
+    let arguments = Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        ("args", probe::args()),
+        (
+            "env",
+            Value::object([
+                (probe::ROLE, Value::string("parent")),
+                (probe::ALLOWED, Value::string(allowed.to_string_lossy())),
+                (probe::PRIVATE, Value::string(private.to_string_lossy())),
+                (probe::ESCAPED, Value::string(escaped.to_string_lossy())),
+            ]),
+        ),
+        ("timeout_ms", Value::number(5000)),
+    ]);
+    let result = tools
+        .execute_begun(
+            Begun::default().with_permission(Level::Workspace, None),
+            "exec",
+            &arguments.encode(),
+            &Cancellation::default(),
+        )
+        .result;
+    assert_eq!(
+        result.get("exit_code"),
+        Some(&Value::number(0)),
+        "{result:?}"
+    );
+    let output = text(&result, "stdout");
+    for expected in [
+        "INSIDE:allowed",
+        "OUTSIDE_ERROR:PermissionDenied",
+        "WRITE_ERROR:PermissionDenied",
+        "CREATED:created",
+    ] {
+        assert!(output.contains(expected), "{result:?}");
+    }
+    assert_eq!(std::fs::read_to_string(&private).unwrap(), "private");
+    assert!(!escaped.exists());
+    assert!(!root.path().join("nested").exists());
+}
+
+#[test]
+#[ignore = "PSEC cannot initialize .NET workloads in a Windows service session; run interactively"]
 fn workspace_native_child_and_grandchild_enforce_file_policy() {
     let root = Directory::new();
     let outside = Directory::new();
@@ -125,6 +179,44 @@ class Probe {
 }
 
 #[test]
+fn workspace_native_rust_probe_receives_selected_environment() {
+    let root = Directory::new();
+    let fixture = probe::executable(root.path());
+    let mut tools = Tools::new(root.path()).unwrap();
+    tools.configure_output(root.path().join("logs"), Redactor::empty());
+    let arguments = Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        ("args", probe::args()),
+        (
+            "env",
+            Value::object([
+                (probe::ROLE, Value::string("environment")),
+                ("JECODE_TEST_ENV", Value::string("sentinel")),
+            ]),
+        ),
+        ("timeout_ms", Value::number(5000)),
+    ]);
+    let result = tools
+        .execute_begun(
+            Begun::default().with_permission(Level::Workspace, None),
+            "exec",
+            &arguments.encode(),
+            &Cancellation::default(),
+        )
+        .result;
+    assert_eq!(
+        result.get("exit_code"),
+        Some(&Value::number(0)),
+        "{result:?}"
+    );
+    assert!(
+        text(&result, "stdout").contains("WORKSPACE_NATIVE:sentinel:"),
+        "{result:?}"
+    );
+}
+
+#[test]
+#[ignore = "PSEC cannot initialize PowerShell in a Windows service session; run interactively"]
 fn workspace_native_powershell_runs_without_user_profile() {
     let root = Directory::new();
     let mut tools = Tools::new(root.path()).unwrap();

@@ -69,6 +69,13 @@ required filesystem and network policy support. Unsupported Windows hosts,
 Linux and macOS reject Workspace command launch; select Full explicitly to run
 unconfined commands there. There is no automatic fallback to Full.
 
+On the verified Windows host, services and CI workers in session 0 cannot start
+some programs, including PowerShell, inside PSEC: Windows fails their DLL
+initialization before user code runs. The owned interpreter and native commands
+without that requirement remain confined and usable. Run affected programs in
+an interactive user session or choose Full explicitly. See the
+[Windows PSEC issue](https://github.com/microsoft/mxc/issues/1465).
+
 ## Requests
 
 Workspace waits before a file call outside its folder or an `exec` with an

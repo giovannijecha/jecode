@@ -74,7 +74,10 @@ pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
         ),
         (200, completion("Native terminal started.", vec![])),
     ]);
-    let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    let mut settings =
+        Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    // Interactive terminals require explicit Full authority on this host.
+    settings.default_permissions = crate::permissions::Level::Full;
     let config = SessionConfig {
         store: Store::new(path.join("home")),
         settings,
@@ -85,6 +88,9 @@ pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(path).unwrap(),
     );
+    agent
+        .permissions()
+        .set_default(config.settings.default_permissions);
     crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
     let sessions = crate::sessions::Store::new(path.join("home"), path)
         .unwrap()

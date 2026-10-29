@@ -170,7 +170,7 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
         if target == "linux" {
             command.arg("-ldl");
         } else {
-            command.args(["-framework", "Foundation"]);
+            command.args(["-framework", "Foundation", "-framework", "CFNetwork"]);
         }
         checked(&mut command, "http");
         assets.push(("http".into(), binary));

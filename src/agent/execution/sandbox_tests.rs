@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
-    test_support::{Directory, HttpFixture, completion, tool_call},
+    test_support::{Directory, HttpFixture, completion, sandbox as probe, tool_call},
     tools::Tools,
 };
 
@@ -59,6 +59,60 @@ fn workspace_agent_launches_direct_exec_through_sandbox() {
 }
 
 #[test]
+fn workspace_agent_launches_native_probe_through_sandbox() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let executable = probe::executable(project.path());
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "sandbox-native-probe",
+                    "exec",
+                    Value::object([
+                        ("executable", Value::string(executable.to_string_lossy())),
+                        ("args", probe::args()),
+                        (
+                            "env",
+                            Value::object([
+                                (probe::ROLE, Value::string("environment")),
+                                ("JECODE_TEST_ENV", Value::string("sentinel")),
+                            ]),
+                        ),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Native command finished", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent
+        .run_turn("Run a native command", &mut |_| Ok(()))
+        .unwrap();
+    let result = result(&agent, "sandbox-native-probe");
+    assert_eq!(
+        result.get("exit_code"),
+        Some(&Value::number(0)),
+        "{result:?}"
+    );
+    assert!(
+        result
+            .get("stdout")
+            .and_then(Value::as_str)
+            .is_some_and(|stdout| stdout.contains("WORKSPACE_NATIVE:sentinel:")),
+        "{result:?}"
+    );
+    assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
+#[ignore = "PSEC cannot initialize PowerShell in a Windows service session; run interactively"]
 fn workspace_powershell_uses_installed_rust_tools_and_git_status() {
     let project = Directory::new();
     let home = Directory::new();

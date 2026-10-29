@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn workspace_sandbox_runs_rust_probe_and_rejects_interactive_terminal() {
+    use crate::permissions::Level;
+    use crate::test_support::sandbox as probe;
+    use crate::tools::Begun;
+
+    let root = Directory::new();
+    let fixture = probe::executable(root.path());
+    let tools = tools(&root);
+    let execute_scoped = |arguments: Value| {
+        tools
+            .execute_begun(
+                Begun::default().with_permission(Level::Workspace, None),
+                "exec",
+                &arguments.encode(),
+                &crate::cancel::Cancellation::default(),
+            )
+            .result
+    };
+    let command = execute_scoped(Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        ("args", probe::args()),
+        (
+            "env",
+            Value::object([
+                (probe::ROLE, Value::string("write")),
+                (probe::ALLOWED, Value::string(root.path().to_string_lossy())),
+            ]),
+        ),
+        ("timeout_ms", Value::number(5000)),
+    ]));
+    assert_eq!(
+        command.get("exit_code"),
+        Some(&Value::number(0)),
+        "{command:?}"
+    );
+    assert!(
+        text(&command, "stdout").contains("CREATED:written"),
+        "{command:?}"
+    );
+    assert!(!root.path().join("nested").exists());
+    let terminal = execute_scoped(Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        ("tty", Value::Bool(true)),
+        ("timeout_ms", Value::number(5000)),
+    ]));
+    assert!(
+        text(&terminal, "error").contains("Workspace interactive terminals"),
+        "{terminal:?}"
+    );
+}
+
+#[test]
+#[ignore = "PSEC cannot initialize .NET workloads in a Windows service session; run interactively"]
 fn workspace_sandbox_runs_native_exec_and_rejects_interactive_terminal() {
     use crate::permissions::Level;
     use crate::tools::Begun;
