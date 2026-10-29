@@ -1,6 +1,84 @@
 use super::*;
 
 #[test]
+fn nonzero_child_command_marks_failed_check() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "check",
+                    "bash",
+                    Value::object([("command", Value::string("exit 1"))]),
+                )],
+            ),
+        ),
+        (
+            200,
+            completion("The check failed; report returned.", vec![]),
+        ),
+    ]);
+    let mut parent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    parent.enable_sessions(home.path()).unwrap();
+    let observer = parent.collaboration();
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    observer
+        .create(
+            project.path(),
+            crate::collaboration::Spec {
+                title: "Failing check".into(),
+                instructions: "Run a failing command and report".into(),
+                context: String::new(),
+                mode: crate::collaboration::workspace::Mode::Shared,
+            },
+            |root| {
+                Ok(Agent::new(
+                    OpenRouter::fixture(fixture.endpoint.clone()),
+                    Tools::new(root)?,
+                ))
+            },
+            gate,
+        )
+        .unwrap();
+    let started = Instant::now();
+    let records = loop {
+        let records = observer.snapshot();
+        if records
+            .first()
+            .is_some_and(|record| value(record, "state") == "returned")
+        {
+            break records;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10));
+        thread::sleep(Duration::from_millis(5));
+    };
+    observer.stop_all();
+    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(
+        records[0].get("checks").unwrap().encode(),
+        r#"["bash: exit 1"]"#
+    );
+    let state = State {
+        width: 100,
+        height: 24,
+        collaboration: records,
+        ..State::default()
+    };
+    let footer = view::composer_frame(&state, "fixture/model", "fixture")
+        .live
+        .last()
+        .unwrap()
+        .plain();
+    assert!(footer.contains("1 failed check"), "{footer}");
+}
+
+#[test]
 fn delayed_child_return_restarts_idle_main_without_a_user_message() {
     let project = Directory::new();
     let home = Directory::new();

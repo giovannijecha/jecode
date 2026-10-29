@@ -35,7 +35,7 @@ fn fact(state: &State, record: &Value) -> (String, Style) {
     let style = match agents::value(record, "state") {
         "unknown" => WARNING,
         "failed" if status != "reviewed" => BAD,
-        "returned" if agents::failed_check(record) && status != "reviewed" => BAD,
+        "returned" if agents::failed_check(record).is_some() && status != "reviewed" => BAD,
         _ => MUTED,
     };
     let fact = match state.agent_clocks.get(agents::value(record, "id")) {
@@ -47,7 +47,7 @@ fn fact(state: &State, record: &Value) -> (String, Style) {
 
 fn name(record: &Value) -> Line {
     let state = match agents::value(record, "state") {
-        "returned" if agents::failed_check(record) => "failed",
+        "returned" if agents::failed_check(record).is_some() => "failed",
         state => state,
     };
     let mut line = cards::agent_badge(&agents::label(record), state);

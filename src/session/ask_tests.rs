@@ -41,6 +41,79 @@ fn result(agent: &Agent, id: &str) -> Value {
 const FORMAT: &str = r#"{"questions":[{"id":"format","title":"Format",
     "question":"Which export format?","options":[{"id":"csv","label":"CSV"}]}]}"#;
 
+#[test]
+fn partial_plain_answers_resume_at_the_unanswered_question() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let questions = json::parse(
+        r#"{"questions":[
+        {"id":"format","title":"Format","question":"Which format?",
+         "options":[{"id":"csv","label":"CSV"},{"id":"json","label":"JSON"}]},
+        {"id":"title","title":"Title","question":"What is the report title?"},
+        {"id":"fields","title":"Fields","question":"Which fields?","multiple":true,
+         "options":[{"id":"dates","label":"Dates"},{"id":"owners","label":"Owners"}]},
+        {"id":"delivery","title":"Delivery","question":"Where should exports go?"}]}"#,
+    )
+    .unwrap();
+    let first = HttpFixture::new(vec![(
+        200,
+        completion("", vec![tool_call("ask-partial", "ask_user", questions)]),
+    )]);
+    let mut original = agent(&project, &first.endpoint);
+    chat(
+        &mut original,
+        &mut config(&home),
+        &mut Cursor::new(format!(
+            "Export the report\n2\n{}\nCaffè report\n2,1\n",
+            "x".repeat(crate::ask::TEXT_LIMIT + 1)
+        )),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert!(original.has_pending_question());
+    let id = original.sessions().unwrap().id();
+    drop(original);
+    assert_eq!(first.finish().len(), 1);
+
+    let next = HttpFixture::new(vec![(200, completion("Answer recorded", vec![]))]);
+    let mut resumed = agent(&project, &next.endpoint);
+    let mut output = Vec::new();
+    chat_with_resume(
+        &mut resumed,
+        &mut config(&home),
+        &mut Cursor::new("Email the lead\n/exit\n"),
+        &mut output,
+        &mut Vec::new(),
+        Some(id),
+    )
+    .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    for index in 1..4 {
+        assert!(
+            !output.contains(&format!("Question {index} of 4")),
+            "{output}"
+        );
+    }
+    assert!(output.contains("Question 4 of 4"), "{output}");
+    assert_eq!(
+        result(&resumed, "ask-partial").get("answers").map(Value::encode),
+        Some(r#"[{"choices":["json"],"id":"format","text":""},{"choices":[],"id":"title","text":"Caffè report"},{"choices":["dates","owners"],"id":"fields","text":""},{"choices":[],"id":"delivery","text":"Email the lead"}]"#.into())
+    );
+    assert!(!resumed.has_pending_question());
+    assert!(
+        resumed
+            .sessions()
+            .unwrap()
+            .snapshot()
+            .input
+            .question
+            .is_none()
+    );
+    assert_eq!(next.finish().len(), 1);
+}
+
 /// Input that closes once after each part, as Ctrl+D (Ctrl+Z on Windows)
 /// does in a terminal that stays open.
 struct Parts(VecDeque<Cursor<Vec<u8>>>);
@@ -127,13 +200,20 @@ fn closed_input_saves_the_question_cancels_later_calls_and_resumes_in_place() {
         ("path", Value::string("must-not-exist.txt")),
         ("content", Value::string("side effect")),
     ]);
+    let questions = json::parse(
+        r#"{"questions":[
+        {"id":"format","title":"Format","question":"Which format?",
+         "options":[{"id":"csv","label":"CSV"}]},
+        {"id":"delivery","title":"Delivery","question":"Where should exports go?"}]}"#,
+    )
+    .unwrap();
     let fixture = HttpFixture::new(vec![
         (
             200,
             completion(
                 "",
                 vec![
-                    tool_call("ask-1", "ask_user", json::parse(FORMAT).unwrap()),
+                    tool_call("ask-1", "ask_user", questions),
                     tool_call("write-after", "write", write),
                 ],
             ),
@@ -145,7 +225,7 @@ fn closed_input_saves_the_question_cancels_later_calls_and_resumes_in_place() {
     chat(
         &mut agent,
         &mut config(&home),
-        &mut parts(&["Export the report\n", "1\n/exit\n"]),
+        &mut parts(&["Export the report\n1\n", "Email the lead\n/exit\n"]),
         &mut Vec::new(),
         &mut status,
         Vec::new(),
@@ -154,7 +234,7 @@ fn closed_input_saves_the_question_cancels_later_calls_and_resumes_in_place() {
     let status = String::from_utf8(status).unwrap();
     assert_eq!(
         status,
-        "[waiting for model: fixture/model]\n[tool: ask_user] Format\n[ask_user: Answer received]\n[waiting for model: fixture/model]\n",
+        "[waiting for model: fixture/model]\n[tool: ask_user] 2 questions\n[ask_user: Answer received]\n[waiting for model: fixture/model]\n",
         "no error and no later call ran"
     );
     assert_eq!(
@@ -166,10 +246,74 @@ fn closed_input_saves_the_question_cancels_later_calls_and_resumes_in_place() {
     assert!(!project.path().join("must-not-exist.txt").exists());
     assert_eq!(
         result(&agent, "ask-1").get("answers").map(Value::encode),
-        Some(r#"[{"choices":["csv"],"id":"format","text":""}]"#.into())
+        Some(r#"[{"choices":["csv"],"id":"format","text":""},{"choices":[],"id":"delivery","text":"Email the lead"}]"#.into())
     );
     assert!(!agent.has_pending_question());
     assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
+fn dismissing_resumed_partial_answers_clears_the_draft_before_the_next_ask() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let questions = json::parse(
+        r#"{"questions":[
+        {"id":"first","title":"First","question":"First question?"},
+        {"id":"second","title":"Second","question":"Second question?"}]}"#,
+    )
+    .unwrap();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion("", vec![tool_call("ask-partial", "ask_user", questions)]),
+        ),
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "ask-next",
+                    "ask_user",
+                    json::parse(FORMAT).unwrap(),
+                )],
+            ),
+        ),
+        (200, completion("Answer recorded", vec![])),
+    ]);
+    let mut agent = agent(&project, &fixture.endpoint);
+    chat(
+        &mut agent,
+        &mut config(&home),
+        &mut parts(&[
+            "Export the report\nPartial answer\n",
+            "/dismiss\n1\n/exit\n",
+        ]),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        result(&agent, "ask-partial")
+            .get("outcome")
+            .and_then(Value::as_str),
+        Some("dismissed")
+    );
+    assert_eq!(
+        result(&agent, "ask-next").get("answers").map(Value::encode),
+        Some(r#"[{"choices":["csv"],"id":"format","text":""}]"#.into())
+    );
+    assert!(!agent.has_pending_question());
+    assert!(
+        agent
+            .sessions()
+            .unwrap()
+            .snapshot()
+            .input
+            .question
+            .is_none()
+    );
+    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]

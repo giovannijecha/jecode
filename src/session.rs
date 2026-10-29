@@ -264,11 +264,18 @@ fn run_plain(
     status: &mut impl Write,
 ) -> Result<(), String> {
     let questions = agent.questions();
+    let session = agent.sessions();
     questions.set_available(true);
     let mut console = Console::new(output, status);
     let mut sink = |event: Event| -> Result<(), String> {
         if let Event::UserQuestion { request } = &event {
-            return ask::answer(&questions, request, input, console.output());
+            return ask::answer(
+                &questions,
+                request,
+                session.as_ref().ok_or("Question session is unavailable")?,
+                input,
+                console.output(),
+            );
         }
         console.emit(event)
     };

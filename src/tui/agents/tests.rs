@@ -464,6 +464,9 @@ mod placement_tests;
 #[path = "inside_tests.rs"]
 mod inside_tests;
 
+#[path = "check_tests.rs"]
+mod check_tests;
+
 #[test]
 fn only_receipted_agent_actions_replace_tool_cards() {
     for action in ["create", "update", "review", "stop", "close"] {

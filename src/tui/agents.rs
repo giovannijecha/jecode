@@ -48,12 +48,61 @@ pub(super) fn label(record: &Value) -> String {
     format!("AGENT {}", number(record, "number"))
 }
 
-/// A returned report whose checks include a failure.
-pub(super) fn failed_check(record: &Value) -> bool {
+/// The first failed command check. Current records carry structured tool
+/// results; older snapshots may only have the command summaries in `checks`.
+pub(super) fn failed_check(record: &Value) -> Option<&str> {
+    let mut structured = false;
+    for tool in list(record, "tools") {
+        if !matches!(value(tool, "name"), "bash" | "exec") {
+            continue;
+        }
+        let Some(result) = tool.get("result") else {
+            continue;
+        };
+        structured = true;
+        if failed_command(result) {
+            return Some(value(tool, "text"))
+                .filter(|summary| !summary.is_empty())
+                .or_else(|| result.get("error").and_then(Value::as_str))
+                .or(Some("Command failed"));
+        }
+    }
+    if structured {
+        return None;
+    }
     list(record, "checks")
-        .iter()
-        .filter_map(|check| check.as_str())
-        .any(|check| check.to_ascii_lowercase().contains("fail"))
+        .into_iter()
+        .filter_map(Value::as_str)
+        .find(|check| {
+            let summary = check
+                .split_once(": ")
+                .map_or(*check, |(_, summary)| summary);
+            summary
+                .strip_prefix("exit ")
+                .and_then(|code| {
+                    code.split(|ch: char| ch.is_whitespace() || ch == ';')
+                        .next()
+                })
+                .and_then(|code| code.parse::<i32>().ok())
+                .is_some_and(|code| code != 0)
+                || summary.contains("timed out")
+                || summary.contains("cancelled")
+                || summary.to_ascii_lowercase().contains("fail")
+        })
+        .map(|check| check.split_once(": ").map_or(check, |(_, summary)| summary))
+}
+
+fn failed_command(result: &Value) -> bool {
+    result.get("error").is_some()
+        || result.get("cancelled") == Some(&Value::Bool(true))
+        || result.get("timed_out") == Some(&Value::Bool(true))
+        || matches!(
+            crate::events::process_status(result),
+            Some("stopped" | "timed_out")
+        )
+        || result
+            .get("exit_code")
+            .is_some_and(|code| code != &Value::number(0) && code != &Value::Null)
 }
 
 /// A collaborator still on its assignment, which quitting would interrupt.
@@ -65,7 +114,7 @@ pub(super) fn status(record: &Value) -> &'static str {
     match value(record, "state") {
         "running" => "running",
         "returned" | "failed" if record.get("reviewed") == Some(&Value::Bool(true)) => "reviewed",
-        "returned" if failed_check(record) => "failed check · main review",
+        "returned" if failed_check(record).is_some() => "failed check · main review",
         "returned" => "returned · main review",
         "failed" => "failed · main review",
         "stopping" => "stopping",

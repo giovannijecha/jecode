@@ -86,10 +86,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
     for record in &state.collaboration {
         let state_name = super::super::agents::value(record, "state");
         let reviewed = record.get("reviewed") == Some(&crate::json::Value::Bool(true));
-        let check_failed = super::super::agents::list(record, "checks")
-            .iter()
-            .filter_map(|check| check.as_str())
-            .any(|check| check.to_ascii_lowercase().contains("fail"));
+        let check_failed = super::super::agents::failed_check(record).is_some();
         match state_name {
             "running" | "stopping" | "queued" => running += 1,
             "returned" | "failed" if !reviewed => {

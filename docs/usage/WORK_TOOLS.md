@@ -63,6 +63,8 @@ option IDs and the typed text. Single-prompt and piped invocations return
 unavailable without blocking. Interactive `--plain` chat asks each question in
 turn on stdin: a number chooses an option, a list such as `1,3` chooses several
 for multiple choice, other text is the user's own words, and `/dismiss` skips.
+Each accepted answer is saved before the next question. If stdin closes, resume
+continues at the unanswered question with earlier answers intact.
 Collaborators do not receive this tool; they report questions to the main agent.
 
 Pending questions and answers in progress survive `/resume`; questions saved

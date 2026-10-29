@@ -1,8 +1,9 @@
 //! The line-based `ask_user` flow: one question at a time, answered by number
 //! or in the user's own words, then sent together.
 
-use crate::ask::{Answer, Observer, Question, Request};
+use crate::ask::{Answer, AnswerDraft, Draft, Observer, Question, Request};
 use crate::input::read_line;
+use crate::sessions::Handle;
 use std::io::{BufRead, Write};
 
 /// Ends with the answers sent, the question dismissed, or, when input
@@ -10,11 +11,12 @@ use std::io::{BufRead, Write};
 pub(super) fn answer(
     questions: &Observer,
     request: &Request,
+    session: &Handle,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<(), String> {
     loop {
-        let sent = match collect(request, input, output)? {
+        let sent = match collect(request, session, input, output)? {
             Flow::Answered(answers) => questions.answer(&request.id, answers),
             Flow::Dismissed => questions.dismiss(&request.id),
             Flow::Closed => {
@@ -37,11 +39,29 @@ enum Flow {
 
 fn collect(
     request: &Request,
+    session: &Handle,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<Flow, String> {
+    let mut draft = session
+        .snapshot()
+        .input
+        .question
+        .filter(|draft| draft.id == request.id && draft.answers.len() == request.questions.len())
+        .unwrap_or_else(|| Draft {
+            id: request.id.clone(),
+            step: 0,
+            answers: vec![AnswerDraft::default(); request.questions.len()],
+        });
+    let start = draft.step.min(request.questions.len() - 1);
     let mut answers = Vec::new();
     for (index, question) in request.questions.iter().enumerate() {
+        if index < start
+            && let Some(answer) = restored_answer(question, &draft.answers[index])
+        {
+            answers.push(answer);
+            continue;
+        }
         show(output, request, index)?;
         loop {
             write!(output, "{}", prompt(question))
@@ -56,6 +76,24 @@ fn collect(
             }
             match parse(question, line) {
                 Ok(answer) => {
+                    draft.answers[index] = AnswerDraft {
+                        choices: answer.choices.clone(),
+                        other: !answer.text.is_empty(),
+                        text: answer.text.clone(),
+                        caret: answer.text.len(),
+                        row: question
+                            .options
+                            .iter()
+                            .position(|option| answer.choices.contains(&option.id))
+                            .unwrap_or(question.options.len()),
+                    };
+                    draft.step = (index + 1).min(request.questions.len() - 1);
+                    // Keep the same draft format as the TUI, and make each
+                    // accepted answer durable before showing the next question.
+                    let mut saved = session.snapshot().input;
+                    saved.question = Some(draft.clone());
+                    session.input(saved);
+                    session.flush()?;
                     answers.push(answer);
                     break;
                 }
@@ -64,6 +102,25 @@ fn collect(
         }
     }
     Ok(Flow::Answered(answers))
+}
+
+fn restored_answer(question: &Question, draft: &AnswerDraft) -> Option<Answer> {
+    let text = if draft.other || question.options.is_empty() {
+        draft.text.clone()
+    } else {
+        String::new()
+    };
+    let answer = Answer {
+        id: question.id.clone(),
+        choices: if !question.is_multiple() && !text.trim().is_empty() {
+            Vec::new()
+        } else {
+            draft.choices.clone()
+        },
+        text,
+    };
+    question.check_answer(&answer).ok()?;
+    Some(answer)
 }
 
 fn show(output: &mut impl Write, request: &Request, index: usize) -> Result<(), String> {
@@ -133,9 +190,11 @@ fn parse(question: &Question, line: &str) -> Result<Answer, String> {
         ),
         None => (Vec::new(), line.to_owned()),
     };
-    Ok(Answer {
+    let answer = Answer {
         id: question.id.clone(),
         choices,
         text,
-    })
+    };
+    question.check_answer(&answer)?;
+    Ok(answer)
 }

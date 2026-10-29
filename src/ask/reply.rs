@@ -1,7 +1,7 @@
 //! What the user returned: per question, the chosen option IDs and the typed
 //! text, or an explicit dismissal.
 
-use super::{LEGACY_ID, Request};
+use super::{LEGACY_ID, Question, Request};
 use crate::json::Value;
 
 /// The longest text one answer may carry.
@@ -95,24 +95,31 @@ impl Request {
             return Err("Answer every question".into());
         }
         for (question, answer) in self.questions.iter().zip(answers) {
-            if answer.id != question.id {
-                return Err("Answers do not match the questions".into());
-            }
-            if answer.text.len() > TEXT_LIMIT {
-                return Err("Answer exceeds 64 KiB".into());
-            }
-            if answer.choices.is_empty() && answer.text.trim().is_empty() {
-                return Err(format!("Answer {}", question.title));
-            }
-            if !question.is_multiple() && answer.choices.len() > 1 {
-                return Err("Choose one answer".into());
-            }
-            for (index, choice) in answer.choices.iter().enumerate() {
-                if !question.options.iter().any(|option| &option.id == choice)
-                    || answer.choices[..index].contains(choice)
-                {
-                    return Err("Unknown answer choice".into());
-                }
+            question.check_answer(answer)?;
+        }
+        Ok(())
+    }
+}
+
+impl Question {
+    pub(crate) fn check_answer(&self, answer: &Answer) -> Result<(), String> {
+        if answer.id != self.id {
+            return Err("Answers do not match the questions".into());
+        }
+        if answer.text.len() > TEXT_LIMIT {
+            return Err("Answer exceeds 64 KiB".into());
+        }
+        if answer.choices.is_empty() && answer.text.trim().is_empty() {
+            return Err(format!("Answer {}", self.title));
+        }
+        if !self.is_multiple() && answer.choices.len() > 1 {
+            return Err("Choose one answer".into());
+        }
+        for (index, choice) in answer.choices.iter().enumerate() {
+            if !self.options.iter().any(|option| &option.id == choice)
+                || answer.choices[..index].contains(choice)
+            {
+                return Err("Unknown answer choice".into());
             }
         }
         Ok(())

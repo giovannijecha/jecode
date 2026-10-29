@@ -52,13 +52,6 @@ fn reviewed(record: &Value) -> bool {
     record.get("reviewed") == Some(&Value::Bool(true))
 }
 
-fn failed_check(record: &Value) -> Option<&str> {
-    strings(record, "checks")
-        .into_iter()
-        .find(|check| check.to_ascii_lowercase().contains("fail"))
-        .map(|check| check.split_once(": ").map_or(check, |(_, rest)| rest))
-}
-
 /// Failed checks and failed runs are `bad`; unknown outcomes `warning`.
 /// Everything else is routine and keeps the family ink.
 pub(super) fn status(event: &Value) -> Status {
@@ -66,7 +59,9 @@ pub(super) fn status(event: &Value) -> Status {
         "unknown" => Status::Unknown,
         "returned"
             if !strings(event, "details").is_empty()
-                || record(event).and_then(failed_check).is_some() =>
+                || record(event)
+                    .and_then(crate::tui::agents::failed_check)
+                    .is_some() =>
         {
             Status::Failed
         }
@@ -159,7 +154,7 @@ fn fact(event: &Value) -> Option<(String, Style)> {
     match field(event, "kind") {
         "returned" => Some(if let Some(error) = strings(event, "details").first() {
             (format!("failed · {}", inline(error)), BAD)
-        } else if let Some(check) = record(event).and_then(failed_check) {
+        } else if let Some(check) = record(event).and_then(crate::tui::agents::failed_check) {
             (format!("check failed · {}", inline(check)), BAD)
         } else if record(event).is_some_and(reviewed) {
             ("reviewed by main agent".into(), MUTED)
@@ -289,7 +284,7 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
             for error in strings(event, "details") {
                 lines.push(Line::new(&text::clean(error), BAD));
             }
-            if let Some(check) = record.and_then(failed_check) {
+            if let Some(check) = record.and_then(crate::tui::agents::failed_check) {
                 lines.push(Line::new(&format!("Check failed · {}", inline(check)), BAD));
             }
             lines.push(Line::new(
