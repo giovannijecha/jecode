@@ -46,7 +46,7 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     let time = state
         .activity
         .as_ref()
-        .map(|activity| activity::duration(activity.started.elapsed()));
+        .map(|activity| activity::duration(activity.elapsed()));
     let mut facts = Vec::new();
     if escape && running.is_some() {
         facts.push(Line::new("Esc interrupt", DIM));

@@ -37,8 +37,7 @@ fn with(columns: usize, notice: Feedback) -> State {
 
 fn working(state: &mut State, seconds: f64) {
     state.status = "Working…".into();
-    let mut activity = Activity::new();
-    activity.started = Instant::now() - Duration::from_secs_f64(seconds);
+    let activity = Activity::with_elapsed(Duration::from_secs_f64(seconds));
     state.activity = Some(activity);
 }
 

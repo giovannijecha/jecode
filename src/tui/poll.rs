@@ -41,7 +41,7 @@ impl App {
                             .describe()
                             .map(|served| agent.redact(&served));
                         let facts = [
-                            Some(activity::duration(activity.started.elapsed())),
+                            Some(activity::duration(activity.elapsed())),
                             activity::tools(activity.tools),
                             activity::generated(activity.generated),
                             served,
@@ -71,7 +71,7 @@ impl App {
                     let facts = [
                         activity
                             .as_ref()
-                            .map(|activity| activity::duration(activity.started.elapsed())),
+                            .map(|activity| activity::duration(activity.elapsed())),
                         if returned {
                             Some("prompt restored".into())
                         } else if cancelled {

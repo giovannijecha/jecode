@@ -23,7 +23,7 @@ pub(super) fn sheet<'a>(
             let fact = format!(
                 "{} · {}",
                 super::status::verb(state),
-                activity::duration(turn.started.elapsed())
+                activity::duration(turn.elapsed())
             );
             ("Current turn".to_owned(), fact)
         })
