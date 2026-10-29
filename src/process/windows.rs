@@ -24,7 +24,13 @@ pub(super) struct Spawned {
     pub writer: JoinHandle<io::Result<()>>,
     /// The supervisor's completion report; None for a directly started leaf.
     pub completion: Option<JoinHandle<Result<i32, String>>>,
+    pub control: Option<File>,
     pub target_pid: u32,
+}
+
+enum Handshake {
+    Stage(u8),
+    Done(ChildStdout, Result<u32, String>),
 }
 
 pub(super) fn spawn(
@@ -76,27 +82,33 @@ pub(super) fn spawn(
         Ok(())
     });
     let mut stdout = child.stdout.take().unwrap();
-    let (sender, receiver) = mpsc::sync_channel(1);
+    let (sender, receiver) = mpsc::channel();
     let handshake = thread::spawn(move || {
-        let result = read_handshake(&mut stdout);
-        let _ = sender.send((stdout, result));
+        let result = read_handshake(&mut stdout, |stage| {
+            let _ = sender.send(Handshake::Stage(stage));
+        });
+        let _ = sender.send(Handshake::Done(stdout, result));
     });
     let started = Instant::now();
+    let mut last_stage = 0;
     loop {
         match receiver.recv_timeout(Duration::from_millis(20)) {
-            Ok((stdout, Ok(target_pid))) => {
+            Ok(Handshake::Stage(stage)) => last_stage = stage,
+            Ok(Handshake::Done(stdout, Ok(target_pid))) => {
                 let _ = handshake.join();
                 let mut completion_file = connect_completion(&mut child, &pipe_name, cancellation)?;
+                let control = connect_control(&mut child, &pipe_name, cancellation)?;
                 let completion = thread::spawn(move || read_completion(&mut completion_file));
                 return Ok(Spawned {
                     child,
                     stdout,
                     writer,
                     completion: Some(completion),
+                    control: Some(control),
                     target_pid,
                 });
             }
-            Ok((_, Err(message))) => {
+            Ok(Handshake::Done(_, Err(message))) => {
                 let _ = handshake.join();
                 let _ = child.kill();
                 let _ = child.wait();
@@ -107,8 +119,11 @@ pub(super) fn spawn(
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout)
-                if started.elapsed() < Duration::from_secs(15) && !cancellation.requested() => {}
+                if started.elapsed() < Duration::from_secs(15)
+                    && !cancellation.requested()
+                    && matches!(child.try_wait(), Ok(None)) => {}
             Err(_) => {
+                let exited = child.try_wait().ok().flatten();
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = handshake.join();
@@ -118,7 +133,14 @@ pub(super) fn spawn(
                     message: if cancellation.requested() {
                         "Operation cancelled".into()
                     } else {
-                        "Windows process supervisor did not initialize".into()
+                        format!(
+                            "Windows process supervisor did not initialize (last stage: {}; exit code: {})",
+                            stage_name(last_stage),
+                            exited.and_then(|status| status.code()).map_or_else(
+                                || "still running".to_string(),
+                                |code| code.to_string()
+                            )
+                        )
                     },
                 });
             }
@@ -154,6 +176,7 @@ pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Sp
         stdout,
         writer,
         completion: None,
+        control: None,
     })
 }
 
@@ -252,6 +275,35 @@ fn connect_completion(
     }
 }
 
+fn connect_control(
+    child: &mut Child,
+    name: &str,
+    cancellation: &Cancellation,
+) -> Result<File, RunError> {
+    let path = format!(r"\\.\pipe\{name}-stop");
+    let started = Instant::now();
+    loop {
+        if let Ok(file) = OpenOptions::new().write(true).open(&path) {
+            return Ok(file);
+        }
+        if cancellation.requested() || started.elapsed() >= Duration::from_secs(5) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(RunError {
+                started: true,
+                message: "Windows process supervisor did not open its stop channel; command outcome is unknown".into(),
+            });
+        }
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return Err(RunError {
+                started: true,
+                message: "Windows process supervisor exited before its stop channel opened; command outcome is unknown".into(),
+            });
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 pub(super) fn completion(reader: JoinHandle<Result<i32, String>>) -> Result<i32, String> {
     reader
         .join()
@@ -294,11 +346,22 @@ fn write_string(data: &mut Vec<u8>, value: &OsStr) {
     }
 }
 
-fn read_handshake(stdout: &mut ChildStdout) -> Result<u32, String> {
+fn read_handshake(stdout: &mut ChildStdout, mut progress: impl FnMut(u8)) -> Result<u32, String> {
     let mut flag = [0];
-    stdout
-        .read_exact(&mut flag)
-        .map_err(|_| "Windows process supervisor stopped before the command started".to_string())?;
+    loop {
+        stdout.read_exact(&mut flag).map_err(|_| {
+            "Windows process supervisor stopped before the command started".to_string()
+        })?;
+        if flag[0] == 2 {
+            let mut stage = [0];
+            stdout
+                .read_exact(&mut stage)
+                .map_err(|_| "Windows process supervisor sent an incomplete stage".to_string())?;
+            progress(stage[0]);
+            continue;
+        }
+        break;
+    }
     if flag[0] == 1 {
         let mut id = [0; 4];
         stdout.read_exact(&mut id).map_err(|_| {
@@ -331,13 +394,44 @@ fn read_handshake(stdout: &mut ChildStdout) -> Result<u32, String> {
     ))
 }
 
-pub(super) fn terminate(child: &mut Child) -> Result<(), String> {
+fn stage_name(stage: u8) -> &'static str {
+    match stage {
+        1 => "managed entry",
+        2 => "command channel",
+        3 => "sandbox preparation",
+        4 => "job and attributes",
+        5 => "native child creation",
+        6 => "child created",
+        _ => "before managed entry",
+    }
+}
+
+pub(super) fn terminate(child: &mut Child, control: Option<&File>) -> Result<(), String> {
     if child
         .try_wait()
         .map_err(|error| format!("Could not inspect process supervisor: {error}"))?
         .is_some()
     {
         return Ok(());
+    }
+    if let Some(control) = control {
+        let mut control = control;
+        if control.write_all(&[1]).is_ok() {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if child
+                    .try_wait()
+                    .map_err(|error| format!("Could not inspect process supervisor: {error}"))?
+                    .is_some()
+                {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
     }
     child
         .kill()

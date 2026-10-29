@@ -206,6 +206,8 @@ pub struct Started {
     #[cfg(windows)]
     completion: Option<JoinHandle<Result<i32, String>>>,
     #[cfg(windows)]
+    control: Option<std::fs::File>,
+    #[cfg(windows)]
     target_pid: u32,
     #[cfg(unix)]
     owner: unix::Owner,
@@ -241,6 +243,7 @@ fn start(
         stdout: child_stdout,
         writer: stdin_writer,
         completion,
+        control,
         target_pid,
     } = if options.leaf {
         windows::spawn_leaf(command, input)?
@@ -280,6 +283,8 @@ fn start(
         #[cfg(windows)]
         completion,
         #[cfg(windows)]
+        control,
+        #[cfg(windows)]
         target_pid,
         #[cfg(unix)]
         owner,
@@ -310,7 +315,9 @@ impl Started {
             chunks,
             writer,
             #[cfg(windows)]
-            completion,
+            mut completion,
+            #[cfg(windows)]
+            control,
             #[cfg(windows)]
                 target_pid: _,
             #[cfg(unix)]
@@ -326,6 +333,20 @@ impl Started {
         let mut cleanup_error = None;
         #[cfg(windows)]
         let mut terminated = false;
+        #[cfg(windows)]
+        let mut termination_confirmed = false;
+        macro_rules! terminate_owned {
+            ($child:expr) => {{
+                #[cfg(windows)]
+                {
+                    windows::terminate($child, control.as_ref())
+                }
+                #[cfg(unix)]
+                {
+                    unix::terminate($child)
+                }
+            }};
+        }
 
         loop {
             while let Ok(chunk) = chunks.try_recv() {
@@ -339,7 +360,7 @@ impl Started {
                 {
                     terminated = true;
                 }
-                cleanup_error = terminate(&mut child).err();
+                cleanup_error = terminate_owned!(&mut child).err();
                 break;
             }
             if stdout.lock().unwrap().error.is_some() || stderr.lock().unwrap().error.is_some() {
@@ -347,14 +368,14 @@ impl Started {
                 {
                     terminated = true;
                 }
-                cleanup_error = terminate(&mut child).err();
+                cleanup_error = terminate_owned!(&mut child).err();
                 break;
             }
             if status.is_none() {
                 match child.try_wait() {
                     Ok(value) => status = value,
                     Err(error) => {
-                        let cleanup = terminate(&mut child).err();
+                        let cleanup = terminate_owned!(&mut child).err();
                         return Err(format!(
                             "Could not wait for process: {error}{}",
                             cleanup.map_or(String::new(), |error| format!("; {error}"))
@@ -380,15 +401,32 @@ impl Started {
                 {
                     terminated = true;
                 }
-                cleanup_error = terminate(&mut child).err();
+                cleanup_error = terminate_owned!(&mut child).err();
+                #[cfg(windows)]
+                if cleanup_error.is_none()
+                    && let Some(report) = completion.take()
+                {
+                    match windows::completion(report) {
+                        Ok(_) => termination_confirmed = true,
+                        Err(error) => cleanup_error = Some(error),
+                    }
+                }
                 #[cfg(unix)]
                 {
                     status = child.try_wait().ok().flatten().or(status);
                 }
                 // An inherited pipe must not make an already timed-out command block forever.
                 let drain_started = Instant::now();
+                #[cfg(windows)]
+                let drain_limit = if termination_confirmed {
+                    Duration::from_secs(5)
+                } else {
+                    Duration::from_millis(250)
+                };
+                #[cfg(unix)]
+                let drain_limit = Duration::from_millis(250);
                 while !(stdout_reader.is_finished() && stderr_reader.is_finished())
-                    && drain_started.elapsed() < Duration::from_millis(250)
+                    && drain_started.elapsed() < drain_limit
                 {
                     thread::sleep(Duration::from_millis(5));
                 }
@@ -427,13 +465,13 @@ impl Started {
         }
 
         #[cfg(windows)]
-        let native_exit_code = if !terminated {
-            match completion {
-                Some(completion) => Some(windows::completion(completion).map_err(RunError::from)?),
-                None => status.and_then(|status| status.code()),
+        let native_exit_code = match completion {
+            Some(completion) => {
+                let code = windows::completion(completion).map_err(RunError::from)?;
+                (!terminated).then_some(code)
             }
-        } else {
-            None
+            None if !terminated => status.and_then(|status| status.code()),
+            None => None,
         };
 
         let input_error = if !timed_out && !cancelled {
@@ -474,11 +512,6 @@ impl Started {
         })
     }
 }
-
-#[cfg(unix)]
-use unix::terminate;
-#[cfg(windows)]
-use windows::terminate;
 
 #[cfg(all(test, windows))]
 mod env_tests;

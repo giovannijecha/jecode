@@ -402,12 +402,12 @@ Rust launches owned, build-embedded native adapters through
 
 | Boundary | Implementation and requirements |
 | --- | --- |
-| Windows processes | The build-embedded C# supervisor creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. Childless native HTTP and account crypto adapters use `process::run_leaf`; cancellation and timeouts kill them directly. |
-| Checkpoint disk space | Windows uses an owned cached C# helper and `GetDiskFreeSpaceExW` at the archive path; requires Windows PowerShell and `Add-Type`. Unix uses the installed `df -Pk` command. Failed queries prevent payload admission and can retry after five seconds. |
-| Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
-| Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
-| Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |
-| Isolated collaborator workspaces | Installed `git` provides local inventory and detached worktree creation/removal. Requires launch at a repository root with an existing `HEAD`. Jecode owns copying the dirty baseline, comparison and selective file integration; no remote, branch or commit is created. |
+| Windows processes | The build-embedded C# supervisor creates commands atomically inside Win32 Job Objects and reports completion through a private named pipe. A separate stop channel keeps cancellation independent of blocking completion reads; the supervisor acknowledges termination after the job has no active processes. Childless native HTTP and account crypto adapters use `process::run_leaf`; cancellation and timeouts kill them directly. |
+| Checkpoint disk space | Build-embedded adapters query `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix. Failed queries prevent payload admission and can retry after five seconds. |
+| Unix processes | An embedded C guardian owns a process group and watches a private owner pipe. It uses libc process, signal and FIFO APIs for cancellation-aware binary stdin and cleanup. |
+| Windows terminal | A build-embedded C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and the system .NET Framework. |
+| Unix terminal | An embedded C adapter uses `termios` and `/dev/tty`, with a native guardian for terminal restoration. Requires a VT-compatible terminal. |
+| Isolated collaborator workspaces | Owned Rust code copies project files, compares the snapshot with the current project and integrates selected paths. Git and `HEAD` are unnecessary; no remote, branch or commit is created. |
 
 Process guardians stop owned descendants on cancellation, timeout or owner loss.
 Unix children that create another process group or session leave that cleanup

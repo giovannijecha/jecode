@@ -148,6 +148,9 @@ public static class JecodeProcess {
     static extern bool TerminateProcess(IntPtr process, uint exitCode);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern IntPtr GetCurrentProcess();
@@ -198,6 +201,13 @@ public static class JecodeProcess {
         output.Flush();
     }
 
+    static void SendStage(byte stage) {
+        Stream output = Console.OpenStandardOutput();
+        output.WriteByte(2);
+        output.WriteByte(stage);
+        output.Flush();
+    }
+
     static void SendCompletion(NamedPipeServerStream pipe, byte kind, byte[] payload) {
         pipe.WriteByte(kind);
         byte[] header = kind == 1 ? payload : BitConverter.GetBytes(payload.Length);
@@ -231,10 +241,13 @@ public static class JecodeProcess {
         JecodeWindowsSandbox sandbox = null;
         bool attributesInitialized = false;
         NamedPipeServerStream completion = null;
+        NamedPipeServerStream stopPipe = null;
         IAsyncResult pendingConnection = null;
+        IAsyncResult pendingStop = null;
         ProcessInformation process = new ProcessInformation();
         bool ready = false;
         try {
+            SendStage(1); // Managed entry reached.
             Stream source = Console.OpenStandardInput();
             var protocol = new BinaryReader(source, Encoding.Unicode);
             int ownerId = protocol.ReadInt32();
@@ -249,6 +262,10 @@ public static class JecodeProcess {
             completion = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1,
                 PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             pendingConnection = completion.BeginWaitForConnection(null, null);
+            stopPipe = new NamedPipeServerStream(pipeName + "-stop", PipeDirection.In, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            pendingStop = stopPipe.BeginWaitForConnection(null, null);
+            SendStage(2); // Command protocol and channels are available.
             string program = ReadString(protocol);
             string executable = JecodeWindowsCommand.ResolveProgram(program);
             int count = protocol.ReadInt32();
@@ -256,6 +273,7 @@ public static class JecodeProcess {
             var commandLine = new StringBuilder(JecodeWindowsCommand.Quote(program));
             for (int i = 0; i < count; i++) commandLine.Append(' ').Append(JecodeWindowsCommand.Quote(ReadString(protocol)));
             sandbox = JecodeWindowsSandbox.Prepare(ReadString(protocol));
+            SendStage(3); // Requested sandbox is prepared.
 
             job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw Failure("CreateJobObject");
@@ -285,6 +303,7 @@ public static class JecodeProcess {
                 jobValue, new IntPtr(IntPtr.Size), IntPtr.Zero, IntPtr.Zero))
                 throw Failure("UpdateProcThreadAttribute job list");
             if (sandbox != null) sandbox.AddAttribute(attributeList);
+            SendStage(4); // Job, handles and process attributes are ready.
             var startup = new StartupInfoEx();
             startup.Startup.Size = Marshal.SizeOf(typeof(StartupInfoEx));
             startup.Startup.Flags = StartfUseStdHandles;
@@ -296,10 +315,12 @@ public static class JecodeProcess {
             try {
                 uint flags = CreateSuspended | CreateNoWindow | ExtendedStartupInfoPresent;
                 if (sandbox != null) flags |= CreateUnicodeEnvironment;
+                SendStage(5); // Entering native child creation.
                 if (!CreateProcess(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
                     flags, environment, null, ref startup, out process))
                     throw Failure("CreateProcess");
             } finally { JecodeWindowsSandbox.FreeInheritedEnvironment(environment); }
+            SendStage(6); // Native child was created suspended.
             Stream readyStream = Console.OpenStandardOutput();
             readyStream.WriteByte(1);
             byte[] childId = BitConverter.GetBytes(process.ProcessId);
@@ -307,7 +328,16 @@ public static class JecodeProcess {
             readyStream.Flush();
             ready = true;
             completion.EndWaitForConnection(pendingConnection);
+            stopPipe.EndWaitForConnection(pendingStop);
             if (ResumeThread(process.Thread) == Infinite) throw Failure("ResumeThread");
+            var stopWatcher = new Thread(() => {
+                try {
+                    if (stopPipe.ReadByte() == 1) TerminateJobObject(job, 1);
+                } catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            });
+            stopWatcher.IsBackground = true;
+            stopWatcher.Start();
             CloseHandle(inputRead); inputRead = IntPtr.Zero;
             CloseHandle(output); output = IntPtr.Zero;
             CloseHandle(error); error = IntPtr.Zero;
@@ -353,6 +383,7 @@ public static class JecodeProcess {
             if (job != IntPtr.Zero) CloseHandle(job);
             if (sandbox != null) sandbox.Dispose();
             if (completion != null) completion.Dispose();
+            if (stopPipe != null) stopPipe.Dispose();
         }
     }
 }

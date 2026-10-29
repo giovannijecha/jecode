@@ -38,10 +38,10 @@ reuse a Codex client ID, or depend on the Codex CLI or app-server.
 The native crypto boundary uses Windows .NET cryptography, macOS Security and
 CommonCrypto, or the OS-supplied Linux libcrypto ABI for secure random bytes,
 SHA-256 and RSA signature verification. Native HTTPS uses Windows WinHTTP,
-Foundation URLSession or Linux sockets with OS libssl certificate and hostname
-verification. Owned adapters are compiled and embedded at build time. Request
-bodies and bearer tokens travel to the adapter on stdin, never in arguments or
-files. Cancellation and timeouts bound these operations. No external Rust crate
+macOS CFNetwork HTTP streams or Linux sockets with OS libssl certificate and
+hostname verification. Owned adapters are compiled and embedded at build time.
+Request bodies and bearer tokens travel to the adapter on stdin, never in
+arguments or files. Cancellation and timeouts bound these operations. No external Rust crate
 or copied cryptographic implementation is used. Unrelated `OPENAI_API_KEY` and
 `ACCESS_TOKEN` variables remain available to tools.
 
