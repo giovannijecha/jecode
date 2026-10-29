@@ -8,7 +8,7 @@ use crate::{
     backend::{Endpoints, Routing, Services},
     effort::Effort,
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, path::PathBuf};
 
 /// What the menus read about the conversation's agent.
 #[derive(Clone)]
@@ -24,6 +24,8 @@ pub(super) struct Facts {
     pub endpoints: Option<Endpoints>,
     /// Where the last turn was served.
     pub charges: Option<String>,
+    /// The user skill library's directory.
+    pub skills: Option<PathBuf>,
 }
 
 impl Facts {
@@ -38,6 +40,7 @@ impl Facts {
             routing: agent.routing(),
             endpoints: agent.cached_endpoints(agent.model()),
             charges: agent.charges().describe(),
+            skills: agent.skill_directory(),
         }
     }
 

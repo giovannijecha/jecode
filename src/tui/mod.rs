@@ -2,7 +2,6 @@ mod activity;
 mod agents;
 mod ask;
 mod attach;
-mod backend_command;
 mod cards;
 #[cfg(test)]
 mod checkpoint_tests;
@@ -91,6 +90,8 @@ struct App {
     auth_model_switch: bool,
     auth_signing_out: bool,
     pending_command: Option<usize>,
+    /// The open command row's name, also while a turn keeps it off the conversation.
+    local_command: Option<String>,
     exit_requested: bool,
     persistence: Option<crate::sessions::Handle>,
     saved_sessions: Vec<crate::sessions::Summary>,
@@ -167,6 +168,7 @@ impl App {
             auth_model_switch: false,
             auth_signing_out: false,
             pending_command: None,
+            local_command: None,
             exit_requested: false,
             persistence,
             saved_sessions: vec![],

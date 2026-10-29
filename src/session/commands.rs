@@ -13,7 +13,7 @@ impl Command {
         match self.name {
             "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/agents" | "/ask" | "/todo"
             | "/exit" => GROUPS[0],
-            "/backend" | "/model" | "/effort" | "/routing" => GROUPS[1],
+            "/model" | "/effort" | "/routing" => GROUPS[1],
             "/settings" | "/help" => GROUPS[3],
             _ => GROUPS[2],
         }
@@ -28,7 +28,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 20] = [
+pub const COMMANDS: [Command; 19] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -40,12 +40,6 @@ pub const COMMANDS: [Command; 20] = [
         description: "Resume or delete a conversation in this folder",
         tui_usage: "/resume [ID]",
         plain_usage: Some("/resume [ID]"),
-    },
-    Command {
-        name: "/backend",
-        description: "Choose the backend and model for this conversation",
-        tui_usage: "/backend [ID MODEL]",
-        plain_usage: Some("/backend [ID [MODEL]]"),
     },
     Command {
         name: "/model",

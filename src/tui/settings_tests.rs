@@ -75,40 +75,6 @@ fn wait(app: &mut App) {
 }
 
 #[test]
-fn backend_command_switches_model_without_changing_saved_defaults() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![]);
-    let mut app = app(&directory, &fixture);
-    app.dispatch("/backend".into()).unwrap();
-    assert!(app.state.items.iter().any(|item| matches!(item, state::Item::Local { result: Some(result), .. } if result.contains("Available backends"))));
-    app.dispatch("/backend openrouter fixture/manual".into())
-        .unwrap();
-    assert_eq!(app.agent.as_ref().unwrap().model(), "fixture/manual");
-    assert_eq!(app.config.settings.model, "fixture/model");
-    assert_eq!(app.archive.model, "fixture/manual");
-    assert!(fixture.finish().is_empty());
-}
-
-#[test]
-fn backend_command_uses_the_selected_chatgpt_account_without_changing_defaults() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![]);
-    let mut app = app(&directory, &fixture);
-    let home = app.config.store.path().parent().unwrap().to_path_buf();
-    crate::auth::openai::Store::fixture_account(home, "fixture-token").unwrap();
-    app.dispatch("/backend openai fixture-chatgpt-model".into())
-        .unwrap();
-    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openai");
-    assert_eq!(app.archive.model, "fixture-chatgpt-model");
-    assert_eq!(app.config.settings.backend_id, "openrouter");
-    assert_eq!(
-        app.agent.as_ref().unwrap().services().account().as_deref(),
-        Some("fixture-client:fixture-subject")
-    );
-    assert!(fixture.finish().is_empty());
-}
-
-#[test]
 fn model_command_reports_when_no_provider_is_configured() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);

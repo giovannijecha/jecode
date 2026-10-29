@@ -138,7 +138,7 @@ fn loaded_skill_card_replays_from_tool_history_after_resume() {
 }
 
 #[test]
-fn queued_skills_command_runs_locally_after_the_active_turn() {
+fn skills_command_runs_locally_during_the_active_turn() {
     let home = Directory::new();
     let directory = Directory::new();
     let skill = home.path().join("skills/review");
@@ -153,13 +153,19 @@ fn queued_skills_command_runs_locally_after_the_active_turn() {
     submit(&mut current, "First question");
     assert!(current.worker.is_some());
     submit(&mut current, "/skills");
+    let panel = current
+        .state
+        .information
+        .as_ref()
+        .expect("the Skills panel");
+    assert!(
+        panel.sections[0]
+            .details
+            .iter()
+            .any(|(name, _)| name == "review")
+    );
     finish(&mut current);
-    assert!(current.state.items.iter().any(|item| matches!(
-        item,
-        state::Item::Local { command, details, .. }
-        if command == "/skills" && details.iter().any(|(name, _)| name == "review")
-    )));
-    assert_eq!(fixture.finish().len(), 1);
+    assert_eq!(fixture.finish().len(), 1, "no model request lists skills");
 }
 
 #[test]

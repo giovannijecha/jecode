@@ -3,7 +3,7 @@
 The interactive TUI keeps one conversation above an editable composer. Enter
 sends a draft when idle. During a turn, it accepts the draft for the active
 turn before the next model request. Menus open over a running turn: `/settings`,
-`/model`, `/effort`, `/routing` and `/help`, besides the panels that always do.
+`/model`, `/effort`, `/routing`, `/skills` and `/help`, besides the panels that always do.
 What they change for this conversation applies from the next turn; saved
 defaults are saved at once. Commands that start work or replace the
 conversation, such as `/init`, `/resume` and `/new`, wait until the turn ends.
@@ -131,9 +131,7 @@ first, then extra draft rows, tabs or column headers, the status row and top
 rule, then the list rows farthest from the selection; the selected row, the
 title rule and the key row holding `Esc` stay.
 
-- `/backend [ID MODEL]` lists backends or switches this conversation to a
-  configured backend and model.
-- `/model [ID]` chooses a model and effort for this conversation;
+- `/model [ID]` chooses a provider, model and effort for this conversation;
   `/effort [NAME]` changes effort directly.
 - `/routing` chooses automatic or a specific OpenRouter endpoint for this
   conversation; OpenAI does not expose endpoint routing here.

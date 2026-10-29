@@ -33,7 +33,7 @@ provider, model and effort. The unsent composer and pending drafts move to the
 new conversation. Without a usable selection, an action banner points to
 model or provider configuration and leaves the current conversation intact.
 
-`/model` and `/backend` change the active selection within the same conversation.
+`/model` changes the active provider and model within the same conversation.
 The session ID, original history, attachments, live processes and browser remain
 available. The next request uses the new selection and resets its token
 calibration. A failed selection save retains the previous backend and model.

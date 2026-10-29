@@ -130,7 +130,6 @@ complete tool cards inline for the latest finished turn; see
 | `/new` | Start a fresh conversation with saved defaults. |
 | `/resume [ID]` | Choose a saved conversation from this project. |
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
-| `/backend [ID MODEL]` | List available backends or switch this conversation to a configured backend and model. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
 | `/settings` | Edit saved defaults and manage provider accounts or API keys. |
 | `/init` | Inspect this project and create or update its `AGENTS.md`. |

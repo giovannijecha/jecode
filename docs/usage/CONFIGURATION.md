@@ -42,7 +42,6 @@ instead report how to run `jecode setup`.
 | Action | Scope |
 | --- | --- |
 | `/model [ID]` | Choose a provider when more than one is configured, then a model and its effort for this conversation. A direct ID uses the current provider. |
-| `/backend` or `/backend ID MODEL` | List available backends or switch this conversation to a configured backend and model. Plain chat also accepts `/backend ID` and prompts for a model. |
 | `/effort [NAME]` | Change this conversation's reasoning effort. |
 | `/settings` → **Default model** | Save the model and effort for future conversations and launches. |
 | `/settings` → **Default effort** | Change the saved model's default effort. |
@@ -240,7 +239,7 @@ temporary storage, checkpoint archives and the personal [skill library](SKILLS.m
 `JECODE_BASH` selects the Bash executable. These are useful for isolated
 development.
 
-`/backend`, `/model`, `/effort` and `/routing` change the conversation without
+`/model`, `/effort` and `/routing` change the conversation without
 changing saved defaults. Changing the OpenRouter key in `/settings` refreshes
 authentication for an active OpenRouter conversation; otherwise it registers
 the key for later use. Connecting or selecting a ChatGPT account registers that

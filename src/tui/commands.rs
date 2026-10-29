@@ -139,13 +139,23 @@ impl App {
         }
         if name == "/skills" && arguments.is_empty() {
             self.local_start("/skills");
-            match self.agent.as_mut().unwrap().skills() {
-                Ok(skills) => {
+            let listing = if let Some(agent) = &mut self.agent {
+                agent
+                    .skills()
+                    .map(|skills| (skills, agent.skill_warnings().to_vec()))
+            } else {
+                // A turn holds the agent; read the same library directly.
+                let mut library = crate::skills::Library::at(self.facts().skills.clone());
+                library.refresh();
+                Ok((library.list(), library.warnings().to_vec()))
+            };
+            match listing {
+                Ok((skills, warnings)) => {
                     let (result, details) = commands::skills_catalog(
                         skills
                             .into_iter()
                             .map(|skill| (skill.name, skill.description)),
-                        self.agent.as_ref().unwrap().skill_warnings(),
+                        &warnings,
                     );
                     self.local_finish(Kind::Notice, &result, details);
                 }
@@ -189,7 +199,6 @@ impl App {
                 self.open_settings();
             }
             "/routing" if arguments.is_empty() => self.open_routing(false),
-            "/backend" => self.backend_command(arguments),
             "/model" => {
                 if !arguments.is_empty()
                     && let Err(error) = crate::config::validate_model(arguments)
@@ -242,6 +251,10 @@ impl App {
     /// Opens a command row. A menu used during a turn reports through notices
     /// instead, so the running turn keeps its rows.
     pub(super) fn local_start(&mut self, command: &str) {
+        self.local_command = command
+            .split_whitespace()
+            .next()
+            .map(str::to_ascii_lowercase);
         if self.held.is_some() {
             return;
         }
@@ -291,15 +304,7 @@ impl App {
                 )
             })
             .collect();
-        let command = self
-            .pending_command
-            .and_then(|index| self.state.items.get(index))
-            .and_then(|item| match item {
-                Item::Local { command, .. } => command.split_whitespace().next(),
-                _ => None,
-            })
-            .map(str::to_ascii_lowercase);
-        let information = match command.as_deref() {
+        let information = match self.local_command.as_deref() {
             Some("/tmp") => Some(
                 super::information::Information::new("Temporary files".into(), details.clone())
                     .context("this session"),
@@ -307,10 +312,6 @@ impl App {
             Some("/skills") => Some(
                 super::information::Information::new("Skills".into(), details.clone())
                     .aside(&result),
-            ),
-            Some("/backend") => Some(
-                super::information::Information::new("Backends".into(), details.clone())
-                    .aside("/backend ID MODEL"),
             ),
             Some("/checkpoints") => Some(super::information::Information::new(
                 result.clone(),
@@ -353,6 +354,7 @@ impl App {
         details: Vec<(String, String)>,
     ) {
         let result = self.archive.redactor.text(result);
+        self.local_command = None;
         if let Some(index) = self.pending_command.take()
             && let Some(Item::Local {
                 command,
@@ -501,7 +503,14 @@ pub(super) fn immediate(name: &str) -> bool {
 /// Commands that start work or replace the conversation still wait.
 fn menu(name: &str) -> bool {
     let name = commands::canonical(name);
-    ["/settings", "/model", "/effort", "/routing", "/help"]
-        .iter()
-        .any(|command| name.eq_ignore_ascii_case(command))
+    [
+        "/settings",
+        "/model",
+        "/effort",
+        "/routing",
+        "/help",
+        "/skills",
+    ]
+    .iter()
+    .any(|command| name.eq_ignore_ascii_case(command))
 }

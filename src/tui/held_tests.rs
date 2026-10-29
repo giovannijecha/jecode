@@ -86,6 +86,39 @@ fn menus_open_during_a_turn_while_work_commands_still_wait() {
 }
 
 #[test]
+fn skills_list_the_library_during_a_turn() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    std::fs::create_dir_all(home.path().join("skills/review")).unwrap();
+    std::fs::write(
+        home.path().join("skills/review/SKILL.md"),
+        "---\nname: review\ndescription: Inspect a change.\n---\n\n# Review\n",
+    )
+    .unwrap();
+    let (fixture, release) = gated();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let mut app = App::new(agent, config(&directory), None);
+    submit(&mut app, "first");
+    wait_until(&mut app, |app| app.state.status == "Writing the response…");
+    submit(&mut app, "/skills");
+    assert!(app.state.queue.is_empty());
+    let panel = app.state.information.as_ref().expect("the Skills panel");
+    assert_eq!(panel.title, "Skills");
+    assert_eq!(
+        panel.sections[0].details,
+        [("review".to_string(), "Inspect a change.".to_string())]
+    );
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert!(local_rows(&app).is_empty());
+    drop(fixture);
+}
+
+#[test]
 fn a_model_chosen_during_a_turn_applies_from_the_next_one() {
     let directory = Directory::new();
     let (fixture, release) = gated();

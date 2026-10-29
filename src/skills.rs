@@ -49,6 +49,18 @@ impl Library {
         self.directory = Some(home.join("skills"));
     }
 
+    /// The directory, for an empty library to scan on its own.
+    pub fn directory(&self) -> Option<&Path> {
+        self.directory.as_deref()
+    }
+
+    pub fn at(directory: Option<PathBuf>) -> Self {
+        Self {
+            directory,
+            ..Self::default()
+        }
+    }
+
     pub fn refresh(&mut self) -> bool {
         let (entries, warnings) = self.scan();
         let changed = entries != self.entries || warnings != self.warnings;

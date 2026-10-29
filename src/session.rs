@@ -185,7 +185,6 @@ fn chat_inner(
             ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
             }),
-            ("/backend", _) => config.change_backend(agent, arguments, input, output),
             ("/routing", "") => config.change_routing(agent, input, output),
             ("/effort", "") => config.change_effort(agent, None, input, output),
             ("/effort", _) => config.change_effort(agent, Some(arguments), input, output),
