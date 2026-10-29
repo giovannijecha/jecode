@@ -111,14 +111,32 @@ fn a_model_chosen_during_a_turn_applies_from_the_next_one() {
     assert_eq!(model(1), Some(Value::string("fixture/other")));
 }
 
-#[test]
-fn a_question_closes_the_menu_open_over_the_turn() {
-    let directory = Directory::new();
-    let arguments = json::parse(
+fn question() -> Value {
+    json::parse(
         r#"{"questions":[{"id":"scope","title":"Scope","question":"Which rows?",
         "options":[{"id":"all","label":"All rows"},{"id":"visible","label":"Visible rows"}]}]}"#,
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn a_question_event_closes_an_open_menu() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_settings();
+    app.open_agents();
+    let request = crate::ask::Request::parse("ask-1", &question()).unwrap();
+    app.worker_event(crate::events::Event::UserQuestion { request });
+    assert!(app.state.selector.is_none() && app.state.agents_panel.is_none());
+    assert!(app.state.ask_panel.is_some());
+    drop(fixture);
+}
+
+#[test]
+fn a_question_closes_the_menu_open_over_the_turn() {
+    let directory = Directory::new();
+    let arguments = question();
     let fixture = HttpFixture::new(vec![(
         200,
         completion("", vec![tool_call("ask-1", "ask_user", arguments)]),

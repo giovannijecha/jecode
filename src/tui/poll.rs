@@ -164,6 +164,9 @@ impl App {
                 self.show_collaboration(event);
             }
             Event::UserQuestion { request } => {
+                if self.state.question.is_none() {
+                    self.make_room_for_ask();
+                }
                 self.state.event(Event::UserQuestion { request });
             }
             Event::ToolStarted {

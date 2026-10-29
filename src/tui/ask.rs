@@ -59,7 +59,7 @@ impl App {
 
     /// Closes every panel and menu, each the way Esc would, so the question
     /// takes the composer's place. The quit confirmation stays above it.
-    fn make_room_for_ask(&mut self) {
+    pub(super) fn make_room_for_ask(&mut self) {
         // Closing a submenu can return to its parent; settle within a few steps.
         for _ in 0..8 {
             if self.state.selector.is_none() {
