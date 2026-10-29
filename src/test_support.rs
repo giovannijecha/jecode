@@ -229,8 +229,10 @@ impl HttpFixture {
                                 Err(_) => panic!("stream was not observed before completion"),
                             }
                         }
-                        stream.write_all(tail.as_bytes()).unwrap();
-                        stream.flush().unwrap();
+                        // A cancelled client may already have closed the socket.
+                        let _ = stream
+                            .write_all(tail.as_bytes())
+                            .and_then(|_| stream.flush());
                     }
                 }
             }
@@ -276,9 +278,11 @@ fn http_fixture_survives_slow_client_preparation() {
             b"POST /chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}",
         )
         .unwrap();
-    let mut response = String::new();
-    client.read_to_string(&mut response).unwrap();
-    assert!(response.starts_with("HTTP/1.1 200"));
+    // Waiting for the close would race a concurrent test's child process
+    // that briefly inherits the accepted socket; the status line suffices.
+    let mut status = [0; 12];
+    client.read_exact(&mut status).unwrap();
+    assert_eq!(&status, b"HTTP/1.1 200");
     assert_eq!(fixture.finish().len(), 1);
 }
 
