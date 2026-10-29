@@ -345,7 +345,7 @@ fn cleanup_accepts_an_already_finished_process_group() {
         .spawn()
         .unwrap();
     child.wait().unwrap();
-    terminate(&mut child).unwrap();
+    super::unix::terminate(&mut child).unwrap();
 }
 
 #[cfg(unix)]
