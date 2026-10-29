@@ -10,6 +10,7 @@ impl Agent {
         if self.persistence.is_none() {
             self.skills.configure(home);
             self.tools.configure_browser_profiles(home);
+            self.tools.configure_project_map(home);
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
@@ -33,6 +34,10 @@ impl Agent {
             self.context.reset_usage();
             self.persistence = Some(Handle::new(store, document, self.redactor.clone()));
             self.sync_conversation();
+            self.collaboration
+                .bind(self.archive(), self.persistence.clone())?;
+            self.questions
+                .bind(self.archive(), self.persistence.clone());
             self.begin_checkpoints();
             self.checkpoint(Stage::Preserve)?;
         }
@@ -81,6 +86,9 @@ impl Agent {
         prompt: impl Into<crate::attachments::Prompt>,
     ) -> Result<(), String> {
         let prompt = prompt.into();
+        if self.has_pending_question() {
+            return Err("Answer or dismiss the pending question before starting a new turn".into());
+        }
         if prompt.is_empty() {
             return Err("The prompt must not be empty".into());
         }
@@ -93,22 +101,33 @@ impl Agent {
         self.refresh_project_instructions()?;
         self.refresh_skills();
         let before = self.messages.lock().unwrap().len();
-        let previous_events = self.events.lock().unwrap().len();
-        self.events.lock().unwrap().push(Value::object([
+        let start = Value::object([
             ("type", Value::string("turn_start")),
             ("after_message", Value::number(before)),
-        ]));
+        ]);
+        self.events.lock().unwrap().push(start.clone());
         self.messages.lock().unwrap().push(prompt.message());
         if let Err(error) = self.checkpoint(Stage::Begin) {
             self.messages.lock().unwrap().truncate(before);
-            self.events.lock().unwrap().truncate(previous_events);
+            self.withdraw_event(&start);
             return Err(error);
         }
         self.prepared = Some(prompt);
         Ok(())
     }
 
+    /// Removes an event this agent appended but could not save. Collaborator
+    /// receipts can be inserted meanwhile, so a length-based truncation could
+    /// drop a saved receipt instead.
+    pub(super) fn withdraw_event(&self, event: &Value) {
+        let mut events = self.events.lock().unwrap();
+        if let Some(index) = events.iter().rposition(|candidate| candidate == event) {
+            events.remove(index);
+        }
+    }
+
     pub(super) fn record_turn_error(&self, error: &str, partial: &str) {
+        let after_message = self.messages.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("turn_error")),
             ("error", Value::string(self.redact(error))),
@@ -121,10 +140,7 @@ impl Agent {
                 }),
             ),
             ("partial_text", Value::string(partial)),
-            (
-                "after_message",
-                Value::number(self.messages.lock().unwrap().len()),
-            ),
+            ("after_message", Value::number(after_message)),
         ]));
     }
 }

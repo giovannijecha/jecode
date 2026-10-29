@@ -18,6 +18,7 @@ impl App {
                     if count == 1 { "tool" } else { "tools" }
                 ),
             ));
+            return true;
         }
         true
     }

@@ -1,0 +1,136 @@
+# Questions and plans
+
+`ask_user` lets the main agent wait for a concrete answer. `todo_list` keeps a
+plan for the current conversation. Both run in source order, even if a call
+includes `parallel: true`, and leave at most one row each in the conversation.
+
+## Answer a question
+
+In an interactive terminal, the questions take the composer's place under a
+`Waiting for you` marker; the conversation gains nothing until they are
+answered. A menu or panel open when they arrive closes, as Esc would, so the
+questions show at once; only the quit confirmation stays above them. One call asks up to four questions, answered one at a time and sent
+together. Each question can include context and up to six options, as single
+or multiple choice. `Other` is always the last answer and takes the user's own
+words; a question without options takes words only. Nothing is preselected,
+and a recommendation is a suggestion that is never submitted automatically.
+
+Arrows move the cursor without choosing. Space selects the highlighted option
+(several, for multiple choice); typing fills `Other`, and Ctrl+J adds a line.
+Enter chooses the highlighted single-choice option, then moves to the next
+question; on the last question it sends every answer. Tab, Shift+Tab, or ←→
+outside typed words switch questions, and a step row shows which are answered.
+Long questions scroll with the cursor, the wheel and Page Up/Down. Ctrl+D
+explicitly dismisses the questions. Ctrl+C stops the active turn.
+
+Esc returns to the main chat while leaving the questions pending. `/ask`
+reopens them. Answers in progress and the main draft keep separate text and
+carets. Dismissing is a separate explicit action and tells the model that no
+answer was supplied. The main agent waits; existing collaborators and processes
+can keep working, and `/agents` and `/todo` remain available for inspection.
+
+The tool accepts:
+
+```json
+{
+  "questions": [
+    {
+      "id": "format",
+      "title": "Format",
+      "question": "Which format should the export use?",
+      "context": "The current exporter produces one file.",
+      "options": [
+        {"id": "csv", "label": "CSV", "description": "Open in a spreadsheet", "recommended": true},
+        {"id": "json", "label": "JSON", "description": "Keep nested fields"}
+      ]
+    },
+    {
+      "id": "fields",
+      "title": "Fields",
+      "question": "Which fields should be included?",
+      "multiple": true,
+      "options": [
+        {"id": "dates", "label": "Dates"},
+        {"id": "owners", "label": "Owners"}
+      ]
+    }
+  ]
+}
+```
+
+The result distinguishes an answer from dismissal, cancellation or unavailable
+interactive input. An answered result lists, for each question ID, the chosen
+option IDs and the typed text. Single-prompt and piped invocations return
+unavailable without blocking. Interactive `--plain` chat asks each question in
+turn on stdin: a number chooses an option, a list such as `1,3` chooses several
+for multiple choice, other text is the user's own words, and `/dismiss` skips.
+Each accepted answer is saved before the next question. If stdin closes, resume
+continues at the unanswered question with earlier answers intact.
+Collaborators do not receive this tool; they report questions to the main agent.
+
+Pending questions and answers in progress survive `/resume`; questions saved
+by earlier versions in the single-question form still resume. A saved answer
+remains associated with its original tool call, including if Jecode closes
+before the model continues. Restoring a question does not replay earlier file
+or command effects, and later tool calls from the same turn are recorded as not
+executed. After answering, the conversation shows one `ASK USER` row with the
+answers that were actually submitted. Closing the input surface preserves a
+pending question; stopping the turn explicitly records cancellation instead.
+
+## Inspect a plan
+
+The plan belongs to the model; ask for changes in the main conversation. The
+conversation shows only the call that creates a plan: a `TODO` row with the plan
+title and its task count, which stays as written. Reads, later updates, replans
+and the end of the plan add no row. A `set` with no plan yet, or after every
+task of the previous plan is done or cancelled, creates a new plan and a new row.
+
+`/todo` opens the current plan below the composer and updates live. The rule
+shows the plan title, one progress cell per counted task and `N of M done`.
+Every task appears in plan order with its number, mark, title, owner and state:
+`done`, `in progress`, `waiting`, `awaiting review`, `failed` or `cancelled`;
+a task not started has no state word. Cancelled tasks keep their place without
+a number. Narrow terminals drop the numbers and shorten `awaiting review` to
+`review`. The menu has nothing to select or open: arrows scroll a long plan and
+Esc closes it. It does not make a model request. In interactive `--plain`,
+`/todo` prints the same information as text.
+
+`todo_list` with `action: "get"` returns the current plan, or revision zero with
+an empty task list when no plan exists. With `action: "set"`, it replaces the
+complete plan and assigns the next revision:
+
+```json
+{
+  "action": "set",
+  "title": "Add the export",
+  "tasks": [
+    {"id": "inspect", "title": "Inspect the existing format", "status": "done"},
+    {"id": "implement", "title": "Implement the exporter", "status": "in_progress"},
+    {"id": "verify", "title": "Verify the exported file", "status": "pending", "note": "Check an empty input too"}
+  ]
+}
+```
+
+Task IDs remain stable when editing a task. Supported statuses are `pending`,
+`in_progress`, `waiting`, `done` and `cancelled`. `note` and `agent` are optional
+text; notes are for the model and `/todo` does not show them. A plan may contain
+up to 40 tasks. An empty `tasks` array clears its activities while retaining the
+new revision in history.
+
+`agent` names the collaborator working on a task, such as `a1`, and `/todo`
+shows it as an `AGENT N` badge with its lifecycle. An `aN` reference follows
+that unique ID; closing it never binds the task to another agent reusing its
+displayed number. An explicit number or `AGENT N` follows the displayed number.
+While the main agent has not marked the task done, cancelled or waiting, a
+returned collaborator shows the
+task as `awaiting review` and a failed one as `failed`. Only the main agent marks
+its plan; a collaborator's return never completes a task, and collaborators keep
+their own plans.
+
+Every successful update returns the full plan with its revision; `/todo` shows
+the latest successful update. Invalid updates leave the previous plan intact.
+There is no permanent Todo footer.
+
+The plan survives resume, compaction and model changes, and is included in the
+conversation export. `/new` starts without a plan. The plan records the model's
+account of progress; it does not enforce a completion gate.

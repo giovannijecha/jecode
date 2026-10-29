@@ -3,6 +3,17 @@ use crate::json::Value;
 
 const PROMPT: &str = include_str!("PROMPT.md");
 
+/// Message-independent request instructions, read before messages are locked.
+pub(super) struct Environment(String);
+
+fn join<const N: usize>(parts: [String; N]) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 impl Agent {
     pub(super) fn system_message(&self) -> Value {
         let environment = Value::object([
@@ -55,14 +66,125 @@ impl Agent {
         message
     }
 
+    #[cfg(test)]
     pub(super) fn request_environment(&self) -> String {
-        [
+        let environment = self.environment();
+        let messages = self.messages.lock().unwrap();
+        self.request_environment_for(&environment, &messages)
+    }
+
+    /// Reads the request instructions that do not depend on messages. Call it
+    /// before locking `messages`: a collaborator receipt holds collaboration
+    /// state while it appends to this conversation, so the lock order is
+    /// collaboration state, then messages.
+    pub(super) fn environment(&self) -> Environment {
+        Environment(join([
             self.temporary_instructions(),
             self.checkpoint_instructions(),
-        ]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+            self.collaboration_instructions(),
+        ]))
+    }
+
+    pub(super) fn request_environment_for(
+        &self,
+        environment: &Environment,
+        messages: &[Value],
+    ) -> String {
+        join([environment.0.clone(), self.todo_instructions(messages)])
+    }
+
+    fn todo_instructions(&self, messages: &[Value]) -> String {
+        let Some(plan) = crate::todo::latest(messages) else {
+            return String::new();
+        };
+        let mut text = format!(
+            "Current conversation plan, revision {}: {}. The model owns updates through todo_list action=set; action=get retrieves the full plan.\n",
+            plan.revision, plan.title
+        );
+        for task in &plan.tasks {
+            let row = format!(
+                "{} [{}] {}{}\n",
+                task.id,
+                task.status,
+                task.title,
+                task.agent
+                    .as_ref()
+                    .map_or(String::new(), |agent| format!(" ({agent})"))
+            );
+            if text.len() + row.len() > 4_000 {
+                text.push_str(
+                    "Further tasks omitted here; call todo_list action=get for the full plan.\n",
+                );
+                break;
+            }
+            text.push_str(&row);
+        }
+        text
+    }
+
+    fn collaboration_instructions(&self) -> String {
+        if self.child {
+            return String::new();
+        }
+        let records = self.collaboration.snapshot();
+        if records.is_empty() {
+            return String::new();
+        }
+        let mut lines = vec![
+            "Active collaborators in this session. Only you, the main agent, review their work. For each returned or failed report still awaiting review, inspect and verify the evidence, then call agent with action=review, id, report_version from the report, and a note recording your assessment. Inspection or a text summary does not record review. After any needed follow-up or integration, call agent with action=close to release the collaborator and remove it from the active list.".to_owned(),
+        ];
+        for record in records {
+            let field = |name| {
+                record
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned()
+            };
+            let id = field("id");
+            let title = field("title");
+            let state = field("state");
+            let received = record
+                .get("received_version")
+                .and_then(Value::as_usize)
+                .unwrap_or(0);
+            let reviewed = record.get("reviewed") == Some(&Value::Bool(true));
+            let report_version = record
+                .get("report")
+                .and_then(|report| report.get("version"))
+                .and_then(Value::as_usize);
+            let review_state = match (state.as_str(), reviewed) {
+                ("returned" | "failed", false) => "awaiting main-agent review",
+                ("returned" | "failed", true) => "reviewed; close when finished",
+                ("running" | "stopping", _) => "working",
+                _ => "close when safe to release",
+            };
+            lines.push(format!(
+                "{id} {title}: {state}, received assignment v{received}, report {}, {}",
+                report_version.map_or_else(|| "none".to_owned(), |version| format!("v{version}")),
+                review_state
+            ));
+            if let Some(report) = record
+                .get("report")
+                .and_then(|report| report.get("text"))
+                .and_then(Value::as_str)
+            {
+                lines.push(format!(
+                    "{id} report: {}",
+                    report.chars().take(2000).collect::<String>()
+                ));
+            } else if let Some(update) = record
+                .get("updates")
+                .and_then(Value::as_array)
+                .and_then(|updates| updates.last())
+                .and_then(Value::as_str)
+            {
+                lines.push(format!(
+                    "{id} latest update: {}",
+                    update.chars().take(1000).collect::<String>()
+                ));
+            }
+        }
+        lines.join("\n")
     }
 }

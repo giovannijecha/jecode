@@ -218,6 +218,7 @@ static int bridge(int master, int *slave, int input, int control,
     input_frame.need = control_frame.need = 5;
     int child_status = 0;
     int child_done = 0;
+    int input_closed = 0;
     struct interrupt_state interrupt;
     memset(&interrupt, 0, sizeof(interrupt));
     for (;;) {
@@ -229,11 +230,11 @@ static int bridge(int master, int *slave, int input, int control,
         }
         struct pollfd events[4] = {
             { master, POLLIN |
-                (queue.count && !interrupt.count &&
+                (!input_closed && queue.count && !interrupt.count &&
                  queue.generation[queue.first] <= interrupt.applied_generation
                      ? POLLOUT : 0), 0 },
-            { child_done ? -1 : input, queue.count < 16 ? POLLIN : 0, 0 },
-            { child_done || interrupt.count == 16 ? -1 : control, POLLIN, 0 },
+            { child_done || input_closed ? -1 : input, queue.count < 16 ? POLLIN : 0, 0 },
+            { child_done || input_closed || interrupt.count == 16 ? -1 : control, POLLIN, 0 },
             { child_done ? -1 : status_read, POLLIN, 0 },
         };
         int ready = poll(events, 4, child_done ? 100 : interrupt.count ? 50 : 1000);
@@ -273,7 +274,7 @@ static int bridge(int master, int *slave, int input, int control,
                 return 125;
             }
         }
-        if (!child_done && interrupt.count < 16 && events[2].revents) {
+        if (!child_done && !input_closed && interrupt.count < 16 && events[2].revents) {
             int result = read_frame(control, &control_frame, *slave, master,
                                     NULL, &interrupt, &queue);
             if (result < 0) {
@@ -294,12 +295,20 @@ static int bridge(int master, int *slave, int input, int control,
                     --queue.count;
                     queue.sent = 0;
                 }
+            } else if (count < 0 && errno == EIO) {
+                /* The slave can close before the watcher publishes the child
+                   status. Pending input is undeliverable, but cleanup and the
+                   child's exit code still come from the watcher. */
+                input_closed = 1;
+                queue.count = 0;
+                queue.sent = 0;
+                interrupt.count = 0;
             } else if (count < 0 && errno != EINTR && errno != EAGAIN) {
                 fprintf(stderr, "Unix PTY master write failed: %s\n", strerror(errno));
                 return 125;
             }
         }
-        if (!child_done && queue.count < 16 && events[1].revents) {
+        if (!child_done && !input_closed && queue.count < 16 && events[1].revents) {
             int result = read_frame(input, &input_frame, *slave, master,
                                     &queue, &interrupt, &queue);
             if (result < 0) {

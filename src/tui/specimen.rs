@@ -280,6 +280,8 @@ fn specimen() {
 mod chapter_live;
 mod composer;
 mod diffs;
+mod discovery;
+mod map;
 mod menus;
 mod messages;
 mod notices;

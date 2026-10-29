@@ -1,203 +1,23 @@
 use super::{canonical, identifier, now, valid_id};
-use crate::attachments::{Attachment, Prompt};
+use crate::attachments::Prompt;
 use crate::backend::{Routing, validate_model};
-use crate::{effort::Effort, json::Value, redact::Redactor};
-use std::collections::BTreeSet;
+use crate::{effort::Effort, json::Value};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Draft {
-    pub text: String,
-    pub cursor: usize,
-    /// One per attachment marker in `text`, in order.
-    pub attachments: Vec<Attachment>,
-}
-
-impl Draft {
-    pub fn prompt(&self) -> Prompt {
-        Prompt::new(self.text.clone(), self.attachments.clone())
-    }
-
-    pub fn from_prompt(prompt: Prompt) -> Self {
-        Self {
-            cursor: prompt.text.len(),
-            text: prompt.text,
-            attachments: prompt.attachments,
-        }
-    }
-
-    fn value(&self) -> Value {
-        let Value::Object(mut fields) = self.prompt().value() else {
-            // Journal deltas merge object fields, so clearing a list must be explicit.
-            return Value::object([
-                ("text", Value::string(&self.text)),
-                ("cursor", Value::number(self.cursor)),
-                ("attachments", Value::Array(vec![])),
-            ]);
-        };
-        fields.insert("cursor".into(), Value::number(self.cursor));
-        Value::Object(fields)
-    }
-
-    fn parse(value: &Value) -> Result<Self, String> {
-        let text = string(value, "text")?.to_string();
-        let cursor =
-            usize::try_from(integer(value, "cursor")?).map_err(|_| "Invalid saved cursor")?;
-        if !text.is_char_boundary(cursor) {
-            return Err("Invalid saved draft or cursor".into());
-        }
-        let prompt = Prompt::parse(value)?;
-        let cursor = if prompt.text == text {
-            cursor
-        } else {
-            prompt.text.len()
-        };
-        Ok(Self {
-            text: prompt.text,
-            cursor,
-            attachments: prompt.attachments,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Input {
-    pub draft: Draft,
-    /// Attachments staged by the line-based chat for its next message.
-    pub staged: Vec<Attachment>,
-    pub queued: Vec<Prompt>,
-    pub paused: Vec<Draft>,
-    pub previous: Option<Draft>,
-    pub history: Vec<Prompt>,
-}
-
-impl Input {
-    pub(crate) fn attachment_ids(&self) -> BTreeSet<String> {
-        std::iter::once(&self.draft)
-            .chain(&self.paused)
-            .chain(self.previous.iter())
-            .flat_map(|draft| &draft.attachments)
-            .chain(
-                self.queued
-                    .iter()
-                    .chain(&self.history)
-                    .flat_map(|prompt| &prompt.attachments),
-            )
-            .chain(&self.staged)
-            .map(|attachment| attachment.id.clone())
-            .collect()
-    }
-
-    pub fn recover(&mut self) {
-        if !self.queued.is_empty() {
-            let mut queued: Vec<_> = self.queued.drain(..).map(Draft::from_prompt).collect();
-            queued.append(&mut self.paused);
-            self.paused = queued;
-        }
-        if let Some(previous) = self.previous.take() {
-            let edited = std::mem::replace(&mut self.draft, previous);
-            if !edited.text.is_empty() {
-                self.paused.push(edited);
-            }
-        }
-        self.history.retain(|prompt| {
-            !prompt.attachments.is_empty() || !prompt.text.trim_start().starts_with('/')
-        });
-    }
-
-    #[cfg(test)]
-    pub fn meaningful(&self) -> bool {
-        !self.draft.text.is_empty()
-            || !self.staged.is_empty()
-            || !self.queued.is_empty()
-            || !self.paused.is_empty()
-            || self.previous.is_some()
-    }
-
-    pub(super) fn redacted(&self, redactor: &Redactor) -> Self {
-        let draft = |draft: &Draft| {
-            let (text, cursor) = redactor.text_cursor(&draft.text, draft.cursor);
-            let prompt = Prompt::new(text, draft.attachments.clone());
-            Draft {
-                cursor: if prompt.text.is_char_boundary(cursor) && cursor <= prompt.text.len() {
-                    cursor
-                } else {
-                    prompt.text.len()
-                },
-                text: prompt.text,
-                attachments: prompt.attachments,
-            }
-        };
-        let prompt =
-            |prompt: &Prompt| Prompt::new(redactor.text(&prompt.text), prompt.attachments.clone());
-        Self {
-            draft: draft(&self.draft),
-            staged: self.staged.clone(),
-            queued: self.queued.iter().map(prompt).collect(),
-            paused: self.paused.iter().map(draft).collect(),
-            previous: self.previous.as_ref().map(draft),
-            history: self.history.iter().map(prompt).collect(),
-        }
-    }
-
-    fn value(&self) -> Value {
-        Value::object([
-            ("draft", self.draft.value()),
-            (
-                "staged",
-                Value::Array(self.staged.iter().map(Attachment::value).collect()),
-            ),
-            ("queued", prompts(&self.queued)),
-            (
-                "paused",
-                Value::Array(self.paused.iter().map(Draft::value).collect()),
-            ),
-            (
-                "previous",
-                self.previous.as_ref().map_or(Value::Null, Draft::value),
-            ),
-            ("history", prompts(&self.history)),
-        ])
-    }
-
-    fn parse(value: &Value) -> Result<Self, String> {
-        let queued = prompt_list(value, "queued", 8)?;
-        let paused = match value.get("paused") {
-            None => Vec::new(),
-            Some(Value::Array(values)) => {
-                values.iter().map(Draft::parse).collect::<Result<_, _>>()?
-            }
-            Some(_) => return Err("Invalid saved paused drafts".into()),
-        };
-        let history = prompt_list(value, "history", 50)?;
-        Ok(Self {
-            draft: Draft::parse(required(value, "draft")?)?,
-            staged: match value.get("staged") {
-                None => Vec::new(),
-                Some(Value::Array(values)) => values
-                    .iter()
-                    .map(Attachment::parse)
-                    .collect::<Result<Vec<_>, _>>()?,
-                Some(_) => return Err("Invalid saved staged attachments".into()),
-            },
-            queued,
-            paused,
-            history,
-            previous: match required(value, "previous")? {
-                Value::Null => None,
-                value => Some(Draft::parse(value)?),
-            },
-        })
-    }
-}
+mod input;
+pub use input::{Draft, Input};
 
 #[derive(Clone, Default)]
 pub struct Pending {
     pub active: bool,
     pub tool: Option<String>,
-    /// Legacy journal name for every call in a parallel read-only batch,
-    /// including web acquisitions and checkpoint/process inspections.
+    /// Legacy journal field for parallel calls. Explicit batch IDs mirror here
+    /// so older readers still treat interrupted modifying calls as unknown.
     pub reads: Vec<String>,
+    /// Calls launched together. Results may complete before earlier calls.
+    pub batch: Vec<String>,
+    /// Durable completed calls awaiting source-order transcript insertion.
+    pub completed: Vec<Value>,
     pub partial: String,
 }
 
@@ -247,6 +67,10 @@ impl Document {
         self.messages
             .iter()
             .any(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+            || self
+                .events
+                .iter()
+                .any(|event| event.get("type").and_then(Value::as_str) == Some("collaboration"))
             || !self.input.attachment_ids().is_empty()
     }
 
@@ -326,6 +150,11 @@ impl Document {
                         "reads",
                         Value::Array(self.pending.reads.iter().map(Value::string).collect()),
                     ),
+                    (
+                        "batch",
+                        Value::Array(self.pending.batch.iter().map(Value::string).collect()),
+                    ),
+                    ("completed", Value::Array(self.pending.completed.clone())),
                     ("partial_text", Value::string(&self.pending.partial)),
                 ]),
             ),
@@ -405,18 +234,12 @@ impl Document {
                     Value::String(id) if !id.is_empty() => Some(id.clone()),
                     _ => return Err("Invalid pending tool".into()),
                 },
-                reads: match pending.get("reads") {
+                reads: pending_ids(pending, "reads")?,
+                batch: pending_ids(pending, "batch")?,
+                completed: match pending.get("completed") {
                     None => Vec::new(),
-                    Some(Value::Array(reads)) => reads
-                        .iter()
-                        .map(|id| {
-                            id.as_str()
-                                .filter(|id| !id.is_empty())
-                                .map(str::to_owned)
-                                .ok_or_else(|| "Invalid pending read".to_owned())
-                        })
-                        .collect::<Result<_, _>>()?,
-                    _ => return Err("Invalid pending reads".into()),
+                    Some(Value::Array(completed)) => completed.clone(),
+                    _ => return Err("Invalid pending completed calls".into()),
                 },
                 partial: string(pending, "partial_text")?.into(),
             },
@@ -430,6 +253,22 @@ impl Document {
                 .unwrap_or(Routing::Default),
         };
         Ok(document)
+    }
+}
+
+fn pending_ids(pending: &Value, key: &str) -> Result<Vec<String>, String> {
+    match pending.get(key) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(ids)) => ids
+            .iter()
+            .map(|id| {
+                id.as_str()
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| format!("Invalid pending {key} call"))
+            })
+            .collect(),
+        _ => Err(format!("Invalid pending {key}")),
     }
 }
 

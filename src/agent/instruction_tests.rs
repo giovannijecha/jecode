@@ -119,7 +119,7 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
             )
     );
     assert!(
-        resumed.context_estimate(&resumed.messages.lock().unwrap())
+        resumed.locked_estimate()
             >= resumed
                 .system_message()
                 .encode()

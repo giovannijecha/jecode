@@ -59,24 +59,22 @@ fn read_at(display: &mut Display, text: &str) {
 
 #[test]
 fn the_reading_row_counts_the_rows_below_and_ends_its_key_two_cells_from_the_edge() {
-    let line = view::reading_row(40, 16, false, false);
+    let line = view::reading_row(50, 16, false);
     let plain = line.plain();
-    assert_eq!(super::super::text::cells(&plain), 38);
+    assert_eq!(super::super::text::cells(&plain), 48);
     assert!(plain.starts_with("↓ 16 rows below "));
-    assert!(plain.ends_with(" Esc  back to bottom"));
+    assert!(plain.ends_with(" Alt+End  back to bottom"), "{plain}");
     assert_eq!(line.spans[0].style, DIM.bold());
+    assert!(line.spans.iter().any(|span| {
+        span.text.contains("Alt+End") && span.background == Some(SELECTED_SURFACE)
+    }));
     assert!(
-        line.spans
-            .iter()
-            .any(|span| { span.text.contains("Esc") && span.background == Some(SELECTED_SURFACE) })
-    );
-    assert!(
-        view::reading_row(40, 1, false, false)
+        view::reading_row(50, 1, false)
             .plain()
             .starts_with("↓ 1 row below ")
     );
 
-    let fresh = view::reading_row(60, 3, true, true);
+    let fresh = view::reading_row(60, 3, true);
     assert_eq!(fresh.spans[0].style, ACCENT.bold());
     assert!(fresh.plain().starts_with("↓ 3 rows below · new output "));
     assert!(fresh.plain().ends_with(" Alt+End  back to bottom"));
@@ -90,43 +88,40 @@ fn the_reading_row_counts_the_rows_below_and_ends_its_key_two_cells_from_the_edg
 
 #[test]
 fn the_reading_row_drops_its_key_first_and_fits_small_widths() {
-    for alt_end in [false, true] {
-        for width in 3..60 {
-            let line = view::reading_row(width, 120, true, alt_end);
-            assert!(super::super::text::cells(&line.plain()) <= width - 2);
-        }
+    for width in 3..60 {
+        let line = view::reading_row(width, 120, true);
+        assert!(super::super::text::cells(&line.plain()) <= width - 2);
     }
-    let narrow = view::reading_row(32, 16, true, false).plain();
+    let narrow = view::reading_row(32, 16, true).plain();
     assert!(narrow.starts_with("↓ 16 rows below · new output"));
-    assert!(!narrow.contains("Esc"));
+    assert!(!narrow.contains("Alt+End"));
 }
 
 #[test]
-fn contextual_escape_actions_use_alt_end_in_the_badge() {
+fn agents_panel_during_readback_offers_one_escape_action_and_alt_end() {
     let mut state = State::default();
-    assert!(!back_to_bottom_uses_alt_end(&state));
-    state.history.record("saved prompt");
-    state.history.navigate(&mut state.editor, true);
-    assert!(back_to_bottom_uses_alt_end(&state));
-    state.history.cancel(&mut state.editor);
-    state.queue.push("queued draft").unwrap();
-    let slot = state.queue.slot(0).unwrap();
-    state.queue.begin_edit(slot, &mut state.editor).unwrap();
-    assert!(back_to_bottom_uses_alt_end(&state));
-    state.queue.cancel_edit(&mut state.editor);
-    state.suggestions.panel = true;
-    assert!(back_to_bottom_uses_alt_end(&state));
-    state.suggestions.panel = false;
-    state.quitting = Some(Vec::new());
-    assert!(back_to_bottom_uses_alt_end(&state));
-    state.quitting = None;
-    state.tool_details.expanded = true;
-    assert!(!back_to_bottom_uses_alt_end(&state));
-    assert!(
-        view::reading_row(60, 1, false, true)
-            .plain()
-            .contains("Alt+End  back to bottom")
+    state.message(
+        Kind::Assistant,
+        &(0..60)
+            .map(|index| format!("Row {index:02}  \n"))
+            .collect::<String>(),
     );
+    state.activity = Some(crate::tui::activity::Activity::new());
+    state.agents_panel = Some(crate::tui::agents::Panel::default());
+    let mut display = Display::new((state.width, state.height));
+    ready(&mut display, &state);
+    display.scroll(Scroll::Page(true));
+    let reading = display.update(&state, "fixture/model", "fixture", Instant::now());
+    assert!(reading.contains(" Alt+End "), "{reading}");
+    let panel = view::composer_frame(&state, "fixture/model", "fixture")
+        .live
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(panel.contains("Esc  close"), "{panel}");
+    assert!(!panel.contains("Esc interrupt"), "{panel}");
+    assert_eq!(panel.matches("Esc").count(), 1, "{panel}");
 }
 
 #[test]
@@ -159,11 +154,7 @@ fn badge_appears_above_the_composer_only_while_reading() {
     assert!(!initial.contains("back to bottom"));
     display.scroll(Scroll::Page(true));
     let reading = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(reading.contains(" Esc ") && reading.contains(" back to bottom"));
-    state.history.record("saved prompt");
-    state.history.navigate(&mut state.editor, true);
-    let contextual = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(contextual.contains(" Alt+End ") && contextual.contains(" back to bottom"));
+    assert!(reading.contains(" Alt+End ") && reading.contains(" back to bottom"));
     assert!(display.back_to_bottom());
     let following = display.update(&state, "fixture/model", "fixture directory", now);
     assert!(!following.contains("back to bottom"));

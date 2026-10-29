@@ -169,6 +169,9 @@ mod no_foreground;
 #[path = "unix_no_foreground_contract_tests.rs"]
 mod no_foreground_contract;
 
+#[path = "unix_eio_contract_tests.rs"]
+mod eio_contract;
+
 #[test]
 fn interrupt_flushes_canonical_typeahead() {
     let script = "stty -echo; trap 'kill \"$sleeper\" 2>/dev/null; wait \"$sleeper\" 2>/dev/null; printf INTERRUPTED\\n' INT; sleep 30 & sleeper=$!; printf 'READY\\n'; wait \"$sleeper\"; IFS= read -r line; printf 'LINE:%s:END\\n' \"$line\"";
@@ -261,7 +264,16 @@ fn input_from_after_interrupt_waits_for_its_control_frame() {
         String::from_utf8_lossy(&seen).contains("LINE:FUTURE:END"),
         "{seen:?}"
     );
-    assert_eq!(finished(&mut bridge.child).code(), Some(0));
+    let status = finished(&mut bridge.child);
+    let mut diagnostics = String::new();
+    bridge
+        .child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut diagnostics)
+        .unwrap();
+    assert_eq!(status.code(), Some(0), "{diagnostics}");
     reader.join().unwrap();
 }
 
@@ -403,7 +415,8 @@ fn interrupt_uses_remapped_vintr() {
 
 #[test]
 fn resize_and_interrupt_bypass_saturated_input() {
-    let script = "stty -echo -icanon; printf 'READY\\n'; trap 'stty size; printf INTERRUPTED\\n; exit 130' INT; while :; do sleep 1; done";
+    // READY must only be visible once the interrupt handler is installed.
+    let script = "stty -echo -icanon; trap 'stty size; printf INTERRUPTED\\n; exit 130' INT; printf 'READY\\n'; while :; do sleep 1; done";
     let (mut bridge, mut input, mut control) = launch(script, None);
     let mut output = bridge.child.stdout.take().unwrap();
     let (sender, receiver) = mpsc::channel();

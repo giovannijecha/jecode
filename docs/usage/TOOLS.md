@@ -1,17 +1,23 @@
 # Tools
 
-Jecode offers nine tools to the model. An assistant message describing a command
+Jecode offers thirteen tools to the main model and twelve operational tools to
+collaborators, which cannot delegate. An assistant message describing a command
 or file change does not execute it; only a native tool call can do that. Check
 the tool result or resulting state before treating a change as complete. Calls
 run only after the complete model response arrives; streamed partial calls never
-execute. Up to four adjacent independent calls run together: `read` except
-`history:`/`skill:`, `checkpoint list`/`inspect`, `process list`, and
-`web fetch`/`download` with GET or HEAD and no body. Other calls end the batch,
-including process polling, crawls and workspace modifications. Results enter the
-conversation and saved session in call order before the next batch or tool runs.
-Tool errors return as results so the model can correct the call.
+execute. Adjacent eligible reads run together automatically, up to four at a
+time: `list`, `search`, `read` except `history:`/`skill:`, `map overview`,
+`checkpoint list`/`inspect`, `process list`, and `web fetch`/`download` with GET
+or HEAD and no body. The model can also declare adjacent calls independent with
+`parallel: true`, including writes and commands. Results enter the conversation
+and saved session in call order. Tool errors return as individual results so the
+model can correct the call.
 
 ## Tool arguments
+
+All tools accept an optional boolean `parallel` argument. The `agent` control
+tool always runs in order; its workers run independently after creation. The
+table lists the other arguments.
 
 | Tool | Required arguments | Optional arguments | Result or constraint |
 | --- | --- | --- | --- |
@@ -24,9 +30,46 @@ Tool errors return as results so the model can correct the call.
 | `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
 | `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
 | `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `protect`, `wait_ms`, `timeout_seconds`, `output_limit_bytes`, `work`, `description` | Runs an executable with separate arguments and no shell parsing. `tty:true` returns a controllable terminal process. |
+| `list` | None | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Lists project entries, optionally as a recursive tree, with types and workspace-relative paths. |
+| `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Finds literal text in UTF-8 project files; returns line numbers, context and byte offsets. |
+| `map` | None | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources`, `work`, `description` | Surveys the project on demand and manages source-backed project notes. `action` defaults to `overview`; `remember` requires `title`, `summary` and `sources` at execution. |
+
+| `agent` | `action`; action-specific fields below | `tasks`, `id`, `instructions`, `context`, `timeout_ms`, `report_version`, `note`, `paths`, `expected_review_token`, `path`, `offset`, `limit` | Main agent only: create, update, inspect, wait, stop, review, compare, integrate or close collaborators. See [collaboration](COLLABORATION.md). |
+| `ask_user` | `questions` (1–4: `id`, `title`, `question`) | per question: `context`, `multiple`, `options` | Ask up to four questions, answered one at a time, with single or multiple choice and the user's own words; wait for explicit answers. Main agent only. See [questions and plans](WORK_TOOLS.md). |
+| `todo_list` | `action`; `title` and `tasks` for `set` | None | Get or atomically replace this conversation's plan. Successful updates create immutable numbered revisions. See [questions and plans](WORK_TOOLS.md). |
+
+## Parallel calls
+
+Set `parallel: true` on each adjacent call whose inputs and effects are
+independent. Jecode runs at most four at once; longer runs proceed in bounded
+waves. A call without `parallel: true` ends that declared group and waits for it
+to finish. `parallel: false` always runs in order. With the argument omitted,
+eligible reads keep their automatic batching and modifying calls run in order.
+Declared groups and automatic read groups never merge. `history:` and `skill:`
+reads and `agent` control calls remain ordered even with `parallel: true`.
+
+The model must consider shared files, interfaces, generated output, processes
+and external state before declaring independence. Different paths alone do not
+establish it; Jecode does not infer it from paths. Each call has its own result.
+Workspace checkpoints belong to individual modifying calls; commands save only
+declared `protect` paths. One failure does not undo another call or make a
+multi-file operation atomic. A `bash` or
+`exec` result with `process_id` only confirms launch or the end of its requested
+wait; poll the process before work
+that depends on its completion.
+
+For concurrent commands, use focused `protect` paths for each command's
+recovery scope. Restoring a broad scope can also undo another operation's
+changes. In explicitly declared groups, completed calls appear individually as
+they finish. Their
+results are saved before display; the next model request receives all results
+in original call order. If Jecode closes mid-group, saved completions retain
+their results and diffs, started calls without a saved result have an unknown
+outcome, and calls not started are marked not executed. None are automatically
+replayed; inspect current state before deciding what to retry.
 
 `work` is an optional short label chosen by the assistant for related `read`,
-`bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
+`list`, `search`, `map`, `bash`, `process`, `web`, `browser` and `exec` calls. At least two adjacent eligible calls
 share a TUI Work chapter only within the same execution turn and with matching
 normalized labels. A single eligible call keeps its normal compact tool card.
 A changed label, assistant narration or another tool breaks the chapter; skill
@@ -38,12 +81,138 @@ are saved with their original tool arguments and survive resume; they do not
 change execution. See
 [tool presentation](../tui/THEME.md) for the summary and `Ctrl+O` behavior.
 
-`description` is an optional short caption on those same six routine tools.
+`description` is an optional short caption on those same nine routine tools.
 It is stored unchanged with the original tool arguments alongside `work` and
 survives resume; it does not change execution. Bash and Process use it as the
 compact title above their command. When omitted, the command or tool target
 remains the visible fallback. Browser keeps its action in the title and shows
 its payload beneath it. See [tool presentation](../tui/THEME.md) for the layout.
+
+## Native file discovery
+
+`list` and `search` use Jecode's own Rust implementation; neither requires an
+installed search program or shell. Paths default to the project root (`.`),
+and returned paths are always workspace-relative with `/` separators. Absolute
+paths inside the project are accepted; paths outside it are rejected.
+
+Examples of tool arguments:
+
+```json
+{"path":"src","recursive":true,"pattern":"*.rs"}
+```
+
+The `list` call above returns Rust file entries under `src`. Without a pattern,
+it also returns directories and links. `recursive` defaults to `false`;
+immediate children have depth 1. Links and Windows junctions are listed without
+descending into them.
+
+```json
+{"query":"Cancellation","path":"src","pattern":"src/**/*.rs","context":2}
+```
+
+The `search` call above returns one result per matching line, including the
+first matched byte's `byte_offset`, a 1-based `line`, `text` and `before`/`after`
+context. Search is recursive under directories; `path` can also select one file.
+`query` is literal nonempty single-line UTF-8 text. `case_sensitive` defaults to
+`true`; `false` ignores ASCII case only. `context` defaults to 2, from 0 to 10.
+Use Bash or exec with an installed program for regular-expression searches.
+
+Both tools accept a path glob in `pattern`: `*`, `?`, `**` and bracket classes.
+A pattern without `/` matches an entry's basename; one containing `/` matches
+its workspace-relative path, even when `path` selects a subdirectory. Windows
+matching folds ASCII case. Patterns filter results without pruning unmatched
+directories from recursive exploration.
+
+Hidden dot-prefixed entries and ignored files/directories are excluded by
+default. `include_hidden` and `include_ignored` opt in independently. Ignore rules
+come from local and repository-ancestor `.gitignore` files and repository
+`info/exclude`, including Git worktrees; the global Git excludes file is not
+read. Git metadata is omitted unless `include_ignored` is true. Selecting an
+explicit path bypasses that path's own exclusions, while descendants still use
+normal filtering. Implicit traversal never follows links or junctions.
+
+`offset` is 1-based and defaults to 1. `list` defaults to 200 entries per page
+(maximum 2000); `search` defaults to 100 matching lines (maximum 1000). Encoded
+results are capped at 64 KiB, so a page can contain fewer results than `limit`.
+Repeat the same arguments with `next_offset` until it is null. Traversal uses
+deterministic depth-first path order and ascending line order, reading live
+files on each call; restart pagination after changes to the workspace.
+
+Long lines are searched in streaming chunks. Their bounded previews center on
+the first match, with `text_truncated` marking omitted text. Use `read` with the
+returned path and `byte_offset` to recover source text without a temporary script.
+Binary and non-UTF-8 files are counted in `skipped`; invalid tails after valid
+lines produce an error while retaining earlier matches. Unreadable paths also
+appear in `errors`. Error details are bounded; `errors_count` and
+`errors_truncated` describe any omitted details. `files_searched` counts opened
+candidate files, including candidates subsequently identified as non-text.
+
+`complete` is false when more results are available or errors prevented a full
+search. `skipped` reports exclusions separately. An empty result proves absence
+only within the selected and readable text scope. Compact TUI cards show counts,
+continuation and errors; `Ctrl+O` expands structured entries, matches and context.
+
+## Project map
+
+Call `map` with no arguments for an overview of the current project. The map is
+built when called; Jecode does not scan the project or put a complete map in the
+starting model context. The overview surveys candidate paths and extracts a
+focused lexical outline from Rust and Markdown files. It identifies areas,
+landmarks and symbols without claiming a language-wide call graph.
+
+The root overview stays coarse. Selecting a directory also reveals its
+immediate Rust source files as module candidates, so follow an area with
+`path` before focusing an individual file for its outline.
+
+```json
+{"action":"overview","path":"src","query":"config","limit":50}
+```
+
+`path` defaults to the project root. `pattern`, `include_hidden` and
+`include_ignored` use the same path filtering as `list` and `search`. `query`
+matches literal text in paths, titles, summaries and roles without case
+sensitivity. Pagination uses a 1-based `offset` (default 1) and `limit` (default
+100, maximum 1000). The encoded result is capped at 64 KiB; continue with a
+numeric `next_offset` and identical arguments. Inventory collection processes
+at most 100,000 candidate entries, keeps 2,000 rows, reads up to 80 candidate
+headers of 8 KiB each, and reads at most 4 MiB for a focused outline.
+`inventory_truncated` means narrow the path or query to recover omitted areas;
+pagination alone cannot recover an inventory cut. Results include `entries`,
+`entries_returned`, `files`, `notes_count`, `complete`, `errors`, `errors_count`
+and `skipped`. Each entry identifies its kind (`area`, `landmark`, `symbol` or
+`note`) and origin (`filesystem`, `source` or `model`).
+
+Filename roles are candidates and lexical declarations are source anchors;
+saved explanations remain model interpretations. Notes are read on demand.
+Unreadable note storage preserves the structural result with
+`notes_available:false`, `notes_count:null`, errors and `complete:false`.
+
+The assistant can save a project note with `remember`:
+
+```json
+{"action":"remember","title":"Configuration entry point","summary":"Setup reads the user-scoped config here.","sources":[{"path":"src/config.rs","line":1}]}
+```
+
+`title`, `summary` and at least one source path are required. A source can omit
+`line` to refer to the whole file; when supplied, the line is 1-based. The
+receipt returns an `id`; pass that `id` to `remember` to update the note or to
+`{"action":"forget","id":"..."}` to remove it. Notes are saved per project in
+the Jecode home, separately from conversations. After a source changes, the
+next overview reports its freshness as `changed`; absent sources report
+`missing`. `current` means the full source content still matches the saved
+fingerprint, while `unverified` means Jecode could not establish that state.
+Inspect the cited files again before relying on a changed or unverified note.
+
+Freshness checks only the notes on the requested page and references at most
+64 MiB of source content per call; sources beyond that budget are `unverified`.
+`remember` needs complete fingerprints within the same budget. Unchanged
+references do not establish semantic correctness or cover unreferenced
+dependencies. A note holds at most 16 sources, a 200-byte title and an
+8 KiB summary; the store holds at most 256 notes and 8 MiB. Writes coordinate
+across processes and preserve unrelated notes. Source paths and excerpts stay
+available for focused reads even when the saved explanation needs revisiting.
+
+## File recovery receipts
 
 `write`, `edit` and protected `bash` calls return a `checkpoint` receipt whose
 `status` is `saved`, `partial` or `none`. Saved references expire 24 hours after

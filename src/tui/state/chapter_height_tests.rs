@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::Event;
 use crate::tui::line::Line;
 
 mod singleton;

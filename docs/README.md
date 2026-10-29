@@ -11,7 +11,7 @@ scripts run from the Jecode repository root.
 | Connect OpenRouter or OpenAI ChatGPT; choose a model, effort or endpoint | [Configuration](usage/CONFIGURATION.md) |
 | Initialize project rules and scope `AGENTS.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
 | Add personal workflows and inspect the skill library | [Skills](usage/SKILLS.md) |
-| Understand file tools, command output and background processes | [Tools](usage/TOOLS.md) |
+| Explore and search files, inspect command output and manage background processes | [Tools](usage/TOOLS.md) |
 | Recover files from a modifying tool call | [Checkpoints](usage/CHECKPOINTS.md) |
 | Resume, recover or delete a conversation | [Saved sessions](usage/SESSIONS.md) |
 | Add files and clipboard images | [Attachments](usage/ATTACHMENTS.md) |

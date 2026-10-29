@@ -11,8 +11,9 @@ pub const GROUPS: [&str; 4] = ["Conversation", "Model", "Workspace", "Jecode"];
 impl Command {
     pub fn group(&self) -> &'static str {
         match self.name {
-            "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/exit" => GROUPS[0],
-            "/backend" | "/model" | "/effort" | "/routing" => GROUPS[1],
+            "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/agents" | "/ask" | "/todo"
+            | "/exit" => GROUPS[0],
+            "/model" | "/effort" | "/routing" => GROUPS[1],
             "/settings" | "/help" => GROUPS[3],
             _ => GROUPS[2],
         }
@@ -27,7 +28,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 17] = [
+pub const COMMANDS: [Command; 19] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -39,12 +40,6 @@ pub const COMMANDS: [Command; 17] = [
         description: "Resume or delete a conversation in this folder",
         tui_usage: "/resume [ID]",
         plain_usage: Some("/resume [ID]"),
-    },
-    Command {
-        name: "/backend",
-        description: "Choose the backend and model for this conversation",
-        tui_usage: "/backend [ID MODEL]",
-        plain_usage: Some("/backend [ID [MODEL]]"),
     },
     Command {
         name: "/model",
@@ -117,6 +112,24 @@ pub const COMMANDS: [Command; 17] = [
         description: "Inspect, stop or type into a background process",
         tui_usage: "/terminal [ID]",
         plain_usage: Some("/terminal [ID]"),
+    },
+    Command {
+        name: "/agents",
+        description: "Inspect collaborators in this conversation",
+        tui_usage: "/agents",
+        plain_usage: Some("/agents"),
+    },
+    Command {
+        name: "/ask",
+        description: "Return to the pending question",
+        tui_usage: "/ask",
+        plain_usage: None,
+    },
+    Command {
+        name: "/todo",
+        description: "Inspect this conversation's current plan",
+        tui_usage: "/todo",
+        plain_usage: Some("/todo"),
     },
     Command {
         name: "/drafts",

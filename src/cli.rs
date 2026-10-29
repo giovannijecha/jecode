@@ -117,8 +117,15 @@ pub fn print_help() {
     #[cfg(target_os = "macos")]
     let requirements =
         format!("{requirements}\nInteractive exec cleanup also uses /bin/ps on macOS.");
+    let tools = crate::tools::definitions()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(crate::json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join(", ");
     println!(
-        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode checkpoints [COMMAND]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nAPI keys, default model and effort live in ~/.jecode/config.json.\nProtected ChatGPT credentials live separately in ~/.jecode/accounts/openai/.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\nPer-call checkpoints expire after 24 hours in ~/.jecode/checkpoints/; jecode checkpoints help lists\ncommands that work offline, without a key or backend.\n\nTools: read, write, edit, bash, exec, process, checkpoint, web, browser (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory; JECODE_BASH selects Bash.",
+        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode checkpoints [COMMAND]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nAPI keys, default model and effort live in ~/.jecode/config.json.\nProtected ChatGPT credentials live separately in ~/.jecode/accounts/openai/.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\nPer-call checkpoints expire after 24 hours in ~/.jecode/checkpoints/; jecode checkpoints help lists\ncommands that work offline, without a key or backend.\n\nTools: {tools} (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory; JECODE_BASH selects Bash.",
         crate::session::commands::help(true),
     );
 }

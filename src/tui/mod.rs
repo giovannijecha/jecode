@@ -1,6 +1,7 @@
 mod activity;
+mod agents;
+mod ask;
 mod attach;
-mod backend_command;
 mod cards;
 #[cfg(test)]
 mod checkpoint_tests;
@@ -14,6 +15,7 @@ mod draft_menu;
 mod drafts;
 mod editor;
 mod feedback;
+mod held;
 mod information;
 mod input;
 mod inspection;
@@ -44,6 +46,7 @@ mod terminal;
 mod terminal_output;
 mod text;
 mod theme;
+mod todo;
 mod transcript;
 mod view;
 mod viewport;
@@ -54,6 +57,7 @@ use feedback::Feedback;
 use jobs::Job;
 use keys::{Decoded, Decoder};
 use state::{Kind, State};
+use std::collections::HashSet;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 use std::time::Instant;
@@ -86,6 +90,8 @@ struct App {
     auth_model_switch: bool,
     auth_signing_out: bool,
     pending_command: Option<usize>,
+    /// The open command row's name, also while a turn keeps it off the conversation.
+    local_command: Option<String>,
     exit_requested: bool,
     persistence: Option<crate::sessions::Handle>,
     saved_sessions: Vec<crate::sessions::Summary>,
@@ -98,6 +104,21 @@ struct App {
     settings_parent: Option<selector::Setting>,
     /// Reads the current conversation's processes, including while a worker owns the agent.
     process_observer: crate::tools::processes::Observer,
+    collaboration_observer: crate::collaboration::Observer,
+    question_observer: crate::ask::Observer,
+    todo_message_len: usize,
+    collaboration_cursor: usize,
+    /// The record revisions `state.collaboration` shows.
+    collaboration_records: Vec<crate::collaboration::Seen>,
+    collaboration_seen: HashSet<usize>,
+    /// Running agent calls whose events replace their rows.
+    collaboration_receipt_calls: HashSet<String>,
+    collaboration_return_pending: bool,
+    collaboration_auto_resume: bool,
+    /// What menus read while a turn holds the agent.
+    held: Option<held::Facts>,
+    /// Choices made during the turn, applied when it returns the agent.
+    deferred: Vec<held::Deferred>,
     #[cfg(test)]
     copied_text: Option<String>,
     #[cfg(test)]
@@ -118,6 +139,17 @@ impl App {
             started: Instant::now(),
             archive: agent.archive(),
             process_observer: agent.processes(),
+            collaboration_observer: agent.collaboration(),
+            question_observer: agent.questions(),
+            todo_message_len: usize::MAX,
+            collaboration_cursor: 0,
+            collaboration_records: Vec::new(),
+            collaboration_seen: HashSet::new(),
+            collaboration_receipt_calls: HashSet::new(),
+            collaboration_return_pending: false,
+            collaboration_auto_resume: true,
+            held: None,
+            deferred: Vec::new(),
             agent: Some(agent),
             worker: None,
             submission: None,
@@ -136,6 +168,7 @@ impl App {
             auth_model_switch: false,
             auth_signing_out: false,
             pending_command: None,
+            local_command: None,
             exit_requested: false,
             persistence,
             saved_sessions: vec![],
@@ -152,6 +185,10 @@ impl App {
             clipboard_image: None,
         };
         app.recent_sessions();
+        app.refresh_agents();
+        app.question_observer.set_available(true);
+        app.refresh_question();
+        app.refresh_todo();
         app.refresh_context();
         app
     }
@@ -341,6 +378,16 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        if self
+            .state
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.stopping)
+        {
+            self.question_observer.set_available(false);
+        } else {
+            self.question_observer.suspend();
+        }
         if let Some(worker) = &self.worker {
             worker.cancel();
         }
@@ -383,6 +430,10 @@ mod delete_tests;
 #[cfg(test)]
 mod feedback_tests;
 #[cfg(test)]
+mod held_projection_tests;
+#[cfg(test)]
+mod held_tests;
+#[cfg(test)]
 mod interaction_tests;
 #[cfg(test)]
 mod intraturn_tests;
@@ -392,6 +443,8 @@ mod long_work_smoke;
 mod manual_tests;
 #[cfg(test)]
 mod measurement_tests;
+#[cfg(test)]
+mod measurement_work_tests;
 #[cfg(test)]
 mod persistence_smoke;
 #[cfg(test)]

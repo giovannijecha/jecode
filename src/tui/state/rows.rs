@@ -144,8 +144,7 @@ pub(in crate::tui) fn tool_card(
     if last {
         let start = chapter_start(items, index);
         let calls: Vec<_> = items[start..=index].iter().filter_map(Item::tool).collect();
-        let activity = cards::chapter_activity(&calls, columns);
-        let has_activity = activity.is_some();
+        let activities = cards::chapter_activities(&calls, columns);
         if !calls.iter().any(|tool| tool.presentation.expanded) {
             // Preserve the former singleton's content height with result
             // facts. A keycap is presentation, not content, and cannot set
@@ -156,14 +155,14 @@ pub(in crate::tui) fn tool_card(
                     .iter()
                     .map(|tool| cards::chapter_exception(tool, columns).len())
                     .sum::<usize>()
-                + usize::from(has_activity);
+                + activities.len();
             chapter.rows.extend(
                 cards::chapter_receipts(&calls[0], columns)
                     .into_iter()
                     .take(singleton.saturating_sub(chapter_height)),
             );
             // Expanded chapters skip it: every call shows as its full card.
-            chapter.rows.extend(activity);
+            chapter.rows.extend(activities);
         }
     }
     // Collapsed, one tree runs from the WORK title through the members and

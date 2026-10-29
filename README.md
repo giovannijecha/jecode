@@ -5,8 +5,15 @@
 A terminal coding agent in Rust.
 
 Jecode connects to OpenRouter with an API key or to OpenAI through your ChatGPT
-account. It works in your project through nine tools: `read`, `write`,
-`edit`, `bash`, `exec`, `process`, `checkpoint`, `web` and `browser`.
+account. It works in your project through fifteen tools: `read`, `list`,
+`search`, `map`, `write`, `edit`, `bash`, `exec`, `process`, `checkpoint`, `web`,
+`browser`, `agent`, `ask_user` and `todo_list`. `map` surveys code structure and can save or forget sourced
+notes; `list` and `search` discover files and matching lines.
+The main agent can delegate focused work to collaborators with the same operational
+tools and separate contexts. Collaborators never delegate. See
+[collaborating agents](docs/usage/COLLABORATION.md).
+The main agent can ask for an explicit answer and maintain a saved conversation
+plan. See [questions and plans](docs/usage/WORK_TOOLS.md).
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
 One Cargo package, the Rust standard library, no external crates. Installed system
@@ -15,6 +22,8 @@ program with separate arguments and can open a controllable terminal session.
 `web` uses local curl for HTTP retrieval and crawling. `browser` controls an
 already installed Chromium-based browser through its local DevTools interface;
 set `JECODE_BROWSER` to its executable path if auto-discovery does not find it.
+Isolated collaborator workspaces additionally require installed Git and a project
+opened at a repository root with an existing commit. Shared workspaces do not.
 
 ## Install
 
@@ -121,12 +130,14 @@ complete tool cards inline for the latest finished turn; see
 | `/new` | Start a fresh conversation with saved defaults. |
 | `/resume [ID]` | Choose a saved conversation from this project. |
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
-| `/backend [ID MODEL]` | List available backends or switch this conversation to a configured backend and model. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
 | `/settings` | Edit saved defaults and manage provider accounts or API keys. |
 | `/init` | Inspect this project and create or update its `AGENTS.md`. |
 | `/skills` | List personal skills available to the model. |
 | `/checkpoints` | Inspect or recover files from a tool call. |
+| `/agents` | Inspect open collaborator assignments and results; review and closure belong to the main agent. |
+| `/ask` | Return to a pending question in the TUI. |
+| `/todo` | Inspect this conversation's current plan, without changing it or calling the model. |
 | `/help` | Show commands and controls. |
 | `/exit` | Quit when the active turn finishes. |
 

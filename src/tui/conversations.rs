@@ -55,9 +55,15 @@ impl App {
         }
         let agent = self.agent.as_ref().unwrap();
         self.archive = agent.archive();
+        self.todo_message_len = usize::MAX;
         self.persistence = agent.sessions();
         self.state.effort = agent.effort().name().into();
         self.state.clear();
+        self.question_observer = agent.questions();
+        self.question_observer.set_available(true);
+        self.refresh_question();
+        self.refresh_todo();
+        self.reset_agents_observer();
         self.refresh_context();
         self.local_start("/new");
         self.local_finish(

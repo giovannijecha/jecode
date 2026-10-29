@@ -21,8 +21,7 @@ use std::{
 pub(super) fn console(bash: &Path) {
     let terminal = Terminal::open(bash).unwrap();
     let (width, height) = terminal.size;
-    let mut activity = Activity::new();
-    activity.started -= Duration::from_secs(70 * 60);
+    let activity = Activity::with_elapsed(Duration::from_secs(70 * 60));
     let started = activity.started;
     let mut state = State {
         activity: Some(activity),

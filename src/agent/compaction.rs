@@ -15,9 +15,8 @@ impl Agent {
 
     /// The projected next request against the effective window, for display.
     pub fn context_status(&self) -> context::Status {
-        let messages = self.messages.lock().unwrap();
         context::Status {
-            tokens: self.context_estimate(&messages),
+            tokens: self.locked_estimate(),
             capacity: self.context.capacity(self.client.known_limits()),
             auto_compact: self.auto_compact,
         }
@@ -25,6 +24,13 @@ impl Agent {
 
     pub(super) fn emit_context(&self, events: &mut impl EventSink) -> Result<(), String> {
         events.emit(Event::Context(self.context_status()))
+    }
+
+    /// The current conversation estimate, with collaboration state read
+    /// before messages are locked.
+    pub(super) fn locked_estimate(&self) -> usize {
+        let environment = self.environment();
+        self.context_estimate(&environment, &self.messages.lock().unwrap())
     }
 
     pub(super) fn next_completion(
@@ -47,7 +53,10 @@ impl Agent {
             // Summarization and event delivery can take time. Include restores
             // observed during that work before constructing the next request.
             self.reload_restored_instructions();
-            let messages = self.transport_messages();
+            let seen = self.collaboration.latest_return_sequence();
+            let mut messages = self.transport_messages();
+            super::continuation::end_with_user_turn(&mut messages);
+            self.collaboration_seen = seen;
             let output_tokens = limits.and_then(|limits| {
                 limits.output.map(|_| {
                     let limits = Limits {
@@ -58,8 +67,7 @@ impl Agent {
                             .min(limits.context),
                         ..limits
                     };
-                    let input = self.context_estimate(&self.messages.lock().unwrap());
-                    limits.output_allowance(input)
+                    limits.output_allowance(self.locked_estimate())
                 })
             });
             if output_tokens == Some(0) {
@@ -106,7 +114,7 @@ impl Agent {
                     }
                     self.context.calibrate(
                         self.context_bytes(&messages)
-                            .saturating_add(crate::tools::encoded_size()),
+                            .saturating_add(crate::tools::encoded_size_for(!self.child)),
                     );
                     return Ok(completion);
                 }
@@ -118,7 +126,7 @@ impl Agent {
                         persistence.partial("")?;
                     }
                     events.emit(Event::RequestDiscarded)?;
-                    let estimate = self.context_estimate(&self.messages.lock().unwrap());
+                    let estimate = self.locked_estimate();
                     let ceiling = self
                         .context
                         .ceiling
@@ -155,8 +163,9 @@ impl Agent {
         forced: bool,
         events: &mut impl EventSink,
     ) -> Result<bool, String> {
+        let environment = self.environment();
         let original = self.messages.lock().unwrap();
-        let estimate = self.context_estimate(&original);
+        let estimate = self.context_estimate(&environment, &original);
         let limits = match limits {
             Some(limits) => limits,
             None if forced || self.context.ceiling.is_some() => Limits {
@@ -205,7 +214,7 @@ impl Agent {
                 && after < before
                 && self
                     .projected_estimate(&preview, &original)
-                    .saturating_add(self.request_environment().len())
+                    .saturating_add(self.request_environment_for(&environment, &original).len())
                     < input_budget
             {
                 // Keep every conversation group and its proof. A native preview
@@ -245,8 +254,8 @@ impl Agent {
         next.summary = " ".into();
         let fixed = next.estimate_bytes(
             self.context_bytes(&self.projected_context(&next, &original))
-                .saturating_add(crate::tools::encoded_size())
-                .saturating_add(self.request_environment().len())
+                .saturating_add(crate::tools::encoded_size_for(!self.child))
+                .saturating_add(self.request_environment_for(&environment, &original).len())
                 .saturating_add(768),
         );
         let limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
@@ -286,10 +295,11 @@ impl Agent {
         next.summary_output_tokens = output_floor;
         next.input_tokens = None;
         next.measured_end = 0;
+        let environment = self.environment();
         let original = self.messages.lock().unwrap();
         if self
             .projected_estimate(&next, &original)
-            .saturating_add(self.request_environment().len())
+            .saturating_add(self.request_environment_for(&environment, &original).len())
             >= input_budget
         {
             return Err(format!(

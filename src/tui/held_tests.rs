@@ -1,0 +1,232 @@
+use super::tests::{config, wait_until};
+use super::*;
+use crate::{
+    backend::openrouter::OpenRouter,
+    effort::Effort,
+    json::{self, Value},
+    test_support::{Directory, HttpFixture, Response, completion, tool_call},
+    tools::Tools,
+};
+
+fn app(directory: &Directory, fixture: &HttpFixture) -> App {
+    App::new(
+        Agent::new(
+            OpenRouter::fixture(fixture.endpoint.clone()),
+            Tools::new(directory.path()).unwrap(),
+        ),
+        config(directory),
+        None,
+    )
+}
+
+fn submit(app: &mut App, value: &str) {
+    app.input(Decoded::Text(value.into())).unwrap();
+    app.input(Decoded::Key(terminal::Key {
+        code: 13,
+        modifiers: 0,
+        character: 0,
+    }))
+    .unwrap();
+}
+
+/// A turn that keeps writing until `release` is sent, then one more reply.
+fn gated() -> (HttpFixture, std::sync::mpsc::Sender<()>) {
+    let (release, gate) = std::sync::mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![
+        Response::GatedStream {
+            head: "data: {\"choices\":[{\"delta\":{\"content\":\"First.\"},\"finish_reason\":null}]}\n\n".into(),
+            tail: "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(),
+            release: gate,
+        },
+        Response::Json(200, completion("Second.", vec![])),
+    ]);
+    (fixture, release)
+}
+
+fn local_rows(app: &App) -> Vec<String> {
+    app.state
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            state::Item::Local {
+                command,
+                result: Some(result),
+                ..
+            } => Some(format!("{command}: {result}")),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn menus_open_during_a_turn_while_work_commands_still_wait() {
+    let directory = Directory::new();
+    let (fixture, release) = gated();
+    let mut app = app(&directory, &fixture);
+    submit(&mut app, "first");
+    wait_until(&mut app, |app| app.state.status == "Writing the response…");
+    submit(&mut app, "/settings");
+    assert!(app.state.selector.is_some(), "the menu opens over the turn");
+    assert!(app.state.queue.is_empty());
+    assert_eq!(app.state.status, "Writing the response…");
+    app.close_selector();
+    submit(&mut app, "/init");
+    assert_eq!(app.state.queue.messages(), ["/init"], "work still waits");
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| {
+        app.worker.is_none() && app.state.queue.is_empty()
+    });
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert!(
+        local_rows(&app).is_empty(),
+        "a menu leaves the turn's rows alone"
+    );
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2, "/init ran after the turn");
+}
+
+#[test]
+fn skills_list_the_library_during_a_turn() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    std::fs::create_dir_all(home.path().join("skills/review")).unwrap();
+    std::fs::write(
+        home.path().join("skills/review/SKILL.md"),
+        "---\nname: review\ndescription: Inspect a change.\n---\n\n# Review\n",
+    )
+    .unwrap();
+    let (fixture, release) = gated();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let mut app = App::new(agent, config(&directory), None);
+    submit(&mut app, "first");
+    wait_until(&mut app, |app| app.state.status == "Writing the response…");
+    submit(&mut app, "/skills");
+    assert!(app.state.queue.is_empty());
+    let panel = app.state.information.as_ref().expect("the Skills panel");
+    assert_eq!(panel.title, "Skills");
+    assert_eq!(
+        panel.sections[0].details,
+        [("review".to_string(), "Inspect a change.".to_string())]
+    );
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert!(local_rows(&app).is_empty());
+    drop(fixture);
+}
+
+#[test]
+fn a_model_chosen_during_a_turn_applies_from_the_next_one() {
+    let directory = Directory::new();
+    let (fixture, release) = gated();
+    let mut app = app(&directory, &fixture);
+    submit(&mut app, "first");
+    wait_until(&mut app, |app| app.state.status == "Writing the response…");
+    app.apply_selection("fixture/other".into(), Effort::High, false);
+    let notice = app.state.notice.as_ref().unwrap().text.clone();
+    assert!(notice.contains("fixture/other (high)") && notice.ends_with("from the next turn"));
+    assert_eq!(app.facts().model, "fixture/other", "later menus show it");
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert_eq!(app.agent.as_ref().unwrap().model(), "fixture/other");
+    assert_eq!(app.agent.as_ref().unwrap().effort(), Effort::High);
+    let rows = local_rows(&app);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].starts_with("/model: Model: fixture/model"));
+    submit(&mut app, "second");
+    wait_until(&mut app, |app| app.worker.is_none());
+    let requests = fixture.finish();
+    let model = |index: usize| requests[index].body.get("model").cloned();
+    assert_eq!(model(0), Some(Value::string("fixture/model")));
+    assert_eq!(model(1), Some(Value::string("fixture/other")));
+}
+
+fn question() -> Value {
+    json::parse(
+        r#"{"questions":[{"id":"scope","title":"Scope","question":"Which rows?",
+        "options":[{"id":"all","label":"All rows"},{"id":"visible","label":"Visible rows"}]}]}"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_question_event_closes_an_open_menu() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_settings();
+    app.open_agents();
+    let request = crate::ask::Request::parse("ask-1", &question()).unwrap();
+    app.worker_event(crate::events::Event::UserQuestion { request });
+    assert!(app.state.selector.is_none() && app.state.agents_panel.is_none());
+    assert!(app.state.ask_panel.is_some());
+    drop(fixture);
+}
+
+#[test]
+fn a_question_closes_the_menu_open_over_the_turn() {
+    let directory = Directory::new();
+    let arguments = question();
+    let fixture = HttpFixture::new(vec![(
+        200,
+        completion("", vec![tool_call("ask-1", "ask_user", arguments)]),
+    )]);
+    let home = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let mut app = App::new(agent, config(&directory), None);
+    submit(&mut app, "Export the report");
+    submit(&mut app, "/settings");
+    assert!(app.state.selector.is_some());
+    wait_until(&mut app, |app| app.state.question.is_some());
+    assert!(app.state.selector.is_none(), "the question takes its place");
+    assert!(app.state.ask_panel.is_some());
+    drop(fixture);
+}
+
+#[test]
+fn a_sign_out_finishing_after_a_question_does_not_restore_its_menu() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_settings();
+    app.auth_signing_out = true;
+    app.state.selector = Some(selector::Selector::loading(
+        "Sign out",
+        "Removing credentials",
+        false,
+    ));
+    app.job = Some(jobs::Job::sign_out(
+        directory.path().to_path_buf(),
+        "missing".into(),
+    ));
+    let request = crate::ask::Request::parse("ask-1", &question()).unwrap();
+    app.worker_event(crate::events::Event::UserQuestion { request });
+    assert!(app.state.selector.is_none());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !app.job.as_ref().unwrap().finished() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sign-out did not finish"
+        );
+        std::thread::yield_now();
+    }
+    assert!(app.poll_job().unwrap());
+    assert!(app.state.ask_panel.is_some(), "the question remains open");
+    assert!(
+        app.state.selector.is_none(),
+        "the completed menu must stay closed"
+    );
+    app.close_ask();
+    assert!(
+        app.state.selector.is_none(),
+        "leaving Ask must not reveal the old menu"
+    );
+    drop(fixture);
+}

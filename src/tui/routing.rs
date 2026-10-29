@@ -1,24 +1,27 @@
 use super::{
     App, Kind,
+    held::Deferred,
     jobs::{Job, RoutingPurpose},
     selector::{Purpose, Selector},
 };
-use crate::backend::{Endpoints, Services};
+use crate::backend::{Endpoints, Routing, Services};
 
 impl App {
     /// Opens routing for the conversation or, with `defaults`, the default
     /// model's saved routing. A fresh listing opens at once; otherwise it is
     /// fetched in the background and Esc cancels the request.
     pub(super) fn open_routing(&mut self, defaults: bool) {
-        let agent = self.agent.as_ref().unwrap();
+        let facts = self.facts();
         let model = if defaults {
             self.config.settings.model.clone()
         } else {
-            agent.model().to_owned()
+            facts.model.clone()
         };
+        let same_backend = facts.backend_id == self.config.settings.backend_id;
+        drop(facts);
         let purpose = RoutingPurpose { defaults, model };
-        if (!defaults || agent.backend_id() == self.config.settings.backend_id)
-            && let Some(endpoints) = agent.cached_endpoints(&purpose.model)
+        if (!defaults || same_backend)
+            && let Some(endpoints) = self.cached_endpoints(&purpose.model)
         {
             return self.show_routing(purpose, Ok(Some(endpoints)));
         }
@@ -46,11 +49,11 @@ impl App {
         result: Result<Option<Endpoints>, String>,
     ) {
         let RoutingPurpose { defaults, model } = purpose;
-        let agent = self.agent.as_mut().unwrap();
+        let facts = self.facts().into_owned();
         let target = if defaults {
             self.config.settings.model.as_str()
         } else {
-            agent.model()
+            facts.model.as_str()
         };
         if model != target {
             return self.finish_setting(
@@ -63,14 +66,19 @@ impl App {
             let settings = &self.config.settings;
             (settings.routing_for(&model), settings.effort.reasons())
         } else {
-            (agent.routing().clone(), agent.effort().reasons())
+            (facts.routing.clone(), facts.effort.reasons())
         };
         let mut notes = Vec::new();
         let endpoints = match result {
             Ok(Some(endpoints)) => {
                 // Ignored unless the conversation uses this model.
-                if !defaults || agent.backend_id() == self.config.settings.backend_id {
-                    agent.offer_endpoints(endpoints.clone());
+                if !defaults || facts.backend_id == self.config.settings.backend_id {
+                    if let Some(agent) = &mut self.agent {
+                        agent.offer_endpoints(endpoints.clone());
+                    } else if let Some(held) = self.held.as_mut().filter(|held| held.model == model)
+                    {
+                        held.endpoints = Some(endpoints.clone());
+                    }
                 }
                 Some(endpoints)
             }
@@ -86,7 +94,7 @@ impl App {
                 None
             }
         };
-        if !defaults && let Some(served) = agent.charges().describe() {
+        if !defaults && let Some(served) = &facts.charges {
             notes.push(format!("Last turn · {served}"));
         }
         let notes = notes
@@ -112,10 +120,10 @@ impl App {
     }
 
     fn routing_services(&self, defaults: bool) -> Result<Services, String> {
-        let agent = self.agent.as_ref().unwrap();
+        let facts = self.facts();
         let id = &self.config.settings.backend_id;
-        if !defaults || id == agent.backend_id() {
-            return Ok(agent.services());
+        if !defaults || id == facts.backend_id {
+            return Ok(facts.services.clone());
         }
         let key = self
             .config
@@ -151,13 +159,10 @@ impl App {
             match self.config.store.save(&settings) {
                 Ok(()) => {
                     self.config.settings = settings;
-                    self.agent
-                        .as_mut()
-                        .unwrap()
-                        .set_backend_routing_preferences(
-                            &self.config.settings.backend_id,
-                            self.config.settings.routing.clone(),
-                        );
+                    self.defer(Deferred::DefaultRouting {
+                        backend: self.config.settings.backend_id.clone(),
+                        preferences: self.config.settings.routing.clone(),
+                    });
                     self.finish_setting_change(
                         Kind::Notice,
                         &format!(
@@ -172,23 +177,50 @@ impl App {
             }
             return;
         }
+        if self.agent.is_some() {
+            return match self.switch_routing(&model, entry.routing) {
+                Ok(notice) => self.finish_setting_change(Kind::Notice, &notice, vec![]),
+                Err(warning) => self.finish_setting(Kind::Warning, &warning, vec![]),
+            };
+        }
+        let facts = self.facts();
+        if facts.model != model {
+            drop(facts);
+            return self.finish_setting(Kind::Warning, &discarded(&model), vec![]);
+        }
+        let notice = format!(
+            "Routing: {} → {} · from the next turn",
+            facts.routing.label(),
+            entry.routing.label()
+        );
+        drop(facts);
+        self.defer(Deferred::Routing {
+            model,
+            routing: entry.routing,
+        });
+        self.finish_setting_change(Kind::Notice, &notice, vec![]);
+    }
+
+    /// Sets this conversation's routing for `model` from its next request.
+    pub(super) fn switch_routing(
+        &mut self,
+        model: &str,
+        routing: Routing,
+    ) -> Result<String, String> {
         let agent = self.agent.as_mut().unwrap();
         if agent.model() != model {
-            return self.finish_setting(
-                Kind::Warning,
-                &format!("Routing for {model} discarded · the model changed meanwhile"),
-                vec![],
-            );
+            return Err(discarded(model));
         }
         let previous = agent.routing().label();
-        agent.set_routing(entry.routing.clone());
-        self.finish_setting_change(
-            Kind::Notice,
-            &format!(
-                "Routing: {previous} → {} · from the next request",
-                entry.routing.label()
-            ),
-            vec![],
+        let notice = format!(
+            "Routing: {previous} → {} · from the next request",
+            routing.label()
         );
+        agent.set_routing(routing);
+        Ok(notice)
     }
+}
+
+fn discarded(model: &str) -> String {
+    format!("Routing for {model} discarded · the model changed meanwhile")
 }

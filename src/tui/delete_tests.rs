@@ -104,9 +104,15 @@ fn delete_current_resets_screen_and_context_preserves_unsent_work_and_cannot_res
         .history
         .navigate(&mut current.state.editor, true);
     assert_eq!(current.state.editor.text, "Delete this conversation");
+    // Receipt sequences restart in the next conversation; the deleted
+    // conversation's seen set must not drop them.
+    current.collaboration_seen.extend([1, 2, 3]);
+    current.collaboration_auto_resume = false;
     confirm(&mut current, &id);
     current.finish_delete(true).unwrap();
     assert_ne!(current.persistence.as_ref().unwrap().id(), id);
+    assert!(current.collaboration_seen.is_empty());
+    assert!(current.collaboration_auto_resume);
     assert!(store.list().unwrap().sessions.is_empty());
     assert_eq!(current.archive.messages.lock().unwrap().len(), 1);
     assert!(current.state.items.is_empty());

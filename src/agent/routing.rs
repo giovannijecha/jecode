@@ -40,6 +40,14 @@ impl Agent {
         );
     }
 
+    /// The preferences a menu needs to preview a model change while a turn
+    /// holds the agent.
+    pub(crate) fn routing_preferences_snapshot(
+        &self,
+    ) -> Option<BTreeMap<(String, String), Routing>> {
+        self.routing_preferences.clone()
+    }
+
     /// The saved preference for `model`; Auto when none is saved.
     #[cfg(test)]
     pub(super) fn preferred_routing(&self, model: &str) -> Routing {

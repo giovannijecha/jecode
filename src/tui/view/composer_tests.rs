@@ -451,8 +451,7 @@ fn a_retry_counts_down_in_warning_with_its_attempt_and_cause() {
 
 #[test]
 fn the_status_row_drops_facts_from_the_right_before_the_pill() {
-    let mut activity = Activity::new();
-    activity.started -= std::time::Duration::from_secs(70 * 60 + 52);
+    let mut activity = Activity::with_elapsed(std::time::Duration::from_secs(70 * 60 + 52));
     activity.generated = 1234;
     let mut state = State {
         activity: Some(activity),

@@ -62,41 +62,6 @@ fn failed_plain_direct_write_records_only_a_safe_command_label() {
 }
 
 #[test]
-fn backend_command_keeps_the_conversation_and_saved_default() {
-    let home = Directory::new();
-    let project = Directory::new();
-    let mut agent = Agent::new(
-        OpenRouter::fixture("http://127.0.0.1:1/chat/completions".into()),
-        Tools::new(project.path()).unwrap(),
-    );
-    let mut config = SessionConfig {
-        store: Store::new(home.path().to_path_buf()),
-        settings: Settings::new("isolated-fixture-key".into(), "fixture/default".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
-    };
-    let before = agent.archive().messages.lock().unwrap().len();
-    let mut output = Vec::new();
-    chat(
-        &mut agent,
-        &mut config,
-        &mut Cursor::new("/backend openrouter fixture/new\n/exit\n"),
-        &mut output,
-        &mut Vec::new(),
-        Vec::new(),
-    )
-    .unwrap();
-    assert_eq!(agent.backend_id(), "openrouter");
-    assert_eq!(agent.model(), "fixture/new");
-    assert_eq!(config.settings.model, "fixture/default");
-    assert!(agent.archive().messages.lock().unwrap().len() >= before);
-    assert!(
-        String::from_utf8(output)
-            .unwrap()
-            .contains("Backend set to openrouter / fixture/new")
-    );
-}
-
-#[test]
 fn skills_command_lists_local_catalog_and_skips_malformed_entries_without_an_api_request() {
     let home = Directory::new();
     let project = Directory::new();

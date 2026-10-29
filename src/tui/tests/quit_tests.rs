@@ -66,3 +66,49 @@ fn ctrl_q_asks_while_a_turn_runs_and_only_enter_or_ctrl_q_quits() {
             .is_some_and(|turn| turn.stopping)
     );
 }
+
+#[test]
+fn ctrl_q_asks_while_a_collaborator_works_and_names_only_working_ones() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let record = |number: usize, title: &str, state: &str| {
+        Value::object([
+            ("id", Value::string(format!("a{number}"))),
+            ("number", Value::number(number)),
+            ("title", Value::string(title)),
+            ("state", Value::string(state)),
+        ])
+    };
+    app.state.collaboration = vec![
+        record(1, "Check CSV encoding", "running"),
+        record(2, "Review browser download", "returned"),
+    ];
+    assert!(!press(&mut app, 81, 4));
+    assert_eq!(
+        app.state.quitting.as_deref(),
+        Some(
+            &[(
+                "Check CSV encoding".to_owned(),
+                "agent 1 running".to_owned()
+            )][..]
+        )
+    );
+    let frame = crate::tui::view::frame(&app.state, "fixture/model", "fixture");
+    let dock: Vec<_> = frame.live[frame.composer..]
+        .iter()
+        .map(Line::plain)
+        .collect();
+    assert!(
+        dock.iter()
+            .any(|row| row.starts_with("  Check CSV encoding  agent 1 running"))
+    );
+    assert!(
+        !dock
+            .iter()
+            .any(|row| row.contains("Review browser download"))
+    );
+    assert!(press(&mut app, 13, 0));
+    app.state.collaboration[0] = record(1, "Check CSV encoding", "returned");
+    assert!(press(&mut app, 81, 4));
+}

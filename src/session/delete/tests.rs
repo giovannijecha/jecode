@@ -8,6 +8,18 @@ use crate::{
 };
 use std::io::Cursor;
 
+#[test]
+fn deletion_message_displays_retained_collaborator_location() {
+    let report = DeleteReport {
+        files: 1,
+        directories: 0,
+        retained_collaboration: Some(std::path::PathBuf::from("retained/child")),
+    };
+    let text = message("Old conversation", &report, false);
+    assert!(text.contains("Collaborator files retained at retained/child"));
+    assert!(text.contains("close isolated workspaces"));
+}
+
 fn fixture() -> (Directory, Agent, SessionConfig) {
     let directory = Directory::new();
     let mut agent = Agent::new(

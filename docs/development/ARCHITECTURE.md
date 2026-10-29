@@ -14,8 +14,11 @@ Paths are relative to `src/`.
 | Settings, credentials and model effort | `config/`, `auth/`, `auth/openai/`, `effort.rs` |
 | Agent, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
+| Collaborator workers, receipts and working copies | `collaboration/`, `agent/collaboration.rs`, `agent/continuation.rs` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Tools and output | `tools/`, `file_change.rs`, `process.rs`, `process/`, `output.rs`, `output/` |
+| Native file discovery and shared path filtering | `tools/discovery/`, `path_filter.rs`, `path_filter/` |
+| Project orientation and shared source-backed notes | `project_map/` |
 | Local web and browser | `web/`, `browser/` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
@@ -23,7 +26,7 @@ Paths are relative to `src/`.
 | Attachments | `attachments/`, `tools/attachment.rs` |
 | Model backends | `backend/`, `backend/openrouter/`, `backend/openai/` |
 | Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
-| Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs` |
+| Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs`, `disk.rs`, `disk/` |
 
 ## Request lifecycle
 
@@ -37,12 +40,16 @@ Paths are relative to `src/`.
    translates that canonical transcript and neutral tool catalog into its wire
    request, then streams text and progress through agent events.
 4. The agent saves tool boundaries, executes calls and records their results.
-   Up to four adjacent eligible calls run together after the complete model
-   response: file reads, checkpoint list/inspect, process list, and web
-   fetch/download using GET or HEAD without a body. History and skill reads,
-   process cursors, crawls and modifying calls break the batch. Results and
-   checkpoints keep model call order. Follow-up messages
-   from the shared inbox join before the next model request.
+   Up to four adjacent eligible reads run together automatically after the
+   complete model response: listings, searches, file reads, map overviews,
+   checkpoint list/inspect, process list and web fetch/download using GET or
+   HEAD without a body. History and skill reads remain ordered. An explicit
+   `parallel: true` on adjacent calls declares independence, including for
+   modifications; bounded waves keep at most four workers active. `false`
+   forces serial execution, and omitted modifying calls remain serial.
+   Explicit and automatic groups do not merge. The agent does not infer
+   independence from paths. Follow-up messages from the shared inbox join
+   before the next model request.
 5. Completion, cancellation or failure checkpoints the conversation. The interface
    renders the result and keeps unsent input available.
 
@@ -78,19 +85,23 @@ native host boundaries.
 
 File writes and exact edits capture contextual changes at execution time.
 `file_change.rs` owns their text alignment and serializable hunks, independently
-of terminal rendering. A local `tool_change` event is saved with the tool-result
-checkpoint and replayed to the TUI; it is excluded from provider messages and
+of terminal rendering. A local `tool_change` event is saved beside its canonical
+tool result and replayed to the TUI; it is excluded from provider messages and
 context estimates. The model-facing tool result remains unchanged.
 Optional capture bounds input size and alignment work; unavailable diffs never
 reject an otherwise valid write or edit. Local `turn_start` events preserve
 execution-turn grouping across queued follow-ups and resume.
 
-The optional `work` argument on `read`, `bash`, `process`, `web` and `browser`
+The optional `work` argument on `read`, `list`, `search`, `map`, `bash`, `exec`,
+`process`, `web`, `browser` and `agent`
 stays in each tool call's canonical arguments. Both provider adapters replay it
 through their native function-call wire shape, and saved sessions retain it
 without a separate event or metadata envelope. `tui/state/rows.rs` forms a
 chapter from two or more contiguous eligible calls with the same normalized label
-and execution-turn ID (`Presentation.turn_id`); text and other tools end the
+and execution-turn ID (`Presentation.turn_id`); only map overview is eligible,
+and of `agent` only its inspection actions and the events it receipts; a lone
+event and `integrate` are not.
+Text and other tools end the
 group. Single eligible calls keep their normal cards. `tui/cards/chapter.rs`
 derives aggregate facts and status from chapter members, omitting a facts row
 that only repeats the homogeneous header status. It keeps every Bash target
@@ -99,6 +110,29 @@ as Activity. Label normalization collapses whitespace; only the heading is
 truncated to 60 terminal cells. Grouping compares the full normalized label;
 the original saved arguments stay unchanged. The existing latest-turn `Ctrl+O`
 state reveals complete individual cards inline.
+
+### Project map
+
+`project_map/survey.rs` uses discovery's filtered filesystem walker for live
+directory areas and candidate landmarks. A focused Rust or Markdown file adds
+lexical declarations or headings with line references; this is not compiler or
+dependency analysis. Collection is bounded and reports omitted inventory.
+
+`map remember` stores model-authored explanations with source paths, optional
+line excerpts and full-file content fingerprints. `sources.rs` compares those
+fingerprints on requested result pages, including edits outside Jecode, and
+returns current, changed, missing or unverified status. Freshness covers the
+referenced content; it cannot establish semantic correctness or account for
+unreferenced dependencies.
+
+`storage.rs` keeps notes at `~/.jecode/projects/<canonical-root-key>/map.json`,
+separate from session deletion and backend state. Writes lock, reload and
+atomically replace the project file so concurrent conversations preserve
+independent notes. Checkpoints and map storage share original fingerprint,
+file-lock and synced replacement helpers in `disk/`. Neither startup nor the
+system message scans or injects the map. The tool's overview is eligible for
+existing read batches and Work chapters; remember/forget execute in order
+unless explicitly declared independent.
 
 ### Context and compaction
 
@@ -150,6 +184,122 @@ cursors. It cannot keep a process alive. Successful conversation switches, live
 session deletion and agent drop stop and join registered processes. See
 [tools](../usage/TOOLS.md) for the model-facing contract.
 
+## Questions and conversation plans
+
+`ask::Observer` connects the terminal's input surface to the main worker without
+putting rendering in the agent loop. A `user_question` journal event identifies
+the original tool call. Submitting or dismissing appends a durable `user_answer`
+before the waiting worker can consume it. One call carries up to four questions;
+journal events written in the earlier single-question form load as one question.
+The session input stores a separate answer draft per question, with its caret
+and cursor row. A closed surface suspends an unanswered call and records later
+calls of the turn as not executed; explicit cancellation resolves it without an
+answer. Recovery finishes the same call and does not replay unrelated tool
+effects. Headless input and child calls return
+unavailable. Plain chat uses the same observer through its synchronous event sink.
+
+Each successful `todo_list` set result contains the entire numbered plan. There
+is no second persisted copy. `todo::latest` pairs tool results with their adjacent
+assistant batch, so reused provider call IDs cannot select an unrelated result.
+The request environment projects a bounded current plan from original history,
+including after compaction. `/todo` caches that projection until the transcript
+changes and joins delegated tasks with collaborator lifecycles. The TUI derives
+from its own tool events which `set` creates a plan; only that call has a row.
+Children have their own transcripts and plans.
+
+Both tools are serial boundaries. The TUI uses the existing sheet, composer,
+badge and card grammar. Ask has an independent editor, and Todo is read-only.
+See [questions and plans](../usage/WORK_TOOLS.md) for the public contract.
+
+## Collaborating agents
+
+The main loop intercepts the `agent` control tool. It remains a serialized
+boundary even in a declared parallel group. `collaboration::Observer` owns live
+records, append-only receipts and worker handles; each child runs an ordinary
+`Agent` on its own thread with an independent backend, tool resources, input
+queue and saved conversation. Focused instructions and context replace whole
+parent-conversation inheritance. Shared project-map notes and personal skills
+retain the parent project's identity.
+
+OpenRouter and OpenAI requests select the catalog for the agent's role. Child
+catalogs omit `agent` and `ask_user`, and agent dispatch rejects child delegation independently
+of provider behavior. Existing workers keep the model, effort and routing with
+which they were created.
+
+Versioned assignment updates use the existing input queue at model boundaries.
+Sent and received receipts are separate. Visible messages, tool activity and
+returned reports populate inspectable records; hidden reasoning is not included.
+The main agent records review explicitly against the latest returned version.
+The current request environment identifies the main agent as the review owner,
+includes each report's version and assessment state, and names the review and
+close actions. A textual completion does not change collaborator state.
+
+Each record keeps the collaborator's activity as one ordered log
+(`collaboration/log.rs`): received assignments, visible messages, calls and
+returns, referring to the bounded `updates` and the `tools` entries rather than
+copying them. Records saved before the log existed are restored with their
+assignment, calls, messages and outcome in that order. A changed file's call
+also records its `+` / `−` line counts; its hunks stay only in the child's own
+session events. `collaboration/changes.rs` reads them from the running child's
+events, or from its saved journal under `child-home` once it no longer runs.
+
+Receipts append to the parent session even while its main model is idle. The TUI
+drains worker events and observer receipts with sequence deduplication, keeping
+historical snapshots immutable. `tui/state/agents.rs` places each receipt as a
+finished `collaboration` tool row whose result is the event, so it joins Work
+chapters, expands with `Ctrl+O` and renders through `tui/cards/agents.rs`.
+Placement comes from what the receipt records (`collaboration/placement.rs`),
+not from when the TUI sees it: `work`, the label of the agent call whose
+observer handle wrote it; `in_turn`, whether a main-agent turn was running; and
+`in_call`, whether one of its calls was. A labelled receipt joins its call's
+chapter; another joins the chapter it follows inside a turn; one written outside
+a turn is lone. It is inserted before streaming prose, the position replay also
+derives from `after_message`. Replay closes the open turn before a receipt
+written outside a turn, reopens one for a continuation's later calls, and moves
+a receipt written while a call ran after that call's record, where it was shown
+live. Receipts saved before these fields take the label of the agent call saved
+after them, and their restored unknown outcomes stay lone. Its `/agents` panel
+reads current snapshots, and inside an agent `tui/agents/conversation.rs` turns
+the ordered log into transcript items for the main renderer, with edit hunks
+read from the child's session when the counts still match; the rows are cached
+until the record, apart from its activity line, the width or the read changes
+change. Opening a result does not review it. A new live return can start
+`Agent::continue_collaboration` through the ordinary model loop without a
+synthetic user message. Queued input wins, explicit cancellation suppresses the
+continuation. Resume schedules one continuation for returned reports in still-open
+assignments, including sessions saved before explicit closure was used. The main
+agent makes the review and closure decisions; restoration never fabricates a
+review. Closed historical receipts do not trigger inference. Plain stdin remains
+line-based and does not poll idle workers, but handles unfinished review on resume.
+
+Storage lives under the parent project bucket's `collaboration/<session-id>/`.
+Child histories have a separate `child-home` so the main conversation picker
+cannot open them as delegating agents. Session changes stop workers before
+replacing the observer. Interrupted running work restores as unknown and is
+never replayed. Successful close joins the worker, releases its tool resources,
+saves a final `closed` receipt and removes the live record. Restore excludes
+already closed records, including legacy records with `workspace_closed=true`.
+An isolated copy is prepared before the `created` receipt that owns it. Binding
+a resumed session under its exclusive lease (`collaboration/restore.rs`)
+removes copies in that session's storage that no restored record names, through
+the owner-verified, link-safe close path. Copies it cannot verify stay, are
+reported in the resume status and keep their numbers out of new IDs.
+A monotonic counter reconstructed from receipts keeps IDs unique after removal.
+The active snapshot and repeated model context therefore depend on open work;
+the durable chronological archive still grows with the conversation. Closing a
+workspace preserves its historical record; missing or
+invalid workspace ownership becomes a record diagnostic rather than breaking
+the parent session.
+
+Shared work uses current project files. Isolated work uses a detached native Git
+worktree, overlaid with the current tracked and non-ignored untracked files,
+including local instruction files. Owned baseline bytes and fingerprints make
+review independent of Git's committed state. Comparison produces bounded evidence
+and a token over baseline, child and current states; integration rechecks selected
+paths and reports partial outcomes. File isolation does not restrict commands or
+external effects. See [collaboration](../usage/COLLABORATION.md) for the user
+contract and limitations.
+
 ## Session storage
 
 `sessions/` stores conversations in buckets derived from the canonical project
@@ -174,9 +324,19 @@ saved immediately; later streaming updates and TUI input use a 250 ms save
 interval. Periodic saves serialize disk access in a worker; explicit saves and
 clean exit flush synchronously. The session journal calls these saves
 checkpoints; they are unrelated to the workspace checkpoints below.
-An in-progress parallel batch records its call IDs in the legacy `pending.reads`
-field until all results are saved in call order. Earlier journals without this
-field load with an empty list.
+Automatic batches record call IDs in `pending.reads` until their results are
+saved in source order. Explicit batches also mirror their IDs into this legacy
+field, so an older reader treats interrupted modifying calls as unknown. They
+record IDs in `pending.batch` and save each completed result, timing and
+optional diff in `pending.completed` before announcing it to the interface.
+Command checkpoint preparation and its running notes happen before workers
+start; each modifying call retains its own recovery scope and receipt.
+The controller joins all workers, then inserts canonical tool results, timing
+and diff events in source order in one checkpoint. A crash restores saved
+completions, marks started calls without a durable outcome unknown, marks
+unstarted calls not executed, and never replays a call. Older readers may lose
+the completed detail but conservatively mark the batch calls unknown. Earlier
+journals without these fields remain readable.
 
 | Condition | Recovery |
 | --- | --- |
@@ -249,6 +409,7 @@ unsafe Rust FFI.
 | Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
 | Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
 | Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |
+| Isolated collaborator workspaces | Installed `git` provides local inventory and detached worktree creation/removal. Requires launch at a repository root with an existing `HEAD`. Jecode owns copying the dirty baseline, comparison and selective file integration; no remote, branch or commit is created. |
 
 Process guardians stop owned descendants on cancellation, timeout or owner loss.
 Unix children that create another process group or session leave that cleanup

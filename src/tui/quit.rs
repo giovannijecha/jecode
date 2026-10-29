@@ -1,10 +1,10 @@
 use super::{App, terminal::Key};
 
 impl App {
-    /// Ctrl+Q quits at once when idle; a running turn or background process
-    /// asks first. Returns whether to quit.
+    /// Ctrl+Q quits at once when idle; a running turn, background process or
+    /// working collaborator asks first. Returns whether to quit.
     pub(super) fn quit(&mut self) -> bool {
-        let processes: Vec<_> = self
+        let mut processes: Vec<_> = self
             .process_observer
             .processes()
             .unwrap_or_default()
@@ -18,6 +18,25 @@ impl App {
                 )
             })
             .collect();
+        // Quitting stops a collaborator mid-assignment; it resumes as unknown.
+        processes.extend(
+            self.state
+                .collaboration
+                .iter()
+                .filter(|record| super::agents::working(record))
+                .map(|record| {
+                    (
+                        self.archive
+                            .redactor
+                            .text(super::agents::value(record, "title")),
+                        format!(
+                            "agent {} {}",
+                            super::agents::number(record, "number"),
+                            super::agents::status(record)
+                        ),
+                    )
+                }),
+        );
         if self.worker.is_none() && processes.is_empty() {
             self.stop();
             return true;
@@ -32,7 +51,9 @@ impl App {
         let plain = !key.ctrl() && !key.alt() && !key.shift();
         if plain && key.code == 13 || key.ctrl() && key.code == 81 {
             self.state.quitting = None;
-            self.stop();
+            if self.state.question.is_none() {
+                self.stop();
+            }
             return true;
         }
         if key.code == 27 || key.ctrl() && key.code == 67 {

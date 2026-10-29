@@ -113,3 +113,37 @@ fn chapter_live() {
         observe(&mut state, "11 Turn closed");
     }
 }
+
+#[test]
+#[ignore = "prints out-of-order concurrent Work chapter frames at 80 and 40 cells"]
+fn chapter_concurrent() {
+    for columns in [80, 40] {
+        let mut state = State {
+            width: columns,
+            height: 20,
+            ..State::default()
+        };
+        state.begin_tool_turn();
+        for (id, path) in [("a", "src/a.rs"), ("b", "src/b.rs"), ("c", "src/c.rs")] {
+            begin(&mut state, id, "read", "path", path);
+        }
+        observe(&mut state, "01 Three reads running");
+        for (id, phase) in [
+            ("b", "02 Second read finished"),
+            ("a", "03 First read finished"),
+            ("c", "04 Last read finished"),
+        ] {
+            done(
+                &mut state,
+                id,
+                "read",
+                Value::object([("lines_returned", Value::number(1))]),
+            );
+            observe(&mut state, phase);
+        }
+        state.close_tools();
+        state.finish_tool_turn();
+        assert_eq!(state.toggle_tools(), Some((true, 3)));
+        observe(&mut state, "05 Expanded in source order");
+    }
+}

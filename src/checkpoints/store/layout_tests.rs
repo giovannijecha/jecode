@@ -235,10 +235,16 @@ fn interrupted_identity_initialization_is_completed() {
     let archive = archive_path(&home, &fixture.workspace());
     let internal = archive.join(".internal");
     fs::create_dir_all(&internal).unwrap();
-    let temporary = internal.join(".write-1-1-1.tmp");
-    fs::write(&temporary, b"incomplete identity").unwrap();
+    // The current staging name and the name earlier versions left behind.
+    let temporaries = [
+        crate::disk::temporary_beside(&internal.join("workspace.id")),
+        internal.join(".write-1-1-1.tmp"),
+    ];
+    for temporary in &temporaries {
+        fs::write(temporary, b"incomplete identity").unwrap();
+    }
     let store = fixture.store();
-    assert!(!temporary.exists());
+    assert!(temporaries.iter().all(|temporary| !temporary.exists()));
     assert_eq!(
         fs::read(internal.join("workspace.id")).unwrap(),
         super::super::identity::identity_bytes(&store.root)

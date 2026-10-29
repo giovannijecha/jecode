@@ -269,9 +269,8 @@ pub use discovery::discover;
 pub(super) use discovery::discover_saved;
 
 mod exact;
-mod ignore;
+pub use crate::path_filter::{Ignore, IgnoreRules};
 pub use exact::discover_exact;
-pub use ignore::{Ignore, IgnoreRules};
 
 #[cfg(test)]
 #[path = "paths/tests.rs"]

@@ -42,7 +42,6 @@ instead report how to run `jecode setup`.
 | Action | Scope |
 | --- | --- |
 | `/model [ID]` | Choose a provider when more than one is configured, then a model and its effort for this conversation. A direct ID uses the current provider. |
-| `/backend` or `/backend ID MODEL` | List available backends or switch this conversation to a configured backend and model. Plain chat also accepts `/backend ID` and prompts for a model. |
 | `/effort [NAME]` | Change this conversation's reasoning effort. |
 | `/settings` → **Default model** | Save the model and effort for future conversations and launches. |
 | `/settings` → **Default effort** | Change the saved model's default effort. |
@@ -137,6 +136,7 @@ its own purpose:
 | `accounts/openai/` | Protected ChatGPT registrations, rotating tokens, active account, stable host ID and refresh lock. |
 | `skills/` | Your reusable skill files; Jecode reads this library. |
 | `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
+| `projects/<canonical-root-key>/map.json` | Source-backed project notes saved by `map remember` and removed by `map forget`; shared across conversations for the same canonical project root. |
 | `tmp/` | Session working files, managed by Jecode's temporary-file actions. |
 | `browser/profiles/` | Named persistent Chromium profiles selected by the `browser` tool. |
 | `cache/` | Native helper binaries generated when needed. |
@@ -148,6 +148,12 @@ workspace files. Provider-free checkpoint commands also open the workspace
 directory. Each pack expires 24 hours after capture and Jecode removes expired
 packs while running or on the next use. The deadline does not apply to
 `.internal/` metadata. Checkpoint cleanup does not manage the other home paths.
+
+Project notes are separate from session storage, so resuming or starting a new
+conversation in the same project can use them. Jecode loads notes when `map`
+is called and checks saved source fingerprints against the current full file
+contents. Opening a project does not scan its files for the map. See
+[Project map](TOOLS.md#project-map) for the tool actions and freshness states.
 
 ## Automatic compaction threshold
 
@@ -233,7 +239,7 @@ temporary storage, checkpoint archives and the personal [skill library](SKILLS.m
 `JECODE_BASH` selects the Bash executable. These are useful for isolated
 development.
 
-`/backend`, `/model`, `/effort` and `/routing` change the conversation without
+`/model`, `/effort` and `/routing` change the conversation without
 changing saved defaults. Changing the OpenRouter key in `/settings` refreshes
 authentication for an active OpenRouter conversation; otherwise it registers
 the key for later use. Connecting or selecting a ChatGPT account registers that

@@ -1,4 +1,5 @@
 use super::*;
+use crate::events::Event;
 use crate::tui::{cards, line::Line};
 
 fn command(state: &mut State, id: &str, command: &str, work: Option<&str>) {

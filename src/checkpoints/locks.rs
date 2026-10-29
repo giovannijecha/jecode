@@ -2,77 +2,14 @@
 //! automatically when a process exits.
 use crate::cancel::Cancellation;
 use std::collections::HashSet;
-use std::fs::{File, TryLockError};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 const STRIPES: usize = 256;
 
-pub fn open(path: &Path) -> std::io::Result<File> {
-    if let Some(parent) = path.parent() {
-        crate::disk::private_directory(parent)?;
-    }
-    crate::disk::private_options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
-}
-
-fn lock_cancellable(file: &File, cancellation: &Cancellation) -> std::io::Result<()> {
-    loop {
-        if cancellation.requested() {
-            return Err(std::io::Error::other("Operation cancelled"));
-        }
-        match file.try_lock() {
-            Ok(()) => return Ok(()),
-            Err(TryLockError::WouldBlock) => cancellation
-                .wait(std::time::Duration::from_millis(10))
-                .map_err(std::io::Error::other)?,
-            Err(TryLockError::Error(error)) => return Err(error),
-        }
-    }
-}
-
-/// An exclusive lock held until drop.
-pub struct Exclusive(File);
-
-impl Exclusive {
-    pub fn acquire(path: &Path) -> std::io::Result<Self> {
-        Self::from_file(open(path)?)
-    }
-
-    pub fn from_file(file: File) -> std::io::Result<Self> {
-        file.lock()?;
-        Ok(Self(file))
-    }
-
-    pub fn file_mut(&mut self) -> &mut File {
-        &mut self.0
-    }
-
-    pub fn try_from_file(file: File) -> std::io::Result<Option<Self>> {
-        match file.try_lock() {
-            Ok(()) => Ok(Some(Self(file))),
-            Err(TryLockError::WouldBlock) => Ok(None),
-            Err(TryLockError::Error(error)) => Err(error),
-        }
-    }
-
-    pub fn acquire_cancellable(path: &Path, cancellation: &Cancellation) -> std::io::Result<Self> {
-        let file = open(path)?;
-        lock_cancellable(&file, cancellation)?;
-        Ok(Self(file))
-    }
-}
-
-impl Drop for Exclusive {
-    fn drop(&mut self) {
-        // A concurrent Unix fork can retain a duplicate descriptor until exec.
-        let _ = self.0.unlock();
-    }
-}
+use crate::disk::lock::lock_cancellable;
+pub use crate::disk::lock::{Exclusive, open};
 
 /// Striped path leases. Paths are folded to lowercase so aliases on
 /// case-insensitive volumes share a stripe; unrelated paths sharing a stripe

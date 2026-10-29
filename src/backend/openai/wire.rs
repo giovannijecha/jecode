@@ -4,13 +4,28 @@ use crate::attachments::{self, Kind, Pool, base64};
 use crate::conversation::ToolCall;
 use crate::effort::Effort;
 use crate::json::Value;
-use crate::tools;
-
+#[cfg(test)]
 pub(super) fn request(
     model: &str,
     effort: Effort,
     messages: &[Value],
     with_tools: bool,
+    pool: Option<&Pool>,
+) -> Result<Value, String> {
+    request_with_catalog(
+        model,
+        effort,
+        messages,
+        with_tools.then(crate::tools::definitions),
+        pool,
+    )
+}
+
+pub(super) fn request_with_catalog(
+    model: &str,
+    effort: Effort,
+    messages: &[Value],
+    catalog: Option<&Value>,
     pool: Option<&Pool>,
 ) -> Result<Value, String> {
     let mut instructions = Vec::new();
@@ -75,10 +90,8 @@ pub(super) fn request(
             Value::object([("effort", Value::string(effort.name()))]),
         );
     }
-    if with_tools {
-        let definitions = tools::definitions()
-            .as_array()
-            .ok_or("Invalid local tool catalog")?;
+    if let Some(catalog) = catalog {
+        let definitions = catalog.as_array().ok_or("Invalid local tool catalog")?;
         let mut wrapped = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let mut tool = definition.clone();

@@ -7,9 +7,11 @@ use super::{
     information::Information,
     suggestions::Suggestions,
 };
+use crate::backend::FailureReason;
 use crate::json::Value;
-use crate::{backend::FailureReason, events::Event};
 
+mod agents;
+mod events;
 pub(super) mod rows;
 
 #[derive(Clone, Copy)]
@@ -100,6 +102,17 @@ pub struct State {
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
+    pub collaboration: Vec<Value>,
+    /// When each running collaborator was first seen running, for `/agents`.
+    pub agent_clocks: std::collections::HashMap<String, std::time::Instant>,
+    pub agents_panel: Option<super::agents::Panel>,
+    pub question: Option<crate::ask::Request>,
+    pub ask_panel: Option<super::ask::Panel>,
+    pub ask_draft: Option<crate::ask::Draft>,
+    pub todo_plan: Option<crate::todo::Plan>,
+    pub todo_panel: Option<super::todo::Panel>,
+    /// Decides which todo_list calls create a plan; only those have a row.
+    pub todo_calls: super::todo::Calls,
     /// The engine's latest projection for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
     /// The recent conversations offered before the first prompt.
@@ -134,6 +147,15 @@ impl Default for State {
             information: None,
             selector: None,
             processes: None,
+            collaboration: Vec::new(),
+            agent_clocks: std::collections::HashMap::new(),
+            agents_panel: None,
+            question: None,
+            ask_panel: None,
+            ask_draft: None,
+            todo_plan: None,
+            todo_panel: None,
+            todo_calls: Default::default(),
             context: None,
             opening: Opening::default(),
             quitting: None,
@@ -167,184 +189,6 @@ impl State {
             text: text.into(),
         });
     }
-    pub fn event(&mut self, event: Event) {
-        if matches!(
-            &event,
-            Event::Streaming { .. }
-                | Event::Message { .. }
-                | Event::ToolStarted { .. }
-                | Event::ToolChanged { .. }
-                | Event::ToolNote { .. }
-                | Event::ToolFinished { .. }
-        ) {
-            self.changed();
-        }
-        match event {
-            Event::Recovering {
-                attempt,
-                delay,
-                error,
-                reason,
-            } => {
-                if matches!(self.items.last(), Some(Item::Streaming { .. })) {
-                    self.items.pop();
-                    self.changed();
-                }
-                self.status = "Waiting for connection…".into();
-                // The rule counts down to the next attempt.
-                let subject = if reason == Some(FailureReason::RateLimited) {
-                    "Rate limited"
-                } else {
-                    "Reconnecting"
-                };
-                let recovery = Feedback::progress(
-                    Kind::Warning,
-                    format!("{subject} · attempt {attempt} · {error}"),
-                );
-                // Server delays can exceed the platform's Instant range. The
-                // cancellable retry still honors them without a countdown.
-                self.recovery = Some(match std::time::Instant::now().checked_add(delay) {
-                    Some(until) => recovery.until(until),
-                    None => recovery,
-                });
-            }
-            Event::RecoveryFinished => {
-                self.recovery = None;
-            }
-            Event::BackendFailure { reason, diagnostic } => {
-                self.backend_failure = Some((reason, diagnostic));
-            }
-            Event::RequestDiscarded => {
-                if matches!(self.items.last(), Some(Item::Streaming { .. })) {
-                    self.items.pop();
-                    self.changed();
-                }
-            }
-            Event::Maintenance { text } => {
-                self.notify(Feedback::progress(Kind::Notice, text));
-            }
-            Event::ContextCompacted { text } => {
-                self.clear_progress();
-                self.message(Kind::Notice, &text);
-            }
-            Event::Preparing => {
-                self.backend_failure = None;
-                self.status = "Preparing request…".into();
-            }
-            Event::Waiting { .. } => {
-                self.status = "Waiting for model…".into();
-            }
-            Event::Reasoning => self.status = "Thinking…".into(),
-            Event::Working => self.status = "Working…".into(),
-            Event::InputHeld => {
-                self.status = "Waiting for your edit…".into();
-            }
-            // The application shows accepted input with its prompt history.
-            Event::Accepted { .. } => {}
-            Event::Context(status) => self.context = Some(status),
-            Event::Generated { tokens } => {
-                if let Some(activity) = &mut self.activity {
-                    activity.generated += tokens;
-                }
-            }
-            Event::Streaming { text } => {
-                self.status = "Writing the response…".into();
-                // Updates contain the entire response so far. Its leading whitespace
-                // remains available when visible content arrives in a later update.
-                if text.trim().is_empty() {
-                    return;
-                }
-                if let Some(Item::Streaming { text: current }) = self.items.last_mut() {
-                    if *current != text {
-                        *current = text;
-                        self.output_changed();
-                    }
-                } else {
-                    self.close_tools();
-                    self.items.push(Item::Streaming { text });
-                    self.output_changed();
-                }
-            }
-            Event::Message { text } => {
-                if let Some(Item::Streaming { text: current }) = self.items.last() {
-                    let changed = *current != text;
-                    *self.items.last_mut().unwrap() = Item::Text {
-                        kind: Kind::Assistant,
-                        text,
-                    };
-                    if changed {
-                        self.output_changed();
-                    }
-                } else {
-                    self.message(Kind::Assistant, &text);
-                }
-            }
-            Event::ToolStarted {
-                id,
-                name,
-                arguments,
-            } => {
-                if let Some(last) = self.open_branch() {
-                    *last = Some(false);
-                }
-                self.status = "Working…".into();
-                if let Some(activity) = &mut self.activity {
-                    activity.tools += 1;
-                }
-                self.items.push(Item::Tool {
-                    id,
-                    name,
-                    arguments,
-                    summary: "running".into(),
-                    result: None,
-                    change: None,
-                    last: None,
-                    presentation: Presentation { turn_id: self.tool_details.turn_id, ..Presentation::live() },
-                });
-                let index = self.items.len() - 1;
-                self.output_changed();
-                self.cache_chapter(index);
-                self.update_chapters(&[index]);
-            }
-            Event::ToolNote { id, text } => {
-                if let Some(Item::Tool { presentation, .. }) = self.items.iter_mut().rev().find(
-                    |item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id),
-                ) {
-                    presentation.note = Some(text);
-                    self.output_changed();
-                }
-            }
-            Event::ToolChanged { id, change } => {
-                if let Some(Item::Tool { change: captured, .. }) = self.items.iter_mut().rev().find(|item| matches!(item, Item::Tool { id: current, result: None, .. } if *current == id)) {
-                    *captured = Some(Box::new(change));
-                    self.output_changed();
-                }
-            }
-            Event::ToolFinished {
-                id,
-                name,
-                summary,
-                result,
-            } => {
-                if let Some(index) = self.items.iter().rposition(|item| {
-                    matches!(item, Item::Tool { id: candidate, name: tool, result: None, .. }
-                        if candidate == &id && tool == &name)
-                }) && let Item::Tool {
-                    summary: current,
-                    result: captured,
-                    presentation,
-                    ..
-                } = &mut self.items[index]
-                {
-                    *current = summary;
-                    *captured = Some(result);
-                    presentation.finish();
-                    self.output_changed();
-                    self.update_chapters(&[index]);
-                }
-            }
-        }
-    }
     fn open_branch(&mut self) -> Option<&mut Option<bool>> {
         self.items.iter_mut().rev().find_map(|item| match item {
             Item::Tool { last, .. } if last.is_none() => Some(last),
@@ -372,6 +216,15 @@ impl State {
         self.backend_failure = None;
         self.information = None;
         self.processes = None;
+        self.agents_panel = None;
+        self.question = None;
+        self.ask_panel = None;
+        self.ask_draft = None;
+        self.todo_plan = None;
+        self.todo_panel = None;
+        self.todo_calls = Default::default();
+        self.collaboration.clear();
+        self.agent_clocks.clear();
     }
     pub fn settled_len(&self) -> usize {
         self.items

@@ -360,3 +360,15 @@ fn browser_actions_without_a_payload_open_their_result_on_the_first_tree_row() {
     );
     assert!(card.rows[1].plain().contains("https://example.com/"));
 }
+
+#[test]
+fn described_discovery_target_is_sanitized_on_its_command_row() {
+    let args = object([
+        ("query", "needle\u{1b}[2J"),
+        ("description", "Find the needle"),
+    ]);
+    let card = draw("search", &args, None, &Presentation::default(), 80);
+    let rows = plain(&card);
+    assert!(rows.contains("needle[ESC][2J"), "{rows}");
+    assert!(!rows.contains('\u{1b}'));
+}

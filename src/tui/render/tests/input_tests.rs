@@ -119,7 +119,7 @@ fn streaming_and_panels_keep_the_reading_position_and_new_resets_it() {
 }
 
 #[test]
-fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priority() {
+fn alt_end_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priority() {
     use crate::test_support::{HttpFixture, Response};
     use std::time::Duration;
     let directory = Directory::new();
@@ -152,10 +152,10 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
     paint(&mut app, &mut screen);
     key(&mut app, 33, 0);
     paint(&mut app, &mut screen);
-    assert!(screen.visible().contains("Esc  back to bottom"));
-    // Esc returns to the bottom here, so the composer rule does not offer it.
-    assert!(!screen.visible().contains(" esc ─"));
-    key(&mut app, 27, 0);
+    assert!(screen.visible().contains("Alt+End  back to bottom"));
+    // Reading back leaves Esc to interrupt the turn.
+    assert!(screen.visible().contains("Esc interrupt"));
+    key(&mut app, 35, 1);
     paint(&mut app, &mut screen);
     assert!(!screen.visible().contains("back to bottom"));
     assert!(!app.state.activity.as_ref().unwrap().stopping);
@@ -168,7 +168,7 @@ fn escape_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priorit
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
     assert!(!app.draft_menu_open());
-    assert!(screen.visible().contains("Esc  back to bottom"));
+    assert!(screen.visible().contains("Alt+End  back to bottom"));
     assert!(!app.state.activity.as_ref().unwrap().stopping);
     app.open_drafts();
     key(&mut app, 35, 1);

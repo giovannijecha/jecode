@@ -40,6 +40,7 @@ fn parallel_operations_exclude_state_changes_and_shared_cursors() {
         arguments: arguments.encode(),
     };
     for (name, action) in [
+        ("map", "overview"),
         ("checkpoint", "list"),
         ("checkpoint", "inspect"),
         ("process", "list"),
@@ -52,6 +53,8 @@ fn parallel_operations_exclude_state_changes_and_shared_cursors() {
         )));
     }
     for (name, action) in [
+        ("map", "remember"),
+        ("map", "forget"),
         ("checkpoint", "restore"),
         ("process", "poll"),
         ("process", "stop"),

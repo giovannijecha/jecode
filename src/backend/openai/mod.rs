@@ -39,6 +39,7 @@ pub struct OpenAi {
     effort: Effort,
     /// The saved session, sent as the prompt cache key and `session-id`.
     conversation: Option<String>,
+    delegation: bool,
 }
 
 impl Api {
@@ -114,6 +115,7 @@ impl OpenAi {
             model,
             effort: Effort::Default,
             conversation: None,
+            delegation: true,
         })
     }
 }
@@ -174,6 +176,9 @@ impl Backend for OpenAi {
     fn set_effort(&mut self, effort: Effort) {
         self.effort = effort;
     }
+    fn set_delegation(&mut self, enabled: bool) {
+        self.delegation = enabled;
+    }
     fn inputs(&self) -> Inputs {
         Inputs::default()
     }
@@ -197,8 +202,14 @@ impl Backend for OpenAi {
             .iter()
             .map(|message| conversation::project(message, &origin))
             .collect();
-        let mut request = wire::request(&self.model, self.effort, &projected, with_tools, pool)
-            .map_err(backend::Failure::from)?;
+        let mut request = wire::request_with_catalog(
+            &self.model,
+            self.effort,
+            &projected,
+            with_tools.then(|| crate::tools::definitions_for(self.delegation)),
+            pool,
+        )
+        .map_err(backend::Failure::from)?;
         // A stable conversation key supports provider prompt-cache affinity.
         if let (Some(id), Value::Object(fields)) = (&self.conversation, &mut request) {
             fields.insert("prompt_cache_key".into(), Value::string(id));

@@ -62,12 +62,23 @@ Pass a test-name filter after the Cargo options:
 ```text
 cargo test --locked --offline agent::routing_tests::
 cargo test --locked --offline agent::backend_tests::
+cargo test --locked --offline backend::delegation_tests::
+cargo test --locked --offline agent::collaboration::
+cargo test --locked --offline collaboration::workspace::tests::
+cargo test --locked --offline tui::agents::tests::
+cargo test --locked --offline session::agents::tests::
 cargo test --locked --offline backend::openrouter::calls::tests::
 cargo test --locked --offline auth::openai::
 cargo test --locked --offline backend::openai::
 cargo test --locked --offline tools::processes::tests::
 cargo test --locked --offline tools::exec::tests::
 cargo test --locked --offline tools::interactive::tests::
+cargo test --locked --offline tools::schema::tests::map_is_appended_as_a_bounded_routine_tool
+cargo test --locked --offline project_map::
+cargo test --locked --offline agent::map_tests::
+cargo test --locked --offline agent::execution::scheduling::tests::
+cargo test --locked --offline agent::execution::declared::tests::
+cargo test --locked --offline sessions::tool_batch_tests::
 cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint
 ```
@@ -79,6 +90,9 @@ verified the change. Use `-- --list` to inspect available names.
 | --- | --- |
 | Agent/context/backend | `agent::backend_tests` uses two synthetic protocols across tool execution, compaction, save and resume. Both `backend/openrouter/` and `backend/openai/` tests use loopback responses for their adapters. |
 | Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
+| Native discovery | `tools::discovery` covers filtering, paging, literal matches, UTF-8/long lines, bounds and cancellation. `path_filter::tests` retains checkpoint ignore-rule coverage; `agent::discovery_tests` exercises both provider wrappers and session resume. |
+| Project map | `project_map::` covers on-demand survey, Rust/Markdown outlines, note persistence, full-file freshness and paging. `agent::map_tests::` exercises OpenRouter and OpenAI tool receipts, source changes, resume and a new conversation using the same project notes. `tools::schema::tests::map_is_appended_as_a_bounded_routine_tool` checks the provider-facing argument shape. |
+| Parallel tool calls | `agent::execution::scheduling::tests::` covers explicit, automatic and serial boundaries. `agent::execution::declared::tests::` covers overlapping commands, joined workers and unknown outcomes after a worker failure. `sessions::tool_batch_tests::` covers out-of-order saved results, recovery, redaction, legacy readers and malformed batch state. |
 | Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
 | Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
 | TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
@@ -102,6 +116,7 @@ at 80 and 40 cells with synthetic events:
 
 ```text
 cargo test --locked --offline tui::specimen::work_chapters -- --ignored --nocapture
+cargo test --locked --offline tui::specimen::discovery::discovery_cards -- --exact --ignored --nocapture
 ```
 
 The [native terminal fixture](PLATFORMS.md#windows) also checks compact chapter
@@ -158,6 +173,24 @@ The Unix installer accepts an absolute root: `sh INSTALL.sh /absolute/test/root`
 Both installers build offline and print the installed executable's version.
 
 ## Native and manual checks
+
+Collaborator fixtures use isolated session homes, synthetic model services and
+local Git repositories. They cover provider catalogs, in-flight assignment
+updates, late returns resuming the main model, review, cancellation, recovery,
+dirty worktree baselines, conflict-aware integration and owned cleanup. A
+subprocess fixture stops after preparing an isolated copy and before its
+`created` receipt; resume reclaims the copy only once that session is no longer
+live. The TUI
+suite covers read-only inspection, stable selection, draft/caret restoration,
+visible activity, readback and summary layout. No personal credentials or live
+provider inference are needed.
+
+The Windows fullscreen fixture also paints collaboration receipts, the `/agents`
+panel and the selected footer through the real Rust renderer into ConPTY:
+
+```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+```
 
 Interactive execution tests use original Rust fixtures and isolated native
 terminals. Unix PTY tests require `cc` on first use, plus `/proc` on Linux or

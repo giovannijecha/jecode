@@ -82,13 +82,23 @@ impl Store {
         &self.bucket
     }
 
+    /// The canonical project directory these sessions belong to.
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     pub fn temporary_area(&self, id: &str) -> Result<crate::scratch::Area, String> {
         crate::scratch::Area::new(self.temporary.join(id), self.directory.clone(), id)
     }
 
     #[cfg(test)]
     pub fn fixture_load(&self, id: &str) -> Result<Document, String> {
-        self.load(id).map(|(doc, _)| doc)
+        self.read(id)
+    }
+
+    /// A saved document, read without opening its session or changing files.
+    pub fn read(&self, id: &str) -> Result<Document, String> {
+        self.load(id).map(|(document, _)| document)
     }
 
     pub fn new(home: PathBuf, directory: &Path) -> Result<Self, String> {

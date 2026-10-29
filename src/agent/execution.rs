@@ -9,6 +9,13 @@ use crate::{
 };
 use std::time::Instant;
 
+mod declared;
+mod scheduling;
+use scheduling::{Mode, mode};
+
+#[cfg(test)]
+use scheduling::parallel_call;
+
 const MAX_PARALLEL_CALLS: usize = 4;
 
 impl Agent {
@@ -23,14 +30,23 @@ impl Agent {
                 self.cancel_calls(&calls[index..]);
                 return Err("Operation cancelled".into());
             }
-            let end = calls[index..]
-                .iter()
-                .take(MAX_PARALLEL_CALLS)
-                .take_while(|call| parallel_call(call))
-                .count()
-                + index;
+            let selected = mode(&calls[index]);
+            let end = if selected == Mode::Serial {
+                index + 1
+            } else {
+                index
+                    + calls[index..]
+                        .iter()
+                        .take(MAX_PARALLEL_CALLS)
+                        .take_while(|call| mode(call) == selected)
+                        .count()
+            };
             if end - index >= 2 {
-                self.execute_parallel_batch(&calls[index..end], &calls[end..], events)?;
+                if selected == Mode::Declared {
+                    self.execute_declared_batch(&calls[index..end], &calls[end..], events)?;
+                } else {
+                    self.execute_parallel_batch(&calls[index..end], &calls[end..], events)?;
+                }
                 index = end;
             } else {
                 self.execute_one(&calls[index], &calls[index + 1..], events)?;
@@ -57,6 +73,7 @@ impl Agent {
             self.cancel_calls(remaining);
             return Err(error);
         }
+        let running = self.collaboration.call();
         let begun = self
             .tools
             .begin_cancellable(&call.name, &call.arguments, &self.cancellation);
@@ -71,22 +88,30 @@ impl Agent {
             return Err(error);
         }
         let executing = Instant::now();
-        let outcome = self.execute_tool_with_change(call, begun);
+        let outcome = if call.name == "ask_user" {
+            Execution {
+                result: self.ask_tool(call, events),
+                change: None,
+            }
+        } else {
+            self.execute_tool_with_change(call, begun)
+        };
+        if call.name == "ask_user" && self.questions.is_suspended() {
+            // The question resumes alone; later calls in the turn never ran.
+            self.cancel_calls(remaining);
+            return Err("Question saved for resume".into());
+        }
         let timing = clock.finish(executing);
         let result = &outcome.result;
+        drop(running);
         self.tool_result(call, result);
+        if call.name == "ask_user" {
+            self.questions.complete(&call.id);
+        }
         self.record_tool_timing(call, timing);
         let change = outcome.change.map(|change| change.redacted(&self.redactor));
         if let Some(change) = &change {
-            self.events.lock().unwrap().push(Value::object([
-                ("type", Value::string("tool_change")),
-                (
-                    "after_message",
-                    Value::number(self.messages.lock().unwrap().len()),
-                ),
-                ("tool_call_id", Value::string(self.redact(&call.id))),
-                ("change", change.value()),
-            ]));
+            self.record_tool_change(call, change);
         }
         if let Err(error) = self.checkpoint(Stage::ToolFinished) {
             self.cancel_calls(remaining);
@@ -131,6 +156,7 @@ impl Agent {
                 return Err(error);
             }
         }
+        let running = self.collaboration.call();
         // Scoped workers all finish before results or a later, potentially
         // modifying call is handled. Session messages remain in source order.
         let mut results = run_parallel_calls(batch, clock, &|call| {
@@ -141,6 +167,7 @@ impl Agent {
                 &self.cancellation,
             )
         });
+        drop(running);
         for (call, (outcome, timing)) in batch.iter().zip(&mut results) {
             self.tool_result(call, &outcome.result);
             if let Some(timing) = timing.take() {
@@ -180,39 +207,23 @@ impl Agent {
         }
     }
 
-    fn finished_event(&self, call: &ToolCall, result: &Value) -> Event {
+    fn record_tool_change(&self, call: &ToolCall, change: &crate::file_change::Change) {
+        let after_message = self.messages.lock().unwrap().len();
+        self.events.lock().unwrap().push(Value::object([
+            ("type", Value::string("tool_change")),
+            ("after_message", Value::number(after_message)),
+            ("tool_call_id", Value::string(self.redact(&call.id))),
+            ("change", change.value()),
+        ]));
+    }
+
+    pub(super) fn finished_event(&self, call: &ToolCall, result: &Value) -> Event {
         Event::ToolFinished {
             id: self.redact(&call.id),
             name: self.redact(&call.name),
             summary: self.redact(&tool_summary(&call.name, result)),
             result: self.redactor.value(result),
         }
-    }
-}
-
-fn parallel_call(call: &ToolCall) -> bool {
-    let Ok(arguments) = json::parse(&call.arguments) else {
-        return false;
-    };
-    let action = arguments.get("action").and_then(Value::as_str);
-    match call.name.as_str() {
-        // History depends on preceding results; skills keep a per-turn snapshot.
-        "read" => arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| !path.starts_with("history:") && !path.starts_with("skill:")),
-        "checkpoint" => matches!(action, Some("list" | "inspect")),
-        "process" => action == Some("list"),
-        "web" => {
-            let method = arguments
-                .get("method")
-                .and_then(Value::as_str)
-                .unwrap_or("GET");
-            matches!(action, Some("fetch" | "download"))
-                && matches!(method, "GET" | "HEAD")
-                && arguments.get("body").is_none()
-        }
-        _ => false,
     }
 }
 
@@ -252,6 +263,8 @@ fn run_parallel_calls(
     })
 }
 
+#[cfg(test)]
+mod provider_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

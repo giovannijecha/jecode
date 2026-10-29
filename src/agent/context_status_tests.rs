@@ -158,14 +158,16 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
-        (200, completion("Goal kept; next action: finish.", vec![])),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    agent.client.fixture_limits(32000, Some(4096));
+    // Room for one large exchange beside the summary, whether or not the
+    // native overhead lets the recent window keep it verbatim.
+    let capacity = agent.fixture_capacity(24_000, AUTO_COMPACT_DEFAULT);
+    agent.client.fixture_limits(capacity, Some(4096));
     agent.messages.lock().unwrap().extend([
         Value::object([
             ("role", Value::string("user")),
@@ -178,7 +180,7 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
     let original = agent.messages.lock().unwrap().clone();
     let (result, trace) = trace(&mut agent, "Continue.");
     result.unwrap();
-    let budget = threshold(32000, AUTO_COMPACT_DEFAULT);
+    let budget = threshold(capacity, AUTO_COMPACT_DEFAULT);
     assert!(trace[0].1.tokens >= budget);
     let compacted = trace.iter().position(|(label, _)| *label == "compacted");
     let reduced = trace[compacted.unwrap()..]
@@ -187,9 +189,9 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
         .unwrap()
         .1;
     assert!(reduced.tokens > 0 && reduced.tokens < budget);
-    assert_eq!(reduced.capacity, Some(32000));
+    assert_eq!(reduced.capacity, Some(capacity));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(fixture.finish().len(), 3);
+    assert_eq!(fixture.finish().len(), 2);
 }
 
 #[test]
@@ -216,6 +218,15 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
         Tools::new(directory.path()).unwrap(),
     );
     agent.client.fixture_unknown_limits();
+    let fixed = agent.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + agent.request_environment().len()
+        + prompt.len();
+    agent
+        .messages
+        .lock()
+        .unwrap()
+        .extend(crate::test_support::prior_compactable_exchange(fixed));
     agent.set_auto_compact(90);
     let (result, trace) = trace(&mut agent, &prompt);
     result.unwrap();
@@ -404,5 +415,8 @@ fn retired_view_keeps_the_measurement_less_the_view() {
             .measured_input(&messages, agent.client.inputs()),
         Some(50_000 - 85)
     );
-    assert_eq!(agent.context_estimate(&messages), 50_000 - 85 + 700);
+    assert_eq!(
+        agent.context_estimate(&agent.environment(), &messages),
+        50_000 - 85 + 700
+    );
 }

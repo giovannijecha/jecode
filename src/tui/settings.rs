@@ -1,5 +1,6 @@
 use super::{
     App, Kind,
+    held::{self, Deferred},
     jobs::{CatalogPurpose, Job, ResultValue},
     selector::{Choice, Purpose, Selector, Setting},
 };
@@ -31,7 +32,7 @@ impl App {
                 let current = if *defaults {
                     self.config.settings.effort
                 } else {
-                    self.agent.as_ref().unwrap().effort()
+                    self.facts().effort
                 };
                 self.show_efforts(model, *defaults, current);
             }
@@ -44,19 +45,21 @@ impl App {
                     .parent()
                     .expect("configuration directory");
                 let configured = self.config.settings.services(home, id);
+                let facts = self.facts();
                 let services = if !defaults
-                    && !self.agent.as_ref().unwrap().needs_configuration()
-                    && self.agent.as_ref().unwrap().backend_id() == id
+                    && !facts.needs_configuration
+                    && facts.backend_id == id
                     && configured
                         .as_ref()
                         .ok()
                         .and_then(|service| service.account())
-                        == self.agent.as_ref().unwrap().services().account()
+                        == facts.services.account()
                 {
-                    Ok(self.agent.as_ref().unwrap().services())
+                    Ok(facts.services.clone())
                 } else {
                     configured
                 };
+                drop(facts);
                 match services {
                     Ok(services) => self.load_catalog_for(
                         CatalogPurpose::Models {
@@ -220,8 +223,7 @@ impl App {
                             }
                             self.state.effort = effort.name().into();
                         }
-                        self.agent.as_mut().unwrap().register_backend(services);
-                        self.archive = self.agent.as_ref().unwrap().archive();
+                        self.defer(Deferred::Register(services));
                     }
                     let changed_provider = self.config.settings.backend_id != settings.backend_id;
                     let previous = format!(
@@ -265,59 +267,75 @@ impl App {
                 }
                 Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
             }
-        } else {
-            let agent = self.agent.as_mut().unwrap();
-            let previous_provider = agent.backend_id();
-            let previous_model = agent.model().to_owned();
-            let previous_effort = agent.effort();
-            let switch = selected.as_ref().is_some_and(|services| {
-                agent.needs_configuration()
-                    || services.id() != agent.backend_id()
-                    || services.account() != agent.services().account()
+        } else if self.agent.is_none() {
+            let facts = self.facts();
+            let provider = selected
+                .as_ref()
+                .map(backend::Services::id)
+                .filter(|id| *id != facts.backend_id);
+            let notice = format!(
+                "Model: {} → {} · from the next turn",
+                held::selection(
+                    provider.map(|_| facts.backend_id),
+                    &facts.model,
+                    facts.effort
+                ),
+                held::selection(provider, &model, effort)
+            );
+            drop(facts);
+            self.defer(Deferred::Model {
+                model,
+                effort,
+                services: selected,
             });
-            let result = if switch {
-                selected
-                    .unwrap()
-                    .create(model.clone())
-                    .and_then(|mut client| {
-                        client.set_effort(effort);
-                        agent.replace_backend(client)
-                    })
-            } else {
-                agent.set_model(model.clone())
-            };
-            match result {
-                Ok(()) => {
-                    agent.set_effort(effort);
-                    let changed_provider = agent.backend_id() != previous_provider;
-                    let previous = if changed_provider {
-                        format!(
-                            "{previous_provider} / {previous_model} ({})",
-                            previous_effort.name()
-                        )
-                    } else {
-                        format!("{previous_model} ({})", previous_effort.name())
-                    };
-                    let next = if changed_provider {
-                        format!("{} / {model}", agent.backend_id())
-                    } else {
-                        model.clone()
-                    };
-                    self.archive = agent.archive();
-                    self.state.effort = effort.name().into();
-                    self.refresh_context();
-                    self.finish_setting_change(
-                        Kind::Notice,
-                        &format!(
-                            "Model: {previous} → {next} ({}) · this conversation",
-                            effort.name()
-                        ),
-                        vec![],
-                    );
-                }
+            self.finish_setting_change(Kind::Notice, &notice, vec![]);
+        } else {
+            match self.switch_model(model, effort, selected) {
+                Ok(notice) => self.finish_setting_change(Kind::Notice, &notice, vec![]),
                 Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
             }
         }
+    }
+
+    /// Switches this conversation's model, reconnecting when `selected` is
+    /// another provider or account; returns the change as its notice reads.
+    pub(super) fn switch_model(
+        &mut self,
+        model: String,
+        effort: Effort,
+        selected: Option<backend::Services>,
+    ) -> Result<String, String> {
+        let agent = self.agent.as_mut().unwrap();
+        let previous_provider = agent.backend_id();
+        let previous_model = agent.model().to_owned();
+        let previous_effort = agent.effort();
+        let switch = selected.as_ref().is_some_and(|services| {
+            agent.needs_configuration()
+                || services.id() != agent.backend_id()
+                || services.account() != agent.services().account()
+        });
+        if switch {
+            let mut client = selected.unwrap().create(model.clone())?;
+            client.set_effort(effort);
+            agent.replace_backend(client)?;
+        } else {
+            agent.set_model(model.clone())?;
+        }
+        agent.set_effort(effort);
+        let changed = agent.backend_id() != previous_provider;
+        let notice = format!(
+            "Model: {} → {} · this conversation",
+            held::selection(
+                changed.then_some(previous_provider),
+                &previous_model,
+                previous_effort
+            ),
+            held::selection(changed.then_some(agent.backend_id()), &model, effort)
+        );
+        self.archive = agent.archive();
+        self.state.effort = effort.name().into();
+        self.refresh_context();
+        Ok(notice)
     }
 
     pub(super) fn poll_job(&mut self) -> Result<bool, String> {
@@ -406,7 +424,7 @@ impl App {
                                         let current = if defaults {
                                             self.config.settings.effort
                                         } else {
-                                            self.agent.as_ref().unwrap().effort()
+                                            self.facts().effort
                                         };
                                         self.show_efforts(model, defaults, current);
                                     }
@@ -422,6 +440,11 @@ impl App {
             ResultValue::SignIn(result) => self.finish_sign_in(result),
             ResultValue::SignOut(result) => self.finish_sign_out(result),
             ResultValue::Key(key, result) => self.finish_key(key, result)?,
+        }
+        // Credential removal can finish after a question closed its panel.
+        // Keep that completion from restoring a menu beneath the question.
+        if self.state.ask_panel.is_some() {
+            self.make_room_for_ask();
         }
         Ok(true)
     }
@@ -474,10 +497,7 @@ impl App {
             Ok(()) => {
                 let previous = self.config.settings.auto_compact;
                 self.config.settings = settings;
-                // /settings runs between turns, while the application holds the agent.
-                if let Some(agent) = &mut self.agent {
-                    agent.set_auto_compact(percent);
-                }
+                self.defer(Deferred::AutoCompact);
                 self.refresh_context();
                 self.finish_setting_change(
                     Kind::Notice,

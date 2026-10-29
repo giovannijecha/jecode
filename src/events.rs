@@ -2,6 +2,12 @@ use crate::json::Value;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
+    UserQuestion {
+        request: crate::ask::Request,
+    },
+    Collaboration {
+        event: Value,
+    },
     Preparing,
     Waiting {
         model: String,
@@ -145,6 +151,133 @@ fn counted(count: usize, noun: &str) -> String {
 fn outcome_summary(name: &str, result: &Value) -> String {
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("error: {error}");
+    }
+    if name == "ask_user" {
+        return match result.get("outcome").and_then(Value::as_str) {
+            Some("answered") => "Answer received",
+            Some("dismissed") => "No answer supplied",
+            Some("cancelled") => "Question cancelled",
+            Some("unavailable") => "Interactive input unavailable",
+            _ => "Question finished",
+        }
+        .into();
+    }
+    if name == "todo_list" {
+        let revision = result
+            .get("revision")
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        return if revision == 0 {
+            "No plan yet".into()
+        } else {
+            let count = result
+                .get("tasks")
+                .and_then(Value::as_array)
+                .map_or(0, <[Value]>::len);
+            format!("{} · revision {revision}", counted(count, "task"))
+        };
+    }
+    if name == "map" {
+        match result.get("action").and_then(Value::as_str) {
+            Some("remember") => return "Note saved".into(),
+            Some("forget") => {
+                return if result.get("removed") == Some(&Value::Bool(true)) {
+                    "Note forgotten".into()
+                } else {
+                    "Note not found".into()
+                };
+            }
+            _ => {}
+        }
+        let count = result
+            .get("entries_returned")
+            .and_then(Value::as_usize)
+            .or_else(|| {
+                result
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .map(<[Value]>::len)
+            })
+            .unwrap_or(0);
+        let mut summary = format!("{count} {}", if count == 1 { "entry" } else { "entries" });
+        if let Some(files) = result.get("files").and_then(Value::as_usize) {
+            summary.push_str(&format!(" in {}", counted(files, "file")));
+        }
+        if let Some(notes) = result
+            .get("notes_count")
+            .and_then(Value::as_usize)
+            .filter(|n| *n > 0)
+        {
+            summary.push_str(&format!("; {}", counted(notes, "note")));
+        }
+        let errors = result
+            .get("errors_count")
+            .and_then(Value::as_usize)
+            .or_else(|| {
+                result
+                    .get("errors")
+                    .and_then(Value::as_array)
+                    .map(<[Value]>::len)
+            })
+            .unwrap_or(0);
+        if errors > 0 {
+            summary.push_str(&format!("; {}", counted(errors, "error")));
+        }
+        if let Some(next) = result.get("next_offset").and_then(Value::as_usize) {
+            summary.push_str(&format!("; more from {next}"));
+        } else if result.get("complete") == Some(&Value::Bool(false))
+            || result.get("inventory_truncated") == Some(&Value::Bool(true))
+        {
+            summary.push_str("; partial");
+        }
+        return summary;
+    }
+    if matches!(name, "list" | "search") {
+        let count_key = if name == "list" {
+            "entries_returned"
+        } else {
+            "matches_returned"
+        };
+        let array_key = if name == "list" { "entries" } else { "matches" };
+        let count = result
+            .get(count_key)
+            .and_then(Value::as_usize)
+            .or_else(|| {
+                result
+                    .get(array_key)
+                    .and_then(Value::as_array)
+                    .map(<[Value]>::len)
+            })
+            .unwrap_or(0);
+        let mut summary = if name == "list" {
+            format!("{count} {}", if count == 1 { "entry" } else { "entries" })
+        } else {
+            format!("{count} {}", if count == 1 { "match" } else { "matches" })
+        };
+        if name == "search"
+            && let Some(files) = result.get("files_searched").and_then(Value::as_usize)
+        {
+            summary.push_str(&format!(" in {}", counted(files, "file")));
+        }
+        let errors = result
+            .get("errors_count")
+            .and_then(Value::as_usize)
+            .or_else(|| {
+                result
+                    .get("errors")
+                    .and_then(Value::as_array)
+                    .map(<[Value]>::len)
+            })
+            .unwrap_or(0);
+        if errors > 0 {
+            summary.push_str(&format!("; {}", counted(errors, "error")));
+        }
+        if let Some(next) = result.get("next_offset").and_then(Value::as_usize) {
+            summary.push_str(&format!("; more from {next}"));
+        } else if result.get("complete") == Some(&Value::Bool(false)) {
+            summary.push_str("; partial");
+        }
+        return summary;
     }
     if name == "checkpoint" {
         return checkpoint_summary(result);
@@ -298,178 +431,7 @@ mod description;
 pub use description::{description, target};
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod discovery_tests;
 
-    #[test]
-    fn bash_summary_exposes_incomplete_checkpoint_status() {
-        for status in ["partial", "none"] {
-            let result = Value::object([
-                ("exit_code", Value::number(0)),
-                (
-                    "checkpoint",
-                    Value::object([("status", Value::string(status))]),
-                ),
-            ]);
-            let summary = tool_summary("bash", &result);
-            assert!(
-                summary.contains(status),
-                "{status} checkpoint was hidden from the tool card: {summary}"
-            );
-        }
-    }
-
-    #[test]
-    fn checkpoint_summaries_use_actual_preview_and_full_counts() {
-        let restored = Value::object([
-            ("ref", Value::string("rc-one")),
-            ("preview", Value::Bool(false)),
-            ("planned", Value::Array(vec![Value::object([])])),
-            ("planned_count", Value::number(71)),
-            ("restored", Value::Array(vec![Value::object([])])),
-            ("restored_count", Value::number(60)),
-            ("conflicts", Value::Array(vec![])),
-            ("conflict_count", Value::number(0)),
-            ("failed", Value::Array(vec![])),
-            ("failed_count", Value::number(0)),
-        ]);
-        assert_eq!(
-            tool_summary("checkpoint", &restored),
-            "restored 60 paths from rc-one"
-        );
-        let mut preview = restored;
-        if let Value::Object(fields) = &mut preview {
-            fields.insert("preview".into(), Value::Bool(true));
-        }
-        assert_eq!(
-            tool_summary("checkpoint", &preview),
-            "preview: 71 paths would change"
-        );
-    }
-
-    #[test]
-    fn checkpoint_summaries_distinguish_list_inspect_and_failures() {
-        let listed = Value::object([("calls", Value::Array(vec![Value::object([])]))]);
-        assert_eq!(tool_summary("checkpoint", &listed), "1 call");
-        let inspected = Value::object([
-            ("ref", Value::string("rc-one")),
-            ("paths", Value::Array(vec![Value::object([])])),
-            ("path_count", Value::number(80)),
-        ]);
-        assert_eq!(
-            tool_summary("checkpoint", &inspected),
-            "inspected 80 paths in rc-one"
-        );
-        let failed = Value::object([
-            ("ref", Value::string("rc-one")),
-            ("preview", Value::Bool(false)),
-            ("restored_count", Value::number(1)),
-            ("failed", Value::Array(vec![Value::object([])])),
-            ("failed_count", Value::number(3)),
-            ("conflict_count", Value::number(2)),
-        ]);
-        assert_eq!(
-            tool_summary("checkpoint", &failed),
-            "restored 1 path from rc-one; 2 conflicts; 3 paths failed"
-        );
-    }
-
-    #[test]
-    fn local_web_and_browser_cards_show_actions_and_artifacts() {
-        let fetch = Value::object([
-            ("action", Value::string("fetch")),
-            ("url", Value::string("https://example.org/")),
-        ]);
-        assert_eq!(description("web", &fetch), "fetch https://example.org/");
-        let fetched = Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]);
-        assert_eq!(tool_summary("web", &fetched), "HTTP 200 · 42 bytes");
-
-        let screenshot = Value::object([
-            ("action", Value::string("screenshot")),
-            ("tab_id", Value::string("tab-1")),
-        ]);
-        assert_eq!(description("browser", &screenshot), "screenshot tab-1");
-        let captured = Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]);
-        assert_eq!(
-            tool_summary("browser", &captured),
-            "screenshot saved to tmp:browser/shot.png"
-        );
-        let crawl = Value::object([
-            ("pages_in_call", Value::number(35)),
-            ("pages_truncated", Value::Bool(true)),
-            ("manifest_repaired", Value::Bool(true)),
-            ("queued", Value::number(4)),
-            (
-                "pages",
-                Value::Array(vec![Value::object([("error", Value::string("offline"))])]),
-            ),
-        ]);
-        assert_eq!(
-            tool_summary("web", &crawl),
-            "crawled 35 pages; 1 failed in preview; 4 queued; manifest repaired"
-        );
-    }
-
-    #[test]
-    fn routine_description_overrides_command_and_blank_falls_back() {
-        for (name, key, command, fallback) in [
-            (
-                "read",
-                "path",
-                "src/lib.rs",
-                "src/lib.rs (from line 1, up to 200 lines)",
-            ),
-            ("bash", "command", "cargo test", "cargo test"),
-            ("exec", "executable", "cargo", "cargo"),
-            ("process", "action", "list", "list"),
-            ("web", "action", "fetch", "fetch"),
-            ("browser", "action", "tabs", "tabs"),
-        ] {
-            let arguments = Value::object([
-                (key, Value::string(command)),
-                ("description", Value::string("Inspect relevant results")),
-            ]);
-            assert_eq!(
-                description(name, &arguments),
-                "Inspect relevant results",
-                "{name}"
-            );
-            assert_eq!(target(name, &arguments), fallback, "{name}");
-            for blank in ["", " \t "] {
-                let arguments = Value::object([
-                    (key, Value::string(command)),
-                    ("description", Value::string(blank)),
-                ]);
-                assert_eq!(description(name, &arguments), fallback, "{name}");
-            }
-            let arguments = Value::object([(key, Value::string(command))]);
-            assert_eq!(description(name, &arguments), fallback, "{name}");
-        }
-    }
-
-    #[test]
-    fn exec_summary_uses_command_exit_and_background_contract() {
-        let done = Value::object([
-            ("exit_code", Value::number(3)),
-            ("truncated", Value::Bool(true)),
-            ("stdout_file", Value::string("output:fixture:stdout")),
-        ]);
-        assert_eq!(tool_summary("exec", &done), "exit 3; full output saved");
-        let background = Value::object([
-            ("process_id", Value::string("process-fixture")),
-            ("status", Value::string("running")),
-        ]);
-        assert_eq!(
-            tool_summary("exec", &background),
-            "started in background · process-fixture"
-        );
-        let arguments = Value::object([
-            ("executable", Value::string("cargo")),
-            (
-                "args",
-                Value::Array(vec![Value::string("test"), Value::string("a b")]),
-            ),
-        ]);
-        assert_eq!(target("exec", &arguments), "cargo [\"test\",\"a b\"]");
-    }
-}
+#[cfg(test)]
+mod tests;

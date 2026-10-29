@@ -1,15 +1,17 @@
 use super::{
-    footer, information, menus,
+    agents, ask, footer, information, menus,
     panel::{self, Part, Sheet},
-    processes, status,
+    processes, status, todo,
 };
+mod editor;
 use crate::tui::{
     drafts::Slot,
     line::Line,
     state::State,
     text,
-    theme::{ACCENT, BADGE_IDLE, CURSOR, DIM, FAINT, LIT, MUTED, STRONG, Style, WARNING},
+    theme::{ACCENT, CURSOR, DIM, FAINT, MUTED, STRONG, Style, WARNING},
 };
+use editor::input;
 
 /// Queued drafts shown above the status row at most.
 const QUEUE_ROWS: usize = 8;
@@ -22,16 +24,24 @@ pub(super) fn render(
     directory: &str,
     columns: usize,
     height: usize,
-    back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let contextual = state.queue.is_editing() || state.history.is_browsing();
-    let sheet = sheet(state, columns);
+    // A question takes the composer's place unless a panel opened over it.
+    let question = state
+        .question
+        .as_ref()
+        .zip(state.ask_panel.as_ref())
+        .filter(|_| {
+            state.quitting.is_none() && state.processes.is_none() && state.agents_panel.is_none()
+        });
+    let sheet = sheet(state, columns).filter(|_| question.is_none());
     // Esc interrupts only where nothing else holds it.
-    let escape = sheet.is_none() && !contextual && !back_to_bottom;
+    let escape = sheet.is_none() && question.is_none() && !contextual;
     let status = status::row(state, columns, escape);
-    let (lines, cursor) = match sheet {
-        Some(sheet) => docked(state, &sheet, status, columns, height),
-        None => {
+    let (lines, cursor) = match (question, sheet) {
+        (Some((request, panel)), _) => ask::block(request, panel, status, columns, height),
+        (None, Some(sheet)) => docked(state, &sheet, status, columns, height),
+        (None, None) => {
             let (draft, cursor) = draft(state, model, directory, columns, height.saturating_sub(1));
             let mut lines = vec![status];
             lines.extend(draft);
@@ -71,6 +81,10 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
         Some(super::quit::sheet(state, work, columns))
     } else if let Some(panel) = &state.processes {
         Some(processes::sheet(panel, columns))
+    } else if let Some(panel) = &state.agents_panel {
+        Some(agents::sheet(state, panel, columns))
+    } else if let Some(panel) = &state.todo_panel {
+        Some(todo::sheet(state, panel, columns))
     } else if let Some(info) = &state.information {
         Some(information::sheet(info, columns))
     } else if let Some(selector) = &state.selector {
@@ -86,7 +100,14 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
 /// between the rules, the panel's title on the bottom rule.
 fn top(state: &State, sheet: &Sheet, status: Line, columns: usize) -> Rows {
     let style = rule_style(state);
-    let mut parts = vec![(status, Part::Chrome)];
+    let mut parts = vec![(
+        status,
+        if state.question.is_some() {
+            Part::Keep
+        } else {
+            Part::Chrome
+        },
+    )];
     let mut caret = None;
     if let Some(field) = &sheet.field {
         let label = [Line::new(&field.label, MUTED)];
@@ -420,87 +441,4 @@ fn draft(
         });
     }
     (lines, Some((input.cursor.0 + 1, input.cursor.1)))
-}
-
-pub(super) struct Input {
-    pub lines: Vec<Line>,
-    pub cursor: (usize, usize),
-    pub position: String,
-}
-
-/// `› ` bold on the first visible row, the draft in `foreground` with
-/// attachment chips, the caret's row centred in the window. The caret shows
-/// only while the draft has the focus.
-pub(super) fn input(
-    state: &State,
-    columns: usize,
-    marker: Style,
-    foreground: Style,
-    limit: usize,
-    focused: bool,
-) -> Input {
-    let caret = |line: Line, column: usize| {
-        if focused {
-            line.caret(column, CURSOR)
-        } else {
-            line
-        }
-    };
-    if columns < 7 {
-        // At extreme widths the editor gets the entire row, including its caret.
-        // The logical draft/caret are unchanged and regain multiline layout later.
-        let (value, column) = state.editor.viewport(columns, false);
-        let line = if state.editor.text.is_empty() {
-            caret(Line::new(&text::clip("Ask anything…", columns), MUTED), 0)
-        } else {
-            caret(Line::new(&value, foreground), column)
-        };
-        let caret = column;
-        return Input {
-            lines: vec![line],
-            cursor: (0, caret),
-            position: String::new(),
-        };
-    }
-    let layout = state.editor.layout(columns.saturating_sub(3));
-    let total = layout.rows.len();
-    let limit = limit.clamp(1, window(state));
-    let start = layout
-        .cursor
-        .0
-        .saturating_sub(limit / 2)
-        .min(total.saturating_sub(limit));
-    let end = (start + limit).min(total);
-    let mut lines = Vec::new();
-    let mut cursor = (0, 0);
-    for index in start..end {
-        let mut line = if index == start {
-            Line::new("› ", marker.bold())
-        } else {
-            Line::new("  ", marker)
-        };
-        if state.editor.text.is_empty() {
-            line.push(&text::ellipsize("Ask anything…", columns - 3), MUTED);
-        } else {
-            let row = &layout.rows[index];
-            let mut at = 0;
-            for label in &row.labels {
-                line.push(&row.text[at..label.start], foreground);
-                line.push_on(&row.text[label.clone()], LIT, BADGE_IDLE);
-                at = label.end;
-            }
-            line.push(&row.text[at..], foreground);
-        }
-        if index == layout.cursor.0 {
-            let column = layout.cursor.1 + 2;
-            line = caret(line, column);
-            cursor = (lines.len(), column);
-        }
-        lines.push(line);
-    }
-    Input {
-        lines,
-        cursor,
-        position: panel::position(start, end, total),
-    }
 }

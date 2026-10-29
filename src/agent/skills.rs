@@ -12,6 +12,11 @@ impl Agent {
         self.skills.warnings()
     }
 
+    /// Where the user library lives, so /skills can list it during a turn.
+    pub fn skill_directory(&self) -> Option<std::path::PathBuf> {
+        self.skills.directory().map(Into::into)
+    }
+
     pub(super) fn refresh_skills(&mut self) {
         if self.skills.refresh() {
             self.context.input_tokens = None;

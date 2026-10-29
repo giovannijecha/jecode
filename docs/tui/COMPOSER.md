@@ -2,9 +2,13 @@
 
 The interactive TUI keeps one conversation above an editable composer. Enter
 sends a draft when idle. During a turn, it accepts the draft for the active
-turn before the next model request; commands that cannot run during a turn wait
-until it ends. Up to eight messages can be pending. The draft clears only after
-Jecode accepts it.
+turn before the next model request. Menus open over a running turn: `/settings`,
+`/model`, `/effort`, `/routing`, `/skills` and `/help`, besides the panels that always do.
+What they change for this conversation applies from the next turn; saved
+defaults are saved at once. Commands that start work or replace the
+conversation, such as `/init`, `/resume` and `/new`, wait until the turn ends.
+Up to eight messages can be pending. The draft clears only after Jecode accepts
+it.
 
 The composer sits between two full-width rules: `›` marks the first visible
 row, the draft is `STRONG`, and an empty draft shows `Ask anything…`. Use
@@ -32,7 +36,7 @@ or `Prompt history`. Attachment labels are chips edited as one unit. See
 | `Ctrl+P` / `Ctrl+N` | Browse up to 50 sent prompts; commands are excluded. |
 | `Alt+V` | Attach the clipboard image. `Ctrl+V` remains the terminal's text paste. |
 | `Alt+Up` | Open pending drafts. |
-| `Ctrl+O` | Expand or collapse every tool in the latest finished execution turn. |
+| `Ctrl+O` | Expand or collapse the latest collaboration receipt, or tools in the latest finished execution turn. |
 | `Ctrl+Q` | Quit; while work runs, ask first. |
 
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
@@ -52,6 +56,14 @@ and retain execution-turn boundaries, including messages accepted during
 generation. The keycap on the turn's last hidden card, the first-run startup
 row and `/help` name the shortcut.
 
+If a collaboration receipt is newer than the last ordinary tool card, `Ctrl+O`
+toggles that receipt's historical assignment snapshots. `/agents` opens a
+read-only list immediately, including during generation. Enter opens Activity,
+Assignment and Result tabs. Esc returns detail → list → main draft, preserving
+the draft and caret. Activity follows output until scrolled; End resumes
+following. Inspecting a result never marks it reviewed. See
+[collaborating agents](../usage/COLLABORATION.md).
+
 ## Activity and queue
 
 While a turn runs, the status row above the composer shows the blinking `>_`
@@ -61,9 +73,10 @@ elapsed time, which reads in hours past 60 minutes, and the generated tokens.
 The composer rules turn faint and the composer stays editable. Pending
 messages appear above the status row as `› first line…` with `queued` or
 `paused` on the right; Jecode accepts ordinary messages before the active
-turn's next model request. Most local commands wait for the turn to finish;
-`/copy`, `/drafts`, and `/terminal` open immediately. If the turn stops or
-fails, messages that have not joined it become `paused` and require review.
+turn's next model request. Menus and inspection panels open immediately;
+commands that start work or replace the conversation wait for the turn to finish.
+If the turn stops or fails, messages that have not joined it become `paused`
+and require review.
 
 When the turn ends, the status row keeps `Done`, `Stopped` or `Failed` with
 its time and facts until the next send. A failed turn also leaves its
@@ -99,7 +112,7 @@ typing filters a flat list. `Up`/`Down` selects a suggestion, `Tab` completes
 its name, and `Enter` runs it when idle. After a space the panel shows the
 typed command's description. `Esc` closes the panel without clearing the
 draft. `/help` opens Commands and Keys tabs, switched with `Left`/`Right`;
-`F1` opens the same help while idle.
+`F1` opens the same help, including during a turn.
 
 Panels open below the composer in place of the footer and take at most two
 thirds of the screen. The title and a count or scope ride the composer's
@@ -119,9 +132,7 @@ first, then extra draft rows, tabs or column headers, the status row and top
 rule, then the list rows farthest from the selection; the selected row, the
 title rule and the key row holding `Esc` stay.
 
-- `/backend [ID MODEL]` lists backends or switches this conversation to a
-  configured backend and model.
-- `/model [ID]` chooses a model and effort for this conversation;
+- `/model [ID]` chooses a provider, model and effort for this conversation;
   `/effort [NAME]` changes effort directly.
 - `/routing` chooses automatic or a specific OpenRouter endpoint for this
   conversation; OpenAI does not expose endpoint routing here.
@@ -165,15 +176,16 @@ the panel closes. See [Tools](../usage/TOOLS.md) for process behavior.
 `Page Up`/`Page Down` and the mouse wheel browse the conversation. Scrolling
 up holds the reading position while new output arrives, and the row above the
 composer counts the rows below. `Alt+Home` goes to the start; `Alt+End`
-follows the latest output. `Esc` returns to the bottom while reading, but
-closes an open panel, draft edit, or history first. At the bottom, `Esc` stops
-active work. `Ctrl+C` also stops work, closes a panel, or clears an idle
+follows the latest output. `Esc` closes an open panel, draft edit, or
+history; otherwise it stops active work, whether or not you are reading. `Ctrl+C` also stops work, closes a panel, or clears an idle
 draft; it never quits. See [Scrolling and resize](RESIZE.md) for reflow and
 terminal restoration.
 
-`Ctrl+Q` quits at once when idle. While a turn runs or a background process is
-active, it opens `Quit · work is running`, listing the current turn and each
-process, with `Stop it and quit?` (`both` or `all` for more). `Enter` or a
+`Ctrl+Q` quits at once when idle. While a turn runs, a background process is
+active or a collaborator is still on its assignment, it opens
+`Quit · work is running`, listing the current turn, each process and each
+working agent, with `Stop it and quit?` (`both` or `all` for more). A stopped
+collaborator resumes with an unknown outcome. `Enter` or a
 second `Ctrl+Q` stops the work and quits; `Esc` or `Ctrl+C` cancels. Quitting
 saves input in an existing saved session.
 

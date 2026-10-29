@@ -54,6 +54,43 @@ impl Drop for Directory {
     }
 }
 
+/// A directory link: a symbolic link on Unix, a junction on Windows.
+pub fn link_directory(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let created = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .output()
+            .unwrap();
+        assert!(created.status.success(), "{created:?}");
+    }
+}
+
+/// A prior exchange large enough to make a synthetic provider rejection
+/// recoverable without shrinking the original user request under test.
+pub fn prior_compactable_exchange(bytes: usize) -> [Value; 2] {
+    const PHRASE: &str = "Earlier assistant observation. ";
+    // About three fifths of the fixed request leaves summary room after the
+    // learned 75% ceiling without creating extra summary portions.
+    [
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Review earlier observations.")),
+        ]),
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "content",
+                Value::string(PHRASE.repeat(bytes.saturating_mul(3).div_ceil(5 * PHRASE.len()))),
+            ),
+        ]),
+    ]
+}
+
 pub struct Request {
     pub headers: Vec<String>,
     pub body: Value,
@@ -192,8 +229,10 @@ impl HttpFixture {
                                 Err(_) => panic!("stream was not observed before completion"),
                             }
                         }
-                        stream.write_all(tail.as_bytes()).unwrap();
-                        stream.flush().unwrap();
+                        // A cancelled client may already have closed the socket.
+                        let _ = stream
+                            .write_all(tail.as_bytes())
+                            .and_then(|_| stream.flush());
                     }
                 }
             }
@@ -239,9 +278,11 @@ fn http_fixture_survives_slow_client_preparation() {
             b"POST /chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}",
         )
         .unwrap();
-    let mut response = String::new();
-    client.read_to_string(&mut response).unwrap();
-    assert!(response.starts_with("HTTP/1.1 200"));
+    // Waiting for the close would race a concurrent test's child process
+    // that briefly inherits the accepted socket; the status line suffices.
+    let mut status = [0; 12];
+    client.read_exact(&mut status).unwrap();
+    assert_eq!(&status, b"HTTP/1.1 200");
     assert_eq!(fixture.finish().len(), 1);
 }
 

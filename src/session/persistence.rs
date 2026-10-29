@@ -107,6 +107,11 @@ pub(super) fn resume(
     let document = agent.sessions().unwrap().snapshot();
     for record in document.records() {
         match record {
+            Record::Question { .. } => {}
+            Record::Collaboration { event } => {
+                writeln!(status, "{}", crate::console::collaboration_line(&event))
+                    .map_err(|error| error.to_string())?;
+            }
             Record::TurnStart => {}
             Record::Text { role, text } => {
                 if role == "user" {

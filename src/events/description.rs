@@ -3,7 +3,7 @@ use crate::json::Value;
 pub fn description(name: &str, arguments: &Value) -> String {
     if matches!(
         name,
-        "read" | "bash" | "exec" | "process" | "web" | "browser"
+        "read" | "list" | "search" | "map" | "bash" | "exec" | "process" | "web" | "browser"
     ) && let Some(label) = arguments.get("description").and_then(Value::as_str)
         && !label.trim().is_empty()
     {
@@ -14,6 +14,78 @@ pub fn description(name: &str, arguments: &Value) -> String {
 
 /// The invocation target, independently of an optional display description.
 pub fn target(name: &str, arguments: &Value) -> String {
+    if name == "ask_user"
+        && let Ok(request) = crate::ask::Request::parse("", arguments)
+    {
+        return request.subject();
+    }
+    if matches!(name, "ask_user" | "todo_list") {
+        return arguments
+            .get("title")
+            .and_then(Value::as_str)
+            .or_else(|| arguments.get("action").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_owned();
+    }
+    if name == "agent" {
+        let action = arguments
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid action");
+        if action == "create" {
+            let count = arguments
+                .get("tasks")
+                .and_then(Value::as_array)
+                .map_or(0, <[Value]>::len);
+            return format!(
+                "create {count} {}",
+                if count == 1 {
+                    "assignment"
+                } else {
+                    "assignments"
+                }
+            );
+        }
+        let id = arguments.get("id").and_then(Value::as_str).unwrap_or("");
+        let label = id
+            .strip_prefix('a')
+            .filter(|suffix| !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()))
+            .map_or_else(|| id.to_owned(), |number| format!("AGENT {number}"));
+        return format!("{action} {label}").trim_end().into();
+    }
+    if name == "map" {
+        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        return match field("action") {
+            "remember" => field("title").to_owned(),
+            "forget" => field("id").to_owned(),
+            _ => {
+                let path = if field("path").is_empty() {
+                    "."
+                } else {
+                    field("path")
+                };
+                match field("query") {
+                    "" => path.to_owned(),
+                    query => format!("{query} in {path}"),
+                }
+            }
+        };
+    }
+    if name == "list" {
+        return arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or(".")
+            .into();
+    }
+    if name == "search" {
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("invalid arguments");
+        let path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+        return format!("{query} in {path}");
+    }
     if name == "web" || name == "browser" {
         let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
         let action = field("action");

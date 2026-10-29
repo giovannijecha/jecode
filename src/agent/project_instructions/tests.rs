@@ -243,7 +243,7 @@ fn changed_rules_invalidate_measurements_and_unchanged_rules_keep_them() {
     let fixture = HttpFixture::new(vec![measured(), measured(), measured()]);
     let mut agent = agent(&directory, &fixture);
     agent.run_turn("First", &mut |_| Ok(())).unwrap();
-    let before = agent.context_estimate(&agent.messages.lock().unwrap());
+    let before = agent.locked_estimate();
     let calibration = agent.context.calibration;
     assert!(calibration.is_some());
     agent.context.ceiling = Some(100_000);
@@ -255,10 +255,7 @@ fn changed_rules_invalidate_measurements_and_unchanged_rules_keep_them() {
     assert_eq!(agent.context.ceiling, Some(100_000));
     // The new rules are 45,000 bytes; the estimate charges them at least at
     // the calibrated rate.
-    assert!(
-        agent.context_estimate(&agent.messages.lock().unwrap())
-            > before + agent.context.estimate_bytes(45_000)
-    );
+    assert!(agent.locked_estimate() > before + agent.context.estimate_bytes(45_000));
     agent.run_turn("Second", &mut |_| Ok(())).unwrap();
     let calibration = agent.context.calibration;
     let measured_end = agent.context.measured_end;
@@ -367,7 +364,7 @@ fn live_requests_keep_the_rules_after_context_compaction() {
     agent.enable_sessions(home.path()).unwrap();
     agent.set_auto_compact(90);
     let temporary = agent.tools.temporary_instructions();
-    let prompt = "original objective ".repeat(1500);
+    let prompt = "original objective ".repeat(2500);
     let original = agent.messages.lock().unwrap().clone();
     let mut notices = Vec::new();
     let result = agent.run_turn(&prompt, &mut |event| {

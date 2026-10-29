@@ -6,6 +6,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+mod receipts;
+
 const SAVE_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
@@ -32,13 +34,18 @@ struct Live {
 
 pub enum Stage {
     Begin,
+    /// A collaborator returned after the main turn ended; continue without a user message.
+    Continue,
     /// Submitted messages joined the turn; the given prompts stay queued.
     Accept(Vec<crate::attachments::Prompt>),
     Completion,
     Tool(String),
     ReadBatch(Vec<String>),
+    ToolBatch(Vec<String>),
+    ToolBatchResult(crate::json::Value),
     ToolFinished,
     ReadBatchFinished,
+    ToolBatchFinished,
     Ready,
     Preserve,
     /// A backend selection must either be saved in full or leave its old state.
@@ -98,11 +105,39 @@ impl Handle {
             .into_iter()
             .map(|id| redactor.text(&id))
             .collect();
+        document.pending.batch = document
+            .pending
+            .batch
+            .into_iter()
+            .map(|id| redactor.text(&id))
+            .collect();
+        document.pending.completed = document
+            .pending
+            .completed
+            .iter()
+            .map(|receipt| redactor.value(receipt))
+            .collect();
+        document.input.question = document
+            .input
+            .question
+            .map(|draft| draft.redacted(&redactor));
         context::validate(&document)?;
         let interrupted = document.recover();
         context::validate(&document)?;
         let handle = Self::with_lease(store, document, redactor, Some(Arc::new(lease)));
         handle.flush()?;
+        let awaiting_question = {
+            let saved = handle.snapshot();
+            saved.pending.tool.as_ref().is_some_and(|id| {
+                saved.events.iter().any(|event| {
+                    event.get("type").and_then(crate::json::Value::as_str) == Some("user_question")
+                        && event
+                            .get("tool_call_id")
+                            .and_then(crate::json::Value::as_str)
+                            == Some(id)
+                })
+            })
+        };
         Ok((
             handle,
             format!(
@@ -112,7 +147,9 @@ impl Handle {
                 } else {
                     ""
                 },
-                if interrupted {
+                if awaiting_question {
+                    "Question awaits your answer."
+                } else if interrupted {
                     "Interrupted work recovered; ready for a new request."
                 } else {
                     "Ready for a new request."
@@ -135,6 +172,12 @@ impl Handle {
         self.0.live.lock().unwrap().document.pending.active
     }
 
+    /// Whether this handle holds the session's exclusive writer lease, which
+    /// keeps every other conversation out of the session's own storage.
+    pub fn leased(&self) -> bool {
+        self.0.live.lock().unwrap().lease.is_some()
+    }
+
     pub fn checkpoint(
         &self,
         archive: &Archive,
@@ -144,6 +187,9 @@ impl Handle {
         has_model: bool,
         stage: Stage,
     ) -> Result<(), String> {
+        if let Stage::ToolBatchResult(receipt) = &stage {
+            context::validate_batch_receipt(receipt)?;
+        }
         let messages = archive.messages.lock().unwrap();
         let events = archive.events.lock().unwrap();
         let _io = self.0.io.lock().unwrap();
@@ -159,7 +205,11 @@ impl Handle {
         }
         let selection = matches!(stage, Stage::Selection)
             .then(|| (live.document.clone(), live.validated.clone()));
-        let preparation = matches!(stage, Stage::Begin | Stage::Accept(_)).then(|| {
+        let preparation = matches!(
+            stage,
+            Stage::Begin | Stage::Continue | Stage::Accept(_) | Stage::ToolBatchResult(_)
+        )
+        .then(|| {
             (
                 live.document.messages.len(),
                 live.document.events.len(),
@@ -194,7 +244,7 @@ impl Handle {
         live.document.context = context.clone();
         live.document.routing = routing.clone();
         match stage {
-            Stage::Begin => {
+            Stage::Begin | Stage::Continue => {
                 live.document.pending = Pending {
                     active: true,
                     ..Pending::default()
@@ -205,8 +255,34 @@ impl Handle {
             Stage::ReadBatch(ids) => {
                 live.document.pending.reads = ids.iter().map(|id| live.redactor.text(id)).collect();
             }
-            Stage::ToolFinished => live.document.pending.tool = None,
+            Stage::ToolBatch(ids) => {
+                live.document.pending.batch = ids.iter().map(|id| live.redactor.text(id)).collect();
+                live.document.pending.reads = live.document.pending.batch.clone();
+                live.document.pending.completed.clear();
+            }
+            Stage::ToolBatchResult(receipt) => {
+                let receipt = live.redactor.value(&receipt);
+                live.document.pending.completed.push(receipt);
+            }
+            Stage::ToolFinished => {
+                if live
+                    .document
+                    .input
+                    .question
+                    .as_ref()
+                    .is_some_and(|draft| Some(&draft.id) == live.document.pending.tool.as_ref())
+                {
+                    live.document.input.question = None;
+                    live.last_ui_input = None;
+                }
+                live.document.pending.tool = None;
+            }
             Stage::ReadBatchFinished => live.document.pending.reads.clear(),
+            Stage::ToolBatchFinished => {
+                live.document.pending.reads.clear();
+                live.document.pending.batch.clear();
+                live.document.pending.completed.clear();
+            }
             Stage::Ready => live.document.pending = Pending::default(),
             Stage::Accept(_) | Stage::Preserve | Stage::Selection => {}
         }
@@ -409,5 +485,7 @@ impl Handle {
     }
 }
 
+#[cfg(test)]
+mod collaboration_tests;
 #[cfg(test)]
 mod tests;

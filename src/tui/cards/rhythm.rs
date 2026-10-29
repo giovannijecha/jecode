@@ -87,28 +87,33 @@ pub(super) fn limited(
     rows
 }
 
-/// ` NAME ` and the description or target in BODY; commands follow as
-/// `$ command` on the tree. Returns the rows, how many belong to the title,
-/// and the gutter the result row takes.
+/// ` NAME ` and the description or target in BODY; commands and discovery
+/// targets follow on the tree when a description is supplied. Returns the
+/// rows, how many belong to the title, and the gutter the result row takes.
 fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, &'static str) {
     let (name, target) = heading(tool);
     let command_tool = matches!(tool.name, "bash" | "exec" | "process");
+    let discovery_note = (matches!(tool.name, "list" | "search")
+        || tool.name == "map" && !matches!(field(tool.arguments, "action"), "remember" | "forget"))
+        && !description(tool).is_empty();
     // Actions without a payload, such as snapshot or stop, have no command row.
-    let command = if tool.name == "browser" {
+    let command = if discovery_note {
+        true
+    } else if tool.name == "browser" {
         !payload(tool).is_empty()
     } else {
         command_tool && !description(tool).is_empty()
     };
     let mut head = badge::badge(name, status);
     head.push(" ", BODY);
-    let target = if command_tool && command {
+    let display_target = if (command_tool && command) || discovery_note {
         description(tool)
     } else if tool.name == "browser" {
         field(tool.arguments, "action")
     } else {
         &target
     };
-    head.push(&inline(target), BODY);
+    head.push(&inline(display_target), BODY);
     // A call still running in the background ends its target in a bold ` &`.
     if status == Status::Background {
         head.push(" &", LIT.bold());
@@ -124,17 +129,21 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, 
     };
     let titled = rows.len();
     if command {
-        let command = Line::new(
-            if tool.name == "exec" {
-                "> "
-            } else if command_tool {
-                "$ "
-            } else {
-                ""
-            },
-            DIM,
-        )
-        .append(code(tool));
+        let command = if discovery_note {
+            Line::new(&inline(&target), CODE_TEXT)
+        } else {
+            Line::new(
+                if tool.name == "exec" {
+                    "> "
+                } else if command_tool {
+                    "$ "
+                } else {
+                    ""
+                },
+                DIM,
+            )
+            .append(code(tool))
+        };
         rows.extend(if tool.presentation.expanded {
             line_rows(&command, columns, 1, "  ⎿ ", "    ", DIM)
         } else {
@@ -188,7 +197,8 @@ fn collapsed_card(
             MUTED
         };
     }
-    let hidden = body.as_ref().is_some_and(|body| body.hidden > 0);
+    let hidden = body.as_ref().is_some_and(|body| body.hidden > 0)
+        || matches!(tool.name, "list" | "search" | "map") && tool.result.is_some();
     let mut suffix = Vec::new();
     if let Some(body) = &body
         && body.hidden > 0

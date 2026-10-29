@@ -25,11 +25,19 @@ const LABEL_MIN: usize = 12;
 const PILL_CHROME: usize = 5;
 
 /// `escape` says whether Esc interrupts the turn from here: not while a
-/// panel, a draft edit or reading back holds it.
+/// panel or a draft edit holds it.
 pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     let frame = motion::frame();
     if let Some(notice) = shown_notice(state) {
         return notice_row(notice, columns);
+    }
+    if state.question.is_some()
+        && !state
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.stopping)
+    {
+        return super::ask::status(columns, state.ask_panel.is_none());
     }
     let running = state
         .activity
@@ -38,7 +46,7 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     let time = state
         .activity
         .as_ref()
-        .map(|activity| activity::duration(activity.started.elapsed()));
+        .map(|activity| activity::duration(activity.elapsed()));
     let mut facts = Vec::new();
     if escape && running.is_some() {
         facts.push(Line::new("Esc interrupt", DIM));
@@ -271,10 +279,9 @@ fn countdown(until: Option<Instant>) -> String {
     }
 }
 
-/// The latest running call's `description` verbatim, else a family verb
-/// and a short target; between calls, the turn's phase.
+/// Name the running calls, or the turn's phase between calls.
 pub(super) fn verb(state: &State) -> String {
-    let running = state.items.iter().rev().find_map(|item| match item {
+    let mut running = state.items.iter().rev().filter_map(|item| match item {
         Item::Tool {
             name,
             arguments,
@@ -283,8 +290,19 @@ pub(super) fn verb(state: &State) -> String {
         } => Some((name.as_str(), arguments)),
         _ => None,
     });
-    if let Some((name, arguments)) = running {
-        return tool_label(name, arguments);
+    if let Some((name, arguments)) = running.next() {
+        return if running.next().is_some() {
+            format!(
+                "{} tools running",
+                state
+                    .items
+                    .iter()
+                    .filter(|item| matches!(item, Item::Tool { result: None, .. }))
+                    .count()
+            )
+        } else {
+            tool_label(name, arguments)
+        };
     }
     match state.status.trim_end_matches(['.', '…']) {
         "" | "Ready" => "Working".into(),
@@ -333,6 +351,31 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
         }
     };
     match name {
+        "list" => labelled(
+            "Listing",
+            if field("path").is_empty() {
+                ".".into()
+            } else {
+                file("path")
+            },
+        ),
+        "search" => labelled("Searching", short(field("query"))),
+        "map" => match field("action") {
+            "remember" => labelled("Remembering", short(field("title"))),
+            "forget" => labelled("Forgetting", short(field("id"))),
+            _ => labelled(
+                "Mapping",
+                if field("query").is_empty() {
+                    if field("path").is_empty() {
+                        ".".into()
+                    } else {
+                        file("path")
+                    }
+                } else {
+                    short(field("query"))
+                },
+            ),
+        },
         "read" => match field("path").strip_prefix("skill:") {
             Some(skill) => labelled(
                 "Loading skill",

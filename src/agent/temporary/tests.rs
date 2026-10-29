@@ -242,10 +242,7 @@ fn legacy_system_messages_get_current_tool_paths_without_rewriting_saved_evidenc
             .contains("Remember the original task")
     );
     assert_eq!(resumed.messages.lock().unwrap()[0], original);
-    assert!(
-        resumed.context_estimate(&resumed.messages.lock().unwrap())
-            >= resumed.tools.temporary_instructions().len()
-    );
+    assert!(resumed.locked_estimate() >= resumed.tools.temporary_instructions().len());
 }
 
 #[test]

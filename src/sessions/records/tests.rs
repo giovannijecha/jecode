@@ -113,6 +113,10 @@ fn records_keep_event_order_at_each_boundary_and_match_reused_tool_ids() {
     let names = records
         .into_iter()
         .map(|record| match record {
+            Record::Question { .. } => panic!("Unexpected question in local-command fixture"),
+            Record::Collaboration { .. } => {
+                panic!("Unexpected collaboration in local-command fixture")
+            }
             Record::TurnStart => "turn start".into(),
             Record::Text { text, .. } => text,
             Record::Tool { name, .. } => name,

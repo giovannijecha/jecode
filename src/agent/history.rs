@@ -17,6 +17,32 @@ impl Agent {
         call: &ToolCall,
         begun: crate::tools::Begun,
     ) -> crate::tools::Execution {
+        if let Ok(arguments) = json::parse(&call.arguments)
+            && let Err(error) = crate::tools::parallel(&arguments)
+        {
+            return crate::tools::Execution {
+                result: Value::object([("error", Value::string(error))]),
+                change: None,
+            };
+        }
+        if call.name == "agent" {
+            let result = json::parse(&call.arguments)
+                .and_then(|arguments| self.agent_tool(&arguments))
+                .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
+            return crate::tools::Execution {
+                result,
+                change: None,
+            };
+        }
+        if call.name == "todo_list" {
+            let result = json::parse(&call.arguments)
+                .and_then(|arguments| self.todo_tool(&arguments))
+                .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
+            return crate::tools::Execution {
+                result,
+                change: None,
+            };
+        }
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
             && arguments

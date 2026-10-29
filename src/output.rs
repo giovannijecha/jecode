@@ -2,6 +2,7 @@ use crate::redact::Redactor;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 mod ownership;
 #[cfg(test)]
@@ -14,6 +15,7 @@ pub struct Store {
     root: PathBuf,
     redactor: Redactor,
     owner: Option<ownership::Identity>,
+    establishment: Arc<Mutex<()>>,
 }
 
 pub struct Logs {
@@ -35,6 +37,7 @@ impl Store {
             root,
             redactor,
             owner: None,
+            establishment: Arc::new(Mutex::new(())),
         }
     }
 
@@ -51,6 +54,7 @@ impl Store {
             root,
             redactor,
             owner: Some(ownership::Identity::new(project, session)?),
+            establishment: Arc::new(Mutex::new(())),
         })
     }
     pub fn include(&mut self, redactor: Redactor) {
@@ -58,6 +62,7 @@ impl Store {
     }
 
     fn owned_directory(&self) -> Result<PathBuf, String> {
+        let _establishment = self.establishment.lock().unwrap_or_else(|e| e.into_inner());
         Ok(if let Some(owner) = &self.owner {
             ownership::ensure(&self.root, owner)?
         } else {

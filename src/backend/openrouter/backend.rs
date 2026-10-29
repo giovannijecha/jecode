@@ -24,6 +24,9 @@ impl Backend for OpenRouter {
     fn set_effort(&mut self, effort: Effort) {
         self.set_effort(effort);
     }
+    fn set_delegation(&mut self, enabled: bool) {
+        self.delegation = enabled;
+    }
     fn inputs(&self) -> Inputs {
         self.inputs()
     }

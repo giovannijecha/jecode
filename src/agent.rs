@@ -33,6 +33,11 @@ pub struct Agent {
     routing_preferences:
         Option<std::collections::BTreeMap<(String, String), crate::backend::Routing>>,
     charges: Mutex<crate::backend::Charges>,
+    collaboration: crate::collaboration::Observer,
+    questions: crate::ask::Observer,
+    child: bool,
+    inherited_project_instructions: Option<String>,
+    collaboration_seen: usize,
 }
 
 impl Agent {
@@ -42,7 +47,7 @@ impl Agent {
         // to the conversation whose compaction the test exercises.
         let fixed = self.current_system_message().encode().len()
             + crate::tools::encoded_size()
-            + self.request_environment().len();
+            + self.request_environment_for(&self.environment(), &[]).len();
         (fixed + headroom)
             .saturating_mul(100)
             .div_ceil(usize::from(auto_percent))
@@ -79,6 +84,11 @@ impl Agent {
             inbox: crate::inbox::Inbox::default(),
             routing_preferences: None,
             charges: Mutex::default(),
+            collaboration: crate::collaboration::Observer::default(),
+            questions: crate::ask::Observer::default(),
+            child: false,
+            inherited_project_instructions: None,
+            collaboration_seen: 0,
         };
         agent.register_backend(agent.client.services());
         agent.clear();
@@ -149,6 +159,14 @@ impl Agent {
         self.cancellation.clone()
     }
 
+    pub fn collaboration(&self) -> crate::collaboration::Observer {
+        self.collaboration.clone()
+    }
+
+    pub fn questions(&self) -> crate::ask::Observer {
+        self.questions.clone()
+    }
+
     /// Prompts submitted while this agent works; ordinary messages join the active turn.
     pub fn inbox(&self) -> crate::inbox::Inbox {
         self.inbox.clone()
@@ -166,7 +184,15 @@ impl Agent {
     ) -> Result<(), String> {
         let prompt = prompt.into();
         let mut partial = String::new();
-        let result = self.turn(&prompt, &mut |event| {
+        let observer = self.collaboration();
+        let _turn = observer.turn();
+        let mut receipt_cursor = observer.events_since(0).0;
+        let mut result = self.turn(&prompt, &mut |event| {
+            let (next, receipts) = observer.events_since(receipt_cursor);
+            receipt_cursor = next;
+            for receipt in receipts {
+                events.emit(Event::Collaboration { event: receipt })?;
+            }
             match &event {
                 Event::Streaming { text } => partial = text.clone(),
                 Event::Message { .. }
@@ -177,6 +203,18 @@ impl Agent {
             }
             events.emit(event)
         });
+        let (_, receipts) = observer.events_since(receipt_cursor);
+        for receipt in receipts {
+            if let Err(error) = events.emit(Event::Collaboration { event: receipt }) {
+                if result.is_ok() {
+                    result = Err(error);
+                }
+                break;
+            }
+        }
+        if self.questions.is_suspended() {
+            return self.checkpoint(crate::sessions::Stage::Preserve);
+        }
         if let Err(error) = &result {
             self.record_turn_error(error, &partial);
         }
@@ -199,6 +237,10 @@ impl Agent {
             self.prepare_turn(prompt)?;
         }
         self.prepared = None;
+        self.drive_turn(events)
+    }
+
+    fn drive_turn(&mut self, events: &mut impl EventSink) -> Result<(), String> {
         // Endpoint refresh may wait on the network. Run it here on the
         // execution worker, not while the TUI prepares the submitted prompt.
         *self.charges.lock().unwrap() = crate::backend::Charges::default();
@@ -260,85 +302,14 @@ impl Agent {
         for call in calls {
             self.tool_result(
                 call,
-                &Value::object([(
-                    "error",
-                    Value::string("Tool was not executed because the turn was interrupted"),
-                )]),
+                &Value::object([
+                    (
+                        "error",
+                        Value::string("Tool was not executed because the turn was interrupted"),
+                    ),
+                    ("outcome", Value::string("not_executed")),
+                ]),
             );
-        }
-    }
-
-    fn transport_messages(&self) -> Vec<Value> {
-        let original = self.messages.lock().unwrap();
-        let mut messages = self.projected_context(&self.context, &original);
-        let temporary = self.request_environment();
-        if !temporary.is_empty()
-            && let Some(Value::Object(system)) = messages.first_mut()
-        {
-            let original = system.get("content").and_then(Value::as_str).unwrap_or("");
-            system.insert(
-                "content".into(),
-                Value::string(format!("{original}\n\n{temporary}")),
-            );
-        }
-        messages
-    }
-
-    fn projected_context(
-        &self,
-        context: &crate::context::Context,
-        messages: &[Value],
-    ) -> Vec<Value> {
-        let stamped;
-        let messages = if let Some(origin) = &self.legacy_origin {
-            stamped = messages
-                .iter()
-                .cloned()
-                .map(|mut message| {
-                    if message.get("role").and_then(Value::as_str) == Some("assistant") {
-                        crate::conversation::stamp(&mut message, origin);
-                    }
-                    message
-                })
-                .collect::<Vec<_>>();
-            &stamped
-        } else {
-            messages
-        };
-        let mut projected = context.project(messages, self.compatible_from);
-        if let Some(system) = projected.first_mut() {
-            // Send current native instructions while retaining original history verbatim.
-            *system = self.current_system_message();
-        }
-        projected
-    }
-
-    fn projected_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        match context.measured_input(messages, self.client.inputs()) {
-            Some(tokens) => context.estimate_growth(messages, tokens, self.client.inputs()),
-            None => self.unmeasured_estimate(context, messages),
-        }
-    }
-
-    fn unmeasured_estimate(&self, context: &crate::context::Context, messages: &[Value]) -> usize {
-        context.estimate_projected(
-            &self.projected_context(context, messages),
-            self.client.inputs(),
-        )
-    }
-
-    fn context_bytes(&self, messages: &[Value]) -> usize {
-        crate::context::bytes_for(messages, self.client.inputs())
-    }
-
-    fn context_estimate(&self, messages: &[Value]) -> usize {
-        match self.context.measured_input(messages, self.client.inputs()) {
-            Some(tokens) => self
-                .context
-                .estimate_growth(messages, tokens, self.client.inputs()),
-            None => self
-                .unmeasured_estimate(&self.context, messages)
-                .saturating_add(self.request_environment().len()),
         }
     }
 
@@ -353,6 +324,7 @@ impl Agent {
         kind: &str,
         details: &[(String, String)],
     ) {
+        let after_message = self.messages.lock().unwrap().len();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("local_command")),
             ("command", Value::string(self.redact(command))),
@@ -374,17 +346,24 @@ impl Agent {
             ),
             ("model", Value::string(self.model())),
             ("effort", Value::string(self.effort().name())),
-            (
-                "after_message",
-                Value::number(self.messages.lock().unwrap().len()),
-            ),
+            ("after_message", Value::number(after_message)),
         ]));
     }
 }
 
+impl Drop for Agent {
+    fn drop(&mut self) {
+        self.collaboration.stop_all();
+        self.tools.stop_processes();
+    }
+}
+
+mod ask;
 mod backend;
 pub(crate) mod checkpoints;
+mod collaboration;
 mod compaction;
+mod continuation;
 mod environment;
 mod execution;
 mod history;
@@ -392,6 +371,7 @@ mod input;
 mod lifecycle;
 mod persistence;
 mod project_instructions;
+mod projection;
 mod recovery;
 mod retraction;
 mod routing;
@@ -400,6 +380,7 @@ mod streaming;
 mod summary;
 mod temporary;
 mod timing;
+mod todo;
 
 #[cfg(test)]
 mod attachment_tests;
@@ -420,6 +401,8 @@ mod context_tests;
 #[cfg(test)]
 mod delete_tests;
 #[cfg(test)]
+mod discovery_tests;
+#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod input_tests;
@@ -431,6 +414,8 @@ mod large_request_tests;
 mod local_read_tests;
 #[cfg(test)]
 mod long_work_tests;
+#[cfg(test)]
+mod map_tests;
 #[cfg(test)]
 mod network_tests;
 #[cfg(test)]

@@ -6,6 +6,8 @@ pub struct Activity {
     /// Tokens the turn's responses generated, as they reported them.
     pub generated: usize,
     pub stopping: bool,
+    #[cfg(test)]
+    fixed_elapsed: Option<Duration>,
 }
 impl Activity {
     pub fn new() -> Self {
@@ -14,6 +16,26 @@ impl Activity {
             tools: 0,
             generated: 0,
             stopping: false,
+            #[cfg(test)]
+            fixed_elapsed: None,
+        }
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(elapsed) = self.fixed_elapsed {
+            return elapsed;
+        }
+        self.started.elapsed()
+    }
+
+    /// Layout fixtures need a fixed age without backdating a clock before
+    /// its platform-specific origin, which can panic on a fresh runner.
+    #[cfg(test)]
+    pub fn with_elapsed(elapsed: Duration) -> Self {
+        Self {
+            fixed_elapsed: Some(elapsed),
+            ..Self::new()
         }
     }
 }

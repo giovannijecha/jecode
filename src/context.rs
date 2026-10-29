@@ -283,9 +283,14 @@ impl Context {
         size.saturating_mul(numerator).saturating_add(bytes - 1) / bytes
     }
     /// Estimates an already projected request together with the tool catalog.
-    pub(crate) fn estimate_projected(&self, messages: &[Value], inputs: Inputs) -> usize {
+    pub(crate) fn estimate_projected_for(
+        &self,
+        messages: &[Value],
+        inputs: Inputs,
+        delegation: bool,
+    ) -> usize {
         self.estimate_bytes(
-            bytes_for(messages, inputs).saturating_add(crate::tools::encoded_size()),
+            bytes_for(messages, inputs).saturating_add(crate::tools::encoded_size_for(delegation)),
         )
     }
     pub(crate) fn summary_byte_budget(&self, token_budget: usize) -> usize {

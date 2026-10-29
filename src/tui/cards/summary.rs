@@ -100,6 +100,9 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
             Line::new(&format!("Wrote {count} {}", plural(count)), MUTED)
         }
         "web" => web(result, tool.summary),
+        "list" | "search" | "map" => {
+            Line::new(&crate::events::tool_summary(tool.name, result), MUTED)
+        }
         "browser" => browser(result, tool.summary),
         _ => Line::new(tool.summary, MUTED),
     }

@@ -1,4 +1,4 @@
-use super::{App, Kind, jobs::Job, selector::Selector};
+use super::{App, Kind, held::Deferred, jobs::Job, selector::Selector};
 use crate::backend;
 
 impl App {
@@ -12,15 +12,13 @@ impl App {
             .text
             .trim()
             .to_string();
-        let services = if self.agent.as_ref().unwrap().backend_id() == "openrouter" {
-            self.agent
-                .as_ref()
-                .unwrap()
-                .services()
-                .with_credential(key.clone())
+        let facts = self.facts();
+        let services = if facts.backend_id == "openrouter" {
+            facts.services.with_credential(key.clone())
         } else {
             backend::Services::for_backend("openrouter", key.clone())
         };
+        drop(facts);
         match services {
             Err(error) => self.warn(&error),
             Ok(services) => {
@@ -55,18 +53,16 @@ impl App {
             self.finish_setting(Kind::Error, &error, vec![]);
             return Ok(());
         }
-        let agent = self.agent.as_mut().unwrap();
-        let unconfigured = agent.needs_configuration();
-        let reuse_model = agent.backend_id() == services.id() && agent.has_model();
-        if reuse_model {
-            let mut client = services.create(agent.model().into())?;
-            client.set_effort(agent.effort());
-            agent.replace_backend(client)?;
+        let facts = self.facts();
+        let unconfigured = facts.needs_configuration;
+        let reuse_model = facts.backend_id == services.id() && facts.has_model;
+        drop(facts);
+        if self.agent.is_some() {
+            self.adopt_key(services.clone())?;
         } else {
-            agent.register_backend(services.clone());
+            self.defer(Deferred::Key(services.clone()));
         }
         self.config.settings = settings;
-        self.archive = agent.archive();
         self.catalog.clear();
         self.refresh_context();
         self.finish_setting(
@@ -81,6 +77,21 @@ impl App {
         if unconfigured && !reuse_model {
             self.offer_connected_models(services);
         }
+        Ok(())
+    }
+
+    /// Reconnects the conversation's model with a validated key, or keeps the
+    /// key for a later switch to its provider.
+    pub(super) fn adopt_key(&mut self, services: backend::Services) -> Result<(), String> {
+        let agent = self.agent.as_mut().unwrap();
+        if agent.backend_id() == services.id() && agent.has_model() {
+            let mut client = services.create(agent.model().into())?;
+            client.set_effort(agent.effort());
+            agent.replace_backend(client)?;
+        } else {
+            agent.register_backend(services);
+        }
+        self.archive = agent.archive();
         Ok(())
     }
 }

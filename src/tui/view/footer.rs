@@ -4,7 +4,10 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{DIM, METER_FILL, METER_TRACK, MUTED, PILL_SURFACE, Style, WARNING},
+        theme::{
+            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, DIM, LIT, METER_FILL, METER_TRACK, MUTED,
+            PILL_SURFACE, STRONG, Style, WARNING,
+        },
     },
 };
 use std::sync::OnceLock;
@@ -20,6 +23,9 @@ static USER_HOME: OnceLock<Option<String>> = OnceLock::new();
 /// rows drop the provider, fall back to the project name, then drop effort,
 /// the path and the chip.
 pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) -> Line {
+    if let Some(active) = agents_line(state, model, columns) {
+        return active;
+    }
     let path = path(directory);
     let directory = text::clean(directory.strip_prefix(r"\\?\").unwrap_or(directory));
     let project = directory
@@ -69,6 +75,136 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
         return line.append(right).shortened(columns);
     }
     unreachable!("the last variant always renders")
+}
+
+fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
+    let mut running = 0;
+    let mut review = 0;
+    let mut failed_runtime = 0;
+    let mut failed_check = 0;
+    let mut unknown = 0;
+    for record in &state.collaboration {
+        let state_name = super::super::agents::value(record, "state");
+        let reviewed = record.get("reviewed") == Some(&crate::json::Value::Bool(true));
+        let check_failed = super::super::agents::failed_check(record).is_some();
+        match state_name {
+            "running" | "stopping" | "queued" => running += 1,
+            "returned" | "failed" if !reviewed => {
+                review += 1;
+                if state_name == "failed" {
+                    failed_runtime += 1;
+                } else if check_failed {
+                    failed_check += 1;
+                }
+            }
+            "unknown" => unknown += 1,
+            _ => {}
+        }
+    }
+    let failed = failed_runtime + failed_check;
+    if running + review + unknown == 0 {
+        return None;
+    }
+    let facts = |short: bool| {
+        let mut parts = Vec::new();
+        if short {
+            if failed > 0 {
+                parts.push(format!("{failed} failed"));
+            }
+        } else {
+            if failed_runtime > 0 {
+                parts.push(format!("{failed_runtime} failed"));
+            }
+            if failed_check > 0 {
+                parts.push(format!("{failed_check} failed check"));
+            }
+        }
+        if running > 0 {
+            parts.push(format!(
+                "{running} {}",
+                if short { "run" } else { "running" }
+            ));
+        }
+        if review > 0 {
+            parts.push(format!(
+                "{} {}",
+                review,
+                if short {
+                    "main review"
+                } else {
+                    "for main agent review"
+                }
+            ));
+        }
+        if unknown > 0 {
+            parts.push(format!("{unknown} unknown"));
+        }
+        parts.join(" · ")
+    };
+    let style = if failed > 0 {
+        BAD
+    } else if unknown > 0 {
+        WARNING
+    } else {
+        MUTED
+    };
+    let meter = state.context.as_ref().map(gauge);
+    let model = text::clean(model);
+    let short = model.rsplit('/').next().unwrap_or(&model);
+    let summary = |short: bool| {
+        let mut line = Line::default();
+        line.push_on(
+            " AGENTS ",
+            if failed > 0 { STRONG } else { LIT },
+            if failed > 0 { BADGE_BAD } else { BADGE_IDLE },
+        );
+        line.push(&format!(" {}", facts(short)), style);
+        line
+    };
+    for short_counts in [false, true] {
+        for model_chip in [
+            Some(format!("{model} · {}", state.effort)),
+            Some(short.to_string()),
+            None,
+        ] {
+            let mut left = summary(short_counts);
+            let mut right = Line::default();
+            if let Some(chip) = &model_chip {
+                right.push_on(&format!(" {chip} "), MUTED, PILL_SURFACE);
+            }
+            if let Some(meter) = &meter {
+                if model_chip.is_some() {
+                    right.push("  ", MUTED);
+                }
+                right = right.append(meter.clone());
+            }
+            let left_cells = text::cells(&left.plain());
+            let right_cells = text::cells(&right.plain());
+            let Some(gap) = columns.checked_sub(left_cells + right_cells) else {
+                continue;
+            };
+            if gap < 2 || (gap < 11 && model_chip.is_some()) {
+                continue;
+            }
+            if gap >= 11 {
+                left.push(&" ".repeat(gap - 9), MUTED);
+                left.push("/agents", ACCENT);
+                left.push("  ", MUTED);
+            } else {
+                left.push(&" ".repeat(gap), MUTED);
+            }
+            return Some(left.append(right));
+        }
+    }
+    let mut left = summary(true);
+    let right = meter.unwrap_or_default();
+    let right_cells = text::cells(&right.plain());
+    left = left.shortened(columns.saturating_sub(right_cells + 2));
+    left.push(
+        &" ".repeat(columns.saturating_sub(text::cells(&left.plain()) + right_cells)),
+        MUTED,
+    );
+    Some(left.append(right).shortened(columns))
 }
 
 /// `▰▰▰▰▱▱▱▱ 52%`: eight cells filling toward the auto-compact threshold,

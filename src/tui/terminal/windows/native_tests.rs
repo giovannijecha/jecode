@@ -12,6 +12,10 @@ use crate::{
 
 #[path = "activity_tests.rs"]
 mod activity_tests;
+#[path = "agents_tests.rs"]
+mod agents_tests;
+#[path = "work_tests.rs"]
+mod work_tests;
 
 #[path = "card_tests.rs"]
 mod card_tests;
@@ -290,10 +294,19 @@ fn native_console_fixture() {
     }
     full_width_console(&bash);
     restored(&path);
+    println!("NATIVE_FULL_WIDTH_VERIFIED");
     card_tests::console(&bash);
     restored(&path);
+    println!("NATIVE_CARDS_VERIFIED");
     activity_tests::console(&bash);
     restored(&path);
+    println!("NATIVE_ACTIVITY_VERIFIED");
+    agents_tests::console(&bash);
+    restored(&path);
+    println!("NATIVE_AGENTS_VERIFIED");
+    work_tests::console(&bash);
+    restored(&path);
+    println!("NATIVE_WORK_TOOLS_VERIFIED");
     std::fs::write(path.join("drop me.txt"), "dropped through ConPTY").unwrap();
     let response = (0..100)
         .map(|i| format!("Native row {i:03}\n"))

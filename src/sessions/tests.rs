@@ -140,8 +140,8 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
     doc.pending = Pending {
         active: true,
         tool: Some("started".into()),
-        reads: Vec::new(),
         partial: "incomplete response".into(),
+        ..Pending::default()
     };
     let lease = store.acquire(&doc.id).unwrap();
     lease.save(&doc).unwrap();
@@ -190,6 +190,7 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
 #[test]
 fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
     let mut input = Input {
+        question: None,
         staged: vec![],
         draft: Draft {
             text: "edited latest".into(),

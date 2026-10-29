@@ -13,7 +13,7 @@ use crate::tui::{
 /// The family surface: reads, edits, shell, and one for the rest.
 fn family(name: &str) -> Surface {
     match name {
-        "Read" | "Skill" | "Web" | "Browser" => BADGE_READ,
+        "Read" | "List" | "Search" | "Map" | "Skill" | "Web" | "Browser" => BADGE_READ,
         "Update" | "Write" => BADGE_EDIT,
         "Bash" | "Exec" | "Process" => BADGE_SHELL,
         _ => BADGE_OTHER,
@@ -39,7 +39,7 @@ pub(super) fn badge(name: &str, status: Status) -> Line {
         Status::Running => return running(&upper),
         Status::Background => (LIT, BADGE_IDLE),
         Status::Failed => (BADGE_TEXT, BADGE_BAD),
-        Status::Stopped => (BADGE_TEXT, BADGE_WARN),
+        Status::Stopped | Status::Unknown => (BADGE_TEXT, BADGE_WARN),
         Status::Done if name == "Work" => (STRONG, BADGE_IDLE),
         Status::Done => (BADGE_TEXT, family(name)),
     };

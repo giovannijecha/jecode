@@ -3,6 +3,8 @@ use std::fs::{self, Metadata, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub mod hash;
+pub mod lock;
 pub mod owned;
 
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
@@ -15,6 +17,21 @@ pub fn temporary_beside(path: &Path) -> PathBuf {
         std::process::id(),
         NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+/// Whether a file name has the form `temporary_beside` creates, so crash
+/// recovery can recognize an abandoned staging file.
+pub fn temporary_name(name: &str) -> bool {
+    let Some(parts) = name
+        .strip_prefix(".jecode-")
+        .and_then(|name| name.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let mut parts = parts.split('-');
+    parts.next().is_some_and(|part| part.parse::<u32>().is_ok())
+        && parts.next().is_some_and(|part| part.parse::<u64>().is_ok())
+        && parts.next().is_none()
 }
 
 /// Options for files only the current user may read: mode 0600 on Unix.
@@ -88,4 +105,39 @@ pub fn ensure_private_directory(path: &Path) -> std::io::Result<bool> {
         std::io::ErrorKind::InvalidInput,
         "Path is a link, junction or non-directory entry",
     ))
+}
+
+/// Replace a private file with a synced staging file in the same directory.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().unwrap_or(Path::new("."));
+    private_directory(parent)?;
+    let temporary = temporary_beside(path);
+    let result = (|| {
+        let mut file = private_options()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        sync_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+/// Windows does not expose directory flushing through the standard library.
+pub fn sync_directory(_path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        fs::File::open(_path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(())
+    }
 }

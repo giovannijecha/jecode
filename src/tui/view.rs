@@ -1,3 +1,5 @@
+pub(in crate::tui) mod agents;
+mod ask;
 mod commands;
 mod composer;
 mod footer;
@@ -9,6 +11,7 @@ pub(super) mod processes;
 mod quit;
 mod routing;
 mod status;
+pub(in crate::tui) mod todo;
 #[cfg(test)]
 use super::text;
 use super::{line::Line, state::State};
@@ -35,20 +38,22 @@ impl Chrome {
     }
 }
 
-pub(super) fn chrome(state: &State, model: &str, directory: &str, reading: bool) -> Chrome {
+pub(super) fn chrome(state: &State, model: &str, directory: &str) -> Chrome {
     let (lines, cursor) = composer::render(
         state,
         model,
         directory,
         state.width.max(1),
         chrome_height(state).min(state.height),
-        reading,
     );
     Chrome { lines, cursor }
 }
 
 #[cfg(test)]
 pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
+    if let Some(frame) = agents::inside(state) {
+        return frame;
+    }
     let mut history = state.rows();
     let end = state.settled_len();
     let pending = history.split_off(end);
@@ -62,7 +67,6 @@ pub fn frame(state: &State, model: &str, directory: &str) -> Frame {
             .chain(pending.into_iter().flatten())
             .collect(),
         state.height,
-        false,
     );
     frame.header = opening::rows(state, state.width.max(2));
     frame.history = history;
@@ -77,7 +81,6 @@ pub fn composer_frame(state: &State, model: &str, directory: &str) -> Frame {
         directory,
         state.width.max(1),
         chrome_height(state),
-        false,
     );
     Frame {
         header: vec![],
@@ -95,9 +98,8 @@ pub(super) fn lower(
     directory: &str,
     live: Vec<Line>,
     height: usize,
-    back_to_bottom: bool,
 ) -> Frame {
-    let chrome = chrome(state, model, directory, back_to_bottom);
+    let chrome = chrome(state, model, directory);
     lower_with_chrome(live, height, chrome)
 }
 
@@ -131,6 +133,9 @@ pub(super) fn lower_with_chrome(mut live: Vec<Line>, height: usize, mut chrome: 
 pub(super) fn panel_open(state: &State) -> bool {
     state.quitting.is_some()
         || state.processes.is_some()
+        || state.agents_panel.is_some()
+        || state.ask_panel.is_some()
+        || state.todo_panel.is_some()
         || state.selector.is_some()
         || state.information.is_some()
         || state.suggestions.panel
@@ -146,7 +151,7 @@ pub(super) fn chrome_height(state: &State) -> usize {
 
 #[cfg(test)]
 pub(super) fn capacity(state: &State, model: &str, directory: &str) -> usize {
-    chrome(state, model, directory, false).capacity(state.height)
+    chrome(state, model, directory).capacity(state.height)
 }
 
 /// The draft's wrapping width in the composer.
@@ -164,6 +169,30 @@ pub(super) fn process_capacity(state: &State) -> usize {
     composer::panel_room(state)
 }
 
+pub(super) fn agents_capacity(state: &State) -> usize {
+    composer::panel_room(state)
+}
+
+/// The Ask block's body window while a question holds the composer.
+pub(super) fn ask_window(state: &State) -> Option<ask::Window> {
+    ask::window(state)
+}
+
+pub(super) fn todo_capacity(state: &State) -> usize {
+    composer::panel_room(state)
+}
+
+/// Rows of the collaborator conversation open in `/agents`, and the rows shown.
+pub(super) fn agents_inside_rows(state: &State) -> (usize, usize) {
+    agents::inside_rows(state)
+}
+
+/// The frame inside a collaborator in `/agents`, which replaces the
+/// conversation column and its chrome.
+pub(super) fn agents_inside(state: &State) -> Option<Frame> {
+    agents::inside(state)
+}
+
 /// Total and visible rows of the open process stream.
 pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
     state.processes.as_ref().map_or((0, 0), |panel| {
@@ -174,7 +203,7 @@ pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
 /// The gap row while reading back: `↓` at column 0, in ACCENT once output
 /// arrived after scrolling away, the rows below, and the way back as a
 /// keycap ending two cells from the edge; the keycap drops first.
-pub(super) fn reading_row(columns: usize, below: usize, fresh: bool, alt_end: bool) -> Line {
+pub(super) fn reading_row(columns: usize, below: usize, fresh: bool) -> Line {
     use super::theme::{ACCENT, DIM, LIT, MUTED};
     let mut line = Line::new("↓ ", if fresh { ACCENT } else { DIM }.bold());
     line.push(
@@ -185,7 +214,7 @@ pub(super) fn reading_row(columns: usize, below: usize, fresh: bool, alt_end: bo
         line.push(" · ", DIM);
         line.push("new output", LIT);
     }
-    let mut key = panel::keycap(if alt_end { "Alt+End" } else { "Esc" });
+    let mut key = panel::keycap("Alt+End");
     key.push(" back to bottom", MUTED);
     let end = columns.saturating_sub(2);
     let (left, right) = (

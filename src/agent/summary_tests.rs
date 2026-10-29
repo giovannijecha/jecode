@@ -187,7 +187,7 @@ fn large_read() -> Value {
     if let Value::Object(fields) = &mut response {
         fields.insert(
             "usage".into(),
-            Value::object([("prompt_tokens", Value::number(6000))]),
+            Value::object([("prompt_tokens", Value::number(18000))]),
         );
     }
     response
@@ -213,7 +213,7 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let capacity = agent.fixture_capacity(8_192, crate::context::AUTO_COMPACT_DEFAULT);
+    let capacity = agent.fixture_capacity(11_000, crate::context::AUTO_COMPACT_DEFAULT);
     agent.client.fixture_limits(capacity, Some(4096));
     agent
         .run_turn("Inspect source; preserve protected.txt", &mut |event| {
@@ -282,9 +282,21 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
         "Original evidence\n".repeat(1900),
     )
     .unwrap();
+    let probe_fixture = HttpFixture::new(vec![]);
+    let probe = Agent::new(
+        OpenRouter::fixture(probe_fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let fixed = probe.current_system_message().encode().len()
+        + crate::tools::encoded_size()
+        + probe.request_environment().len();
+    assert!(probe_fixture.finish().is_empty());
+    // Keep the carried constraints near native prompt/catalog overhead. The
+    // memory then remains between a quarter and half of the fixture window.
     let memory = format!(
         "Continue existing work. Constraints: {}end.",
-        "Preserve detailed constraint; ".repeat(400)
+        "Preserve detailed constraint; "
+            .repeat(fixed.div_ceil("Preserve detailed constraint; ".len()))
     );
     let mut first = large_read();
     if let Value::Object(fields) = &mut first {
