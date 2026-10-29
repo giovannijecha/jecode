@@ -447,3 +447,36 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
     assert_eq!(rows.len(), 1);
     assert_eq!(plain(&rows), " WRITE  notes.txt  New file · 0 lines");
 }
+
+#[test]
+fn a_null_error_field_is_not_a_failure() {
+    // `agent inspect` returns the collaborator record, whose `error` is null.
+    let record = Value::object([
+        ("id", Value::string("a2")),
+        ("state", Value::string("returned")),
+        ("error", Value::Null),
+    ]);
+    let arguments = Value::object([
+        ("action", Value::string("inspect")),
+        ("id", Value::string("a2")),
+    ]);
+    let text = plain(&draw(
+        "agent",
+        &arguments,
+        Some(&record),
+        None,
+        80,
+        &Presentation::default(),
+    ));
+    assert!(!text.contains("Exit"), "{text}");
+    let failed = Value::object([("error", Value::string("Unknown collaborator"))]);
+    let text = plain(&draw(
+        "agent",
+        &arguments,
+        Some(&failed),
+        None,
+        80,
+        &Presentation::default(),
+    ));
+    assert!(text.contains("Unknown collaborator"), "{text}");
+}

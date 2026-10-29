@@ -71,7 +71,9 @@ impl Status {
             || matches!(process, Some("stopped" | "timed_out"))
         {
             Self::Stopped
-        } else if result.get("error").is_some()
+        } else if result
+            .get("error")
+            .is_some_and(|error| error != &Value::Null)
             || matches!(tool.name, "bash" | "exec" | "process")
                 && result
                     .get("exit_code")
