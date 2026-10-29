@@ -214,3 +214,28 @@ fn owners_resolve_by_id_or_number_and_label_in_capitals() {
     let task = task("pending", Some("2"));
     assert_eq!(owner(&task, &records), Some(&records[0]));
 }
+
+#[test]
+fn closed_agent_id_does_not_follow_a_reused_display_number() {
+    let records = [record("a2", 1, "failed"), record("a3", 2, "returned")];
+    let closed = task("in_progress", Some("a1"));
+    assert_eq!(owner(&closed, &records), None);
+    assert_eq!(
+        owner_label(&closed, owner(&closed, &records)),
+        Some("A1".into())
+    );
+    assert_eq!(
+        Phase::of(&closed, owner(&closed, &records)),
+        Phase::InProgress
+    );
+
+    let current = task("pending", Some("a2"));
+    assert_eq!(owner(&current, &records), Some(&records[0]));
+    assert_eq!(
+        owner_label(&current, owner(&current, &records)),
+        Some("AGENT 1".into())
+    );
+
+    let shown = task("pending", Some("AGENT 1"));
+    assert_eq!(owner(&shown, &records), Some(&records[0]));
+}

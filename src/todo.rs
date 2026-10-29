@@ -195,7 +195,12 @@ pub fn owner<'a>(task: &Task, records: &'a [Value]) -> Option<&'a Value> {
     let number = agent_number(agent);
     records
         .iter()
-        .find(|record| record.get("id").and_then(Value::as_str) == Some(agent))
+        .find(|record| {
+            record
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.eq_ignore_ascii_case(agent))
+        })
         .or_else(|| {
             // A closed collaborator's number is reused; the latest holds it.
             records.iter().rev().find(|record| {
@@ -216,13 +221,13 @@ pub fn owner_label(task: &Task, owner: Option<&Value>) -> Option<String> {
     ))
 }
 
-/// `a3`, `AGENT 3`, `agent-3` and `3` name collaborator number 3.
+/// `AGENT 3`, `agent-3` and `3` name shown collaborator number 3.
+/// `a3` is a stable ID and must not follow a reused number.
 fn agent_number(agent: &str) -> Option<usize> {
     let lower = agent.to_ascii_lowercase();
     let digits = lower
         .strip_prefix("agent")
         .map(|rest| rest.trim_start_matches([' ', '-', '_']))
-        .or_else(|| lower.strip_prefix('a'))
         .unwrap_or(&lower);
     digits
         .bytes()

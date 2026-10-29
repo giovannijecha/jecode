@@ -28,18 +28,21 @@ fn render(records: &[Value], arguments: &str, output: &mut impl Write) -> Result
         )
         .map_err(|e| e.to_string());
     }
-    let id = arguments
-        .strip_prefix('a')
-        .unwrap_or(arguments)
-        .parse::<usize>()
-        .map_err(|_| "Usage: /agents [number]".to_owned())?;
-    let record = records
-        .iter()
-        .find(|r| number(r) == id)
-        .ok_or("Agent not found among open assignments")?;
+    let record = if arguments.starts_with('a') {
+        records
+            .iter()
+            .find(|record| text(record, "id") == arguments)
+    } else {
+        let shown = arguments
+            .parse::<usize>()
+            .map_err(|_| "Usage: /agents [number]".to_owned())?;
+        records.iter().find(|record| number(record) == shown)
+    }
+    .ok_or("Agent not found among open assignments")?;
+    let shown = number(record);
     writeln!(
         output,
-        "AGENT {id} — {}\n{}\nWorkspace: {}\nDirectory: {}\nAssignment v{}:\n{}",
+        "AGENT {shown} — {}\n{}\nWorkspace: {}\nDirectory: {}\nAssignment v{}:\n{}",
         text(record, "title"),
         state(record),
         text(record, "workspace"),
@@ -138,6 +141,7 @@ mod tests {
     #[test]
     fn plain_inspection_keeps_returned_work_unreviewed_and_shows_failure_evidence() {
         let record = Value::object([
+            ("id", Value::string("a2")),
             ("number", Value::number(2)),
             ("title", Value::string("Check search")),
             ("state", Value::string("failed")),
@@ -187,5 +191,29 @@ mod tests {
         let mut output = Vec::new();
         render(&[], "", &mut output).unwrap();
         assert_eq!(String::from_utf8(output).unwrap(), "No open assignments.\n");
+    }
+
+    #[test]
+    fn plain_inspection_distinguishes_stable_ids_from_reused_numbers() {
+        let records = [
+            Value::object([
+                ("id", Value::string("a2")),
+                ("number", Value::number(1)),
+                ("title", Value::string("Second worker")),
+            ]),
+            Value::object([
+                ("id", Value::string("a3")),
+                ("number", Value::number(2)),
+                ("title", Value::string("Third worker")),
+            ]),
+        ];
+        assert!(render(&records, "a1", &mut Vec::new()).is_err());
+        for argument in ["a2", "1"] {
+            let mut output = Vec::new();
+            render(&records, argument, &mut output).unwrap();
+            let text = String::from_utf8(output).unwrap();
+            assert!(text.starts_with("AGENT 1"), "{text}");
+            assert!(text.contains("Second worker"), "{text}");
+        }
     }
 }

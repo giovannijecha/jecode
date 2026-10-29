@@ -268,3 +268,35 @@ fn moving_between_questions_keeps_the_block_height() {
     let rows = plain(&dock(&single, &Panel::new(&single, None), 80, 30));
     assert!(!rows[rows.len() - 3].is_empty(), "{rows:#?}");
 }
+
+#[test]
+fn switching_questions_with_different_key_rows_keeps_the_dock_height() {
+    let several = request(SEVERAL);
+    let mut panel = Panel::new(&several, None);
+    for width in [24, 40] {
+        for height in [14, 20, 30] {
+            panel.step = 0;
+            let choices = plain(&dock(&several, &panel, width, height));
+            panel.switch(&several, true);
+            let words = plain(&dock(&several, &panel, width, height));
+            assert_eq!(
+                choices.len(),
+                words.len(),
+                "{width}x{height}: {choices:#?}\n{words:#?}"
+            );
+            for rows in [&choices, &words] {
+                let keys = rows.join("\n");
+                assert!(
+                    keys.contains("Esc  back to chat"),
+                    "{width}x{height}: {rows:#?}"
+                );
+                assert!(
+                    keys.contains("Ctrl+D  dismiss"),
+                    "{width}x{height}: {rows:#?}"
+                );
+            }
+            assert!(choices.join("\n").contains("Space  select"));
+            assert!(!words.join("\n").contains("Space  select"));
+        }
+    }
+}

@@ -430,6 +430,8 @@ mod delete_tests;
 #[cfg(test)]
 mod feedback_tests;
 #[cfg(test)]
+mod held_projection_tests;
+#[cfg(test)]
 mod held_tests;
 #[cfg(test)]
 mod interaction_tests;

@@ -73,9 +73,10 @@ elapsed time, which reads in hours past 60 minutes, and the generated tokens.
 The composer rules turn faint and the composer stays editable. Pending
 messages appear above the status row as `› first line…` with `queued` or
 `paused` on the right; Jecode accepts ordinary messages before the active
-turn's next model request. Most local commands wait for the turn to finish;
-`/copy`, `/drafts`, and `/terminal` open immediately. If the turn stops or
-fails, messages that have not joined it become `paused` and require review.
+turn's next model request. Menus and inspection panels open immediately;
+commands that start work or replace the conversation wait for the turn to finish.
+If the turn stops or fails, messages that have not joined it become `paused`
+and require review.
 
 When the turn ends, the status row keeps `Done`, `Stopped` or `Failed` with
 its time and facts until the next send. A failed turn also leaves its
@@ -111,7 +112,7 @@ typing filters a flat list. `Up`/`Down` selects a suggestion, `Tab` completes
 its name, and `Enter` runs it when idle. After a space the panel shows the
 typed command's description. `Esc` closes the panel without clearing the
 draft. `/help` opens Commands and Keys tabs, switched with `Left`/`Right`;
-`F1` opens the same help while idle.
+`F1` opens the same help, including during a turn.
 
 Panels open below the composer in place of the footer and take at most two
 thirds of the screen. The title and a count or scope ride the composer's

@@ -118,8 +118,11 @@ up to 40 tasks. An empty `tasks` array clears its activities while retaining the
 new revision in history.
 
 `agent` names the collaborator working on a task, such as `a1`, and `/todo`
-shows it as an `AGENT N` badge with its lifecycle. While the main agent has not
-marked the task done, cancelled or waiting, a returned collaborator shows the
+shows it as an `AGENT N` badge with its lifecycle. An `aN` reference follows
+that unique ID; closing it never binds the task to another agent reusing its
+displayed number. An explicit number or `AGENT N` follows the displayed number.
+While the main agent has not marked the task done, cancelled or waiting, a
+returned collaborator shows the
 task as `awaiting review` and a failed one as `failed`. Only the main agent marks
 its plan; a collaborator's return never completes a task, and collaborators keep
 their own plans.

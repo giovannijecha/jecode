@@ -81,15 +81,13 @@ impl App {
     }
 
     pub(super) fn models_menu(&self, defaults: bool) -> Selector {
-        let mut menu = Selector::models(
-            &self.catalog,
-            defaults,
-            if defaults {
-                &self.config.settings.model
-            } else {
-                &self.archive.model
-            },
-        );
+        let facts = self.facts();
+        let current = if defaults {
+            &self.config.settings.model
+        } else {
+            &facts.model
+        };
+        let mut menu = Selector::models(&self.catalog, defaults, current);
         // The account the catalog came from rides the rule title.
         if let Some(detail) = self
             .catalog_services

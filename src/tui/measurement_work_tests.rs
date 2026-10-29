@@ -157,7 +157,9 @@ fn waiting_turn_ask_and_collaborators() {
     for tools in [20, 100, 400] {
         let records: Vec<_> = (1..=4).map(|number| record(number, tools)).collect();
         let previous = records.clone();
-        samples("collaborator_poll", tools, || {
+        // The pre-cache baseline copies every result even when no record changed.
+        // This is not a measurement of the live snapshot_since polling path.
+        samples("collaborator_full_copy_baseline", tools, || {
             let redacted: Vec<_> = records.iter().map(|value| redactor.value(value)).collect();
             usize::from(redacted != previous)
         });

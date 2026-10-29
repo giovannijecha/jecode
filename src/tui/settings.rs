@@ -441,6 +441,11 @@ impl App {
             ResultValue::SignOut(result) => self.finish_sign_out(result),
             ResultValue::Key(key, result) => self.finish_key(key, result)?,
         }
+        // Credential removal can finish after a question closed its panel.
+        // Keep that completion from restoring a menu beneath the question.
+        if self.state.ask_panel.is_some() {
+            self.make_room_for_ask();
+        }
         Ok(true)
     }
 

@@ -8,7 +8,7 @@ use crate::{
     backend::{Endpoints, Routing, Services},
     effort::Effort,
 };
-use std::{borrow::Cow, path::PathBuf};
+use std::{borrow::Cow, collections::BTreeMap, path::PathBuf};
 
 /// What the menus read about the conversation's agent.
 #[derive(Clone)]
@@ -20,6 +20,7 @@ pub(super) struct Facts {
     pub model: String,
     pub effort: Effort,
     pub routing: Routing,
+    routing_preferences: Option<BTreeMap<(String, String), Routing>>,
     /// The listing cached for `model`.
     pub endpoints: Option<Endpoints>,
     /// Where the last turn was served.
@@ -38,6 +39,7 @@ impl Facts {
             model: agent.model().into(),
             effort: agent.effort(),
             routing: agent.routing(),
+            routing_preferences: agent.routing_preferences_snapshot(),
             endpoints: agent.cached_endpoints(agent.model()),
             charges: agent.charges().describe(),
             skills: agent.skill_directory(),
@@ -46,6 +48,17 @@ impl Facts {
 
     fn cached_endpoints(&self, model: &str) -> Option<Endpoints> {
         self.endpoints.clone().filter(|_| self.model == model)
+    }
+
+    fn selection_routing(&self, backend: &str, model: &str) -> Routing {
+        self.routing_preferences
+            .as_ref()
+            .map_or(Routing::Default, |preferences| {
+                preferences
+                    .get(&(backend.into(), model.into()))
+                    .cloned()
+                    .unwrap_or(Routing::Auto)
+            })
     }
 }
 
@@ -61,7 +74,10 @@ pub(super) enum Deferred {
         routing: Routing,
     },
     /// The saved routing preferences changed.
-    DefaultRouting,
+    DefaultRouting {
+        backend: String,
+        preferences: BTreeMap<String, Routing>,
+    },
     /// The saved auto-compact threshold changed.
     AutoCompact,
     Register(Services),
@@ -96,18 +112,38 @@ impl App {
                     effort,
                     services,
                 } => {
+                    let replacing = services.as_ref().is_some_and(|services| {
+                        held.needs_configuration
+                            || services.id() != held.backend_id
+                            || services.account() != held.services.account()
+                    });
+                    if replacing || *model != held.model {
+                        let backend = services.as_ref().map_or(held.backend_id, Services::id);
+                        held.routing = held.selection_routing(backend, model);
+                        held.endpoints = None;
+                    }
                     if let Some(services) = services {
                         held.backend_id = services.id();
                         held.services = services.clone();
                         held.needs_configuration = false;
                     }
-                    if *model != held.model {
-                        held.endpoints = None;
-                    }
                     model.clone_into(&mut held.model);
                     held.effort = *effort;
                 }
                 Deferred::Routing { routing, .. } => held.routing = routing.clone(),
+                Deferred::DefaultRouting {
+                    backend,
+                    preferences,
+                } => {
+                    let saved = held.routing_preferences.get_or_insert_with(BTreeMap::new);
+                    saved.retain(|(id, _), _| id != backend);
+                    saved.extend(preferences.iter().map(|(model, routing)| {
+                        ((backend.clone(), model.clone()), routing.clone())
+                    }));
+                }
+                Deferred::Key(services) if held.backend_id == services.id() => {
+                    held.services = services.clone();
+                }
                 _ => {}
             }
         }
@@ -134,15 +170,14 @@ impl App {
                     let result = self.switch_routing(&model, routing);
                     self.record("/routing", result, Kind::Warning);
                 }
-                Deferred::DefaultRouting => {
-                    let settings = &self.config.settings;
+                Deferred::DefaultRouting {
+                    backend,
+                    preferences,
+                } => {
                     self.agent
                         .as_mut()
                         .unwrap()
-                        .set_backend_routing_preferences(
-                            &settings.backend_id,
-                            settings.routing.clone(),
-                        );
+                        .set_backend_routing_preferences(&backend, preferences);
                 }
                 Deferred::AutoCompact => {
                     let percent = self.config.settings.auto_compact;

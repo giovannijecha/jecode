@@ -159,7 +159,10 @@ impl App {
             match self.config.store.save(&settings) {
                 Ok(()) => {
                     self.config.settings = settings;
-                    self.defer(Deferred::DefaultRouting);
+                    self.defer(Deferred::DefaultRouting {
+                        backend: self.config.settings.backend_id.clone(),
+                        preferences: self.config.settings.routing.clone(),
+                    });
                     self.finish_setting_change(
                         Kind::Notice,
                         &format!(

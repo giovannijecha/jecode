@@ -40,7 +40,7 @@ fn layout(request: &Request, panel: &Panel, columns: usize, height: usize) -> La
     let question = &request.questions[panel.step];
     let entry = panel.entry();
     let fixed =
-        3 + key_rows(request, panel, columns).len() + usize::from(request.questions.len() > 1);
+        3 + max_key_rows(request, panel, columns) + usize::from(request.questions.len() > 1);
     let room = height.saturating_sub(fixed).max(1);
     let mut body = body::body(question, entry, columns);
     let overflow = body.rows.len() > room && columns >= 7;
@@ -117,8 +117,8 @@ pub(super) fn block(
         };
         parts.push((row, part));
     }
-    // Every question keeps the tallest one's rows, so moving between them
-    // never shifts the conversation above; the padding leaves first.
+    // Reserve the tallest body and the most key rows of any question, so
+    // switching between them never shifts the conversation above.
     let tallest = request
         .questions
         .iter()
@@ -127,7 +127,9 @@ pub(super) fn block(
         .max()
         .unwrap_or(0)
         .min(room);
-    for _ in end - start..tallest {
+    let keys = key_rows(request, panel, columns, panel.step);
+    let key_padding = max_key_rows(request, panel, columns).saturating_sub(keys.len());
+    for _ in end - start..tallest + key_padding {
         parts.push((Line::default(), Part::Space));
     }
     let caret = body
@@ -135,22 +137,29 @@ pub(super) fn block(
         .filter(|(row, _)| (start..end).contains(row))
         .map(|(row, column)| (first + row - start, column));
     parts.push((rule, Part::Chrome));
-    for keys in key_rows(request, panel, columns) {
-        parts.push((keys, Part::Keep));
+    for row in keys {
+        parts.push((row, Part::Keep));
     }
     panel::fitted(parts, caret, height)
 }
 
 /// The keys where the footer was. When narrow, the movement hints leave
 /// first and what still does not fit wraps, so Esc and Ctrl+D always show.
-fn key_rows(request: &Request, panel: &Panel, columns: usize) -> Vec<Line> {
+fn key_rows(request: &Request, panel: &Panel, columns: usize, step: usize) -> Vec<Line> {
     if columns < 7 {
         return Vec::new();
     }
-    panel::keys(&keys(request, panel), columns - 4, false)
+    panel::keys(&keys(request, panel, step), columns - 4, false)
         .into_iter()
         .map(|row| row.indent("  ", MUTED))
         .collect()
+}
+
+fn max_key_rows(request: &Request, panel: &Panel, columns: usize) -> usize {
+    (0..request.questions.len())
+        .map(|step| key_rows(request, panel, columns, step).len())
+        .max()
+        .unwrap_or(0)
 }
 
 /// `☑` before each answered title, the current one in bold `accent`, and
@@ -185,13 +194,13 @@ fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
 
 /// Enter chooses, moves on or sends; Space selects for a multiple choice;
 /// ←→ (or Tab inside typed words) move between several questions.
-fn keys(request: &Request, panel: &Panel) -> Vec<Key<'static>> {
-    let question = &request.questions[panel.step];
-    let entry = panel.entry();
+fn keys(request: &Request, panel: &Panel, step: usize) -> Vec<Key<'static>> {
+    let question = &request.questions[step];
+    let entry = &panel.entries[step];
     let several = request.questions.len() > 1;
     let typing = entry.in_text(question);
     let free = question.options.is_empty();
-    let verb = if several && panel.step + 1 < request.questions.len() {
+    let verb = if several && step + 1 < request.questions.len() {
         "next"
     } else if !several && !typing && !question.is_multiple() {
         "choose"

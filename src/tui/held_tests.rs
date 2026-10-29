@@ -189,3 +189,44 @@ fn a_question_closes_the_menu_open_over_the_turn() {
     assert!(app.state.ask_panel.is_some());
     drop(fixture);
 }
+
+#[test]
+fn a_sign_out_finishing_after_a_question_does_not_restore_its_menu() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_settings();
+    app.auth_signing_out = true;
+    app.state.selector = Some(selector::Selector::loading(
+        "Sign out",
+        "Removing credentials",
+        false,
+    ));
+    app.job = Some(jobs::Job::sign_out(
+        directory.path().to_path_buf(),
+        "missing".into(),
+    ));
+    let request = crate::ask::Request::parse("ask-1", &question()).unwrap();
+    app.worker_event(crate::events::Event::UserQuestion { request });
+    assert!(app.state.selector.is_none());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !app.job.as_ref().unwrap().finished() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "sign-out did not finish"
+        );
+        std::thread::yield_now();
+    }
+    assert!(app.poll_job().unwrap());
+    assert!(app.state.ask_panel.is_some(), "the question remains open");
+    assert!(
+        app.state.selector.is_none(),
+        "the completed menu must stay closed"
+    );
+    app.close_ask();
+    assert!(
+        app.state.selector.is_none(),
+        "leaving Ask must not reveal the old menu"
+    );
+    drop(fixture);
+}

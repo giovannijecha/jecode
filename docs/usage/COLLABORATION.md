@@ -173,7 +173,9 @@ results were returned without a recorded close. Resume does not mark reports as
 reviewed itself. Closed assignments stay in history and do not restart the model.
 
 In `--plain`, `/agents` prints the list and `/agents <number>` prints an individual
-record. The line-based interface does not poll while waiting for stdin; live
+record by its displayed number. `/agents aN` resolves the unique internal ID;
+closing that agent never redirects the ID to a new holder of its old number.
+The line-based interface does not poll while waiting for stdin; live
 inspection and automatic idle continuation are TUI features. For single prompts,
 the model should wait for and review delegated work before ending its turn.
 
