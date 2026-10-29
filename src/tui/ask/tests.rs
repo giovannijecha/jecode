@@ -254,3 +254,17 @@ fn a_question_taller_than_its_room_scrolls_with_the_cursor() {
     assert!(shown.iter().any(|row| row.ends_with('│')));
     assert!(rows.len() <= 12);
 }
+
+#[test]
+fn moving_between_questions_keeps_the_block_height() {
+    let several = request(SEVERAL);
+    let mut panel = Panel::new(&several, None);
+    let first = dock(&several, &panel, 80, 30).len();
+    assert!(panel.switch(&several, true));
+    let second = dock(&several, &panel, 80, 30);
+    assert_eq!(second.len(), first, "{:#?}", plain(&second));
+    // A single question has no padding to keep.
+    let single = request(SINGLE);
+    let rows = plain(&dock(&single, &Panel::new(&single, None), 80, 30));
+    assert!(!rows[rows.len() - 3].is_empty(), "{rows:#?}");
+}

@@ -117,6 +117,19 @@ pub(super) fn block(
         };
         parts.push((row, part));
     }
+    // Every question keeps the tallest one's rows, so moving between them
+    // never shifts the conversation above; the padding leaves first.
+    let tallest = request
+        .questions
+        .iter()
+        .zip(&panel.entries)
+        .map(|(question, entry)| body::body(question, entry, columns).rows.len())
+        .max()
+        .unwrap_or(0)
+        .min(room);
+    for _ in end - start..tallest {
+        parts.push((Line::default(), Part::Space));
+    }
     let caret = body
         .caret
         .filter(|(row, _)| (start..end).contains(row))
