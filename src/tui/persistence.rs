@@ -380,15 +380,14 @@ impl App {
                 self.restore_staged();
                 self.refresh_question();
                 self.refresh_todo();
-                if pending_question {
-                    self.state.begin_tool_turn();
-                    self.state.activity = Some(super::activity::Activity::new());
-                    self.worker =
-                        Some(super::Worker::continue_question(self.agent.take().unwrap()));
-                }
                 self.local_start(&format!("/resume {id}"));
                 self.local_finish(Kind::Notice, &format!("Resumed {title} · {status}"), vec![]);
                 self.refresh_context();
+                if pending_question {
+                    self.state.begin_tool_turn();
+                    self.state.activity = Some(super::activity::Activity::new());
+                    self.worker = Some(super::Worker::continue_question(self.hold()));
+                }
                 self.state.changed();
             }
             Err(error) => {

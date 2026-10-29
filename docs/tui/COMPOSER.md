@@ -2,9 +2,13 @@
 
 The interactive TUI keeps one conversation above an editable composer. Enter
 sends a draft when idle. During a turn, it accepts the draft for the active
-turn before the next model request; commands that cannot run during a turn wait
-until it ends. Up to eight messages can be pending. The draft clears only after
-Jecode accepts it.
+turn before the next model request. Menus open over a running turn: `/settings`,
+`/model`, `/effort`, `/routing` and `/help`, besides the panels that always do.
+What they change for this conversation applies from the next turn; saved
+defaults are saved at once. Commands that start work or replace the
+conversation, such as `/init`, `/resume` and `/new`, wait until the turn ends.
+Up to eight messages can be pending. The draft clears only after Jecode accepts
+it.
 
 The composer sits between two full-width rules: `›` marks the first visible
 row, the draft is `STRONG`, and an empty draft shows `Ask anything…`. Use

@@ -201,9 +201,10 @@ impl App {
         {
             return false;
         }
-        let Some(agent) = self.agent.take() else {
+        if self.agent.is_none() {
             return false;
-        };
+        }
+        let agent = self.hold();
         self.collaboration_return_pending = false;
         self.state.begin_tool_turn();
         self.state.activity = Some(super::activity::Activity::new());

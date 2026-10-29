@@ -18,6 +18,10 @@ impl App {
         }
         match pending {
             Some(request) => {
+                // A new question closes any menu over it, as /ask does.
+                if self.state.question.is_none() {
+                    self.make_room_for_ask();
+                }
                 let saved = self
                     .persistence
                     .as_ref()
@@ -50,10 +54,23 @@ impl App {
             });
             self.state.ask_panel = Some(Panel::new(request, saved.as_ref()));
         }
+        self.make_room_for_ask();
+    }
+
+    /// Closes every panel and menu, each the way Esc would, so the question
+    /// takes the composer's place. The quit confirmation stays above it.
+    fn make_room_for_ask(&mut self) {
+        // Closing a submenu can return to its parent; settle within a few steps.
+        for _ in 0..8 {
+            if self.state.selector.is_none() {
+                break;
+            }
+            self.close_selector();
+        }
+        self.state.selector = None;
         self.state.todo_panel = None;
         self.state.agents_panel = None;
         self.state.processes = None;
-        self.state.selector = None;
         self.state.information = None;
         self.state.suggestions.dismiss();
         self.state.changed();

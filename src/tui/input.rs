@@ -253,7 +253,7 @@ impl App {
         }
         match key.code {
             13 if !key.shift() && !key.alt() && !key.ctrl() => return self.submit(),
-            112 if self.worker.is_none() && self.checkpoint_job.is_none() => self.help(),
+            112 if self.checkpoint_job.is_none() && self.deletion_job.is_none() => self.help(),
             80 | 78 if key.ctrl() => {
                 if self.state.queue.is_editing() {
                     self.warn(

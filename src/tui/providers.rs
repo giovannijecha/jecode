@@ -1,5 +1,6 @@
 use super::{
     App, Feedback, Kind,
+    held::Deferred,
     jobs::Job,
     selector::{Purpose, Selector},
 };
@@ -10,7 +11,11 @@ use std::{path::PathBuf, sync::mpsc};
 const USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 
 impl App {
-    fn sync_openai_credentials(&mut self) -> Result<(), String> {
+    pub(super) fn sync_openai_credentials(&mut self) -> Result<(), String> {
+        if self.agent.is_none() {
+            self.defer(Deferred::Credentials);
+            return Ok(());
+        }
         let store = Store::new(self.home());
         let redactor = store.redactor()?;
         let services = store
@@ -106,7 +111,8 @@ impl App {
     pub(super) fn open_model_providers(&mut self, defaults: bool) {
         self.provider_parent = None;
         let mut services = self.config.settings.configured_services(&self.home());
-        let active = self.agent.as_ref().unwrap().services();
+        let facts = self.facts().into_owned();
+        let active = facts.services;
         match services.len() {
             0 => self.finish_setting(
                 Kind::Error,
@@ -115,7 +121,7 @@ impl App {
             ),
             1 => self.load_catalog_for(
                 super::jobs::CatalogPurpose::Models { defaults, id: None },
-                if !self.agent.as_ref().unwrap().needs_configuration()
+                if !facts.needs_configuration
                     && services[0].id() == active.id()
                     && services[0].account() == active.account()
                 {
@@ -128,7 +134,7 @@ impl App {
                 let mut menu = Selector::providers(
                     &services,
                     defaults,
-                    self.agent.as_ref().unwrap().backend_id(),
+                    facts.backend_id,
                     &self.config.settings.backend_id,
                 );
                 for (option, service) in menu.options.iter_mut().zip(&services) {
@@ -227,9 +233,11 @@ impl App {
             .and_then(|()| self.sync_openai_credentials())
         {
             Ok(()) => {
-                let switch = self.agent.as_ref().unwrap().backend_id() == "openai"
-                    && self.agent.as_ref().unwrap().services().account()
+                let facts = self.facts();
+                let switch = facts.backend_id == "openai"
+                    && facts.services.account()
                         != Some(format!("{}:{}", account.client_id, account.subject));
+                drop(facts);
                 self.open_accounts();
                 self.state.notify(Feedback::result(
                     Kind::Notice,
@@ -368,11 +376,12 @@ impl App {
     }
 
     pub(super) fn offer_connected_models(&mut self, services: Services) {
-        let agent = self.agent.as_ref().unwrap();
-        if agent.needs_configuration()
-            || (agent.backend_id() == services.id()
-                && services.account() != agent.services().account())
-        {
+        let facts = self.facts();
+        let offer = facts.needs_configuration
+            || (facts.backend_id == services.id()
+                && services.account() != facts.services.account());
+        drop(facts);
+        if offer {
             self.auth_model_switch = services.id() == "openai";
             self.load_catalog_for(
                 super::jobs::CatalogPurpose::Models {

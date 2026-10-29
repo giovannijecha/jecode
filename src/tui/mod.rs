@@ -16,6 +16,7 @@ mod draft_menu;
 mod drafts;
 mod editor;
 mod feedback;
+mod held;
 mod information;
 mod input;
 mod inspection;
@@ -113,6 +114,10 @@ struct App {
     collaboration_receipt_calls: HashSet<String>,
     collaboration_return_pending: bool,
     collaboration_auto_resume: bool,
+    /// What menus read while a turn holds the agent.
+    held: Option<held::Facts>,
+    /// Choices made during the turn, applied when it returns the agent.
+    deferred: Vec<held::Deferred>,
     #[cfg(test)]
     copied_text: Option<String>,
     #[cfg(test)]
@@ -142,6 +147,8 @@ impl App {
             collaboration_receipt_calls: HashSet::new(),
             collaboration_return_pending: false,
             collaboration_auto_resume: true,
+            held: None,
+            deferred: Vec::new(),
             agent: Some(agent),
             worker: None,
             submission: None,
@@ -420,6 +427,8 @@ mod copy_tests;
 mod delete_tests;
 #[cfg(test)]
 mod feedback_tests;
+#[cfg(test)]
+mod held_tests;
 #[cfg(test)]
 mod interaction_tests;
 #[cfg(test)]

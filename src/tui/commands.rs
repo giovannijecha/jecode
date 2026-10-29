@@ -37,7 +37,9 @@ impl App {
             return Ok(false);
         }
         self.state.sent();
-        if (self.worker.is_none() || self.state.suggestions.chosen().is_some_and(immediate))
+        let turn = self.held.is_some();
+        let now = |name: &str| immediate(name) || (turn && menu(name));
+        if (self.worker.is_none() || self.state.suggestions.chosen().is_some_and(now))
             && self.state.suggestions.visible
             && prompt.attachments.is_empty()
             && let Some(chosen) = self.state.suggestions.chosen()
@@ -52,6 +54,16 @@ impl App {
             self.run_immediate(&prompt.text);
             self.capture_input();
             return Ok(false);
+        }
+        if turn
+            && prompt.attachments.is_empty()
+            && prompt.text.split_whitespace().next().is_some_and(menu)
+        {
+            // A menu opens over the running turn; what it changes waits for it.
+            self.state.history.submitted(&mut self.state.editor);
+            self.edited();
+            self.capture_input();
+            return self.dispatch(prompt);
         }
         if self.busy() {
             if let Err(error) = self.state.queue.push(prompt.clone()) {
@@ -111,7 +123,7 @@ impl App {
             self.process_observer = self.agent.as_ref().unwrap().processes();
             self.collaboration_auto_resume = true;
             self.collaboration_return_pending = false;
-            self.worker = Some(Worker::start(self.agent.take().unwrap(), execution));
+            self.worker = Some(Worker::start(self.hold(), execution));
             self.state.status = "Starting...".into();
             return Ok(false);
         }
@@ -194,7 +206,7 @@ impl App {
                     });
                 }
             }
-            "/effort" if !self.agent.as_ref().unwrap().has_model() => self.local_finish(
+            "/effort" if !self.facts().has_model => self.local_finish(
                 Kind::Warning,
                 "No model selected · Choose a model with /model before setting effort",
                 vec![],
@@ -205,16 +217,21 @@ impl App {
                 Effort::parse(arguments).map(Some)
             } {
                 Ok(Some(Effort::Default)) => {
-                    self.apply_selection(self.archive.model.clone(), Effort::Default, false)
+                    let model = self.facts().model.clone();
+                    self.apply_selection(model, Effort::Default, false)
                 }
-                Ok(Some(effort)) if !self.agent.as_ref().unwrap().services().validates_effort() => {
-                    self.apply_selection(self.archive.model.clone(), effort, false)
+                Ok(Some(effort)) if !self.facts().services.validates_effort() => {
+                    let model = self.facts().model.clone();
+                    self.apply_selection(model, effort, false)
                 }
-                Ok(effort) => self.load_catalog(CatalogPurpose::Effort {
-                    defaults: false,
-                    model: self.archive.model.clone(),
-                    effort,
-                }),
+                Ok(effort) => {
+                    let model = self.facts().model.clone();
+                    self.load_catalog(CatalogPurpose::Effort {
+                        defaults: false,
+                        model,
+                        effort,
+                    })
+                }
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
             _ => self.local_finish(Kind::Error, &commands::unknown(&name), vec![]),
@@ -222,7 +239,12 @@ impl App {
         Ok(false)
     }
 
+    /// Opens a command row. A menu used during a turn reports through notices
+    /// instead, so the running turn keeps its rows.
     pub(super) fn local_start(&mut self, command: &str) {
+        if self.held.is_some() {
+            return;
+        }
         self.state.close_tools();
         self.state.changed();
         self.pending_command = Some(self.state.items.len());
@@ -356,7 +378,9 @@ impl App {
             *rows = details;
         }
         self.state.changed();
-        self.state.status = "Ready".into();
+        if self.held.is_none() {
+            self.state.status = "Ready".into();
+        }
         if let Some(agent) = &self.agent
             && let Err(error) = agent.save_session()
         {
@@ -376,18 +400,20 @@ impl App {
             .path()
             .parent()
             .expect("configuration directory");
+        let facts = self.facts();
         let id = match &purpose {
             CatalogPurpose::Models { defaults: true, .. }
             | CatalogPurpose::Effort { defaults: true, .. } => {
                 self.config.settings.backend_id.as_str()
             }
-            _ => self.agent.as_ref().unwrap().backend_id(),
+            _ => facts.backend_id,
         };
-        let services = if id == self.agent.as_ref().unwrap().backend_id() {
-            Ok(self.agent.as_ref().unwrap().services())
+        let services = if id == facts.backend_id {
+            Ok(facts.services.clone())
         } else {
             self.config.settings.services(home, id)
         };
+        drop(facts);
         match services {
             Ok(services) => self.load_catalog_for(purpose, services),
             Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
@@ -467,6 +493,15 @@ impl App {
 /// Commands that run at once, even while a turn is busy.
 pub(super) fn immediate(name: &str) -> bool {
     ["/copy", "/drafts", "/terminal", "/agents", "/ask", "/todo"]
+        .iter()
+        .any(|command| name.eq_ignore_ascii_case(command))
+}
+
+/// Commands that open a menu over a running turn instead of waiting for it.
+/// Commands that start work or replace the conversation still wait.
+fn menu(name: &str) -> bool {
+    let name = commands::canonical(name);
+    ["/settings", "/model", "/effort", "/routing", "/help"]
         .iter()
         .any(|command| name.eq_ignore_ascii_case(command))
 }

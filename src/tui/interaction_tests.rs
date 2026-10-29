@@ -272,15 +272,17 @@ fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
     let mut app = app(&directory, &fixture);
     submit(&mut app, "first");
     wait_until(&mut app, |app| app.state.status == "Writing the response…");
-    submit(&mut app, "/help");
     submit(&mut app, "second\nline");
     submit(&mut app, "/export");
     submit(&mut app, "third");
-    assert_eq!(app.state.queue.messages().len(), 4);
+    // A menu opens over the turn; other commands wait for it.
+    submit(&mut app, "/help");
+    assert!(app.state.information.is_some());
+    assert_eq!(app.state.queue.messages().len(), 3);
     assert!(app.state.editor.text.is_empty());
     release.send(()).unwrap();
     wait_until(&mut app, |app| app.worker.is_none());
-    // Commands run after the turn, in submission order.
+    // Waiting commands run after the turn, once the open panel closes.
     assert!(app.state.information.is_some());
     assert_eq!(app.state.queue.messages(), ["/export"]);
     key(&mut app, 27, 0);

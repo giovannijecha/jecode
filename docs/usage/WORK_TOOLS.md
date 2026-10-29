@@ -8,7 +8,8 @@ includes `parallel: true`, and leave at most one row each in the conversation.
 
 In an interactive terminal, the questions take the composer's place under a
 `Waiting for you` marker; the conversation gains nothing until they are
-answered. One call asks up to four questions, answered one at a time and sent
+answered. A menu or panel open when they arrive closes, as Esc would, so the
+questions show at once; only the quit confirmation stays above them. One call asks up to four questions, answered one at a time and sent
 together. Each question can include context and up to six options, as single
 or multiple choice. `Other` is always the last answer and takes the user's own
 words; a question without options takes words only. Nothing is preselected,
