@@ -72,14 +72,27 @@ public sealed partial class JecodeTestPty : IDisposable {
             input = new FileStream(new SafeFileHandle(inputWrite, true), FileAccess.Write);
             output = new FileStream(new SafeFileHandle(outputRead, true), FileAccess.Read);
         } finally { CloseHandle(inputRead); CloseHandle(outputWrite); }
+        // Read available pipe bytes directly. StreamReader.Read(char[]) may
+        // hold a short final repaint until its character buffer fills or EOF.
         reader = new Thread(() => {
-            using (var text = new StreamReader(output, Encoding.UTF8)) {
-                char[] buffer = new char[8192];
+            using (output) {
+                byte[] bytes = new byte[8192];
+                char[] characters = new char[Encoding.UTF8.GetMaxCharCount(bytes.Length)];
+                Decoder decoder = Encoding.UTF8.GetDecoder();
                 try {
                     int count;
-                    while ((count = text.Read(buffer, 0, buffer.Length)) > 0) {
+                    while ((count = output.Read(bytes, 0, bytes.Length)) > 0) {
+                        int length = decoder.GetChars(bytes, 0, count, characters, 0, false);
                         lock (gate) {
-                            received.Append(buffer, 0, count);
+                            received.Append(characters, 0, length);
+                            if (received.Length > 4 * 1024 * 1024) throw new IOException("ConPTY output exceeded fixture limit");
+                            Monitor.PulseAll(gate);
+                        }
+                    }
+                    int tail = decoder.GetChars(new byte[0], 0, 0, characters, 0, true);
+                    if (tail > 0) {
+                        lock (gate) {
+                            received.Append(characters, 0, tail);
                             if (received.Length > 4 * 1024 * 1024) throw new IOException("ConPTY output exceeded fixture limit");
                             Monitor.PulseAll(gate);
                         }
@@ -348,7 +361,9 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.EnsureNoText("[ESC]", started);
                 int detached = pty.Mark(); pty.Send("\x1d");
                 pty.Wait("i  input", detached);
-                pty.Send("i"); pty.Wait("Ctrl+]  back", detached);
+                // Match the new input-mode frame, not an earlier queued repaint.
+                int reattached = pty.Mark(); pty.Send("i");
+                pty.Wait("Ctrl+]  back", reattached);
                 pty.Wait("NATIVE_SECOND_READY");
                 pty.Send("finish\r");
                 pty.Wait("NATIVE_PTY_END", detached);
