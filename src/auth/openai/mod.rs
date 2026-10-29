@@ -1,6 +1,5 @@
 //! OpenAI public-client OAuth registration, account isolation and token refresh.
-//! The native boundary uses Windows PowerShell/.NET or Unix OpenSSL plus the
-//! system HTTPS-enabled curl executable; no third-party Rust code is used.
+//! Native OS cryptography and HTTPS adapters protect the OAuth boundary.
 
 mod flow;
 mod jwt;

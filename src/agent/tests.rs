@@ -111,6 +111,10 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     let mut output = Vec::new();
     let mut events = Vec::new();
     agent

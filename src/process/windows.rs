@@ -1,9 +1,9 @@
 use super::RunError;
 use crate::cancel::Cancellation;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::windows::ffi::OsStrExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::process::CommandExt;
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,9 +12,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const SANDBOX_ENV: &str = "JECODE_INTERNAL_SANDBOX_POLICY";
 static NEXT_PIPE: AtomicU64 = AtomicU64::new(0);
-mod cache;
-pub(crate) use cache::helper;
+#[cfg(test)]
+#[path = "windows/sandbox_tests.rs"]
+mod sandbox_tests;
 
 pub(super) struct Spawned {
     pub child: Child,
@@ -39,44 +41,26 @@ pub(super) fn spawn(
             message: "Executable and arguments must not contain NUL characters".into(),
         });
     }
-    let executable = cache::supervisor(cancellation);
     if cancellation.requested() {
         return Err(RunError {
             started: false,
             message: "Operation cancelled".into(),
         });
     }
-    let mut helper = match &executable {
-        Some(path) => Command::new(path),
-        None => dynamic_supervisor(),
-    };
+    let executable = crate::native::helper("supervisor").map_err(|message| RunError {
+        started: false,
+        message,
+    })?;
+    let mut helper = Command::new(executable);
     configure(&mut helper, command);
-    let mut child = helper
-        .spawn()
-        .or_else(|error| {
-            if executable.is_none() {
-                return Err(error);
-            }
-            if cancellation.requested() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "Operation cancelled",
-                ));
-            }
-            // If a cached executable was removed or blocked, retain the original
-            // startup path without changing whether the target has run.
-            let mut fallback = dynamic_supervisor();
-            configure(&mut fallback, command);
-            fallback.spawn()
-        })
-        .map_err(|error| RunError {
-            started: false,
-            message: if error.kind() == io::ErrorKind::Interrupted {
-                "Operation cancelled".into()
-            } else {
-                format!("Could not start Windows process supervisor: {error}")
-            },
-        })?;
+    let mut child = helper.spawn().map_err(|error| RunError {
+        started: false,
+        message: if error.kind() == io::ErrorKind::Interrupted {
+            "Operation cancelled".into()
+        } else {
+            format!("Could not start Windows process supervisor: {error}")
+        },
+    })?;
     let pipe_name = format!(
         "jecode-process-{}-{}",
         std::process::id(),
@@ -173,39 +157,49 @@ pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Sp
     })
 }
 
-fn dynamic_supervisor() -> Command {
-    let script = include_str!("windows.ps1").replace(
-        "__JECODE_NATIVE_SOURCE__",
-        &cache::owned_source(include_str!("windows.cs")),
-    );
-    let mut helper = Command::new("powershell.exe");
-    helper.args([
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        &script,
-    ]);
-    helper
-}
-
 fn configure(helper: &mut Command, command: &Command) {
+    if command.get_envs().any(|(key, value)| {
+        key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV) && value.is_some()
+    }) {
+        // A confined child inherits the helper's environment. Start it only
+        // with the environment selected for this command by the Rust policy.
+        helper.env_clear();
+    }
     helper
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW);
     if let Some(directory) = command.get_current_dir() {
-        helper.current_dir(directory);
+        helper.current_dir(ordinary_path(directory));
     }
     crate::auth::isolate_environment(helper);
     for (key, value) in command.get_envs() {
+        if key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV) {
+            continue;
+        }
         if let Some(value) = value {
             helper.env(key, value);
         } else {
             helper.env_remove(key);
         }
     }
+    helper.env_remove(SANDBOX_ENV);
+}
+
+fn ordinary_path(path: &std::path::Path) -> std::path::PathBuf {
+    let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    let verbatim = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    if !wide.starts_with(&verbatim) {
+        return path.to_path_buf();
+    }
+    let unc = [b'U' as u16, b'N' as u16, b'C' as u16, b'\\' as u16];
+    let ordinary = if wide[4..].starts_with(&unc) {
+        [vec![b'\\' as u16, b'\\' as u16], wide[8..].to_vec()].concat()
+    } else {
+        wide[4..].to_vec()
+    };
+    OsString::from_wide(&ordinary).into()
 }
 
 fn encode_command(command: &Command, pipe_name: &str) -> Vec<u8> {
@@ -217,6 +211,11 @@ fn encode_command(command: &Command, pipe_name: &str) -> Vec<u8> {
     for argument in command.get_args() {
         write_string(&mut data, argument);
     }
+    let policy = command
+        .get_envs()
+        .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV))
+        .and_then(|(_, value)| value);
+    write_string(&mut data, policy.unwrap_or_else(|| OsStr::new("")));
     data
 }
 

@@ -16,7 +16,9 @@ pub(super) enum Fingerprint {
         target: String,
         directory: bool,
     },
-    Directory,
+    Directory {
+        mode: u32,
+    },
 }
 
 impl Fingerprint {
@@ -28,7 +30,7 @@ impl Fingerprint {
             Self::Absent => "absent",
             Self::File { .. } => "file",
             Self::Link { .. } => "link",
-            Self::Directory => "directory",
+            Self::Directory { .. } => "directory",
         }
     }
     pub(super) fn value(&self) -> Value {
@@ -45,13 +47,20 @@ impl Fingerprint {
                 ("target", Value::string(target)),
                 ("directory", Value::Bool(*directory)),
             ]),
-            Self::Directory => Value::object([("kind", Value::string("directory"))]),
+            Self::Directory { mode } => Value::object([
+                ("kind", Value::string("directory")),
+                ("mode", Value::number(mode)),
+            ]),
         }
     }
     pub(super) fn from_value(value: &Value) -> Result<Self, String> {
         match value.get("kind").and_then(Value::as_str) {
             Some("absent") => Ok(Self::Absent),
-            Some("directory") => Ok(Self::Directory),
+            Some("directory") => Ok(Self::Directory {
+                // Older saved baselines had no directory mode. Recovery fills
+                // this from the owned copy in Workspace::from_value.
+                mode: value.get("mode").and_then(Value::as_usize).unwrap_or(0) as u32,
+            }),
             Some("file") => Ok(Self::File {
                 size: value
                     .get("size")
@@ -159,7 +168,9 @@ pub(super) fn observe(root: &Path, name: &str) -> Result<Fingerprint, String> {
         return Err(format!("Unsupported reparse point {name}"));
     }
     if kind.is_dir() {
-        return Ok(Fingerprint::Directory);
+        return Ok(Fingerprint::Directory {
+            mode: mode(&metadata),
+        });
     }
     if !kind.is_file() {
         return Err(format!("Unsupported filesystem entry {name}"));
@@ -204,7 +215,7 @@ fn mode(metadata: &fs::Metadata) -> u32 {
     }
 }
 
-fn apply_mode(path: &Path, mode: u32) -> Result<(), String> {
+pub(super) fn apply_mode(path: &Path, mode: u32) -> Result<(), String> {
     let mut permissions = fs::symlink_metadata(path)
         .map_err(|error| error.to_string())?
         .permissions();
@@ -250,13 +261,12 @@ pub(super) fn copy_entry(
     }
     match expected {
         Fingerprint::Absent => remove(&to)?,
-        // Submodules and nested repositories are separate repositories: the
-        // copy keeps their directory, not their contents.
-        Fingerprint::Directory => {
-            if observe(target, name)? != Fingerprint::Directory {
+        Fingerprint::Directory { mode } => {
+            if !matches!(observe(target, name)?, Fingerprint::Directory { .. }) {
                 remove(&to)?;
                 fs::create_dir(&to).map_err(|error| error.to_string())?;
             }
+            apply_mode(&to, *mode)?;
         }
         Fingerprint::File { mode, .. } => {
             remove(&to)?;
@@ -363,30 +373,65 @@ pub(super) fn remove_baseline(base: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Removes the links a collaborator left in its copy without following them,
-/// so deleting the copy never depends on how Git treats links on this platform.
-pub(super) fn remove_links(root: &Path) -> Result<(), String> {
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let kind = entry.file_type().map_err(|error| error.to_string())?;
-            let path = entry.path();
-            if kind.is_symlink() {
-                #[cfg(windows)]
-                let removed = if std::os::windows::fs::FileTypeExt::is_symlink_dir(&kind) {
-                    fs::remove_dir(&path)
-                } else {
-                    fs::remove_file(&path)
-                };
-                #[cfg(not(windows))]
-                let removed = fs::remove_file(&path);
-                removed.map_err(|error| {
-                    format!("Could not remove link {}: {error}", path.display())
-                })?;
-            } else if kind.is_dir() {
-                pending.push(path);
+/// Delete only entries inside an owned copy. Inspect the entire tree before
+/// removing anything, and never follow directory links or reparse points.
+pub(super) fn remove_tree(root: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
+    if !disk::ordinary_directory(&metadata) {
+        return Err("Workspace copy is not an ordinary directory".into());
+    }
+    let mut entries = Vec::new();
+    let mut pending = vec![(root.to_path_buf(), false)];
+    while let Some((path, visited)) = pending.pop() {
+        let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        if disk::ordinary_directory(&metadata) {
+            if visited {
+                entries.push((path, true, false));
+            } else {
+                pending.push((path.clone(), true));
+                for child in fs::read_dir(&path).map_err(|error| error.to_string())? {
+                    pending.push((child.map_err(|error| error.to_string())?.path(), false));
+                }
             }
+        } else if metadata.file_type().is_symlink() {
+            entries.push((path, false, true));
+        } else if metadata.is_file() && !disk::linked(&metadata) {
+            entries.push((path, false, false));
+        } else {
+            return Err(format!(
+                "Workspace copy has an unsupported entry: {}",
+                path.display()
+            ));
+        }
+    }
+    for (path, directory, link) in entries {
+        if directory {
+            fs::remove_dir(&path).map_err(|error| error.to_string())?;
+        } else if link {
+            #[cfg(windows)]
+            {
+                let kind = fs::symlink_metadata(&path)
+                    .map_err(|error| error.to_string())?
+                    .file_type();
+                use std::os::windows::fs::FileTypeExt;
+                if kind.is_symlink_dir() {
+                    fs::remove_dir(&path).map_err(|error| error.to_string())?;
+                } else {
+                    fs::remove_file(&path).map_err(|error| error.to_string())?;
+                }
+            }
+            #[cfg(not(windows))]
+            fs::remove_file(&path).map_err(|error| error.to_string())?;
+        } else {
+            #[cfg(windows)]
+            if fs::symlink_metadata(&path)
+                .map_err(|error| error.to_string())?
+                .permissions()
+                .readonly()
+            {
+                apply_mode(&path, 0)?;
+            }
+            fs::remove_file(&path).map_err(|error| error.to_string())?;
         }
     }
     Ok(())
@@ -397,7 +442,10 @@ pub(super) fn verify_content(
     name: &str,
     expected: &Fingerprint,
 ) -> Result<(), String> {
-    if matches!(expected, Fingerprint::Link { .. } | Fingerprint::Directory) {
+    if matches!(
+        expected,
+        Fingerprint::Link { .. } | Fingerprint::Directory { .. }
+    ) {
         return Ok(());
     }
     let observed = observe(root, name)?;

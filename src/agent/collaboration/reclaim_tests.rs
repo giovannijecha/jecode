@@ -1,4 +1,4 @@
-use super::recovery_tests::{create, repository};
+use super::recovery_tests::create;
 use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
@@ -23,18 +23,12 @@ impl Drop for Running {
     }
 }
 
-fn worktrees(project: &Path) -> usize {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project)
-        .args(["worktree", "list", "--porcelain"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| line.starts_with("worktree "))
-        .count()
+fn project() -> (Directory, PathBuf) {
+    let fixture = Directory::new();
+    let root = fixture.path().join("project");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("file.txt"), "source\n").unwrap();
+    (fixture, root)
 }
 
 fn storage(home: &Directory, project: &Path, session: &str) -> PathBuf {
@@ -58,7 +52,7 @@ fn wait(agent: &Agent, id: &str) {
 
 #[test]
 fn copy_prepared_before_a_crash_is_reclaimed_on_resume_but_not_while_its_session_lives() {
-    let (_temp, project) = repository();
+    let (_temp, project) = project();
     let home = Directory::new();
     let signal = Directory::new();
     let mut command = Command::new(std::env::current_exe().unwrap());
@@ -97,7 +91,11 @@ fn copy_prepared_before_a_crash_is_reclaimed_on_resume_but_not_while_its_session
     let crashed = fs::read_to_string(&prepared).unwrap();
     let live_copy = storage(&home, &project, &crashed).join("a1");
     assert!(live_copy.join("tree/file.txt").is_file());
-    assert_eq!(worktrees(&project), 2);
+    assert_eq!(
+        fs::read_to_string(live_copy.join("base/file.txt")).unwrap(),
+        "source\n"
+    );
+    assert!(live_copy.join("baseline.json").is_file());
 
     // Another conversation in the same project, with its own leftover setup.
     let fixture = HttpFixture::new(vec![
@@ -115,7 +113,7 @@ fn copy_prepared_before_a_crash_is_reclaimed_on_resume_but_not_while_its_session
     Workspace::prepare(&project, &leftover, "a1", Mode::Isolated).unwrap();
     other.save_session().unwrap();
     drop(other);
-    assert_eq!(worktrees(&project), 3);
+    assert!(leftover.join("a1/tree/file.txt").is_file());
 
     let mut resumed = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
@@ -133,20 +131,19 @@ fn copy_prepared_before_a_crash_is_reclaimed_on_resume_but_not_while_its_session
     assert!(status.contains("Removed 1 isolated agent copy"), "{status}");
     assert!(!leftover.join("a1").exists());
     assert!(live_copy.join("tree/file.txt").is_file());
-    assert_eq!(worktrees(&project), 2);
+    assert!(live_copy.join("baseline.json").is_file());
 
     drop(child);
     let status = resumed.resume(&crashed).unwrap();
     assert!(status.contains("Removed 1 isolated agent copy"), "{status}");
     assert!(!live_copy.exists());
-    assert_eq!(worktrees(&project), 1);
     // The unused number prepares a fresh copy rather than colliding.
     resumed.agent_tool(&create("isolated")).unwrap();
     wait(&resumed, "a1");
     resumed
         .agent_tool(&super::recovery_tests::action("close"))
         .unwrap();
-    assert_eq!(worktrees(&project), 1);
+    assert!(!live_copy.exists());
     assert_eq!(fixture.finish().len(), 2);
 }
 
@@ -189,7 +186,7 @@ fn prepare_then_stop() {
             context: String::new(),
             mode: Mode::Isolated,
         },
-        |_| {
+        |_, _| {
             // The copy is prepared; stop before the `created` receipt is saved.
             let staged = signal.join("prepared.tmp");
             fs::write(&staged, &session).unwrap();
@@ -204,7 +201,7 @@ fn prepare_then_stop() {
 
 #[test]
 fn resume_keeps_owned_and_foreign_copies_and_reclaims_setup_leftovers() {
-    let (_temp, project) = repository();
+    let (_temp, project) = project();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Completed report", vec![])),
@@ -276,7 +273,7 @@ fn resume_keeps_owned_and_foreign_copies_and_reclaims_setup_leftovers() {
 
 #[test]
 fn reclaiming_a_copy_removes_its_links_without_following_them() {
-    let (temp, project) = repository();
+    let (temp, project) = project();
     let outside = temp.path().join("outside");
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("canary.txt"), "keep\n").unwrap();
@@ -314,6 +311,6 @@ fn reclaiming_a_copy_removes_its_links_without_following_them() {
         fs::read_to_string(project.join("file.txt")).unwrap(),
         "source\n"
     );
-    assert_eq!(worktrees(&project), 1);
+    assert!(!storage.join("a1").exists());
     assert_eq!(fixture.finish().len(), 1);
 }

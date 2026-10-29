@@ -90,22 +90,19 @@ disk do not trigger a model request.
 changes, but workers can affect the same files and external state. The main agent
 must assign compatible scopes and inspect the combined result.
 
-`isolated` creates a detached local Git worktree outside the project. It includes
-the current contents of tracked files, tracked deletions and non-ignored untracked
-files, including uncommitted changes. Scoped local `AGENTS.md` files are included.
-Ignored build output and other ignored local data are not generally copied. The
-starting files are retained separately for comparison; no commit or branch is
-created. Native Git must be available, and the project must be a Git repository
-root with an existing `HEAD`.
+`isolated` copies the project's current files and directories into Jecode-owned
+storage outside the project. It includes working changes, new files, empty
+directories and local `AGENTS.md` files; Git and an existing commit are
+unnecessary. The copy omits `.git` and `.jecode` metadata at every directory
+level, plus root `target` and `.tmp` directories. Files with those names and
+nested `target` or `.tmp` directories remain in scope. Other files are included
+even when Git ignores them. Starting entries are retained separately for
+comparison. No commit or branch is created.
 
-Very deep Windows paths can still exceed Git's own directory limits. Jecode
-reports the native failure and any incomplete cleanup; it does not start a
-worker with a partially prepared copy. Shared work remains available when an
-isolated copy cannot be prepared.
-
-This is file isolation, not an operating-system sandbox. Commands and browser
-operations retain ordinary system access. A worktree shares its repository's Git
-administration; coordinate repository operations and other external effects.
+If a copy cannot be prepared, Jecode reports the filesystem error and any
+incomplete cleanup without starting the worker. This is file isolation; command
+and browser access follows the active permission settings. Coordinate external
+effects separately.
 
 `diff` returns changed paths, baseline/child/current fingerprints, bounded change
 evidence and a review token. For longer files, request `diff` with `path`; byte
@@ -196,9 +193,9 @@ parent conversation from opening.
 
 An isolated copy is prepared just before the receipt that records its
 assignment. If Jecode stops in between, no assignment owns the copy. Resuming
-that conversation removes such copies and their Git registrations, removing
-links inside without following them. Only the resumed conversation's own
-collaborator storage is examined, while its session lock keeps other
+that conversation removes such owned copies without following links inside.
+Only the resumed conversation's own collaborator storage is examined, while its
+session lock keeps other
 conversations out, and copies of its saved assignments stay. A copy whose
 ownership marker does not name this project and assignment is left in place
 and reported in the resume status; new assignments skip its ID.

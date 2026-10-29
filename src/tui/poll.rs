@@ -131,6 +131,7 @@ impl App {
         dirty |= self.refresh_processes(false);
         dirty |= self.refresh_agents();
         dirty |= self.refresh_question();
+        dirty |= self.refresh_permission();
         dirty |= self.refresh_todo();
         dirty |= self.start_collaboration_continuation();
         Ok(dirty)
@@ -174,6 +175,9 @@ impl App {
                 name,
                 arguments,
             } if name == "agent" && super::agents::receipt_replaces_tool(&arguments) => {
+                if let Some(activity) = &mut self.state.activity {
+                    activity.tools += 1;
+                }
                 self.collaboration_receipt_calls.insert(id);
             }
             Event::ToolFinished {

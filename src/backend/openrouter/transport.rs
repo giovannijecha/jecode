@@ -1,7 +1,6 @@
-use super::{Api, BASE_URL, Failure, api_error, headers::Headers};
+use super::{Api, Failure, api_error, headers::Headers};
 use crate::json::Value;
 use crate::{json, process};
-use std::process::Command;
 
 #[cfg(test)]
 #[path = "transport_tests.rs"]
@@ -39,62 +38,28 @@ impl Api {
         body: Option<&str>,
         observer: &mut impl FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<String, Failure> {
-        // The body travels on stdin; curl imports the key from its own child
-        // environment. Neither value appears in arguments or request files.
+        // The request, including its token, travels on private child stdin.
         let url = format!("{}{path}", self.base_url);
-        let mut command = Command::new(crate::curl::executable());
-        command.args([
-            "--disable",
-            "--silent",
-            "--show-error",
-            "--no-buffer",
-            "--variable",
-            "%OPENROUTER_API_KEY",
-            "--expand-header",
-            "Authorization: Bearer {{OPENROUTER_API_KEY}}",
-            "--request",
-            method,
-            "--connect-timeout",
-            "10",
-            "--suppress-connect-headers",
-            "--dump-header",
-            "-",
-            "--write-out",
-            "\n%{http_code}",
-            "--url",
-            &url,
-        ]);
-        crate::auth::isolate_environment(&mut command);
-        command.env("OPENROUTER_API_KEY", &self.api_key);
+        let authorization = format!("Bearer {}", self.api_key);
+        let mut request_headers = vec![("Authorization", authorization.as_str())];
         if body.is_some() {
-            command.args([
-                "--header",
-                "Content-Type: application/json",
-                "--header",
-                "Accept: */*",
-                "--header",
-                "Expect:",
-                "--data-binary",
-                "@-",
-            ]);
+            request_headers.extend([("Content-Type", "application/json"), ("Accept", "*/*")]);
         }
         if path == "/chat/completions" {
-            command.args(["--header", "X-OpenRouter-Metadata: enabled"]);
-        }
-        if self.base_url == BASE_URL {
-            command.args(["--proto", "=https"]);
-        } else {
-            // Only the test constructor can select a loopback HTTP fixture.
-            command.args(["--noproxy", "*"]);
+            request_headers.push(("X-OpenRouter-Metadata", "enabled"));
         }
         let mut headers = Headers::default();
-        let output = crate::curl::run(
-            &mut command,
-            body.map(|body| body.as_bytes().to_vec()),
-            None,
-            usize::MAX,
+        let mut output = crate::http::run(
+            crate::http::Request {
+                url: &url,
+                method,
+                headers: &request_headers,
+                body: body.map(str::as_bytes),
+                timeout: None,
+                idle: Some(std::time::Duration::from_secs(120)),
+                output_limit: usize::MAX,
+            },
             &self.cancellation,
-            Some(std::time::Duration::from_secs(120)),
             &mut |bytes| headers.feed(bytes, observer),
         )
         .map_err(|error| {
@@ -102,6 +67,10 @@ impl Api {
             error.retry_after = headers.retry_after;
             error
         })?;
+        // Preserve the response decoder's bounded HTTP/error behavior.
+        output
+            .stdout
+            .extend_from_slice(format!("\n{}", headers.status).as_bytes());
         self.response(output, headers.retry_after)
     }
 
@@ -119,22 +88,12 @@ impl Api {
         let input_error = output.input_error.as_deref();
         if output.exit_code != Some(0) {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let unsupported_option = output.exit_code == Some(2)
-                && ["--variable", "--expand-header"].iter().any(|option| {
-                    stderr.contains(option)
-                        && (stderr.contains("unknown") || stderr.contains("unsupported"))
-                });
             let message = format!(
-                "Could not reach OpenRouter via curl (exit {}): {}{}",
+                "Could not reach OpenRouter via native HTTP (exit {}): {}",
                 output
                     .exit_code
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 stderr.trim(),
-                if unsupported_option {
-                    " Upgrade the selected curl to version 8.3 or newer with HTTPS support, or set JECODE_CURL to a compatible executable."
-                } else {
-                    ""
-                }
             );
             return Err(with_input_error(
                 if matches!(
@@ -153,11 +112,11 @@ impl Api {
         })?;
         let (body, status) = response
             .rsplit_once('\n')
-            .ok_or_else(|| with_input_error("curl returned no HTTP status".into(), input_error))?;
+            .ok_or_else(|| with_input_error("HTTP response had no status".into(), input_error))?;
         let body = super::headers::body(body)
             .map_err(|error| with_input_error(error.into(), input_error))?;
         let status: u16 = status.trim().parse().map_err(|_| {
-            with_input_error("curl returned an invalid HTTP status".into(), input_error)
+            with_input_error("HTTP response had an invalid status".into(), input_error)
         })?;
         let parsed = json::parse(body);
         if !(200..300).contains(&status) {
@@ -167,7 +126,7 @@ impl Api {
         }
         if let Some(error) = input_error {
             return Err(Failure::from(format!(
-                "Could not send OpenRouter request to curl: {error}"
+                "Could not send OpenRouter HTTP request: {error}"
             )));
         }
         Ok(body.into())

@@ -27,7 +27,11 @@ impl App {
                     .as_ref()
                     .and_then(|handle| handle.snapshot().input.question);
                 self.state.ask_draft = saved.clone();
-                self.state.ask_panel = Some(Panel::new(&request, saved.as_ref()));
+                let mut panel = Panel::new(&request, saved.as_ref());
+                if !self.state.editor.text.is_empty() {
+                    panel.protect_arrival(&request);
+                }
+                self.state.ask_panel = Some(panel);
                 self.state.question = Some(request);
             }
             None => {
@@ -52,7 +56,11 @@ impl App {
                     .as_ref()
                     .and_then(|handle| handle.snapshot().input.question)
             });
-            self.state.ask_panel = Some(Panel::new(request, saved.as_ref()));
+            let mut panel = Panel::new(request, saved.as_ref());
+            if !self.state.editor.text.is_empty() {
+                panel.protect_arrival(request);
+            }
+            self.state.ask_panel = Some(panel);
         }
         self.make_room_for_ask();
     }
@@ -78,11 +86,35 @@ impl App {
 
     /// Space selects an option; any other text, or Space in the typed
     /// words, goes to `Other`.
-    pub(super) fn ask_text(&mut self, text: &str) {
+    pub(super) fn ask_text(&mut self, text: &str, pasted: bool) {
         let (Some(panel), Some(request)) = (&mut self.state.ask_panel, &self.state.question) else {
             return;
         };
         let question = &request.questions[panel.step];
+        if !pasted
+            && panel.entry().row == usize::MAX
+            && text.len() == 1
+            && let Some(index) = text
+                .chars()
+                .next()
+                .and_then(|ch| ch.to_digit(10))
+                .and_then(|number| number.checked_sub(1))
+                .map(|number| number as usize)
+            && index <= question.options.len()
+        {
+            let multiple = question.is_multiple();
+            let option = index < question.options.len();
+            let request = request.clone();
+            panel.entries[panel.step].row = index;
+            if option {
+                panel.select(question);
+            }
+            self.ask_changed();
+            if !multiple && option {
+                self.ask_enter(&request);
+            }
+            return;
+        }
         let selected = text == " " && panel.select(question);
         if !selected && !panel.type_text(question, text) {
             self.warn("Answer exceeds 64 KiB");
@@ -218,6 +250,9 @@ impl App {
         let Some(panel) = self.state.ask_panel.as_mut() else {
             return;
         };
+        if panel.entry().row == usize::MAX {
+            return;
+        }
         let question = &request.questions[panel.step];
         let chosen = if question.is_multiple() {
             true

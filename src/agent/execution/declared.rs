@@ -31,9 +31,13 @@ impl Agent {
             if self.cancellation.requested() {
                 return self.abort_declared(batch, remaining, "Operation cancelled".into());
             }
-            let begun =
-                self.tools
-                    .begin_cancellable(&call.name, &call.arguments, &self.cancellation);
+            let begun = self
+                .tools
+                .begin_cancellable(&call.name, &call.arguments, &self.cancellation)
+                .with_permission(
+                    self.permissions.level(),
+                    self.tools.access(&call.name, &call.arguments),
+                );
             if let Some(note) = begun.note()
                 && let Err(error) = events.emit(Event::ToolNote {
                     id: self.redact(&call.id),

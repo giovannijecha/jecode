@@ -1,9 +1,17 @@
 use super::*;
+use std::path::Path;
 
 #[test]
 fn settings_restore_focus_from_their_actual_rows() {
     let path = Path::new(r"C:\fixture\custom-home\config.json");
-    let menu = Selector::settings("fixture/model", Effort::Default, 80, &Routing::Auto, path);
+    let menu = Selector::settings(
+        "fixture/model",
+        Effort::Default,
+        80,
+        &Routing::Auto,
+        Default::default(),
+        path,
+    );
     let providers = menu.setting_index(Setting::Providers);
     assert_eq!(menu.options[providers].name, "Providers");
     for (index, option) in menu.options.iter().enumerate() {

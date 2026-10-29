@@ -148,6 +148,7 @@ fn configure_with(
     settings.model = model;
     if let Some(current) = current {
         settings.auto_compact = current.auto_compact;
+        settings.default_permissions = current.default_permissions;
         if current.backend_id == settings.backend_id {
             settings.routing = current.routing.clone();
         }

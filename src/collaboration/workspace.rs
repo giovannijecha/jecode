@@ -1,12 +1,12 @@
 //! Assignment working copies and evidence for coordinator-directed integration.
 use crate::json::{self, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod files;
-mod git;
 mod review;
+mod tree;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -63,7 +63,6 @@ impl Workspace {
         if project.starts_with(&storage_root) || storage_root.starts_with(&project) {
             return Err("Isolated storage must be outside the project tree".into());
         }
-        git::require_repository(&project)?;
         let storage = storage_root.join(id);
         let root = storage.join("tree");
         let mut workspace = Self {
@@ -100,28 +99,34 @@ impl Workspace {
             };
         }
         let result = (|| {
-            git::create_worktree(&workspace.project, &workspace.root)?;
+            fs::create_dir(&workspace.root)
+                .map_err(|error| format!("Could not create isolated copy: {error}"))?;
             let base = workspace.storage.join("base");
             fs::create_dir(&base).map_err(|error| format!("Could not create baseline: {error}"))?;
-            let source = git::inventory(&workspace.project)?;
-            let source = git::with_instructions(&workspace.project, source)?;
-            let initial_child = git::inventory(&workspace.root)?;
-            let names: BTreeSet<_> = source.union(&initial_child).cloned().collect();
+            let source = tree::inventory(&workspace.project)?;
             let mut baseline = BTreeMap::new();
             let mut observed = BTreeMap::new();
-            for name in &names {
+            for name in &source {
                 files::validate_name(name)?;
                 let original = files::observe(&workspace.project, name)?;
-                files::copy_entry(&workspace.project, &workspace.root, name, &original)?;
+                if !matches!(original, files::Fingerprint::Directory { .. }) {
+                    files::copy_entry(&workspace.project, &workspace.root, name, &original)?;
+                }
                 files::save_baseline(&workspace.project, &base, name, &original)?;
                 if original.exists() {
                     baseline.insert(name.clone(), original.clone());
                 }
                 observed.insert(name.clone(), original);
             }
-            if git::with_instructions(&workspace.project, git::inventory(&workspace.project)?)?
-                != source
-            {
+            let mut directories: Vec<_> = observed
+                .iter()
+                .filter(|(_, state)| matches!(state, files::Fingerprint::Directory { .. }))
+                .collect();
+            directories.sort_by_key(|(name, _)| std::cmp::Reverse(name.matches('/').count()));
+            for (name, state) in directories {
+                files::copy_entry(&workspace.project, &workspace.root, name, state)?;
+            }
+            if tree::inventory(&workspace.project)? != source {
                 return Err("Project file inventory changed during workspace preparation".into());
             }
             for (name, original) in &observed {
@@ -170,20 +175,20 @@ impl Workspace {
             return Ok(Value::object([("closed", Value::Bool(true))]));
         }
         self.verify_owner()?;
-        if self.root.exists() {
-            files::remove_links(&self.root)?;
-        }
-        if self.root.exists() || git::registered(&self.project, &self.root)? {
-            git::remove_worktree(&self.project, &self.root)?;
+        if crate::disk::metadata_if_present(&self.root)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            files::remove_tree(&self.root)?;
         }
         let base = self.storage.join("base");
         if base.exists() {
             files::remove_baseline(&base)?;
         }
         fs::remove_file(self.storage.join("baseline.json"))
-            .map_err(|error| format!("Worktree removed; could not remove baseline: {error}"))?;
+            .map_err(|error| format!("Copy removed; could not remove baseline: {error}"))?;
         fs::remove_dir(&self.storage).map_err(|error| {
-            format!("Worktree removed; could not remove assignment directory: {error}")
+            format!("Copy removed; could not remove assignment directory: {error}")
         })?;
         Ok(Value::object([("closed", Value::Bool(true))]))
     }
@@ -307,9 +312,23 @@ impl Workspace {
             .ok_or("Missing workspace baseline entries")?;
         for (name, value) in entries {
             files::validate_name(name)?;
-            workspace
-                .baseline
-                .insert(name.clone(), files::Fingerprint::from_value(value)?);
+            let mut fingerprint = files::Fingerprint::from_value(value)?;
+            if matches!(fingerprint, files::Fingerprint::Directory { .. })
+                && value.get("mode").is_none()
+            {
+                // Older markers omitted directory modes. Use the owned copy
+                // when present, or the project for a directory deleted in the
+                // copy, because that mode was not part of the old baseline.
+                for root in [&workspace.root, &workspace.project] {
+                    if let observed @ files::Fingerprint::Directory { .. } =
+                        files::observe(root, name)?
+                    {
+                        fingerprint = observed;
+                        break;
+                    }
+                }
+            }
+            workspace.baseline.insert(name.clone(), fingerprint);
         }
         Ok(workspace)
     }
@@ -351,7 +370,7 @@ impl Workspace {
         {
             return Ok(false);
         }
-        Ok(!git::registered(&project, &storage.join("tree"))?)
+        Ok(true)
     }
 
     fn save(&self, ready: bool) -> Result<(), String> {

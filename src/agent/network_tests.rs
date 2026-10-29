@@ -130,6 +130,10 @@ fn unavailable_native_tool_returns_an_error_and_keeps_the_turn_usable() {
         Tools::new(project.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     agent.run_turn("Inspect the page", &mut |_| Ok(())).unwrap();
     let requests = provider.finish();
     let history = requests[1].body.get("messages").unwrap().encode();

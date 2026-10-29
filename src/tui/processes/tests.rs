@@ -29,7 +29,7 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     );
     app.state.width = 80;
     app.state.height = 30;
-    app
+    tests::full_app(app)
 }
 
 fn key(app: &mut App, code: u16, modifiers: u8) {
@@ -141,7 +141,7 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
                 .read(&id, 0, crate::tools::processes::Window::Tail)
                 .is_ok_and(|page| page.text.ends_with("29999\n30000\n"))
     });
-    // Bash may add startup warnings; retain the entire stream for comparison.
+    // Retain the entire error stream for comparison.
     let errors = observer
         .read(&id, 1, crate::tools::processes::Window::Tail)
         .unwrap()
@@ -216,7 +216,26 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
     );
     assert_eq!(fixture.finish().len(), 2);
 
-    // The viewer read nothing on the model's behalf: its first poll starts at 0.
+    // The launch itself may report output before returning, even at wait_ms=0.
+    // The viewer must leave that model cursor exactly where launch placed it.
+    let launch = app
+        .archive
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|message| message.get("tool_call_id").and_then(Value::as_str) == Some("launch"))
+        .and_then(|message| message.get("content").and_then(Value::as_str))
+        .map(|content| crate::json::parse(content).unwrap())
+        .unwrap();
+    let launched_stdout = launch
+        .get("stdout_next_offset")
+        .and_then(Value::as_usize)
+        .unwrap();
+    let launched_stderr = launch
+        .get("stderr_next_offset")
+        .and_then(Value::as_usize)
+        .unwrap();
     let poll = HttpFixture::new(vec![
         (
             200,
@@ -251,17 +270,23 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
         .map(|content| crate::json::parse(content).unwrap())
         .unwrap();
     // The observer did not advance the model cursor. Its first bounded poll
-    // starts at the beginning and leaves the rest available to later polls.
+    // starts after the launch's reported bytes and leaves the rest available.
     let offset = result.get("stdout_offset").and_then(Value::as_usize);
     let skipped = result.get("stdout_skipped_bytes").and_then(Value::as_usize);
-    assert_eq!(offset, Some(0));
+    assert_eq!(offset, Some(launched_stdout));
     assert_eq!(skipped, Some(0));
-    assert!(text_of(&result, "stdout").starts_with("1\n2\n"));
+    let expected: String = (1..=30_000).map(|number| format!("{number}\n")).collect();
+    let expected = format!("{expected}tail-line\n");
+    let output = text_of(&result, "stdout");
+    assert_eq!(
+        output,
+        expected[launched_stdout..launched_stdout + output.len()]
+    );
     assert_eq!(
         result.get("stdout_next_offset").and_then(Value::as_usize),
-        Some(text_of(&result, "stdout").len())
+        Some(launched_stdout + output.len())
     );
-    assert_eq!(text_of(&result, "stderr"), errors);
+    assert_eq!(text_of(&result, "stderr"), errors[launched_stderr..]);
     assert_eq!(poll.finish().len(), 2);
     create(&directory, "stop");
 }

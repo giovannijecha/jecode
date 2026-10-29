@@ -28,18 +28,9 @@ impl Terminal {
             std::process::id(),
             NEXT_CHANNEL.fetch_add(1, Ordering::Relaxed)
         );
-        let script = include_str!("../terminal.ps1")
-            .replace("__JECODE_NATIVE_SOURCE__", include_str!("../terminal.cs"))
-            .replace("__JECODE_CHANNEL__", &name);
-        let mut command = Command::new("powershell.exe");
+        let mut command = Command::new(crate::native::helper("terminal")?);
         command
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ])
+            .arg(&name)
             .stdin(Stdio::piped())
             .stdout(Stdio::inherit())
             .stderr(Stdio::null());
@@ -165,6 +156,10 @@ fn parse(line: &str) -> Input {
         {
             (Ok(input), Ok(output), Ok(code_page)) => Input::Modes(input, output, code_page),
             _ => Input::Error("Invalid console modes".into()),
+        },
+        ["B", red, green, blue] => match (red.parse(), green.parse(), blue.parse()) {
+            (Ok(red), Ok(green), Ok(blue)) => Input::NativeBackground(red, green, blue),
+            _ => Input::Error("Invalid console background".into()),
         },
         ["W", amount] => match amount.parse() {
             Ok(amount) => Input::Scroll(amount),

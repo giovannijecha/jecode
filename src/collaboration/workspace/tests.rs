@@ -2,40 +2,12 @@ use super::*;
 use crate::test_support::{Directory, link_directory};
 use std::process::Command;
 
-fn git(root: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
 fn fixture() -> (Directory, PathBuf, PathBuf) {
     let temp = Directory::new();
     let project = temp.path().join("project");
     let storage = temp.path().join("storage");
     fs::create_dir(&project).unwrap();
-    git(&project, &["init", "-q"]);
     fs::write(project.join("tracked.txt"), "head\n").unwrap();
-    git(&project, &["add", "tracked.txt"]);
-    git(
-        &project,
-        &[
-            "-c",
-            "user.name=Giovanni Jecha",
-            "-c",
-            "user.email=100841799+giovannijecha@users.noreply.github.com",
-            "commit",
-            "-qm",
-            "initial",
-        ],
-    );
     (temp, project, storage)
 }
 
@@ -52,7 +24,7 @@ fn changed(review: &Value) -> Vec<String> {
 
 #[cfg(windows)]
 #[test]
-fn isolated_windows_path_reports_git_limit_and_cleans_up() {
+fn isolated_windows_long_path_is_owned_and_cleans_up() {
     for length in [240, 300] {
         let (_temp, project, mut storage) = fixture();
         while storage.join("a1/tree").to_string_lossy().len() < length {
@@ -63,18 +35,12 @@ fn isolated_windows_path_reports_git_limit_and_cleans_up() {
         let workspace = match Workspace::prepare(&project, &storage, "a1", Mode::Isolated) {
             Ok(workspace) => workspace,
             Err(error) if length == 300 => {
-                assert!(
-                    error.contains("cannot prepare isolated workspace")
-                        || error.contains("cannot inventory isolated workspace"),
-                    "{error}"
-                );
-                assert!(error.contains("core.longpaths=true"), "{error}");
+                assert!(!error.contains("Git"), "{error}");
                 assert_eq!(
                     fs::read_to_string(project.join("tracked.txt")).unwrap(),
                     "head\n"
                 );
                 assert!(!storage.join("a1").exists());
-                assert!(!super::git::registered(&project, &storage.join("a1/tree")).unwrap());
                 continue;
             }
             Err(error) => panic!("240-character workspace should work: {error}"),
@@ -106,15 +72,12 @@ fn isolated_windows_path_reports_git_limit_and_cleans_up() {
         workspace.close().unwrap();
         assert!(!workspace.root().exists());
         assert!(!storage.join("a1").exists());
-        assert!(!super::git::registered(&project, &storage.join("a1/tree")).unwrap());
     }
 }
 
 #[test]
-fn dirty_baseline_and_untracked_files_are_copied() {
+fn working_and_new_files_are_copied() {
     let (_temp, project, storage) = fixture();
-    fs::write(project.join("tracked.txt"), "staged\n").unwrap();
-    git(&project, &["add", "tracked.txt"]);
     fs::write(project.join("tracked.txt"), "working\n").unwrap();
     fs::write(project.join("untracked.txt"), "new\n").unwrap();
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
@@ -134,14 +97,51 @@ fn dirty_baseline_and_untracked_files_are_copied() {
 }
 
 #[test]
-fn deleted_head_file_stays_deleted_in_the_initial_copy() {
+fn absent_project_file_stays_absent_in_the_initial_copy() {
     let (_temp, project, storage) = fixture();
     fs::remove_file(project.join("tracked.txt")).unwrap();
-    git(&project, &["add", "-u"]);
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     assert!(!workspace.root().join("tracked.txt").exists());
     assert!(changed(&workspace.inspect().unwrap()).is_empty());
     workspace.close().unwrap();
+}
+
+#[test]
+fn isolated_copy_integrates_and_closes_without_git_on_path() {
+    if std::env::var_os("JECODE_TEST_NO_GIT_PATH").is_none() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("collaboration::workspace::tests::isolated_copy_integrates_and_closes_without_git_on_path")
+            .arg("--nocapture")
+            .env("PATH", "")
+            .env("JECODE_TEST_NO_GIT_PATH", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
+    let (_temp, project, storage) = fixture();
+    assert!(!project.join(".git").exists());
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    fs::write(workspace.root().join("tracked.txt"), "child\n").unwrap();
+    let review = workspace.inspect().unwrap();
+    assert_eq!(changed(&review), vec!["tracked.txt"]);
+    let token = review.get("review_token").unwrap().as_str().unwrap();
+    let result = workspace.integrate(&["tracked.txt".into()], token).unwrap();
+    assert_eq!(
+        result.get("applied").unwrap().as_array().unwrap(),
+        &[Value::string("tracked.txt")]
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("tracked.txt")).unwrap(),
+        "child\n"
+    );
+    workspace.close().unwrap();
+    assert!(!storage.join("a1").exists());
 }
 
 #[test]
@@ -174,42 +174,32 @@ fn integration_requires_selected_paths_and_reports_overlap() {
 }
 
 #[test]
-fn isolated_workspace_accepts_submodules_and_nested_repositories() {
-    let (temp, project, storage) = fixture();
-    let (_other, library, _) = fixture();
-    git(
-        &project,
-        &[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "add",
-            "-q",
-            &library.to_string_lossy(),
-            "library",
-        ],
-    );
-    git(
-        &project,
-        &[
-            "-c",
-            "user.name=Giovanni Jecha",
-            "-c",
-            "user.email=100841799+giovannijecha@users.noreply.github.com",
-            "commit",
-            "-qm",
-            "submodule",
-        ],
-    );
+fn isolated_workspace_skips_service_trees_and_copies_nested_files() {
+    let (_temp, project, storage) = fixture();
     let nested = project.join("nested");
     fs::create_dir(&nested).unwrap();
-    git(&nested, &["init", "-q"]);
     fs::write(nested.join("inner.txt"), "inner\n").unwrap();
+    fs::create_dir_all(nested.join("target")).unwrap();
+    fs::write(nested.join("target/data.txt"), "source data\n").unwrap();
+    for name in [".git", ".jecode", "target", ".tmp"] {
+        fs::create_dir(project.join(name)).unwrap();
+        fs::write(project.join(name).join("secret.txt"), name).unwrap();
+    }
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    assert_eq!(
+        fs::read_to_string(workspace.root().join("nested/inner.txt")).unwrap(),
+        "inner\n"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.root().join("nested/target/data.txt")).unwrap(),
+        "source data\n"
+    );
+    for name in [".git", ".jecode", "target", ".tmp"] {
+        assert!(!workspace.root().join(name).exists());
+    }
     fs::write(workspace.root().join("tracked.txt"), "child\n").unwrap();
     assert_eq!(changed(&workspace.inspect().unwrap()), vec!["tracked.txt"]);
     workspace.close().unwrap();
-    drop(temp);
 }
 
 #[test]
@@ -300,9 +290,9 @@ fn ignored_agent_instructions_and_text_evidence_are_available() {
 }
 
 #[test]
-fn failed_copy_cleans_owned_worktree_and_allows_retry() {
+fn failed_copy_cleans_owned_tree_and_allows_retry() {
     let (_temp, project, storage) = fixture();
-    // The copy fails after the worktree exists: the source cannot be read on
+    // The copy fails after the tree exists: the source cannot be read on
     // Windows, and Unix allows a name the workspace cannot represent.
     #[cfg(windows)]
     let blocker = {
@@ -393,12 +383,9 @@ fn unowned_complete_copy_is_reclaimed_and_foreign_entries_are_preserved() {
     assert!(workspace.root().join("tracked.txt").exists());
     fs::write(&marker, ready).unwrap();
     // A copy no saved record owns, as after a stop before its `created`
-    // receipt, is removed with its Git registration.
-    let canonical = fs::canonicalize(&project).unwrap();
-    assert!(git::registered(&canonical, workspace.root()).unwrap());
+    // receipt, is removed from owned storage.
     Workspace::reclaim(&project, &storage, "a1").unwrap();
     assert!(!storage.join("a1").exists());
-    assert!(!git::registered(&canonical, workspace.root()).unwrap());
     // A stop before or while writing the marker leaves an empty directory or
     // a staging file; anything else without a marker stays.
     fs::create_dir(storage.join("a2")).unwrap();
@@ -423,7 +410,7 @@ fn unowned_complete_copy_is_reclaimed_and_foreign_entries_are_preserved() {
 }
 
 #[test]
-fn interrupted_worktree_with_missing_tree_can_retry_same_id() {
+fn interrupted_copy_with_missing_tree_can_retry_same_id() {
     let (_temp, project, storage) = fixture();
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     let marker = storage.join("a1/baseline.json");
@@ -456,3 +443,34 @@ fn closing_removes_links_without_touching_their_targets() {
         "head\n"
     );
 }
+
+#[test]
+fn snapshot_does_not_follow_project_directory_links() {
+    let (temp, project, storage) = fixture();
+    let outside = temp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("canary.txt"), "keep\n").unwrap();
+    link_directory(&outside, &project.join("outside-link"));
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated);
+    #[cfg(windows)]
+    if let Err(error) = &workspace {
+        // Creating a copied symbolic link can require developer privileges.
+        assert!(error.contains("1314"), "{error}");
+        assert!(!storage.join("a1").exists());
+        assert_eq!(
+            fs::read_to_string(outside.join("canary.txt")).unwrap(),
+            "keep\n"
+        );
+        return;
+    }
+    let workspace = workspace.unwrap();
+    assert!(workspace.root().join("outside-link").exists());
+    assert!(changed(&workspace.inspect().unwrap()).is_empty());
+    workspace.close().unwrap();
+    assert_eq!(
+        fs::read_to_string(outside.join("canary.txt")).unwrap(),
+        "keep\n"
+    );
+}
+
+mod directories;

@@ -106,6 +106,7 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
             | Event::Accepted { .. }
             | Event::InputHeld
             | Event::UserQuestion { .. }
+            | Event::PermissionRequest { .. }
             | Event::Context(_)
             | Event::Generated { .. } => return Ok(()),
         };

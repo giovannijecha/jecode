@@ -54,14 +54,17 @@ impl Pipe {
             reader: None,
             writer: None,
         };
-        let status = Command::new("mkfifo")
-            .args(["-m", "600"])
+        let executable = crate::native::helper("process_unix").map_err(before_start)?;
+        let status = Command::new(executable)
+            .arg("fifo")
             .arg(pipe.path())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .map_err(|error| before_start(format!("Could not run mkfifo: {error}")))?;
+            .map_err(|error| {
+                before_start(format!("Could not create native input pipe: {error}"))
+            })?;
         if !status.success() {
             return Err(before_start(
                 "Could not create private process input pipe".into(),

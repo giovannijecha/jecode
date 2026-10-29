@@ -35,6 +35,7 @@ pub struct Agent {
     charges: Mutex<crate::backend::Charges>,
     collaboration: crate::collaboration::Observer,
     questions: crate::ask::Observer,
+    permissions: crate::permissions::Permissions,
     child: bool,
     inherited_project_instructions: Option<String>,
     collaboration_seen: usize,
@@ -86,6 +87,7 @@ impl Agent {
             charges: Mutex::default(),
             collaboration: crate::collaboration::Observer::default(),
             questions: crate::ask::Observer::default(),
+            permissions: crate::permissions::Permissions::default(),
             child: false,
             inherited_project_instructions: None,
             collaboration_seen: 0,
@@ -369,6 +371,9 @@ mod execution;
 mod history;
 mod input;
 mod lifecycle;
+mod permission;
+#[cfg(test)]
+mod permission_tests;
 mod persistence;
 mod project_instructions;
 mod projection;

@@ -42,20 +42,22 @@ impl<R: BufRead, W: Write> Prompter for Terminal<'_, R, W> {
         write!(self.output, "{prompt}")
             .and_then(|_| self.output.flush())
             .map_err(|error| error.to_string())?;
-        // Bash's native terminal input hides the key; it returns through a private stdout pipe.
-        // Interactive stdin stays attached. No credential is included in a command argument.
-        let script = "IFS= read -r -s credential || exit 2; printf '\\n' >&2; if (( ${#credential} > 512 )); then exit 3; fi; printf '%s' \"$credential\"";
-        let mut command = Command::new(self.bash);
+        // The owned terminal adapter disables echo and returns the key through
+        // a private pipe; no credential appears in a process argument.
+        let helper = crate::native::helper(if cfg!(windows) {
+            "terminal"
+        } else {
+            "terminal_unix"
+        })?;
+        let mut command = Command::new(helper);
         command
-            .args(["--noprofile", "--norc", "-c", script])
-            .env_remove("BASH_ENV")
-            .env_remove("ENV")
+            .arg("secret")
             .stdin(Stdio::inherit())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
         let output = crate::auth::isolate_environment(&mut command)
             .output()
-            .map_err(|error| format!("Could not read the key using Bash: {error}"))?;
+            .map_err(|error| format!("Could not read the key from the terminal: {error}"))?;
         match output.status.code() {
             Some(0) => String::from_utf8(output.stdout)
                 .map(Some)
@@ -94,24 +96,15 @@ impl SignInMonitor {
     fn start(bash: &Path, cancellation: Cancellation) -> Result<Self, String> {
         // A separate process owns the pending console read. It can be killed and
         // reaped before the next prompt, unlike a blocked Rust stdin thread.
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = Command::new("cmd.exe");
-            command.args(["/d", "/q", "/c", "set /p JECODE_SIGNIN_CANCEL="]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = {
-            let mut command = Command::new(bash);
-            command
-                .args(["--noprofile", "--norc", "-c", "IFS= read -r _"])
-                .env_remove("BASH_ENV")
-                .env_remove("ENV");
-            command
-        };
-        #[cfg(windows)]
         let _ = bash;
+        let helper = crate::native::helper(if cfg!(windows) {
+            "terminal"
+        } else {
+            "terminal_unix"
+        })?;
+        let mut command = Command::new(helper);
         command
+            .arg("wait-enter")
             .stdin(Stdio::inherit())
             .stdout(Stdio::null())
             .stderr(Stdio::null());

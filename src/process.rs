@@ -14,7 +14,7 @@ mod windows;
 mod capture;
 use capture::{Capture, capture};
 #[cfg(windows)]
-pub(crate) use windows::{CREATE_NO_WINDOW, helper as compile_helper};
+pub(crate) use windows::CREATE_NO_WINDOW;
 
 pub struct Output {
     pub stdout: Vec<u8>,
@@ -72,7 +72,7 @@ pub fn run_observed(
 }
 
 /// Like `run_observed`, for an executable that starts no child processes,
-/// such as curl. Windows launches it directly instead of through the Job
+/// such as an owned HTTP adapter. Windows launches it directly instead of through the Job
 /// Object supervisor; Unix keeps its process-group boundary.
 pub fn run_leaf(
     command: &mut Command,

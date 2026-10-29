@@ -347,12 +347,12 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
             .unwrap()
             .style
     };
-    use crate::tui::theme::{ACCENT, BAD, DIM, GOOD, MUTED, STRONG, WARNING};
+    use crate::tui::theme::{ACCENT, BAD, DIM, GOOD, MUTED, STRONG};
     assert_eq!(style(0, "☑"), GOOD);
     assert_eq!(style(0, "Inspect"), MUTED);
     assert_eq!(style(1, "☐"), ACCENT.bold());
     assert_eq!(style(1, "Write"), STRONG.bold());
-    assert_eq!(style(2, "awaiting review"), WARNING);
+    assert_eq!(style(2, "awaiting review"), MUTED);
     assert_eq!(style(3, "☐"), BAD.bold());
     assert_eq!(style(3, "failed"), BAD);
     assert_eq!(style(5, "Support"), DIM.strike());

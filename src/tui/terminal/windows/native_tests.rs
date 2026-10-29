@@ -23,19 +23,29 @@ mod card_tests;
 #[path = "native_direct_input.rs"]
 mod native_direct_input;
 
+#[path = "native_permissions.rs"]
+mod native_permissions;
+
+#[path = "native_background.rs"]
+mod native_background;
+
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
 fn native_pty_source() -> String {
-    include_str!("native_pty.cs")
-        .replace(
-            "JECODE_WARNING_FOREGROUND",
-            &format!("\\x1b[{}m", crate::tui::theme::WARNING),
-        )
-        .replace(
-            "JECODE_WARNING_SURFACE",
-            &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
-        )
+    format!(
+        "{}\n{}",
+        include_str!("native_pty.cs"),
+        include_str!("native_permissions.cs")
+    )
+    .replace(
+        "JECODE_WARNING_FOREGROUND",
+        &format!("\\x1b[{}m", crate::tui::theme::WARNING),
+    )
+    .replace(
+        "JECODE_WARNING_SURFACE",
+        &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
+    )
 }
 
 #[test]
@@ -241,6 +251,17 @@ fn native_console_fixture() {
     let bash = crate::tools::find_bash().unwrap();
     if scenario == "direct-input" {
         native_direct_input::fixture(&path, &bash);
+        restored(&path);
+        return;
+    }
+    if scenario == "permissions" {
+        native_permissions::fixture(&path, &bash);
+        restored(&path);
+        println!("NATIVE_PERMISSIONS_RESTORED");
+        return;
+    }
+    if matches!(scenario.as_str(), "background-light" | "background-native") {
+        native_background::fixture(&path, &bash, &scenario);
         restored(&path);
         return;
     }

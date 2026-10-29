@@ -17,29 +17,30 @@ pub(super) struct Mode {
 }
 
 pub(super) fn stty(tty: &File, arguments: &[&str]) -> Result<String, String> {
-    let mut command = Command::new("stty");
+    let mut command = Command::new(crate::native::helper("terminal_unix")?);
     command
+        .arg("mode")
         .args(arguments)
         .env("LC_ALL", "C")
         .stdin(Stdio::from(tty.try_clone().map_err(|e| e.to_string())?))
         .stderr(Stdio::null());
     let output = crate::auth::isolate_environment(&mut command)
         .output()
-        .map_err(|error| format!("Could not run stty: {error}"))?;
+        .map_err(|error| format!("Could not query native terminal settings: {error}"))?;
     if !output.status.success() {
-        return Err("stty could not access the terminal".into());
+        return Err("Could not access native terminal settings".into());
     }
     String::from_utf8(output.stdout)
         .map(|value| value.trim().to_string())
-        .map_err(|_| "Invalid stty output".into())
+        .map_err(|_| "Invalid native terminal settings".into())
 }
 
 impl Mode {
-    pub(super) fn open(tty: File, bash: &Path) -> Result<Self, String> {
+    pub(super) fn open(tty: File, _bash: &Path) -> Result<Self, String> {
         let saved = stty(&tty, &["-g"])?;
-        let mut command = Command::new(bash);
+        let mut command = Command::new(crate::native::helper("terminal_unix")?);
         command
-            .args(["--noprofile", "--norc", "-c", include_str!("../unix.sh")])
+            .arg("guard")
             .env_remove("BASH_ENV")
             .env_remove("ENV")
             .stdin(Stdio::piped())

@@ -188,6 +188,12 @@ pub(super) fn marker(on: bool, deleting: bool) -> Line {
     )
 }
 
+/// A selectable row shares one marker and an optional trailing chip. The
+/// caller supplies the body, including any fact column, without its marker.
+pub(super) fn option(body: Line, chip: Line, on: bool, deleting: bool, width: usize) -> Line {
+    spread(marker(on, deleting).append(body), chip, width, None)
+}
+
 /// One key hint. Scrolling keys show only when content overflows; optional
 /// keys leave first when the row is too narrow.
 #[derive(Clone, Copy)]
@@ -244,13 +250,12 @@ fn caps(keys: &[Key], first: Style) -> Line {
     line
 }
 
-/// One row of keycaps; keys leave from the right when it is too narrow.
+/// One row of keycaps; movement and secondary keys leave before the action
+/// and exit controls when it is too narrow.
 pub(super) fn row(keys: &[Key], width: usize) -> Line {
-    let mut shown = keys.len();
-    while shown > 1 && cells(&caps(&keys[..shown], MUTED)) > width {
-        shown -= 1;
-    }
-    caps(&keys[..shown], MUTED).shortened(width)
+    let mut shown = keys.to_vec();
+    trim_keys(&mut shown, width, true);
+    caps(&shown, MUTED).shortened(width)
 }
 
 /// The key row as keycaps; what still does not fit wraps onto more rows.
@@ -260,12 +265,7 @@ pub(super) fn keys(keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
         .copied()
         .filter(|key| overflow || !key.scroll)
         .collect();
-    while cells(&caps(&shown, MUTED)) > width {
-        let Some(index) = shown.iter().rposition(|key| key.optional) else {
-            break;
-        };
-        shown.remove(index);
-    }
+    trim_keys(&mut shown, width, false);
     let mut rows: Vec<Vec<Key>> = vec![vec![]];
     for key in shown {
         let last = rows.last_mut().unwrap();
@@ -278,6 +278,31 @@ pub(super) fn keys(keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
     rows.iter()
         .map(|row| caps(row, MUTED).shortened(width))
         .collect()
+}
+
+/// Keep the primary action and Escape visible. Movement hints leave first,
+/// even when a caller did not mark them optional. Multi-row callers may keep
+/// other required controls below.
+fn trim_keys(shown: &mut Vec<Key<'_>>, width: usize, single_row: bool) {
+    while cells(&caps(shown, MUTED)) > width {
+        let has_escape = shown.iter().any(|key| key.key == "Esc");
+        let protected = |key: &Key<'_>| {
+            key.key == "Enter" || key.key == "Esc" || !has_escape && key.key == "Ctrl+D"
+        };
+        let movement = shown.iter().position(|key| {
+            !protected(key) && matches!(key.label, "move" | "scroll" | "questions")
+        });
+        let optional = shown
+            .iter()
+            .rposition(|key| key.optional && !protected(key));
+        let expendable = single_row
+            .then(|| shown.iter().rposition(|key| !protected(key)))
+            .flatten();
+        let Some(index) = movement.or(optional).or(expendable) else {
+            break;
+        };
+        shown.remove(index);
+    }
 }
 
 /// A destructive step: the question in `bad` replaces the keys, which follow

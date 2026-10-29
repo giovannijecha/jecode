@@ -116,7 +116,7 @@ fn sequential_closure_releases_workers_and_preserves_monotonic_ids_after_resume(
                     context: String::new(),
                     mode: workspace::Mode::Shared,
                 },
-                |root| {
+                |_, root| {
                     Ok(Agent::new(
                         OpenRouter::fixture(fixture.endpoint.clone()),
                         Tools::new(root)?,
@@ -249,7 +249,7 @@ fn removed_isolated_workspace_can_be_closed_after_failed_receipt_and_resume() {
                 context: String::new(),
                 mode: workspace::Mode::Isolated,
             },
-            |root| {
+            |_, root| {
                 Ok(Agent::new(
                     OpenRouter::fixture(fixture.endpoint.clone()),
                     Tools::new(root)?,

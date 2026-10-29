@@ -201,7 +201,14 @@ impl App {
         {
             return false;
         }
-        if self.agent.is_none() {
+        if self
+            .agent
+            .as_ref()
+            .is_none_or(|agent| !agent.can_continue_collaboration())
+        {
+            // A return already included in the final response is only a
+            // receipt. Do not replace its statistics with an empty turn.
+            self.collaboration_return_pending = false;
             return false;
         }
         let agent = self.hold();

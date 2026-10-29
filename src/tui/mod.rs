@@ -2,11 +2,14 @@ mod activity;
 mod agents;
 mod ask;
 mod attach;
+mod background;
 mod cards;
 #[cfg(test)]
 mod checkpoint_tests;
 mod checkpoints;
 mod commands;
+#[cfg(test)]
+mod completion_tests;
 mod conversations;
 mod copy;
 mod delete;
@@ -25,6 +28,7 @@ mod keys;
 mod line;
 mod markdown;
 mod motion;
+mod permission;
 mod persistence;
 mod poll;
 mod processes;
@@ -106,6 +110,8 @@ struct App {
     process_observer: crate::tools::processes::Observer,
     collaboration_observer: crate::collaboration::Observer,
     question_observer: crate::ask::Observer,
+    /// The conversation's permissions, shared with the agent and its collaborators.
+    permission_observer: crate::permissions::Permissions,
     todo_message_len: usize,
     collaboration_cursor: usize,
     /// The record revisions `state.collaboration` shows.
@@ -141,6 +147,7 @@ impl App {
             process_observer: agent.processes(),
             collaboration_observer: agent.collaboration(),
             question_observer: agent.questions(),
+            permission_observer: agent.permissions(),
             todo_message_len: usize::MAX,
             collaboration_cursor: 0,
             collaboration_records: Vec::new(),
@@ -187,7 +194,10 @@ impl App {
         app.recent_sessions();
         app.refresh_agents();
         app.question_observer.set_available(true);
+        app.permission_observer
+            .set_surface(crate::permissions::Surface::Panel);
         app.refresh_question();
+        app.refresh_permission();
         app.refresh_todo();
         app.refresh_context();
         app
@@ -229,6 +239,7 @@ pub(crate) fn launch(
     )?;
     let terminal = Terminal::open(&config.bash)?;
     let mut app = App::new(agent, config, Some(terminal));
+    let mut background = background::Probe::start()?;
     if !draft.is_empty() {
         app.state.editor.set(draft);
     }
@@ -260,6 +271,23 @@ pub(crate) fn launch(
             .chain(app.terminal.as_ref().unwrap().input.try_iter().take(64))
             .collect();
         for event in events {
+            let (forwarded, light) = background.feed(event);
+            if let Some(light) = light {
+                app.renderer.set_light_background(light);
+            }
+            for event in forwarded {
+                if app.terminal_event(event, &mut decoder)? {
+                    return Ok(());
+                }
+            }
+            dirty = true;
+        }
+        let (replayed, fallback) = background.expire();
+        if let Some(light) = fallback {
+            app.renderer.set_light_background(light);
+            dirty = true;
+        }
+        for event in replayed {
             if app.terminal_event(event, &mut decoder)? {
                 return Ok(());
             }
@@ -288,6 +316,7 @@ pub(crate) fn launch(
             } else {
                 delay
             };
+            let delay = delay.min(background.wait().unwrap_or(Duration::MAX));
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
             } else if loading(&app.state) {
@@ -349,6 +378,8 @@ impl App {
             }
             #[cfg(windows)]
             Input::Modes(..) => {}
+            #[cfg(windows)]
+            Input::NativeBackground(..) => {}
             Input::Size(size) => {
                 self.state.width = size.width;
                 self.state.height = size.height;
@@ -378,6 +409,9 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        // Waiting calls end unrun; resume records them as not run.
+        self.permission_observer
+            .set_surface(crate::permissions::Surface::None);
         if self
             .state
             .activity

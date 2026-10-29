@@ -1,9 +1,14 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
+using System.Web.Script.Serialization;
 
 // This owned Windows boundary keeps the job handle outside the target process tree.
 public static class JecodeProcess {
@@ -14,6 +19,7 @@ public static class JecodeProcess {
     const uint ExtendedStartupInfoPresent = 0x00080000;
     const int AttributeJobList = 0x0002000d;
     const uint CreateNoWindow = 0x08000000;
+    const uint CreateUnicodeEnvironment = 0x00000400;
     const uint StartfUseStdHandles = 0x00000100;
     const uint JobLimitKillOnClose = 0x00002000;
     const uint DuplicateSameAccess = 0x00000002;
@@ -222,6 +228,7 @@ public static class JecodeProcess {
         IntPtr job = IntPtr.Zero, inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
         IntPtr output = IntPtr.Zero, error = IntPtr.Zero;
         IntPtr attributeList = IntPtr.Zero, jobValue = IntPtr.Zero;
+        JecodeWindowsSandbox sandbox = null;
         bool attributesInitialized = false;
         NamedPipeServerStream completion = null;
         IAsyncResult pendingConnection = null;
@@ -248,6 +255,7 @@ public static class JecodeProcess {
             if (count < 0 || count > 100000) throw new InvalidDataException("Invalid argument count");
             var commandLine = new StringBuilder(JecodeWindowsCommand.Quote(program));
             for (int i = 0; i < count; i++) commandLine.Append(' ').Append(JecodeWindowsCommand.Quote(ReadString(protocol)));
+            sandbox = JecodeWindowsSandbox.Prepare(ReadString(protocol));
 
             job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw Failure("CreateJobObject");
@@ -264,10 +272,11 @@ public static class JecodeProcess {
             output = InheritedStdHandle(-11);
             error = InheritedStdHandle(-12);
             IntPtr attributeSize = IntPtr.Zero;
-            InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeSize);
+            int attributeCount = sandbox == null ? 1 : 2;
+            InitializeProcThreadAttributeList(IntPtr.Zero, attributeCount, 0, ref attributeSize);
             if (attributeSize == IntPtr.Zero) throw Failure("InitializeProcThreadAttributeList size");
             attributeList = Marshal.AllocHGlobal(attributeSize);
-            if (!InitializeProcThreadAttributeList(attributeList, 1, 0, ref attributeSize))
+            if (!InitializeProcThreadAttributeList(attributeList, attributeCount, 0, ref attributeSize))
                 throw Failure("InitializeProcThreadAttributeList");
             attributesInitialized = true;
             jobValue = Marshal.AllocHGlobal(IntPtr.Size);
@@ -275,6 +284,7 @@ public static class JecodeProcess {
             if (!UpdateProcThreadAttribute(attributeList, 0, new IntPtr(AttributeJobList),
                 jobValue, new IntPtr(IntPtr.Size), IntPtr.Zero, IntPtr.Zero))
                 throw Failure("UpdateProcThreadAttribute job list");
+            if (sandbox != null) sandbox.AddAttribute(attributeList);
             var startup = new StartupInfoEx();
             startup.Startup.Size = Marshal.SizeOf(typeof(StartupInfoEx));
             startup.Startup.Flags = StartfUseStdHandles;
@@ -282,10 +292,14 @@ public static class JecodeProcess {
             startup.Startup.StdOutput = output;
             startup.Startup.StdError = error;
             startup.AttributeList = attributeList;
-            if (!CreateProcess(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
-                CreateSuspended | CreateNoWindow | ExtendedStartupInfoPresent, IntPtr.Zero, null,
-                ref startup, out process))
-                throw Failure("CreateProcess");
+            IntPtr environment = sandbox == null ? IntPtr.Zero : JecodeWindowsSandbox.InheritedEnvironment();
+            try {
+                uint flags = CreateSuspended | CreateNoWindow | ExtendedStartupInfoPresent;
+                if (sandbox != null) flags |= CreateUnicodeEnvironment;
+                if (!CreateProcess(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
+                    flags, environment, null, ref startup, out process))
+                    throw Failure("CreateProcess");
+            } finally { JecodeWindowsSandbox.FreeInheritedEnvironment(environment); }
             Stream readyStream = Console.OpenStandardOutput();
             readyStream.WriteByte(1);
             byte[] childId = BitConverter.GetBytes(process.ProcessId);
@@ -337,6 +351,7 @@ public static class JecodeProcess {
             if (attributeList != IntPtr.Zero) Marshal.FreeHGlobal(attributeList);
             if (jobValue != IntPtr.Zero) Marshal.FreeHGlobal(jobValue);
             if (job != IntPtr.Zero) CloseHandle(job);
+            if (sandbox != null) sandbox.Dispose();
             if (completion != null) completion.Dispose();
         }
     }

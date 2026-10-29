@@ -173,7 +173,7 @@ fn slow_reader_receives_every_reliable_event_in_order() {
 }
 
 #[test]
-fn cancels_a_waiting_native_curl_request_and_returns_the_agent() {
+fn cancels_a_waiting_native_http_request_and_returns_the_agent() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());

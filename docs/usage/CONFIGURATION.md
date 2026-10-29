@@ -96,7 +96,8 @@ Settings. Connect the ChatGPT account separately.
       "provider/model-id": { "mode": "auto" }
     }
   },
-  "context": { "auto_compact_percent": 80 }
+  "context": { "auto_compact_percent": 80 },
+  "permissions": { "default": "workspace" }
 }
 ```
 
@@ -120,7 +121,9 @@ or unreadable file blocks setup and launch with an error; Jecode leaves it
 unchanged so you can correct it. Saves replace the file atomically. New Unix
 configuration directories and files use permissions `0700` and `0600`; Windows
 inherits permissions from the user's directory.
-Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
+`permissions.default` is the level new conversations start at: `read`,
+`workspace` or `full`, with `workspace` when absent; see
+[Permissions](PERMISSIONS.md). Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
 storage and resume. Per-call checkpoints have a fixed 24-hour lifetime and no
 policy file; see [Checkpoints](CHECKPOINTS.md).
 
@@ -236,8 +239,8 @@ always manages the personal file.
 
 `JECODE_HOME` selects an absolute configuration directory, including sessions,
 temporary storage, checkpoint archives and the personal [skill library](SKILLS.md).
-`JECODE_BASH` selects the Bash executable. These are useful for isolated
-development.
+This is useful for isolated development. The command interpreter and HTTP
+adapters are embedded in Jecode; `JECODE_BASH` and `JECODE_CURL` are not used.
 
 `/model`, `/effort` and `/routing` change the conversation without
 changing saved defaults. Changing the OpenRouter key in `/settings` refreshes

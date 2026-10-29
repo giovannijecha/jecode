@@ -186,8 +186,14 @@ fn timeout_stops_a_slow_transfer() {
         ("url", Value::string(format!("{}/slow", server.base))),
         ("timeout_seconds", Value::number(1)),
     ]);
+    let started = std::time::Instant::now();
     let error = execute(&area, &arguments, &Cancellation::default()).unwrap_err();
     assert!(error.contains("HTTP transfer failed"), "{error}");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "The one-second transfer deadline was exceeded: {:?}",
+        started.elapsed()
+    );
 }
 
 #[test]

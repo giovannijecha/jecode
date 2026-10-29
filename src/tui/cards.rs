@@ -249,6 +249,20 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         .flatten();
     let name = match tool.name {
         "read" if skill.is_some() => "Skill",
+        "collaboration" => field(tool.arguments, "label"),
+        other => title_name(other),
+    };
+    let target = match tool.name {
+        "bash" => field(tool.arguments, "command").into(),
+        "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
+        | "agent" => crate::events::target(tool.name, tool.arguments),
+        _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
+    };
+    (name, target)
+}
+
+fn title_name(tool: &str) -> &str {
+    match tool {
         "read" => "Read",
         "list" => "List",
         "search" => "Search",
@@ -262,16 +276,14 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         "web" => "Web",
         "browser" => "Browser",
         "agent" => "Agents",
-        "collaboration" => field(tool.arguments, "label"),
         other => other,
-    };
-    let target = match tool.name {
-        "bash" => field(tool.arguments, "command").into(),
-        "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
-        | "agent" => crate::events::target(tool.name, tool.arguments),
-        _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
-    };
-    (name, target)
+    }
+}
+
+/// `UPDATE` in its family colour, as a Work chapter names a tool.
+pub(in crate::tui) fn tool_title(tool: &str) -> Line {
+    let name = title_name(tool);
+    Line::new(&name.to_uppercase(), badge::ink(name).bold())
 }
 
 /// `row` with a right-aligned Ctrl+O keycap, or the keycap on its own row.

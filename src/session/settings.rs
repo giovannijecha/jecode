@@ -35,6 +35,9 @@ impl SessionConfig {
                 agent.replace_backend(client)?;
             }
             agent.set_auto_compact(settings.auto_compact);
+            agent
+                .permissions()
+                .set_default(settings.default_permissions);
             agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
             self.settings = settings;
             writeln!(

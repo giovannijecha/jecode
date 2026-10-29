@@ -92,6 +92,10 @@ fn an_empty_completion_is_retried_without_replaying_a_completed_tool() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     agent.run_turn("Execute once", &mut |_| Ok(())).unwrap();
     assert_eq!(
         std::fs::read_to_string(directory.path().join("executions.txt")).unwrap(),

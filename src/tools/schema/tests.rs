@@ -345,7 +345,7 @@ fn bash_contract_distinguishes_wait_from_execution_deadline() {
         .find(|tool| tool.get("name").and_then(Value::as_str) == Some("bash"))
         .unwrap();
     let description = bash.get("description").and_then(Value::as_str).unwrap();
-    assert!(description.contains("Bash on every host, including Windows"));
+    assert!(description.contains("Jecode's built-in command language"));
     let properties = bash.get("parameters").unwrap().get("properties").unwrap();
     let timeout = properties.get("timeout_seconds").unwrap();
     let wait = properties.get("wait_ms").unwrap();

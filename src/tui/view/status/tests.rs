@@ -363,3 +363,15 @@ fn multiple_live_tools_show_a_count_until_only_one_remains() {
     });
     assert_eq!(verb(&state), "Reading first.rs");
 }
+
+#[test]
+fn waiting_uses_the_status_pill_geometry_without_a_warning() {
+    for label in ["Waiting for you", "Waiting for permission"] {
+        for width in [40, 80, 120] {
+            let row = waiting(label, width, None);
+            assert!(row.plain().starts_with(&format!(" ?  {label} ")));
+            assert_eq!(style_of(&row, "?"), Some(crate::tui::theme::ACCENT.bold()));
+            assert!(text::cells(&row.plain()) <= width);
+        }
+    }
+}

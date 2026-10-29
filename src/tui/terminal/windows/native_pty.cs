@@ -6,7 +6,7 @@ using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 // Owned, headless verification host for the documented Windows ConPTY ABI.
-public sealed class JecodeTestPty : IDisposable {
+public sealed partial class JecodeTestPty : IDisposable {
     [StructLayout(LayoutKind.Sequential)]
     struct Coord { public short X, Y; public Coord(short x, short y) { X = x; Y = y; } }
     [StructLayout(LayoutKind.Sequential)]
@@ -169,6 +169,26 @@ public sealed class JecodeTestPty : IDisposable {
             }
             int length = Math.Min(received.Length, 2000);
             throw new IOException("ConPTY did not show " + text + ": " + received.ToString(received.Length - length, length));
+        }
+    }
+
+    public void WaitRaw(string text, int after = 0) {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        lock (gate) {
+            while (clock.ElapsedMilliseconds < 20000) {
+                if (received.ToString(after, received.Length - after).Contains(text)) return;
+                Monitor.Wait(gate, 20);
+            }
+            int length = Math.Min(received.Length, 2000);
+            throw new IOException("ConPTY did not emit " + text + ": " +
+                received.ToString(received.Length - length, length).Replace("\x1b", "[ESC]"));
+        }
+    }
+
+    public void EnsureNoRaw(string text, int after) {
+        lock (gate) {
+            if (received.ToString(after, received.Length - after).Contains(text))
+                throw new IOException("ConPTY unexpectedly emitted " + text);
         }
     }
 
@@ -339,6 +359,21 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Send("\x11");
                 pty.Wait("NATIVE_DIRECT_INPUT_RESTORED");
                 pty.Finish(true);
+            } else if (scenario == "background-light") {
+                pty.WaitRaw("48;2;12;12;12m");
+                pty.Wait("NATIVE_LIGHT_FRAME");
+                pty.EnsureNoRaw("\x1b[49m", 0);
+                pty.Wait("NATIVE_BACKGROUND_RESTORED");
+                pty.Finish(true);
+            } else if (scenario == "background-native") {
+                pty.WaitFast("Ask anything");
+                int reported = pty.Mark();
+                pty.WaitRaw("48;2;12;12;12m", reported);
+                pty.Send("\x11");
+                pty.Wait("NATIVE_BACKGROUND_DETECTED_RESTORED");
+                pty.Finish(true);
+            } else if (scenario == "permissions") {
+                pty.Permissions();
             } else if (scenario == "interactive") {
                 // Each renderer phase completes before the TUI startup wait begins.
                 pty.Wait("NATIVE_FULL_WIDTH_VERIFIED");

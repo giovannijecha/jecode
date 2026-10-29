@@ -170,6 +170,7 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
                 Effort::Default,
                 80,
                 &crate::backend::openrouter::Routing::Auto,
+                Default::default(),
                 std::path::Path::new("fixture/config.json"),
             ),
             "   ↑↓  move    Enter  change    Esc  close",

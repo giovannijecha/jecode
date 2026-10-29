@@ -11,7 +11,7 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{ACCENT, DIM, MUTED, PILL_SURFACE, STRONG},
+        theme::{ACCENT, DIM, MUTED},
     },
 };
 
@@ -209,9 +209,22 @@ fn keys(request: &Request, panel: &Panel, step: usize) -> Vec<Key<'static>> {
     };
     let mut keys = Vec::new();
     if question.is_multiple() && !typing {
-        keys.push(key("Space", "select"));
+        keys.push(key("Space", "toggle"));
     }
-    keys.push(key("Enter", verb));
+    if entry.row == usize::MAX {
+        let numbers = match question.options.len() + 1 {
+            1 => "1",
+            2 => "1–2",
+            3 => "1–3",
+            4 => "1–4",
+            5 => "1–5",
+            6 => "1–6",
+            _ => "1–7",
+        };
+        keys.push(key(numbers, "choose"));
+    } else {
+        keys.push(key("Enter", verb));
+    }
     if free {
         keys.push(key("Ctrl+J", "new line").optional());
     }
@@ -228,15 +241,4 @@ fn keys(request: &Request, panel: &Panel, step: usize) -> Vec<Key<'static>> {
     keys.push(key("Esc", "back to chat"));
     keys.push(key("Ctrl+D", "dismiss"));
     keys
-}
-
-pub(super) fn status(columns: usize, hidden: bool) -> Line {
-    let mut line = Line::default();
-    line.push_on(" ? ", ACCENT.bold(), PILL_SURFACE);
-    line.push_on(" Waiting for you ", STRONG, PILL_SURFACE);
-    if hidden && text::cells(&line.plain()) + text::cells("  /ask answer") <= columns {
-        line.push("  /ask", ACCENT);
-        line.push(" answer", MUTED);
-    }
-    line.shortened(columns)
 }

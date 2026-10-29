@@ -111,7 +111,10 @@ their attachment references, but the referenced files are not copied. See
 | Windows | Windows PowerShell 5.1 (`powershell.exe`) with System.Windows.Forms | System.Drawing through PowerShell |
 | WSL | `powershell.exe` through Windows interop | Same, through interop |
 | macOS | `osascript` | `sips` |
-| Linux | `wl-paste` (Wayland) or `xclip` (X11) | None; unsupported formats stay local |
+| Linux | Embedded adapter using X11 `libX11` or the compositor's Wayland data-control protocol | Desktop `gdk-pixbuf` library through the embedded adapter |
 
-If a native command is unavailable, Jecode reports the import or conversion
-failure. Image bytes use standard input and output, not command arguments.
+Wayland clipboard access requires the compositor to advertise `ext-data-control-v1`
+or `wlr-data-control-unstable-v1`. If it does not, Jecode reports that desktop
+clipboard access is unavailable; installing a clipboard utility does not change
+the compositor's permission. Image bytes use standard input and output, not
+command arguments.

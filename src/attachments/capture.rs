@@ -3,9 +3,9 @@
 //!
 //! Windows, and WSL through interop, use Windows PowerShell 5.1
 //! (`powershell.exe`) with System.Windows.Forms and System.Drawing. macOS uses
-//! `osascript` and `sips`. Other Unix systems read the clipboard with
-//! `wl-paste` (Wayland) or `xclip` (X11) and have no converter. Image bytes
-//! travel through stdin and stdout, never through arguments or files.
+//! `osascript` and `sips`. Native Linux uses an embedded helper that speaks
+//! X11 or Wayland data-control and loads the desktop's imaging library.
+//! Image bytes travel through stdin and stdout, never through arguments.
 
 use crate::cancel::Cancellation;
 use crate::process;
@@ -16,13 +16,16 @@ const OUTPUT_LIMIT: usize = 96 * 1024 * 1024;
 
 /// Reads the clipboard image as PNG bytes.
 pub fn clipboard_image(cancellation: &Cancellation) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "linux")]
+    if !super::paths::wsl() {
+        let mut command = linux_command("clipboard")?;
+        return run(&mut command, None, Duration::from_secs(20), cancellation);
+    }
     let (mut command, encoding) = clipboard_command()?;
     let stdout = run(&mut command, None, Duration::from_secs(20), cancellation)?;
     match encoding {
         #[cfg(not(target_os = "macos"))]
         Encoding::Base64 => super::base64::decode(std::str::from_utf8(&stdout).unwrap_or("!")),
-        #[cfg(all(unix, not(target_os = "macos")))]
-        Encoding::Raw => Ok(stdout),
         #[cfg(target_os = "macos")]
         Encoding::AppleScript => apple_data(&stdout),
     }
@@ -41,8 +44,6 @@ pub fn convert(
 enum Encoding {
     #[cfg(not(target_os = "macos"))]
     Base64,
-    #[cfg(all(unix, not(target_os = "macos")))]
-    Raw,
     #[cfg(target_os = "macos")]
     AppleScript,
 }
@@ -82,6 +83,12 @@ fn run(
             }
         }
         Some(3) => Err("The clipboard has no image".into()),
+        #[cfg(target_os = "linux")]
+        Some(4) => {
+            Err("Desktop clipboard access is unavailable or denied by the compositor".into())
+        }
+        #[cfg(target_os = "linux")]
+        Some(6) => Err("The desktop image library is unavailable".into()),
         _ => Err(format!("{program} failed")),
     }
 }
@@ -148,7 +155,7 @@ if ($output.Length -gt 524288) {
 
 #[cfg(not(target_os = "macos"))]
 fn powershell(script: &str) -> Command {
-    let mut command = Command::new("powershell.exe");
+    let mut command = crate::native::powershell();
     command.args([
         "-NoLogo",
         "-NoProfile",
@@ -158,15 +165,6 @@ fn powershell(script: &str) -> Command {
         script,
     ]);
     command
-}
-
-#[cfg(not(target_os = "macos"))]
-fn powershell_available() -> Result<(), String> {
-    #[cfg(not(windows))]
-    if !super::paths::wsl() {
-        return Err("No image converter is available on this platform".into());
-    }
-    Ok(())
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
@@ -181,12 +179,11 @@ fn windows_converted(stdout: Vec<u8>) -> Result<(&'static str, Vec<u8>), String>
     Ok((extension, super::base64::decode(data)?))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 fn convert_native(
     data: &[u8],
     cancellation: &Cancellation,
 ) -> Result<(&'static str, Vec<u8>), String> {
-    powershell_available()?;
     let stdout = run(
         &mut powershell(POWERSHELL_CONVERT),
         Some(data.to_vec()),
@@ -196,6 +193,50 @@ fn convert_native(
     windows_converted(stdout)
 }
 
+#[cfg(target_os = "linux")]
+fn convert_native(
+    data: &[u8],
+    cancellation: &Cancellation,
+) -> Result<(&'static str, Vec<u8>), String> {
+    if super::paths::wsl() {
+        let stdout = run(
+            &mut powershell(POWERSHELL_CONVERT),
+            Some(data.to_vec()),
+            Duration::from_secs(60),
+            cancellation,
+        )?;
+        return windows_converted(stdout);
+    }
+    let mut command = linux_command("convert")?;
+    linux_converted(run(
+        &mut command,
+        Some(data.to_vec()),
+        Duration::from_secs(60),
+        cancellation,
+    )?)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn linux_converted(stdout: Vec<u8>) -> Result<(&'static str, Vec<u8>), String> {
+    let (kind, bytes) = stdout.split_at(stdout.len().min(4));
+    let extension = match kind {
+        b"png\n" => "png",
+        b"jpg\n" => "jpg",
+        _ => return Err("Image conversion failed".into()),
+    };
+    if bytes.is_empty() {
+        return Err("Image conversion failed".into());
+    }
+    Ok((extension, bytes.to_vec()))
+}
+
+#[cfg(target_os = "linux")]
+fn linux_command(action: &str) -> Result<Command, String> {
+    let mut command = Command::new(crate::native::helper("clipboard_linux")?);
+    command.arg(action);
+    Ok(command)
+}
+
 #[cfg(windows)]
 fn clipboard_command() -> Result<(Command, Encoding), String> {
     Ok((powershell(POWERSHELL_CLIPBOARD), Encoding::Base64))
@@ -203,23 +244,8 @@ fn clipboard_command() -> Result<(Command, Encoding), String> {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn clipboard_command() -> Result<(Command, Encoding), String> {
-    if super::paths::wsl() {
-        // Windows interop; fails visibly when interop or the Windows PATH is disabled.
-        return Ok((powershell(POWERSHELL_CLIPBOARD), Encoding::Base64));
-    }
-    let mut command = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        let mut command = Command::new("wl-paste");
-        command.args(["--no-newline", "--type", "image/png"]);
-        command
-    } else if std::env::var_os("DISPLAY").is_some() {
-        let mut command = Command::new("xclip");
-        command.args(["-selection", "clipboard", "-target", "image/png", "-out"]);
-        command
-    } else {
-        return Err("No graphical clipboard is available".into());
-    };
-    command.env("LC_ALL", "C");
-    Ok((command, Encoding::Raw))
+    // Called only for WSL, whose clipboard is owned by Windows interop.
+    Ok((powershell(POWERSHELL_CLIPBOARD), Encoding::Base64))
 }
 
 #[cfg(target_os = "macos")]
@@ -316,6 +342,12 @@ mod tests {
             ("jpg", vec![0xff, 0xd8, 0xff])
         );
         assert!(windows_converted(b"exe\nAAAA".to_vec()).is_err());
+        assert_eq!(
+            linux_converted(b"png\n\x89PNG".to_vec()).unwrap(),
+            ("png", b"\x89PNG".to_vec())
+        );
+        assert!(linux_converted(b"png\n".to_vec()).is_err());
+        assert!(linux_converted(b"other\nimage".to_vec()).is_err());
     }
 
     /// An uncompressed 24-bit BMP, a format providers do not take directly.
@@ -334,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "runs the native image converter (PowerShell on Windows and WSL, sips on macOS)"]
+    #[ignore = "runs the native image converter on the host"]
     fn native_conversion_bounds_unsupported_images() {
         let (extension, png) = convert(&bmp(3000, 10), &Cancellation::default()).unwrap();
         assert_eq!(extension, "png");
@@ -373,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "runs the native image converter (PowerShell on Windows and WSL, sips on macOS)"]
+    #[ignore = "runs the native image converter on the host"]
     fn native_imports_skip_unused_or_too_large_views() {
         let (_, png) = convert(&bmp(3000, 10), &Cancellation::default()).unwrap();
         let root = crate::test_support::Directory::new();

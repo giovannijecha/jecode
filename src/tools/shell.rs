@@ -19,6 +19,7 @@ pub(super) struct Context<'a> {
     pub outputs: &'a crate::output::Store,
     pub temporary: Option<&'a Path>,
     pub processes: &'a super::processes::Registry,
+    pub sandbox: Option<&'a crate::sandbox::Policy>,
 }
 
 pub(super) fn execute(
@@ -34,7 +35,7 @@ pub(super) fn execute(
     if text.contains('\0') {
         return Err("command must not contain NUL characters".into());
     }
-    let command = command(context.bash, context.root, text, context.temporary);
+    let command = command(context.bash, context.root, text, context.temporary)?;
     execute_command(context, arguments, cancellation, command, None, text)
 }
 
@@ -48,8 +49,12 @@ pub(super) fn execute_command(
     label: &str,
 ) -> Result<Value, String> {
     let Context {
-        outputs, processes, ..
+        outputs,
+        processes,
+        sandbox,
+        ..
     } = context;
+    crate::sandbox::apply(&mut command, sandbox)?;
     let wait = super::processes::wait_argument(arguments)?;
     let output_limit = super::processes::output_limit(arguments)?;
     let timeout = timeout_argument(arguments)?;
@@ -235,19 +240,14 @@ fn unknown_outcome(message: &str, [stdout_ref, stderr_ref]: [String; 2]) -> Valu
     ])
 }
 
-fn command(bash: &Path, root: &Path, text: &str, temporary: Option<&Path>) -> Command {
-    // Git Bash shares its TEMP-derived /tmp mount across live MSYS processes.
-    // Initialize it from the inherited environment before exporting a session
-    // path that can disappear when that session is deleted.
-    #[cfg(windows)]
-    let script =
-        temporary.map(|_| format!("export TEMP=\"$JECODE_TMP\" TMP=\"$JECODE_TMP\"\n{text}"));
-    #[cfg(windows)]
-    let text = script.as_deref().unwrap_or(text);
-    let mut command = Command::new(bash);
-    command.args(["--noprofile", "--norc"]);
+fn command(
+    _bash: &Path,
+    root: &Path,
+    text: &str,
+    temporary: Option<&Path>,
+) -> Result<Command, String> {
+    let mut command = crate::shell::command(text)?;
     command
-        .args(["-c", text])
         .current_dir(root)
         .env_remove("BASH_ENV")
         .env_remove("ENV")
@@ -258,43 +258,15 @@ fn command(bash: &Path, root: &Path, text: &str, temporary: Option<&Path>) -> Co
         let temporary = crate::scratch::environment_path(temporary);
         command
             .env("JECODE_TMP", &temporary)
-            .env("TMPDIR", &temporary);
-        #[cfg(not(windows))]
-        command.env("TEMP", &temporary).env("TMP", &temporary);
+            .env("TMPDIR", &temporary)
+            .env("TEMP", &temporary)
+            .env("TMP", &temporary);
     }
-    command
+    Ok(command)
 }
 
 pub fn find_bash() -> Result<PathBuf, String> {
-    if let Some(path) = std::env::var_os("JECODE_BASH") {
-        if path.is_empty() {
-            return Err("JECODE_BASH must name a Bash executable".into());
-        }
-        return Ok(path.into());
-    }
-    #[cfg(windows)]
-    {
-        for variable in [
-            "ProgramW6432",
-            "ProgramFiles",
-            "ProgramFiles(x86)",
-            "LOCALAPPDATA",
-        ] {
-            if let Some(base) = std::env::var_os(variable) {
-                for suffix in ["Git/bin/bash.exe", "Programs/Git/bin/bash.exe"] {
-                    let path = PathBuf::from(&base).join(suffix);
-                    if path.is_file() {
-                        return Ok(path);
-                    }
-                }
-            }
-        }
-        Err("Git Bash was not found. Install Git for Windows or set JECODE_BASH to bash.exe".into())
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(PathBuf::from("bash"))
-    }
+    crate::shell::executable()
 }
 
 #[cfg(test)]
@@ -319,6 +291,7 @@ mod tests {
                 outputs: &outputs,
                 temporary: None,
                 processes: &processes,
+                sandbox: None,
             },
             arguments,
             cancellation,
@@ -408,7 +381,7 @@ mod tests {
     fn shell_does_not_inherit_the_api_key_or_startup_script() {
         let directory = Directory::new();
         let bash = find_bash().unwrap();
-        let command = command(&bash, directory.path(), "true", None);
+        let command = command(&bash, directory.path(), "true", None).unwrap();
         for variable in ["OPENROUTER_API_KEY", "BASH_ENV", "ENV"] {
             assert!(
                 command

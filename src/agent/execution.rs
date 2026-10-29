@@ -1,4 +1,5 @@
 use super::Agent;
+use super::permission::Gate;
 use super::timing::Clock;
 use crate::{
     backend::ToolCall,
@@ -30,7 +31,11 @@ impl Agent {
                 self.cancel_calls(&calls[index..]);
                 return Err("Operation cancelled".into());
             }
-            let selected = mode(&calls[index]);
+            let selected = if self.gated(&calls[index]) {
+                Mode::Serial
+            } else {
+                mode(&calls[index])
+            };
             let end = if selected == Mode::Serial {
                 index + 1
             } else {
@@ -38,7 +43,7 @@ impl Agent {
                     + calls[index..]
                         .iter()
                         .take(MAX_PARALLEL_CALLS)
-                        .take_while(|call| mode(call) == selected)
+                        .take_while(|call| mode(call) == selected && !self.gated(call))
                         .count()
             };
             if end - index >= 2 {
@@ -74,10 +79,23 @@ impl Agent {
             return Err(error);
         }
         let running = self.collaboration.call();
-        let begun = self
-            .tools
-            .begin_cancellable(&call.name, &call.arguments, &self.cancellation);
-        if let Some(note) = begun.note()
+        let (begun, refused) = match self.permit(call, events) {
+            Gate::Run {
+                base,
+                access,
+                level,
+            } => (
+                Some(
+                    self.tools
+                        .begin_cancellable(&call.name, &call.arguments, &self.cancellation)
+                        .with_base(base)
+                        .with_permission(level, access),
+                ),
+                None,
+            ),
+            Gate::Done(result) => (None, Some(result)),
+        };
+        if let Some(note) = begun.as_ref().and_then(Begun::note)
             && let Err(error) = events.emit(Event::ToolNote {
                 id: self.redact(&call.id),
                 text: self.redact(&note),
@@ -88,13 +106,18 @@ impl Agent {
             return Err(error);
         }
         let executing = Instant::now();
-        let outcome = if call.name == "ask_user" {
+        let outcome = if let Some(result) = refused {
+            Execution {
+                result,
+                change: None,
+            }
+        } else if call.name == "ask_user" {
             Execution {
                 result: self.ask_tool(call, events),
                 change: None,
             }
         } else {
-            self.execute_tool_with_change(call, begun)
+            self.execute_tool_with_change(call, begun.unwrap_or_default())
         };
         if call.name == "ask_user" && self.questions.is_suspended() {
             // The question resumes alone; later calls in the turn never ran.
@@ -265,6 +288,8 @@ fn run_parallel_calls(
 
 #[cfg(test)]
 mod provider_tests;
+#[cfg(all(test, windows))]
+mod sandbox_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

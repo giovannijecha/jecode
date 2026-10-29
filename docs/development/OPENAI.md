@@ -35,14 +35,15 @@ reuse a Codex client ID, or depend on the Codex CLI or app-server.
   expiry together. Preserve account/workspace separation and the verified ID
   token in the local account record. Never log credentials.
 
-The native crypto boundary uses Windows PowerShell/.NET for secure random
-bytes, SHA-256 and RSA signature verification. Unix requires the installed
-`openssl` executable. HTTPS uses system curl 8.3+ with certificate verification;
-token request bodies travel through stdin and inference bearer tokens through
-the curl child's environment. Cancellation and timeouts bound these operations.
-No external Rust crate or copied cryptographic implementation is used.
-Only `JECODE_OPENAI_ACCESS_TOKEN` is reserved for Jecode's OpenAI transport;
-unrelated `OPENAI_API_KEY` and `ACCESS_TOKEN` variables remain available to tools.
+The native crypto boundary uses Windows .NET cryptography, macOS Security and
+CommonCrypto, or the OS-supplied Linux libcrypto ABI for secure random bytes,
+SHA-256 and RSA signature verification. Native HTTPS uses Windows WinHTTP,
+Foundation URLSession or Linux sockets with OS libssl certificate and hostname
+verification. Owned adapters are compiled and embedded at build time. Request
+bodies and bearer tokens travel to the adapter on stdin, never in arguments or
+files. Cancellation and timeouts bound these operations. No external Rust crate
+or copied cryptographic implementation is used. Unrelated `OPENAI_API_KEY` and
+`ACCESS_TOKEN` variables remain available to tools.
 
 Account records are plaintext JSON under `~/.jecode/accounts/openai/`, separately
 from `config.json`. Unix uses `0700` directories and `0600` files; Windows applies an

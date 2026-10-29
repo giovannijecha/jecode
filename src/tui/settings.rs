@@ -6,6 +6,8 @@ use super::{
 };
 use crate::{backend, effort::Effort};
 
+mod auto_compact;
+
 impl App {
     pub(super) fn choose(&mut self, choice: Choice) -> Result<(), String> {
         let menu = self.state.selector.take().unwrap();
@@ -113,6 +115,11 @@ impl App {
                         effort: None,
                     }),
                     Setting::Routing => self.open_routing(true),
+                    Setting::Permissions => {
+                        self.state.selector = Some(Selector::default_permissions(
+                            self.config.settings.default_permissions,
+                        ))
+                    }
                     Setting::AutoCompact => {
                         self.state.selector =
                             Some(Selector::auto_compact(self.config.settings.auto_compact))
@@ -122,6 +129,12 @@ impl App {
                     }
                 }
             }
+            (
+                _,
+                Purpose::Permissions { .. }
+                | Purpose::DefaultPermissions
+                | Purpose::Remembered { .. },
+            ) => self.choose_permissions(choice, menu),
             _ => {
                 self.state.selector = Some(menu);
             }
@@ -466,53 +479,5 @@ impl App {
             }
         }
         self.state.selector = Some(menu);
-    }
-
-    /// Saves the threshold, then applies it to the active conversation. An
-    /// invalid value keeps the panel open; a failed save keeps both unchanged.
-    pub(super) fn save_auto_compact(&mut self) {
-        let text = &self.state.selector.as_ref().unwrap().editor.text;
-        let text = text.trim();
-        let percent = text
-            .strip_suffix('%')
-            .unwrap_or(text)
-            .trim_end()
-            .parse::<usize>()
-            .map_err(|_| "Auto-compact must be a whole percentage from 1 to 99".to_string())
-            .and_then(crate::context::auto_compact_percent);
-        let percent = match percent {
-            Ok(percent) => percent,
-            Err(error) => return self.warn(&format!("{error} · previous setting kept")),
-        };
-        self.state.selector = None;
-        let mut settings = self.config.settings.clone();
-        settings.auto_compact = percent;
-        let first_setup = !settings.has_model();
-        let saved = if first_setup {
-            Ok(())
-        } else {
-            self.config.store.save(&settings)
-        };
-        match saved {
-            Ok(()) => {
-                let previous = self.config.settings.auto_compact;
-                self.config.settings = settings;
-                self.defer(Deferred::AutoCompact);
-                self.refresh_context();
-                self.finish_setting_change(
-                    Kind::Notice,
-                    &format!(
-                        "Auto-compact: {previous}% → {percent}% · {}",
-                        if first_setup {
-                            "this session · choose a default model to save"
-                        } else {
-                            "this and new conversations"
-                        }
-                    ),
-                    vec![],
-                );
-            }
-            Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
-        }
     }
 }

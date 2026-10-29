@@ -7,10 +7,7 @@ fn keep_shell_alive(tools: &Tools, marker: &str) {
     let result = tools.execute(
         "bash",
         &Value::object([
-            (
-                "command",
-                Value::string(format!(": > {marker}; while :; do sleep 1; done")),
-            ),
+            ("command", Value::string(format!(": > {marker}; sleep 10"))),
             ("wait_ms", Value::number(0)),
         ])
         .encode(),
@@ -27,7 +24,7 @@ fn keep_shell_alive(tools: &Tools, marker: &str) {
 }
 
 #[test]
-fn deleting_a_session_does_not_break_another_shells_temporary_mount() {
+fn deleting_a_session_does_not_break_another_shells_temporary_directory() {
     let project = Directory::new();
     let first_home = Directory::new();
     let temporary = Store::new(first_home.path().join("user data"), project.path())
@@ -40,9 +37,16 @@ fn deleting_a_session_does_not_break_another_shells_temporary_mount() {
     first.configure_temporary(temporary);
     keep_shell_alive(&first, "first-ready");
 
-    // Keep the MSYS runtime alive while its first session and TEMP disappear.
+    // A running command in another session retains its own temporary area.
+    let other_home = Directory::new();
+    let other_temporary = Store::new(other_home.path().join("user data"), project.path())
+        .unwrap()
+        .temporary_area("123-42-1")
+        .unwrap();
+    let other_root = other_temporary.ensure().unwrap();
     let mut other = Tools::new(project.path()).unwrap();
-    other.configure_output(project.path().join("logs"), Redactor::empty());
+    other.configure_output(other_home.path().join("logs"), Redactor::empty());
+    other.configure_temporary(other_temporary);
     keep_shell_alive(&other, "other-ready");
     drop(first);
     drop(first_home);
@@ -52,7 +56,7 @@ fn deleting_a_session_does_not_break_another_shells_temporary_mount() {
         "bash",
         &Value::object([(
             "command",
-            Value::string("test -d /tmp && printf tmp-present"),
+            Value::string("test -d \"$JECODE_TMP\" && printf tmp-present"),
         )])
         .encode(),
     );
@@ -62,6 +66,7 @@ fn deleting_a_session_does_not_break_another_shells_temporary_mount() {
         result.get("stdout").and_then(Value::as_str),
         Some("tmp-present")
     );
+    assert!(other_root.exists());
     // The other command keeps running across session deletion.
     assert!(
         other

@@ -24,7 +24,7 @@ fn system_environment_identifies_host_and_bash_shell() {
     );
     assert_eq!(
         environment.get("command_shell").and_then(Value::as_str),
-        Some("Bash")
+        Some("Jecode shell")
     );
     assert!(content.contains("Text that describes a tool call"));
     assert!(content.contains("optional description argument"));

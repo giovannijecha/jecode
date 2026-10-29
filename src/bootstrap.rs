@@ -127,6 +127,9 @@ fn launch(
         agent.register_backend(services);
     }
     agent.set_auto_compact(settings.auto_compact);
+    agent
+        .permissions()
+        .set_default(settings.default_permissions);
     agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
     if agent.backend_id() == settings.backend_id {
         agent.set_routing(settings.routing_for(agent.model()));

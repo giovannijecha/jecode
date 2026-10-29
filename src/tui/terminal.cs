@@ -43,6 +43,18 @@ public static class JecodeConsole {
     }
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetConsoleScreenBufferInfo(IntPtr handle, out ScreenInfo info);
+    [StructLayout(LayoutKind.Sequential)]
+    struct ScreenInfoEx {
+        public uint Size;
+        public short Width, Height, CursorX, CursorY;
+        public ushort Attributes;
+        public short Left, Top, Right, Bottom, MaximumX, MaximumY;
+        public ushort PopupAttributes;
+        public int FullscreenSupported;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public uint[] ColorTable;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetConsoleScreenBufferInfoEx(IntPtr handle, ref ScreenInfoEx info);
 
     static void Check(bool success, string operation = "input") {
         if (!success) throw new IOException("Windows console " + operation + " error " + Marshal.GetLastWin32Error());
@@ -264,6 +276,16 @@ public static class JecodeConsole {
             Check(GetConsoleMode(output, out outputMode), "read output mode");
             uint codePage = GetConsoleOutputCP();
             writer.WriteLine("R|" + inputMode + "|" + outputMode + "|" + codePage);
+            // The main screen's palette is a fallback when the host does not
+            // answer OSC 11. COLORREF stores red in the low byte.
+            var palette = new ScreenInfoEx();
+            palette.Size = (uint)Marshal.SizeOf(typeof(ScreenInfoEx));
+            palette.ColorTable = new uint[16];
+            string background = null;
+            if (GetConsoleScreenBufferInfoEx(output, ref palette)) {
+                uint color = palette.ColorTable[(palette.Attributes >> 4) & 15];
+                background = (color & 255) + "|" + ((color >> 8) & 255) + "|" + ((color >> 16) & 255);
+            }
             try {
                 // No line buffering, echo, Ctrl+C processing, quick edit or VT key conversion.
                 Check(SetConsoleMode(input, (inputMode & ~0x247u) | 0x98u));
@@ -285,6 +307,7 @@ public static class JecodeConsole {
                     if (current != size) {
                         size = current;
                         writer.WriteLine("S|" + size);
+                        if (background != null) { writer.WriteLine("B|" + background); background = null; }
                     }
                     uint available;
                     Check(GetNumberOfConsoleInputEvents(input, out available));

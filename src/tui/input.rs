@@ -12,6 +12,14 @@ impl App {
             }
         }
         let decoded = match decoded {
+            // Only an explicitly typed shortcut can decide a request.
+            Decoded::Text(text) if self.state.permission.is_some() => {
+                self.permission_text(&text);
+                return Ok(false);
+            }
+            Decoded::Paste(_) | Decoded::Error if self.state.permission.is_some() => {
+                return Ok(false);
+            }
             // Terminals deliver a file drop as a paste of its paths.
             // The process panel keeps typed and pasted text out of the hidden
             // draft.
@@ -31,8 +39,12 @@ impl App {
                 self.agents_text(&text);
                 return Ok(false);
             }
-            Decoded::Text(text) | Decoded::Paste(text) if self.state.ask_panel.is_some() => {
-                self.ask_text(&text);
+            Decoded::Text(text) if self.state.ask_panel.is_some() => {
+                self.ask_text(&text, false);
+                return Ok(false);
+            }
+            Decoded::Paste(text) if self.state.ask_panel.is_some() => {
+                self.ask_text(&text, true);
                 return Ok(false);
             }
             // The Todo menu has nothing to type into.
@@ -134,6 +146,10 @@ impl App {
             return Ok(false);
         }
         if self.inspect_key(key) {
+            return Ok(false);
+        }
+        if self.state.permission.is_some() {
+            self.permission_key(key);
             return Ok(false);
         }
         if self.state.processes.is_some() {
@@ -318,11 +334,13 @@ impl App {
         if self.deletion_job.is_some() {
             return Ok(false);
         }
-        let menu = self.state.selector.as_mut().unwrap();
         if key.code == 68 && key.ctrl() && !key.alt() && !key.shift() {
-            menu.toggle_delete();
+            if !self.revoke_grant() {
+                self.state.selector.as_mut().unwrap().toggle_delete();
+            }
             return Ok(false);
         }
+        let menu = self.state.selector.as_mut().unwrap();
         match key.code {
             38 | 40 => menu.move_selection(key.code == 38),
             13 if !key.shift() && !key.alt() && !key.ctrl() => {
@@ -390,7 +408,7 @@ impl App {
             self.state.selector = None;
             return;
         }
-        if self.close_provider_panel() {
+        if self.close_provider_panel() || self.close_permissions_menu() {
             return;
         }
         drop(self.job.take());

@@ -127,6 +127,13 @@ fn aside(menu: &Selector) -> Line {
         Purpose::Routing { entries, .. } if entries.iter().any(|entry| entry.metrics.is_some()) => {
             "30-min medians · $/M after discounts".into()
         }
+        Purpose::Permissions { default } => format!("new conversations use {}", default.name()),
+        Purpose::DefaultPermissions => "new conversations".into(),
+        Purpose::Remembered {
+            paused: Some(level),
+            ..
+        } => format!("paused at {}", level.name()),
+        Purpose::Remembered { .. } => "this conversation".into(),
         Purpose::Key => "~/.jecode/config.json".into(),
         Purpose::AutoCompact => "this and new conversations".into(),
         Purpose::Drafts { .. } => {
@@ -182,7 +189,9 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
                 width,
             );
         }
-        Purpose::Sessions { .. } | Purpose::Drafts { .. } if menu.options.is_empty() => {
+        Purpose::Sessions { .. } | Purpose::Drafts { .. } | Purpose::Remembered { .. }
+            if menu.options.is_empty() =>
+        {
             close.to_vec()
         }
         Purpose::Sessions { .. } => vec![
@@ -203,6 +212,11 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
             keys.extend([key("Ctrl+D", "discard"), close[0]]);
             keys
         }
+        Purpose::Remembered { .. } => vec![
+            key("↑↓", "move").optional(),
+            key("Ctrl+D", "revoke"),
+            close[0],
+        ],
         Purpose::Key => vec![key("Enter", "validate and save"), close[0]],
         Purpose::AutoCompact => vec![key("Enter", "save"), close[0]],
         Purpose::Loading if menu.title == "Sign out" => vec![],
@@ -215,7 +229,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
         Purpose::Copy => vec![key("↑↓", "move").optional(), key("Enter", "copy"), close[0]],
         _ => vec![
             key("↑↓", "move").optional(),
-            key("Enter", "select"),
+            key("Enter", "choose"),
             close[0],
         ],
     };
@@ -237,6 +251,8 @@ fn list(menu: &Selector, columns: usize, room: usize) -> Vec<(Line, Part)> {
         Some("No saved conversations")
     } else if menu.options.is_empty() && matches!(menu.purpose, Purpose::Drafts { .. }) {
         Some("No pending drafts")
+    } else if menu.options.is_empty() && matches!(menu.purpose, Purpose::Remembered { .. }) {
+        Some("Nothing remembered")
     } else if menu.filtered.is_empty() {
         Some("No matching option")
     } else {
@@ -277,12 +293,13 @@ fn list(menu: &Selector, columns: usize, room: usize) -> Vec<(Line, Part)> {
                     let width = table_width(menu, columns);
                     let option = &menu.options[hit.index];
                     let row = panel::fit(table.row(&entries[hit.index], width), width, None);
-                    let mut line = panel::marker(on, false).append(row);
-                    if option.badge.is_some() {
-                        line.push("  ", MUTED);
-                        line = line.append(badge(option.badge.as_ref()));
-                    }
-                    line
+                    panel::option(
+                        row,
+                        badge(option.badge.as_ref()),
+                        on,
+                        false,
+                        columns.saturating_sub(2),
+                    )
                 }
                 None => option(menu, hit, on, names, columns),
             };
@@ -345,7 +362,7 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
     let value = &menu.options[hit.index];
     let deleting = menu.delete_target() == Some(hit.index);
     let end = columns.saturating_sub(2);
-    let mut line = panel::marker(on, deleting);
+    let mut line = Line::default();
     let style = if deleting {
         BAD
     } else if matches!(menu.purpose, Purpose::Drafts { .. }) {
@@ -371,15 +388,32 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
     };
     // A fact shows only with room for a few of its cells.
     if !fact.is_empty() && room >= column + 6 {
-        line = panel::fit(line, 2 + column, None);
-        highlighted(
-            &mut line,
-            &text::ellipsize(&fact, room - column),
-            &hit.fact,
-            tone,
-        );
+        line = panel::fit(line, column, None);
+        let fact = match &menu.purpose {
+            Purpose::Remembered { display, .. } => grant_fact(&display[hit.index], room - column),
+            _ => text::ellipsize(&fact, room - column),
+        };
+        highlighted(&mut line, &fact, &hit.fact, tone);
     }
-    panel::spread(line, right, end, None)
+    panel::option(line, right, on, deleting, end)
+}
+
+/// A path shortened from the left so the file name stays; a command whole,
+/// with its folder shortened.
+fn grant_fact(grant: &crate::permissions::Grant, room: usize) -> String {
+    let target = text::clean(&grant.target);
+    if grant.kind != crate::permissions::Kind::Runs {
+        return text::ellipsize_start(&super::footer::path(&target), room);
+    }
+    let Some(place) = &grant.place else {
+        return text::ellipsize(&target, room);
+    };
+    let rest = room.saturating_sub(text::cells(&target) + 4);
+    if rest < 4 {
+        return text::ellipsize(&target, room);
+    }
+    let place = text::ellipsize_start(&super::footer::path(place), rest);
+    format!("{target} in {place}")
 }
 
 pub(super) fn badge(badge: Option<&Badge>) -> Line {

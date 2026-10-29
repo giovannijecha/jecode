@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $InstallRoot,
+    [string] $BinaryPath,
     [switch] $NoPath
 )
 
@@ -10,45 +11,15 @@ Set-StrictMode -Version Latest
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw 'INSTALL.ps1 supports Windows. See README.md for other platforms.'
 }
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    throw 'Cargo was not found. Install the Rust toolchain, open a new terminal, and retry.'
+if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
+    $BinaryPath = Join-Path $PSScriptRoot 'jecode.exe'
 }
-$curlExecutable = $null
-if (-not [string]::IsNullOrEmpty($env:JECODE_CURL)) {
-    $curlExecutable = $env:JECODE_CURL
+if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
+    throw 'This installer needs the prebuilt jecode.exe supplied in the platform package. Building from source is a separate developer operation.'
 }
-if (-not $curlExecutable -and -not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
-    $systemCurl = Join-Path $env:SystemRoot 'System32/curl.exe'
-    if (Test-Path -LiteralPath $systemCurl -PathType Leaf) {
-        $curlExecutable = $systemCurl
-    }
-}
-if (-not $curlExecutable) {
-    $curlCommand = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
-    if ($curlCommand) { $curlExecutable = $curlCommand.Source }
-}
-if (-not $curlExecutable) {
-    throw 'curl was not found. Install an HTTPS-enabled curl 8.3 or newer and retry.'
-}
-if (-not (Get-Command $curlExecutable -CommandType Application -ErrorAction SilentlyContinue)) {
-    throw "Selected curl was not found: $curlExecutable. Check JECODE_CURL or PATH and retry."
-}
-$curlDetails = @(& $curlExecutable --version 2>&1)
-if ($LASTEXITCODE -ne 0 -or $curlDetails.Count -eq 0) {
-    throw "Could not inspect curl at $curlExecutable. Install an HTTPS-enabled curl 8.3 or newer and retry."
-}
-$curlBanner = [string] $curlDetails[0]
-$curlVersion = [regex]::Match($curlBanner, '^curl (\d+)\.(\d+)\.(\d+)(?:\s|$)')
-if (-not $curlVersion.Success -or
-    [int] $curlVersion.Groups[1].Value -lt 8 -or
-    ([int] $curlVersion.Groups[1].Value -eq 8 -and [int] $curlVersion.Groups[2].Value -lt 3)) {
-    throw "curl at $curlExecutable must be version 8.3 or newer. Found: $curlBanner"
-}
-$protocolLine = @($curlDetails | Where-Object { [string] $_ -match '^Protocols:' })
-$protocols = if ($protocolLine.Count) { ([string] $protocolLine[0] -replace '^Protocols:\s*', '') -split '\s+' } else { @() }
-if ($protocols -cnotcontains 'https') {
-    throw "curl at $curlExecutable lacks HTTPS support. Install an HTTPS-enabled curl 8.3 or newer and retry."
-}
+$BinaryPath = (Resolve-Path -LiteralPath $BinaryPath).Path
+& $BinaryPath --version
+if ($LASTEXITCODE -ne 0) { throw 'The supplied executable could not start.' }
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw 'LOCALAPPDATA is unavailable. Supply an absolute -InstallRoot directory.'
@@ -72,45 +43,45 @@ if (Test-Path -LiteralPath $ownerFile) {
     throw "An unrecognized jecode.exe already exists in $binaryDirectory. Choose another -InstallRoot."
 }
 
-Write-Host 'Building and installing Jecode locally (offline)...'
-$cargoArguments = @('install', '--path', $PSScriptRoot, '--locked', '--offline', '--root', $InstallRoot, '--force')
-$linkerVariable = 'CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER'
-$previousLinker = [Environment]::GetEnvironmentVariable($linkerVariable, 'Process')
-Push-Location -LiteralPath $PSScriptRoot
-try {
-    # Prefer the installed Windows toolchain used by CI. An unqualified channel
-    # otherwise resolves to rustup's default host, which may require Visual C++.
-    if (Get-Command rustup -ErrorAction SilentlyContinue) {
-        $toolchainFile = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'rust-toolchain.toml'))
-        $channel = [regex]::Match($toolchainFile, '(?m)^\s*channel\s*=\s*"([^"]+)"').Groups[1].Value
-        $windowsToolchain = "$channel-x86_64-pc-windows-gnullvm"
-        $installedToolchains = @(& rustup toolchain list)
-        if ($LASTEXITCODE -ne 0) { throw 'Could not list the installed Rust toolchains.' }
-        if ($installedToolchains -match ('^' + [regex]::Escape($windowsToolchain) + '(\s|$)')) {
-            $sysroot = & rustup run $windowsToolchain rustc --print sysroot
-            if ($LASTEXITCODE -ne 0) { throw 'Could not locate the Windows Rust toolchain.' }
-            $bundledLinker = Join-Path $sysroot 'lib/rustlib/x86_64-pc-windows-gnullvm/bin/rust-lld.exe'
-            if (-not (Test-Path -LiteralPath $bundledLinker -PathType Leaf)) {
-                throw "The bundled Windows linker is missing from $windowsToolchain. Repair this Rust toolchain and retry."
-            }
-            [Environment]::SetEnvironmentVariable($linkerVariable, $bundledLinker, 'Process')
-            $cargoArguments = @('run', $windowsToolchain, 'cargo') + $cargoArguments + @('--target', 'x86_64-pc-windows-gnullvm')
-            Write-Host "Rust toolchain: $windowsToolchain (bundled linker)"
-            & rustup @cargoArguments
-        } else {
-            & cargo @cargoArguments
-        }
-    } else {
-        & cargo @cargoArguments
+[IO.Directory]::CreateDirectory($binaryDirectory) | Out-Null
+if (-not [IO.File]::Exists($ownerFile)) {
+    $markerStage = Join-Path $InstallRoot ('.jecode-marker-' + [Guid]::NewGuid().ToString('N'))
+    $markerOwned = $false
+    try {
+        $markerStream = [IO.File]::Open($markerStage, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $markerOwned = $true
+        try {
+            $markerBytes = [Text.Encoding]::UTF8.GetBytes($ownerValue + [Environment]::NewLine)
+            $markerStream.Write($markerBytes, 0, $markerBytes.Length)
+            $markerStream.Flush($true)
+        } finally { $markerStream.Dispose() }
+        [IO.File]::Move($markerStage, $ownerFile)
+    } finally {
+        if ($markerOwned -and [IO.File]::Exists($markerStage)) { [IO.File]::Delete($markerStage) }
     }
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Cargo installation failed. The PATH was left unchanged.'
-    }
-} finally {
-    [Environment]::SetEnvironmentVariable($linkerVariable, $previousLinker, 'Process')
-    Pop-Location
 }
-[IO.File]::WriteAllText($ownerFile, $ownerValue + [Environment]::NewLine)
+if (-not $BinaryPath.Equals($installedBinary, [StringComparison]::OrdinalIgnoreCase)) {
+    $stagedBinary = Join-Path $binaryDirectory ('jecode-' + [Guid]::NewGuid().ToString('N') + '.exe')
+    $stageOwned = $false
+    try {
+        $stageStream = [IO.File]::Open($stagedBinary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stageOwned = $true
+        try {
+            $sourceStream = [IO.File]::OpenRead($BinaryPath)
+            try { $sourceStream.CopyTo($stageStream) } finally { $sourceStream.Dispose() }
+            $stageStream.Flush($true)
+        } finally { $stageStream.Dispose() }
+        & $stagedBinary --version
+        if ($LASTEXITCODE -ne 0) { throw 'The staged executable could not start.' }
+        if (Test-Path -LiteralPath $installedBinary) {
+            [IO.File]::Replace($stagedBinary, $installedBinary, [NullString]::Value)
+        } else {
+            [IO.File]::Move($stagedBinary, $installedBinary)
+        }
+    } finally {
+        if ($stageOwned -and [IO.File]::Exists($stagedBinary)) { [IO.File]::Delete($stagedBinary) }
+    }
+}
 & $installedBinary --version
 if ($LASTEXITCODE -ne 0) {
     throw 'The installed executable could not start. The PATH was left unchanged.'

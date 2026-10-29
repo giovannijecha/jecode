@@ -1,4 +1,4 @@
-//! Local HTTP retrieval using the system curl executable. No provider transport is involved.
+//! Local HTTP retrieval through the native OS adapter.
 
 mod crawl;
 mod html;

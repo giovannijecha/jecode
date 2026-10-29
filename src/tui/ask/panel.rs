@@ -126,6 +126,16 @@ impl Panel {
         }
     }
 
+    /// A waiting question must not turn an Enter meant for a hidden chat draft
+    /// into a choice. No option has the cursor until an arrow or number acts.
+    pub fn protect_arrival(&mut self, request: &Request) {
+        let question = &request.questions[self.step];
+        let entry = &mut self.entries[self.step];
+        if !question.options.is_empty() && entry.picked.is_empty() && !entry.other {
+            entry.row = usize::MAX;
+        }
+    }
+
     pub fn draft(&self, request: &Request) -> Draft {
         Draft {
             id: request.id.clone(),
@@ -143,7 +153,7 @@ impl Panel {
                     other: entry.other,
                     text: entry.editor.text.clone(),
                     caret: entry.editor.cursor,
-                    row: entry.row,
+                    row: entry.row.min(question.options.len()),
                 })
                 .collect(),
         }
@@ -180,7 +190,9 @@ impl Panel {
     /// Moves the cursor between answer rows; nothing is selected.
     pub fn move_row(&mut self, question: &Question, up: bool) -> bool {
         let entry = &mut self.entries[self.step];
-        let row = if up {
+        let row = if entry.row == usize::MAX {
+            0
+        } else if up {
             entry.row.saturating_sub(1)
         } else {
             (entry.row + 1).min(question.options.len())
@@ -198,6 +210,9 @@ impl Panel {
     /// toggles it. Elsewhere Space is typed.
     pub fn select(&mut self, question: &Question) -> bool {
         let entry = &mut self.entries[self.step];
+        if entry.row == usize::MAX {
+            return false;
+        }
         if entry.in_text(question) {
             return false;
         }
@@ -220,6 +235,9 @@ impl Panel {
     /// when the cursor is on empty own words.
     pub fn choose(&mut self, question: &Question) -> bool {
         let entry = &mut self.entries[self.step];
+        if entry.row == usize::MAX {
+            return false;
+        }
         if entry.in_text(question) {
             entry.typed(question);
             return entry.other;

@@ -46,6 +46,7 @@ fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            Default::default(),
             std::path::Path::new("fixture/config.json"),
         ),
         Selector::models(&models, false, "fixture/model-1"),
@@ -213,6 +214,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            Default::default(),
             std::path::Path::new("fixture/config.json"),
         )),
         notice: Some(crate::tui::Feedback::result(
@@ -444,4 +446,37 @@ fn options_align_facts_in_one_column_and_mark_the_current_choice() {
         "{rows:#?}"
     );
     assert!(rows.iter().any(|row| row.contains("Short")), "{rows:#?}");
+}
+
+#[test]
+fn narrow_key_rows_keep_enter_and_escape_before_movement() {
+    let hints = [
+        panel::key("Enter", "open"),
+        panel::key("↑↓", "move"),
+        panel::key("Esc", "close"),
+    ];
+    for width in [30, 36] {
+        let one = panel::row(&hints, width).plain();
+        let many = panel::keys(&hints, width, true)
+            .into_iter()
+            .map(|line| line.plain())
+            .collect::<Vec<_>>()
+            .join(" ");
+        for rendered in [one, many] {
+            assert!(
+                rendered.contains("Enter") && rendered.contains("Esc"),
+                "{rendered}"
+            );
+            assert!(!rendered.contains("move"), "{rendered}");
+        }
+    }
+
+    let wide_labels = [
+        panel::key("Enter", "approve and remember"),
+        panel::key("↑↓", "move"),
+        panel::key("Esc", "close"),
+    ];
+    let one = panel::row(&wide_labels, 48).plain();
+    assert!(one.contains("Enter") && one.contains("Esc"), "{one}");
+    assert!(!one.contains("move"), "{one}");
 }

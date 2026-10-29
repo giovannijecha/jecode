@@ -17,26 +17,30 @@ mod console;
 mod context;
 mod conversation;
 mod copy;
-mod curl;
 mod disk;
 mod effort;
 mod events;
 mod export;
 mod file_change;
+mod http;
 mod identity;
 mod inbox;
 mod input;
 mod json;
+mod native;
 mod output;
 mod path_filter;
+mod permissions;
 mod process;
 mod project_map;
 mod pty;
 mod redact;
+mod sandbox;
 mod scratch;
 mod session;
 mod sessions;
 mod setup;
+mod shell;
 mod skills;
 mod todo;
 mod tools;
@@ -50,7 +54,14 @@ mod test_support;
 use cli::Action;
 use std::process::ExitCode;
 
+fn shell_executable() -> Result<std::path::PathBuf, String> {
+    native::helper("shell")
+}
+
 fn main() -> ExitCode {
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--internal-shell")) {
+        return ExitCode::from(shell::run_entry(std::env::args_os().skip(2)) as u8);
+    }
     identity::capture();
     let action = match cli::parse(std::env::args_os().skip(1)) {
         Ok(action) => action,

@@ -24,10 +24,10 @@ table lists the other arguments.
 | `read` | `path` | `offset`, `limit`, `byte_offset`, `work`, `description` | Pages UTF-8 text or shows an image/PDF; also reads saved output, history, skills and attachments. |
 | `write` | `path`, `content` | — | Creates or replaces a complete UTF-8 file; returns `bytes_written`. |
 | `edit` | `path`, `edits` | — | Applies one or more exact unique replacements in order, installing the file only after all succeed. Returns `bytes_written`. |
-| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes`, `work`, `description` | Runs a Bash command from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
+| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes`, `work`, `description` | Runs Jecode's [owned command language](SHELL.md) from the project directory. `protect` saves declared files or recursive directory scopes before launch. With `wait_ms`, it returns a persistent `process_id`. |
 | `process` | `action` | `process_id` for actions except `list`; `text` or `key` for `write`; `cols`, `rows` for `resize`; `protect` for `write`/`resize`/`interrupt`; `wait_ms` for `poll`; `output_limit_bytes`, `output_mode`, `work`, `description` | Lists, polls, stops and controls this conversation's persistent processes. |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` | Lists, inspects and restores the before state of individual modifying calls. See [Checkpoints](CHECKPOINTS.md#inspect-and-recover). |
-| `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages with local curl; saves bodies under `tmp:web/`. |
+| `web` | `action`; `url` for `fetch`/`download`, `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin`, `work`, `description` | Fetches HTTP(S) resources and crawls pages through native OS HTTP/TLS; saves bodies under `tmp:web/`. |
 | `browser` | `action`; `url` for `navigate`, `expression` for `evaluate`, `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor`, `work`, `description` | Controls an installed Chromium-based browser through local DevTools; screenshots and logs go under `tmp:browser/`. |
 | `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `protect`, `wait_ms`, `timeout_seconds`, `output_limit_bytes`, `work`, `description` | Runs an executable with separate arguments and no shell parsing. `tty:true` returns a controllable terminal process. |
 | `list` | None | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit`, `work`, `description` | Lists project entries, optionally as a recursive tree, with types and workspace-relative paths. |
@@ -280,7 +280,7 @@ See [TUI theme](../tui/THEME.md) for presentation and controls.
 
 ## Local web and browser tools
 
-`web` uses the system's HTTPS-enabled `curl`, directly from the user's machine.
+`web` uses Jecode's embedded native HTTP adapter and OS TLS APIs.
 `fetch` returns the HTTP status, final URL, MIME type, response size, a text
 preview when available, and a `tmp:web/` path to the complete raw response.
 For text and HTML, extraction reads at most the first 4 MiB of that response;
@@ -418,23 +418,22 @@ output cannot be changed with `write` or `edit`.
 
 For disposable files, use `tmp:relative/path` with the file tools. Its parent
 directories are created as needed, and command tools receive `JECODE_TMP` and
-`TMPDIR` pointing to the session's temporary area. On Unix, `TEMP` and `TMP`
-also point there; on Windows, native `TEMP` and `TMP` stay inherited so Git Bash
-can initialize its shared `/tmp` mount. Bash still starts in
+`TMPDIR`, `TEMP` and `TMP` pointing to the session's temporary area. The shell starts in
 the project directory, so use an explicit path such as `"$JECODE_TMP/check.log"`
 for disposable output. See [Temporary files](TEMPORARY.md) for lifetime and
 cleanup.
 
-## Bash execution and saved output
+## Shell execution and saved output
 
-`bash` starts a fresh `bash -c` process with closed stdin and no shared shell
-state. It has normal system access; the project working directory is not a
-sandbox. Startup profiles are disabled, and Jecode removes `BASH_ENV`, `ENV`,
+`bash` starts Jecode's embedded command interpreter with closed stdin and no
+shared shell state. Its implementation is the same with or without an installed
+shell. Jecode removes `BASH_ENV`, `ENV`,
 `OPENROUTER_API_KEY` and `JECODE_OPENAI_ACCESS_TOKEN` from the command
 environment. No timeout is imposed unless `timeout_seconds` is a positive
 integer, measured from command start.
-Commands use Bash syntax on Windows too; use an explicit PowerShell invocation
-when a PowerShell command is needed.
+See [Jecode shell](SHELL.md) for supported syntax and builtins. Permission levels
+apply to shell commands: Read cannot execute them; Workspace uses supported
+native confinement; Full runs with the invoking user's OS authority.
 
 Without `wait_ms`, the call waits for completion. It returns `exit_code`,
 `cancelled`, `timed_out`, byte counts, and a 16 KiB preview of each stdout/stderr
@@ -469,9 +468,8 @@ Changing `cwd` does not change the project root or checkpoint scope.
 `env` maps names to strings to set or `null` to remove. Jecode removes inherited
 provider credentials first, then applies explicit `env` values. `stdin` sends a
 UTF-8 string and closes the stream; omitted `stdin` closes it immediately.
-Session temporary paths are available as `JECODE_TMP` and `TMPDIR`, with `TEMP`
-and `TMP` also set on Unix. On Windows those two native variables remain
-inherited to preserve Git Bash's `/tmp` mount.
+Session temporary paths are available as `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
+on every platform.
 
 For a command that needs interactive input, set `tty:true`. This always returns
 a persistent `process_id`, even when `wait_ms` is omitted. `stdin` cannot be
@@ -479,10 +477,10 @@ combined with `tty:true`; use `process write` instead. Initial `cols` and `rows`
 default to 80 by 24 and accept values from 1 to 1000.
 Terminal stdout includes the child's stdout and stderr together; the result's
 stderr stream is reserved for terminal bridge diagnostics. Windows uses ConPTY
-on Windows 10 or later. On Unix, Jecode compiles its owned POSIX helper with an
-installed system `cc` on first PTY use. Cleanup enumerates `/proc` on Linux and
-uses `/bin/ps` on macOS.
-The helper is cached afterwards.
+on supported Windows versions. Unix uses Jecode's owned POSIX helper. Both
+adapters are compiled during the package build and embedded in Jecode; there
+is no runtime compiler requirement. Cleanup enumerates `/proc` on Linux and
+uses the system `/bin/ps` on macOS.
 
 Without `tty`, `wait_ms`, timeouts, saved output and previews follow the Bash
 contract above. `protect` uses the same declared workspace paths as Bash; a

@@ -29,6 +29,12 @@ impl Pty {
         let fixture = "tui::terminal::unix::native_tests::native_pty_fixture";
         let run = format!("{executable} --exact {fixture} --ignored --nocapture --test-threads=1");
         let script = if case == "owner-death" {
+            let terminal_helper = quote(
+                crate::native::helper("terminal_unix")
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            );
             let release = quote(
                 directory
                     .path()
@@ -37,7 +43,7 @@ impl Pty {
                     .unwrap(),
             );
             format!(
-                "stty rows 24 cols 80; saved=$(stty -g); printf '\\nPTY_OWNER_SAVED|%s\\n' \"$saved\"; {run}; while [ ! -f {release} ]; do sleep 0.1; done; printf '\\nPTY_OWNER_RESTORED\\n'"
+                "stty rows 24 cols 80; saved=$({terminal_helper} mode -g); printf '\\nPTY_OWNER_SAVED|%s\\n' \"$saved\"; {run}; while [ ! -f {release} ]; do sleep 0.1; done; printf '\\nPTY_OWNER_RESTORED\\n'"
             )
         } else {
             format!("stty rows 24 cols 80; exec {run}")

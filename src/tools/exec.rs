@@ -49,30 +49,7 @@ pub(super) fn command(
     if args.iter().any(|argument| argument.contains('\0')) {
         return Err("args must not contain NUL characters".into());
     }
-    let cwd = match arguments.get("cwd") {
-        None => root.to_path_buf(),
-        Some(Value::String(path)) if !path.is_empty() => {
-            let path = Path::new(path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else if path.has_root()
-                || matches!(
-                    path.components().next(),
-                    Some(std::path::Component::Prefix(_))
-                )
-            {
-                return Err("cwd must be an absolute or project-relative directory path".into());
-            } else {
-                root.join(path)
-            }
-        }
-        Some(_) => return Err("cwd must be a nonempty directory path".into()),
-    };
-    let cwd = std::fs::canonicalize(&cwd)
-        .map_err(|error| format!("Invalid cwd {}: {error}", cwd.display()))?;
-    if !cwd.is_dir() {
-        return Err(format!("cwd must be a directory: {}", cwd.display()));
-    }
+    let cwd = working_directory(root, arguments)?;
     let program = Path::new(executable);
     if !program.is_absolute()
         && (program.has_root()
@@ -120,9 +97,6 @@ pub(super) fn command(
         command
             .env("JECODE_TMP", &temporary)
             .env("TMPDIR", &temporary);
-        // On Windows, replacing TEMP before Git Bash starts changes the shared
-        // MSYS /tmp mount. Bash also keeps the inherited native TEMP and TMP.
-        #[cfg(not(windows))]
         command.env("TEMP", &temporary).env("TMP", &temporary);
     }
     let input = match arguments.get("stdin") {
@@ -132,4 +106,34 @@ pub(super) fn command(
     };
     let label = crate::events::target("exec", arguments);
     Ok((command, input, label))
+}
+
+/// The canonical working directory: `cwd` absolute or project-relative, the
+/// project root by default.
+pub(super) fn working_directory(root: &Path, arguments: &Value) -> Result<PathBuf, String> {
+    let cwd = match arguments.get("cwd") {
+        None => root.to_path_buf(),
+        Some(Value::String(path)) if !path.is_empty() => {
+            let path = Path::new(path);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else if path.has_root()
+                || matches!(
+                    path.components().next(),
+                    Some(std::path::Component::Prefix(_))
+                )
+            {
+                return Err("cwd must be an absolute or project-relative directory path".into());
+            } else {
+                root.join(path)
+            }
+        }
+        Some(_) => return Err("cwd must be a nonempty directory path".into()),
+    };
+    let cwd = std::fs::canonicalize(&cwd)
+        .map_err(|error| format!("Invalid cwd {}: {error}", cwd.display()))?;
+    if !cwd.is_dir() {
+        return Err(format!("cwd must be a directory: {}", cwd.display()));
+    }
+    Ok(cwd)
 }

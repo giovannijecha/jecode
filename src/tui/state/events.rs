@@ -82,6 +82,8 @@ impl State {
             }
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}
+            // The application reads permission requests from their queue.
+            Event::PermissionRequest { .. } => {}
             Event::UserQuestion { request } => {
                 if self.question.as_ref().is_none_or(|current| current.id != request.id) {
                     self.ask_panel = Some(crate::tui::ask::Panel::new(&request, self.ask_draft.as_ref()));

@@ -16,6 +16,7 @@ pub(super) fn execute(
     if !command.get_envs().any(|(key, _)| key == "TERM") {
         command.env("TERM", "xterm-256color");
     }
+    crate::sandbox::apply(&mut command, context.sandbox)?;
     let size = crate::pty::size(arguments)?;
     let wait = processes::wait_argument(arguments)?.unwrap_or(Duration::ZERO);
     let output_limit = processes::output_limit(arguments)?;

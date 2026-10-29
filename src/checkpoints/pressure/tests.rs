@@ -131,22 +131,6 @@ fn failed_archive_does_not_throttle_another_archive_on_the_same_volume() {
 
 #[cfg(windows)]
 #[test]
-fn failed_helper_compilation_is_not_cached() {
-    let cache = OnceLock::new();
-    assert!(cached_helper(&cache, || None).is_none());
-    let expected = PathBuf::from("compiled-helper.exe");
-    assert_eq!(
-        cached_helper(&cache, || Some(expected.clone())),
-        Some(expected.clone())
-    );
-    assert_eq!(
-        cached_helper(&cache, || panic!("already compiled")),
-        Some(expected)
-    );
-}
-
-#[cfg(windows)]
-#[test]
 fn native_probe_reads_space_at_an_existing_directory() {
     let archive = std::fs::canonicalize(std::env::temp_dir()).unwrap();
     assert!(sample_free(&archive, None).unwrap() > 0);

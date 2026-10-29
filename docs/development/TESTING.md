@@ -1,7 +1,9 @@
 # Development and testing
 
 Run these commands from the repository root with Rust 1.95.0, pinned by
-`rust-toolchain.toml`. Install the native tools listed in the [README](../../README.md#install).
+`rust-toolchain.toml`. Building from source needs the platform infrastructure
+listed in the [README](../../README.md#building-from-source); prebuilt packages
+already contain the owned native adapters.
 
 ## Windows toolchain
 
@@ -32,9 +34,9 @@ All four commands must exit successfully. Ignored tests require an explicit
 invocation; a normal test run does not establish their coverage.
 
 Tests use original Rust fixtures, synthetic credentials, isolated directories
-under `target` and loopback HTTP. They exercise installed curl 8.3+ and Bash
-without contacting OpenRouter or OpenAI and without reading personal
-configuration.
+under `target` and loopback HTTP. They exercise the build-embedded native HTTP
+adapter and process boundaries without contacting OpenRouter or OpenAI or
+reading personal configuration.
 
 Unix owner-loss tests also use the system `ps` command to inspect process groups.
 They synchronize owner exit with live descendants, then wait for the group to
@@ -42,8 +44,10 @@ stop; zombies awaiting reaping do not count as running commands.
 
 OpenAI fixtures also use isolated account records and loopback HTTP. They do
 not read Codex credentials or launch a real ChatGPT sign-in. Native signature
-checks exercise Windows .NET or the Unix `openssl` executable. A successful
+checks exercise Windows .NET, macOS Security or Linux OS libcrypto. A successful
 fixture run does not establish account eligibility or real plan inference.
+The ignored `http::tests::trusted_https_uses_os_tls_policy` smoke check uses
+`https://example.com/` without credentials to verify the native TLS boundary.
 
 Opt-in live OpenAI checks use the selected saved ChatGPT registration and
 synthetic inputs. They consume ChatGPT plan usage, never print tokens, and stay
@@ -117,6 +121,7 @@ at 80 and 40 cells with synthetic events:
 ```text
 cargo test --locked --offline tui::specimen::work_chapters -- --ignored --nocapture
 cargo test --locked --offline tui::specimen::discovery::discovery_cards -- --exact --ignored --nocapture
+cargo test --locked --offline tui::specimen::alignment::alignment -- --exact --ignored --nocapture
 ```
 
 The [native terminal fixture](PLATFORMS.md#windows) also checks compact chapter

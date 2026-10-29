@@ -16,7 +16,7 @@ on first use; its metadata is excluded from file and size counts.
 
 Keep source code and reusable tests in the project. Put one-off verification
 scripts, fixtures, logs, reports, screenshots and browser traces in the active
-session area. Use `tmp:` with file tools or quoted `$JECODE_TMP` paths in Bash.
+session area. Use `tmp:` with file tools or quoted `$JECODE_TMP` paths in the shell.
 Honor explicit user or project output requirements.
 The `web` and `browser` tools also save fetched responses, snapshots, screenshots
 and logs here. A named persistent browser profile lives separately under
@@ -39,39 +39,29 @@ For example, a `write` call can use these arguments:
 
 `write` creates parent directories for temporary paths. Project writes retain
 their existing parent-directory requirement. Absolute paths inside the same
-temporary area are accepted too, including Git Bash `/c/...` paths on Windows.
+temporary area are accepted too, using native absolute paths on each platform.
 Other sessions and configuration directories are not extra file-tool roots.
 Traversal, ownership metadata paths, links and Windows junctions are rejected
 within temporary paths. `write` and `edit` use UTF-8 text. `read` also recognizes
 images and PDFs and shows them to the model through a saved attachment copy;
-its returned `attachment:ID` remains readable after temporary cleanup. Bash
-can create other file types in the area. See [Attachments](ATTACHMENTS.md).
+its returned `attachment:ID` remains readable after temporary cleanup. Shell
+and direct executable calls can create other file types in the area. See
+[Attachments](ATTACHMENTS.md).
 
 Shell commands run in the project with `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
 pointing to this session area. Use quoted paths:
 
-```bash
-bash "$JECODE_TMP/probes/check.sh"
+```sh
+sh "$JECODE_TMP/probes/check.sh"
 printf 'probe\n' > "$JECODE_TMP/report.txt"
-created=$(mktemp "$TMPDIR/check.XXXXXXXXXX")
 ```
 
-Pass an explicit template to `mktemp` to use the session area on every platform.
-macOS can use its native user temporary directory instead of `TMPDIR` when no
-template is supplied.
-
-On Windows, Git Bash initializes its shared `/tmp` mount from the inherited
-environment before Jecode exports the session's `TEMP` and `TMP`. Deleting a
-session therefore cannot leave another live shell's `/tmp` pointing to that
-removed session area.
-
-Git Bash can normalize temporary environment paths into its `/c/...` notation;
-native Windows child programs receive paths usable by Windows APIs. Jecode does
-not change the parent terminal's environment. Temporary scripts must reference
+Jecode passes native absolute paths on Windows and Unix. It does not change the
+parent terminal's environment. Temporary scripts must reference
 project paths explicitly when their imports resolve relative to the script.
 Programs that generate files beside their inputs need explicit output paths.
-Bash keeps normal system access; providing an area does not redirect arbitrary
-writes or make it a sandbox.
+The area does not redirect arbitrary writes; command access follows the active
+permission settings.
 
 The tool contracts and each model request describe the active area, including
 after context compaction and resume.

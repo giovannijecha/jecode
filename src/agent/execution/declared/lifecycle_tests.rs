@@ -196,6 +196,10 @@ fn cancellation_keeps_a_durable_fast_result_and_never_starts_the_dependent_call(
         ),
     )]);
     let mut agent = fixture_agent(&project, &home, &fixture);
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     let handle = agent.sessions().unwrap();
     let cancellation = agent.cancellation();
     let mut finished = Vec::new();

@@ -12,6 +12,7 @@ impl Agent {
             self.tools.configure_browser_profiles(home);
             self.tools.configure_project_map(home);
             let store = Store::new(home.to_path_buf(), self.tools.root())?;
+            self.tools.configure_session_home(home);
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
                 if self.has_model() {
@@ -22,6 +23,7 @@ impl Agent {
                 self.effort(),
             )?;
             document.routing = self.routing().clone();
+            document.permissions = Some(self.permissions.default_level());
             document.backend = self.backend_id().into();
             self.tools.configure_session_output(
                 store.output_directory(),
@@ -38,6 +40,7 @@ impl Agent {
                 .bind(self.archive(), self.persistence.clone())?;
             self.questions
                 .bind(self.archive(), self.persistence.clone());
+            self.bind_permissions();
             self.begin_checkpoints();
             self.checkpoint(Stage::Preserve)?;
         }

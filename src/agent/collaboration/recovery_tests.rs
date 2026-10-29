@@ -57,7 +57,7 @@ fn update_before_worker_handoff_is_received_once_as_initial_assignment() {
                 context: String::new(),
                 mode: Mode::Shared,
             },
-            |root| parent.new_child(root, Mode::Shared),
+            |id, root| parent.new_child(id, root, Mode::Shared),
             gate.clone(),
         )
         .unwrap();
@@ -260,6 +260,10 @@ fn closing_idle_child_stops_its_persistent_process() {
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
+    parent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     parent.agent_tool(&create("shared")).unwrap();
     parent
         .collaboration()

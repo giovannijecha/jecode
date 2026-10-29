@@ -78,11 +78,10 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
         (200, completion("Inspection finished.", vec![])),
     ]);
     let (mut agent, _) = measured_growth_agent(&directory, &fixture);
-    const WINDOW: usize = 52_000;
-    agent.client.fixture_limits(WINDOW, None);
-    // A rejected request learns 75% of the uncalibrated estimate. Keep that
-    // ceiling near the advertised window so the fixed native catalog leaves
-    // summary room, while the previous assistant history can be compacted.
+    // The rejected request learns a 75% ceiling. Reserve room above the
+    // current fixed prompt and tool catalog while removable history grows.
+    let window = agent.fixture_capacity(8_192, 75);
+    agent.client.fixture_limits(window, None);
     let raw = {
         let mut uncalibrated = agent.context.clone();
         uncalibrated.calibration = None;
@@ -92,7 +91,7 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
             .unwrap();
         uncalibrated.estimate_growth(&messages, measured, agent.client.inputs())
     };
-    let extra = WINDOW.saturating_sub(raw).saturating_add(512);
+    let extra = window.saturating_sub(raw).saturating_add(512);
     const NOTE: &str = "Earlier inspection note. ";
     agent.messages.lock().unwrap().insert(
         2,
@@ -108,7 +107,7 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
     agent.set_auto_compact(99);
     assert!(
         agent.context_estimate(&agent.environment(), &original)
-            < crate::context::threshold(WINDOW, 99)
+            < crate::context::threshold(window, 99)
     );
     agent
         .run_turn("Continue the current inspection", &mut |_| Ok(()))

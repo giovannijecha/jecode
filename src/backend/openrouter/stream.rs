@@ -62,7 +62,7 @@ impl Stream {
                 self.data.push_str(data.strip_prefix(' ').unwrap_or(data));
                 self.data.push('\n');
             }
-            // SSE comments, event/id fields and curl's final status are not deltas.
+            // SSE comments and event/id fields are not deltas.
         }
         Ok(())
     }

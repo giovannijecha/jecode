@@ -97,6 +97,10 @@ fn persistent_processes_span_turns_and_end_only_with_their_conversation() {
     ]);
     let mut agent = agent(&home, &directory, &fixture.endpoint);
     agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
+    agent
         .run_turn("Start the watcher", &mut |event| match event {
             Event::Recovering { error, .. } => Err(format!("Unexpected fixture recovery: {error}")),
             _ => Ok(()),

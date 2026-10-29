@@ -38,6 +38,8 @@ pub enum Input {
     Scroll(i16),
     #[cfg(windows)]
     Modes(u32, u32, u32),
+    #[cfg(windows)]
+    NativeBackground(u8, u8, u8),
     #[cfg(unix)]
     Bytes(Vec<u8>),
     Size(Geometry),

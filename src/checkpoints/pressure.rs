@@ -324,17 +324,10 @@ fn run(mut command: Command, cancellation: Option<&Cancellation>) -> Result<Stri
 #[cfg(windows)]
 fn sample_free(path: &Path, cancellation: Option<&Cancellation>) -> Result<u64, String> {
     use std::os::windows::process::CommandExt;
-    const SOURCE: &str = include_str!("space.cs");
-    static HELPER: OnceLock<PathBuf> = OnceLock::new();
-    let fallback = Cancellation::default();
-    let executable = cached_helper(&HELPER, || {
-        crate::process::compile_helper(
-            "checkpoint-space-v1",
-            SOURCE,
-            cancellation.unwrap_or(&fallback),
-        )
-    })
-    .ok_or("Could not compile the checkpoint disk-space helper")?;
+    if cancellation.is_some_and(Cancellation::requested) {
+        return Err("Operation cancelled".into());
+    }
+    let executable = crate::native::helper("checkpoint_space")?;
     let mut command = Command::new(executable);
     command
         .arg(path)
@@ -346,37 +339,15 @@ fn sample_free(path: &Path, cancellation: Option<&Cancellation>) -> Result<u64, 
         .map_err(|_| "system disk-space query returned an invalid byte count".into())
 }
 
-#[cfg(windows)]
-fn cached_helper(
-    cache: &OnceLock<PathBuf>,
-    build: impl FnOnce() -> Option<PathBuf>,
-) -> Option<PathBuf> {
-    if let Some(path) = cache.get() {
-        return Some(path.clone());
-    }
-    let path = build()?;
-    let _ = cache.set(path.clone());
-    Some(path)
-}
-
 #[cfg(unix)]
 fn sample_free(path: &Path, cancellation: Option<&Cancellation>) -> Result<u64, String> {
-    let mut command = Command::new("df");
-    command.args(["-Pk"]).arg(path).env("LC_ALL", "C");
+    let mut command = Command::new(crate::native::helper("process_unix")?);
+    command.arg("space").arg(path);
     let output = run(command, cancellation)?;
-    let row = output
-        .lines()
-        .nth(1)
-        .ok_or("system disk-space query returned no volume row")?;
-    let kib = row
-        .split_whitespace()
-        .nth(3)
-        .ok_or("system disk-space query returned no available space")?
+    output
+        .trim()
         .parse::<u64>()
-        .map_err(|_| "system disk-space query returned an invalid byte count")?;
-    kib.checked_mul(1024)
-        .ok_or("system disk-space query byte count overflows")
-        .map_err(str::to_string)
+        .map_err(|_| "system disk-space query returned an invalid byte count".into())
 }
 
 #[cfg(test)]

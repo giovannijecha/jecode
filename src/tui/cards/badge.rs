@@ -5,18 +5,20 @@ use crate::tui::{
     line::{Line, Span},
     motion,
     theme::{
-        ACCENT, BADGE_BAD, BADGE_EDIT, BADGE_IDLE, BADGE_OTHER, BADGE_READ, BADGE_SHELL,
+        ACCENT, BADGE_BAD, BADGE_COORD, BADGE_EDIT, BADGE_IDLE, BADGE_READ, BADGE_SHELL,
         BADGE_TEXT, BADGE_WARN, BASE, DIM, KEYWORD, LIT, S_BASE, STRONG, Style, Surface,
     },
 };
 
-/// The family surface: reads, edits, shell, and one for the rest.
+/// The family surface: read, edit, shell, coordination, then read for the rest.
 fn family(name: &str) -> Surface {
     match name {
         "Read" | "List" | "Search" | "Map" | "Skill" | "Web" | "Browser" => BADGE_READ,
         "Update" | "Write" => BADGE_EDIT,
         "Bash" | "Exec" | "Process" => BADGE_SHELL,
-        _ => BADGE_OTHER,
+        "Agents" | "Todo" | "Ask user" => BADGE_COORD,
+        name if name.starts_with("AGENT") || name.starts_with("Agent") => BADGE_COORD,
+        _ => BADGE_READ,
     }
 }
 
