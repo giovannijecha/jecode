@@ -299,8 +299,8 @@ in `BAD`, and the marked row turns `BAD` until confirmed or cancelled.
 While you read older output, the gap row above the dock shows
 `↓ N rows below`, with `· new output` in `LIT` once output arrived after you
 scrolled away; the arrow is `ACCENT` then, `DIM` otherwise. A keycap
-`Esc back to bottom` ends two cells from the edge, or `Alt+End` while a panel
-or a draft edit holds Esc; it drops first when narrow. While a resize reflows
+`Alt+End back to bottom` ends two cells from the edge; it drops first when
+narrow. While a resize reflows
 the conversation, the gap row may show `Reflowing conversation…`.
 
 After the alternate screen closes, the normal screen keeps the terminal's own

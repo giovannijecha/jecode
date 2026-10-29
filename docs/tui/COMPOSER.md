@@ -173,9 +173,8 @@ the panel closes. See [Tools](../usage/TOOLS.md) for process behavior.
 `Page Up`/`Page Down` and the mouse wheel browse the conversation. Scrolling
 up holds the reading position while new output arrives, and the row above the
 composer counts the rows below. `Alt+Home` goes to the start; `Alt+End`
-follows the latest output. `Esc` returns to the bottom while reading, but
-closes an open panel, draft edit, or history first. At the bottom, `Esc` stops
-active work. `Ctrl+C` also stops work, closes a panel, or clears an idle
+follows the latest output. `Esc` closes an open panel, draft edit, or
+history; otherwise it stops active work, whether or not you are reading. `Ctrl+C` also stops work, closes a panel, or clears an idle
 draft; it never quits. See [Scrolling and resize](RESIZE.md) for reflow and
 terminal restoration.
 

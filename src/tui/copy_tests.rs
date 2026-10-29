@@ -197,14 +197,7 @@ fn searchable_copy_menu_and_small_dimensions_preserve_full_text() {
     for (width, height) in [(80, 24), (15, 6), (2, 2)] {
         app.state.width = width;
         app.state.height = height;
-        let frame = super::view::lower(
-            &app.state,
-            "fixture/model",
-            "fixture",
-            vec![],
-            height,
-            false,
-        );
+        let frame = super::view::lower(&app.state, "fixture/model", "fixture", vec![], height);
         assert!(frame.live.len() <= height);
     }
     key(&mut app, 13, 0);

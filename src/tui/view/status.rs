@@ -25,7 +25,7 @@ const LABEL_MIN: usize = 12;
 const PILL_CHROME: usize = 5;
 
 /// `escape` says whether Esc interrupts the turn from here: not while a
-/// panel, a draft edit or reading back holds it.
+/// panel or a draft edit holds it.
 pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     let frame = motion::frame();
     if let Some(notice) = shown_notice(state) {

@@ -198,8 +198,6 @@ impl App {
                 self.state.suggestions.dismiss();
             } else if self.state.history.cancel(&mut self.state.editor) {
                 self.edited();
-            } else if self.renderer.back_to_bottom() {
-                // Return to the latest output before interpreting Esc as a stop.
             } else if self.worker.is_some() {
                 self.stop();
             }

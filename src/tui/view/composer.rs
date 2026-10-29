@@ -24,7 +24,6 @@ pub(super) fn render(
     directory: &str,
     columns: usize,
     height: usize,
-    back_to_bottom: bool,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let contextual = state.queue.is_editing() || state.history.is_browsing();
     // A question takes the composer's place unless a panel opened over it.
@@ -37,7 +36,7 @@ pub(super) fn render(
         });
     let sheet = sheet(state, columns).filter(|_| question.is_none());
     // Esc interrupts only where nothing else holds it.
-    let escape = sheet.is_none() && question.is_none() && !contextual && !back_to_bottom;
+    let escape = sheet.is_none() && question.is_none() && !contextual;
     let status = status::row(state, columns, escape);
     let (lines, cursor) = match (question, sheet) {
         (Some((request, panel)), _) => ask::block(request, panel, status, columns, height),

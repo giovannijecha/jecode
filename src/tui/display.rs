@@ -56,6 +56,7 @@ impl Display {
         self.viewport.scroll(request);
     }
 
+    #[cfg(test)]
     pub fn back_to_bottom(&mut self) -> bool {
         if self.viewport.following() {
             return false;
@@ -143,8 +144,7 @@ impl Display {
         }
         self.output_revision = Some(state.output_revision);
         let columns = state.width;
-        let was_reading = !self.viewport.following();
-        let mut chrome = view::chrome(state, model, directory, was_reading);
+        let chrome = view::chrome(state, model, directory);
         let capacity = chrome.capacity(state.height);
         let mut reading = false;
         let dragging = self.resize.pending() && !self.resize.take_due(now);
@@ -173,9 +173,6 @@ impl Display {
         if !self.viewport.following() {
             lines.truncate(capacity);
         }
-        if was_reading == self.viewport.following() {
-            chrome = view::chrome(state, model, directory, !self.viewport.following());
-        }
         // Inside a collaborator in `/agents`, its conversation takes the column.
         if let Some(frame) = view::agents_inside(state) {
             return self.renderer.paint(&frame, state.width, state.height);
@@ -184,12 +181,7 @@ impl Display {
         if frame.composer >= 2 {
             let gap = &mut frame.live[frame.composer - 1];
             if reading || !self.viewport.following() {
-                *gap = view::reading_row(
-                    columns,
-                    self.below,
-                    self.fresh,
-                    back_to_bottom_uses_alt_end(state),
-                );
+                *gap = view::reading_row(columns, self.below, self.fresh);
             } else if dragging || self.working {
                 *gap = Line::new(
                     &super::text::ellipsize("Reflowing conversation…", columns),
@@ -199,10 +191,6 @@ impl Display {
         }
         self.renderer.paint(&frame, state.width, state.height)
     }
-}
-
-fn back_to_bottom_uses_alt_end(state: &State) -> bool {
-    state.queue.is_editing() || state.history.is_browsing() || super::view::panel_open(state)
 }
 
 #[cfg(test)]

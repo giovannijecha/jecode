@@ -11,17 +11,16 @@ if Jecode cannot initialize one, its error points to `jecode --plain`.
 The conversation initially follows new output. `Page Up`/`Page Down` moves by
 nearly one page, with a row of overlap; the mouse wheel moves three rows per
 notch. `Alt+Home` goes to the beginning and `Alt+End` follows the latest
-output. `Esc` returns to the bottom while reading, after any open panel,
-draft edit, history, or tool inspection has been closed.
+output. `Esc` never moves the view: it closes panels and menus, or stops
+active work.
 
 Scrolling up pauses following. New response text and tool results can arrive
 without moving the page you are reading. While the view is away from the
 tail, the row above the dock reads `↓ N rows below`, adding `· new output`
 once output arrived after you scrolled away; a resize reflow alone does not
-count. Its keycap names the way back: `Esc back to bottom`, or `Alt+End` while
-a panel or a draft edit holds Esc. The keycap drops first when narrow. Scroll
-down to the end, press `Alt+End`, use `Esc` in the ordinary reading view, or
-send a new prompt to resume following.
+count. Its keycap names the way back, `Alt+End back to bottom`, and drops
+first when narrow. Scroll down to the end, press `Alt+End`, or send a new
+prompt to resume following.
 
 `Up`/`Down` edit the draft instead of scrolling the conversation. An open
 selector, information panel, or process view receives its own navigation and

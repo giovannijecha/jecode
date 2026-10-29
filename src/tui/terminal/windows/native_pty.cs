@@ -353,7 +353,7 @@ public sealed class JecodeTestPty : IDisposable {
                 int chapter = pty.Mark(); pty.Send("\x1b[1;3H");
                 pty.Wait("READ  drop me.txt", chapter);
                 pty.Wait("1 line", chapter);
-                pty.Send("\x1b");
+                pty.Send("\x1b[1;3F");
                 int expanded = pty.Mark(); pty.Send("\x0f");
                 pty.Wait("Tool details expanded", expanded);
                 pty.Send("after expansion");
@@ -383,8 +383,8 @@ public sealed class JecodeTestPty : IDisposable {
                 // Windows Terminal delivers a file drop as a paste of its quoted path.
                 pty.Send("\x1b[200~\"" + System.IO.Path.Combine(directory, "drop me.txt") + "\"\x1b[201~");
                 pty.Wait("Attached 1 item");
-                pty.Send("\x1b[<64;10;5M"); pty.Wait("back to bottom");
-                pty.Send("\x1b"); Thread.Sleep(150);
+                pty.Send("\x1b[<64;10;5M"); pty.Wait("Alt+End  back to bottom");
+                pty.Send("\x1b[1;3F"); Thread.Sleep(150);
                 pty.Send("\x10"); pty.Wait("Prompt history");
                 pty.Send("\x0e"); Thread.Sleep(150);
                 pty.Send("\x1b[1;3A"); pty.Wait("No pending drafts");
