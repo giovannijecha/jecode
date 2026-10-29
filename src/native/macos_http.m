@@ -22,7 +22,7 @@ static NSString *decoded(char *line) {
     return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
 }
 
-static int decimal(const char *text, unsigned long long *value) {
+static int parse_decimal(const char *text, unsigned long long *value) {
     if (!text || *text < '0' || *text > '9') return 0;
     errno = 0;
     char *end;
@@ -88,9 +88,9 @@ int main(void) {
         url_text = decoded(line);
         if (getline(&line, &capacity, stdin) < 0) goto done;
         method = decoded(line);
-        if (getline(&line, &capacity, stdin) < 0 || !decimal(line, &timeout_ms) ||
+        if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &timeout_ms) ||
             !timeout_ms || timeout_ms > (unsigned long long)UINT_MAX * 1000) goto done;
-        if (getline(&line, &capacity, stdin) < 0 || !decimal(line, &count) || count > 1000) goto done;
+        if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &count) || count > 1000) goto done;
         if (!url_text || !method) goto done;
         url = [NSURL URLWithString:url_text];
         if (!url || !([url.scheme isEqual:@"http"] || [url.scheme isEqual:@"https"])) goto done;
