@@ -384,7 +384,11 @@ fn a_saved_tail_appends_like_the_whole_history_and_a_gap_is_refused() {
         events: &[],
     };
     assert!(lease.save_tail(&gap, &doc.title()).is_err());
-    assert_eq!(fs::read(&path).unwrap(), before, "a refused tail writes nothing");
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        before,
+        "a refused tail writes nothing"
+    );
     let tail = journal::Tail {
         document: &state,
         messages_from: messages,
