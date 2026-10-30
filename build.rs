@@ -99,9 +99,10 @@ fn windows(out: &Path, assets: &mut Vec<(String, PathBuf)>) {
             "src/process/windows.cs",
             "src/process/windows_command.cs",
             "src/process/windows_sandbox.cs",
+            "src/process/windows_sandbox_policy.cs",
             "src/process/windows_sandbox_spec.cs",
         ],
-        &["System.Web.Extensions.dll"],
+        &[],
     );
     compile(
         "pty",

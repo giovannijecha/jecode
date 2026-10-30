@@ -30,8 +30,7 @@ internal sealed class JecodeWindowsSandbox : System.IDisposable {
 
     public static JecodeWindowsSandbox Prepare(string json) {
         if (System.String.IsNullOrEmpty(json)) return null;
-        var policy = new System.Web.Script.Serialization.JavaScriptSerializer()
-            .Deserialize<System.Collections.Generic.Dictionary<string, object>>(json);
+        var policy = JecodeWindowsSandboxPolicy.Read(json);
         if (policy == null || policy.Count != 4 || !policy.ContainsKey("read") ||
             !policy.ContainsKey("write") || !policy.ContainsKey("deny") ||
             !policy.ContainsKey("network") || !(policy["network"] is bool) ||

@@ -8,7 +8,6 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
-using System.Web.Script.Serialization;
 
 // This owned Windows boundary keeps the job handle outside the target process tree.
 public static class JecodeProcess {
@@ -103,6 +102,12 @@ public static class JecodeProcess {
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    struct JobCompletionPort {
+        public IntPtr CompletionKey;
+        public IntPtr CompletionPort;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     struct BasicAccountingInformation {
         public long TotalUserTime;
         public long TotalKernelTime;
@@ -119,6 +124,15 @@ public static class JecodeProcess {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimitInformation info, int length);
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "SetInformationJobObject")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool AssociateJobPort(IntPtr job, int infoClass, ref JobCompletionPort info, int length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr CreateIoCompletionPort(IntPtr file, IntPtr existing, UIntPtr key, uint threads);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetQueuedCompletionStatus(IntPtr port, out uint message, out UIntPtr key,
+        out IntPtr overlapped, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool QueryInformationJobObject(IntPtr job, int infoClass, out BasicAccountingInformation info, int length, IntPtr returned);
@@ -208,6 +222,29 @@ public static class JecodeProcess {
         output.Flush();
     }
 
+    // Job notifications wake the active-process check as soon as a process in
+    // the job exits. Without them the check falls back to a short poll.
+    static IntPtr JobEvents(IntPtr job) {
+        IntPtr port = CreateIoCompletionPort(new IntPtr(-1), IntPtr.Zero, UIntPtr.Zero, 1);
+        if (port == IntPtr.Zero) return IntPtr.Zero;
+        var association = new JobCompletionPort();
+        association.CompletionKey = job;
+        association.CompletionPort = port;
+        if (AssociateJobPort(job, 7, ref association, Marshal.SizeOf(typeof(JobCompletionPort))))
+            return port;
+        CloseHandle(port);
+        return IntPtr.Zero;
+    }
+
+    static void WaitForJobEvent(IntPtr port) {
+        if (port == IntPtr.Zero) { Thread.Sleep(10); return; }
+        uint message;
+        UIntPtr key;
+        IntPtr overlapped;
+        // Any job message, or the bounded wait, leads to a fresh accounting query.
+        GetQueuedCompletionStatus(port, out message, out key, out overlapped, 100);
+    }
+
     static void SendCompletion(NamedPipeServerStream pipe, byte kind, byte[] payload) {
         pipe.WriteByte(kind);
         byte[] header = kind == 1 ? payload : BitConverter.GetBytes(payload.Length);
@@ -235,7 +272,8 @@ public static class JecodeProcess {
     }
 
     public static int Run() {
-        IntPtr job = IntPtr.Zero, inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
+        IntPtr job = IntPtr.Zero, jobEvents = IntPtr.Zero;
+        IntPtr inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
         IntPtr output = IntPtr.Zero, error = IntPtr.Zero;
         IntPtr attributeList = IntPtr.Zero, jobValue = IntPtr.Zero;
         JecodeWindowsSandbox sandbox = null;
@@ -262,8 +300,10 @@ public static class JecodeProcess {
             completion = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1,
                 PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             pendingConnection = completion.BeginWaitForConnection(null, null);
+            // The input buffer lets the owner's stop request complete without
+            // waiting for the stop watcher to read it.
             stopPipe = new NamedPipeServerStream(pipeName + "-stop", PipeDirection.In, 1,
-                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16, 0);
             pendingStop = stopPipe.BeginWaitForConnection(null, null);
             SendStage(2); // Command protocol and channels are available.
             string program = ReadString(protocol);
@@ -281,6 +321,7 @@ public static class JecodeProcess {
             limits.Basic.LimitFlags = JobLimitKillOnClose;
             if (!SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(ExtendedLimitInformation))))
                 throw Failure("SetInformationJobObject");
+            jobEvents = JobEvents(job);
 
             var security = new SecurityAttributes();
             security.Length = Marshal.SizeOf(typeof(SecurityAttributes));
@@ -356,7 +397,7 @@ public static class JecodeProcess {
                 if (!QueryInformationJobObject(job, 1, out accounting,
                     Marshal.SizeOf(typeof(BasicAccountingInformation)), IntPtr.Zero))
                     throw Failure("QueryInformationJobObject");
-                if (accounting.ActiveProcesses > 0) Thread.Sleep(10);
+                if (accounting.ActiveProcesses > 0) WaitForJobEvent(jobEvents);
             } while (accounting.ActiveProcesses > 0);
             SendCompletion(completion, 1, BitConverter.GetBytes(exitCode));
             return unchecked((int)exitCode);
@@ -381,6 +422,7 @@ public static class JecodeProcess {
             if (attributeList != IntPtr.Zero) Marshal.FreeHGlobal(attributeList);
             if (jobValue != IntPtr.Zero) Marshal.FreeHGlobal(jobValue);
             if (job != IntPtr.Zero) CloseHandle(job);
+            if (jobEvents != IntPtr.Zero) CloseHandle(jobEvents);
             if (sandbox != null) sandbox.Dispose();
             if (completion != null) completion.Dispose();
             if (stopPipe != null) stopPipe.Dispose();
