@@ -254,29 +254,38 @@ fn wrapped_command_arguments_follow_the_panel_width_and_keep_the_caret_after_esc
 }
 
 #[test]
-fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
+fn an_ordinary_message_joins_the_turn_and_a_local_command_waits_for_it() {
     let directory = Directory::new();
     let (release, gate) = std::sync::mpsc::channel();
+    let (second, second_gate) = std::sync::mpsc::channel();
     let fixture = HttpFixture::streaming(vec![
         Response::GatedStream {
             head: "data: {\"choices\":[{\"delta\":{\"content\":\"First.\"},\"finish_reason\":null}]}\n\n".into(),
             tail: "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(),
             release: gate,
         },
-        Response::Json(200, completion("Second.", vec![])),
+        Response::GatedStream {
+            head: "data: {\"choices\":[{\"delta\":{\"content\":\"Second.\"},\"finish_reason\":null}]}\n\n".into(),
+            tail: "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".into(),
+            release: second_gate,
+        },
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "first");
     wait_until(&mut app, |app| app.state.status == "Writing the response…");
     submit(&mut app, "second\nline");
+    assert_eq!(app.state.queue.messages(), ["second\nline"]);
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| {
+        super::tests::rows(app).contains(&"user: second\nline".to_owned())
+    });
     submit(&mut app, "/export");
-    submit(&mut app, "third");
     // A menu opens over the turn; other commands wait for it.
     submit(&mut app, "/help");
     assert!(app.state.information.is_some());
-    assert_eq!(app.state.queue.messages().len(), 3);
+    assert_eq!(app.state.queue.messages(), ["/export"]);
     assert!(app.state.editor.text.is_empty());
-    release.send(()).unwrap();
+    second.send(()).unwrap();
     wait_until(&mut app, |app| app.worker.is_none());
     // Waiting commands run after the turn, once the open panel closes.
     assert!(app.state.information.is_some());
@@ -297,7 +306,7 @@ fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
         .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
         .filter_map(|message| message.get("content").and_then(Value::as_str))
         .collect();
-    assert_eq!(users, ["first", "second\nline", "third"]);
+    assert_eq!(users, ["first", "second\nline"]);
     assert!(
         requests
             .iter()
@@ -309,7 +318,6 @@ fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
             "user: first",
             "assistant: First.",
             "user: second\nline",
-            "user: third",
             "assistant: Second.",
         ]
     );
@@ -332,7 +340,7 @@ fn ordinary_messages_join_the_turn_while_local_commands_wait_in_order() {
 }
 
 #[test]
-fn stopping_before_output_restores_input_and_preserves_fifo_drafts() {
+fn stopping_before_output_restores_input_and_joins_unsent_text_in_order() {
     let directory = Directory::new();
     let fixture = HttpFixture::streaming(vec![Response::Stream(vec![
         (Duration::ZERO, "data: {\"choices\":[{\"delta\":{\"reasoning\":\"fixture\"},\"finish_reason\":null}]}\n\n".into()),
@@ -346,26 +354,14 @@ fn stopping_before_output_restores_input_and_preserves_fifo_drafts() {
         assert!(started.elapsed() < Duration::from_secs(3));
         thread::sleep(Duration::from_millis(5));
     }
-    submit(&mut app, "queued one");
-    submit(&mut app, "queued two");
+    submit(&mut app, "queued");
     text(&mut app, "prior draft");
-    key(&mut app, 38, 1);
-    key(&mut app, 40, 0);
-    key(&mut app, 13, 0);
-    text(&mut app, " revised");
-    key(&mut app, 13, 0);
-    key(&mut app, 27, 0);
     key(&mut app, 27, 0);
     wait(&mut app);
     assert_eq!(app.state.editor.text, "active");
     assert_eq!(
-        app.state
-            .queue
-            .paused
-            .iter()
-            .map(|draft| draft.text.as_str())
-            .collect::<Vec<_>>(),
-        ["queued one", "queued two revised", "prior draft"]
+        app.state.queue.paused.as_ref().unwrap().text,
+        "queued\n\nprior draft"
     );
     assert!(app.state.queue.messages().is_empty());
     assert!(app.state.activity.is_none());

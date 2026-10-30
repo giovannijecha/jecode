@@ -194,7 +194,6 @@ impl App {
             || !self.collaboration_return_pending
             || !self.idle()
             || !self.state.queue.is_empty()
-            || self.state.queue.is_editing()
             || self.state.selector.is_some()
             || self.state.quitting.is_some()
             || self.state.question.is_some()
@@ -409,7 +408,7 @@ impl App {
                 _ => offset,
             };
             if matches!(code, 33..=40) {
-                // End follows; reaching the end by scrolling also does.
+                // Alt+End (or End) follows; reaching the end by scrolling also does.
                 panel.follow = code == 35 || matches!(code, 34 | 40) && panel.offset == end;
             }
         } else {
@@ -429,6 +428,13 @@ impl App {
         }
     }
 
+    pub(super) fn agents_inside(&self) -> bool {
+        self.state
+            .agents_panel
+            .as_ref()
+            .is_some_and(|panel| panel.inside.is_some())
+    }
+
     pub(super) fn agents_key(&mut self, key: Key) {
         if key.code == 27 || key.ctrl() && key.code == 67 {
             if let Some(panel) = &mut self.state.agents_panel {
@@ -438,6 +444,10 @@ impl App {
                     self.state.agents_panel = None;
                 }
             }
+            return;
+        }
+        if key.alt() && !key.ctrl() && matches!(key.code, 35 | 36) && self.agents_inside() {
+            self.agents_move(key.code);
             return;
         }
         if key.ctrl() || key.alt() {

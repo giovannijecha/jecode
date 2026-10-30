@@ -138,6 +138,7 @@ fn launch(
         eprintln!("Could not create personal skills library: {error}");
     }
     agent.enable_sessions(config_home)?;
+    agent.name_sessions();
     agent.enable_checkpoints(config_home);
     let attachments = agent.import_attachments(
         &attachments

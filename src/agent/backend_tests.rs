@@ -5,7 +5,7 @@ use crate::{
     test_support::Directory,
 };
 use std::fs;
-mod fixture;
+pub(super) mod fixture;
 use fixture::{Account, Reply};
 
 #[test]

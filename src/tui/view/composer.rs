@@ -5,7 +5,6 @@ use super::{
 };
 mod editor;
 use crate::tui::{
-    drafts::Slot,
     line::Line,
     state::State,
     text,
@@ -13,10 +12,7 @@ use crate::tui::{
 };
 use editor::input;
 
-/// Queued drafts shown above the status row at most.
-const QUEUE_ROWS: usize = 8;
-
-/// The dock: queued drafts, the status row, then the composer with the
+/// The dock: the pending draft, the status row, then the composer with the
 /// footer, its key hints or an open panel below.
 pub(super) fn render(
     state: &State,
@@ -25,7 +21,7 @@ pub(super) fn render(
     columns: usize,
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let contextual = state.queue.is_editing() || state.history.is_browsing();
+    let contextual = state.history.is_browsing();
     // A permission request holds the keys until a choice; only the quit
     // question goes above it.
     if let Some(pending) = state
@@ -34,8 +30,7 @@ pub(super) fn render(
         .filter(|_| state.quitting.is_none())
     {
         let status = status::row(state, columns, false);
-        let level = state.permission_level.name();
-        return permission::block(pending, level, status, columns, height);
+        return permission::block(pending, state.permission_level, status, columns, height);
     }
     // A question takes the composer's place unless a panel opened over it.
     let question = state
@@ -71,16 +66,7 @@ pub(super) fn render(
         }
     };
     let mut lines = lines;
-    let draft_menu = state
-        .selector
-        .as_ref()
-        .is_some_and(|menu| matches!(menu.purpose, crate::tui::selector::Purpose::Drafts { .. }));
-    let budget = if draft_menu {
-        0
-    } else {
-        height.saturating_sub(lines.len()).min(QUEUE_ROWS)
-    };
-    let mut rows = queue(state, columns, budget);
+    let mut rows = Vec::from_iter(pending(state, columns).filter(|_| lines.len() < height));
     let offset = rows.len();
     rows.append(&mut lines);
     (rows, cursor.map(|(row, col)| (row + offset, col)))
@@ -280,69 +266,45 @@ fn rule_style(state: &State) -> Style {
     }
 }
 
-/// The top rule's label: the draft being edited, the history, or the drafts.
+/// The top rule's label: the history, or the pending draft with its key
+/// while the composer is empty.
 fn draft_label(state: &State) -> Vec<Line> {
-    if let Some(index) = state.queue.edit_index() {
-        vec![Line::new(
-            &format!("Editing draft {}/{}", index + 1, state.queue.len()),
-            MUTED,
-        )]
-    } else if state.history.is_browsing() {
+    if state.history.is_browsing() {
         vec![Line::new("Prompt history", MUTED)]
-    } else if !state.queue.is_empty() {
-        let drafts = state.queue.len();
-        vec![
-            Line::new(&format!("Drafts {drafts} · Alt+↑"), MUTED),
-            Line::new(&format!("Drafts {drafts}"), MUTED),
-        ]
-    } else {
+    } else if state.queue.is_empty() {
         Vec::new()
+    } else if state.editor.text.is_empty() {
+        vec![Line::new("Draft · ↑", MUTED), Line::new("Draft", MUTED)]
+    } else {
+        vec![Line::new("Draft", MUTED)]
     }
 }
 
 /// `› first line…` in `muted`, `queued` in `dim` or `paused` in `warning`
-/// ending two cells from the edge; the first label carries the range when
-/// not every draft fits.
-fn queue(state: &State, columns: usize, budget: usize) -> Vec<Line> {
-    let mut drafts = state.queue.drafts();
-    drafts.retain(|(slot, _)| Some(*slot) != state.queue.editing());
-    let pending = drafts.len();
-    let visible = pending.min(budget);
+/// ending two cells from the edge.
+fn pending(state: &State, columns: usize) -> Option<Line> {
+    let (message, paused) = state.queue.pending()?;
+    let (label, style) = if paused {
+        ("paused", WARNING)
+    } else {
+        ("queued", DIM)
+    };
     let end = columns.saturating_sub(2);
-    drafts
-        .into_iter()
-        .take(visible)
-        .enumerate()
-        .map(|(index, (slot, message))| {
-            let (status, style) = match slot {
-                Slot::Queued(_) => ("queued", DIM),
-                Slot::Paused(_) => ("paused", WARNING),
-            };
-            let first = message.lines().next().unwrap_or("");
-            let more = if message.contains('\n') { "…" } else { "" };
-            let preview = text::clean(&format!("› {first}{more}"));
-            let ranged = (index == 0 && visible < pending)
-                .then(|| format!("{status} {}", panel::position(0, visible, pending)));
-            let label = ranged
-                .iter()
-                .map(String::as_str)
-                .chain([status])
-                .find(|label| text::cells(label) + text::cells(&preview).min(10) + 2 <= end)
-                .unwrap_or("");
-            if label.is_empty() {
-                return Line::new(&text::ellipsize(&preview, columns), MUTED);
-            }
-            let room = end - text::cells(label) - 2;
-            let preview = text::ellipsize(&preview, room);
-            let mut row = Line::new(&preview, MUTED);
-            row.push(
-                &" ".repeat(end - text::cells(&preview) - text::cells(label)),
-                MUTED,
-            );
-            row.push(label, style);
-            row
-        })
-        .collect()
+    let first = message.lines().next().unwrap_or("");
+    let more = if message.contains('\n') { "…" } else { "" };
+    let preview = text::clean(&format!("› {first}{more}"));
+    if text::cells(label) + text::cells(&preview).min(10) + 2 > end {
+        return Some(Line::new(&text::ellipsize(&preview, columns), MUTED));
+    }
+    let room = end - text::cells(label) - 2;
+    let preview = text::ellipsize(&preview, room);
+    let mut row = Line::new(&preview, MUTED);
+    row.push(
+        &" ".repeat(end - text::cells(&preview) - text::cells(label)),
+        MUTED,
+    );
+    row.push(label, style);
+    Some(row)
 }
 
 /// A full-width rule with an optional `─ label` and an aside before ` ─` on
@@ -400,29 +362,15 @@ fn window(state: &State) -> usize {
     (state.height / 3).clamp(5, 10)
 }
 
-/// Key hints in place of the footer while a draft edit or the prompt
-/// history holds the composer.
+/// Key hints in place of the footer while the prompt history holds the
+/// composer.
 fn hints(state: &State) -> Option<&'static [panel::Key<'static>]> {
-    const PAUSED: &[panel::Key] = &[
-        panel::key("Enter", "save"),
-        panel::key("Ctrl+S", "send"),
-        panel::key("Esc", "cancel"),
-    ];
-    const EDITING: &[panel::Key] = &[panel::key("Enter", "save"), panel::key("Esc", "cancel")];
     const HISTORY: &[panel::Key] = &[
         panel::key("Enter", "send"),
         panel::key("Ctrl+P/N", "history").optional(),
         panel::key("Esc", "back"),
     ];
-    if matches!(state.queue.editing(), Some(Slot::Paused(_))) {
-        Some(PAUSED)
-    } else if state.queue.is_editing() {
-        Some(EDITING)
-    } else if state.history.is_browsing() {
-        Some(HISTORY)
-    } else {
-        None
-    }
+    state.history.is_browsing().then_some(HISTORY)
 }
 
 fn draft(
@@ -438,8 +386,8 @@ fn draft(
     let position = Line::new(&input.position, MUTED);
     let mut lines = vec![rule(columns, style, &draft_label(state), &position)];
     lines.extend(input.lines);
-    // The level stays beside the draft, a plain word (B12.3).
-    let level = Line::new(state.permission_level.name(), MUTED);
+    // The level stays beside the draft as its chip (B12.3, B12.8).
+    let level = crate::tui::cards::level(state.permission_level);
     lines.push(rule(columns, style, &[], &level));
     if columns >= 7 {
         lines.push(match hints(state) {

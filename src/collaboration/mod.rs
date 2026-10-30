@@ -363,7 +363,6 @@ impl Observer {
                 if ids.contains(&state.workers[index].id) {
                     let worker = state.workers.remove(index);
                     worker.cancellation.cancel();
-                    worker.inbox.wake();
                     let _ = worker.wake.send(());
                     workers.push(worker);
                 } else {
@@ -490,7 +489,6 @@ impl Observer {
             }
             for worker in &state.workers {
                 worker.cancellation.cancel();
-                worker.inbox.wake();
                 let _ = worker.wake.send(());
             }
             std::mem::take(&mut state.workers)

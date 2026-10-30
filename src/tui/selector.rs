@@ -26,7 +26,6 @@ pub enum Choice {
     Setting(Setting),
     Session(usize),
     Copy(usize),
-    Draft(super::drafts::Slot),
     Provider(&'static str),
     Credentials,
     ApiKeys,
@@ -45,8 +44,6 @@ pub enum Badge {
     Current,
     Default,
     Note(String),
-    Queued,
-    Paused,
 }
 pub struct OptionRow {
     pub name: String,
@@ -100,9 +97,6 @@ pub enum Purpose {
         working: bool,
     },
     Copy,
-    Drafts {
-        delete: Option<usize>,
-    },
     /// This conversation's level; `default` is for new conversations.
     Permissions {
         default: crate::permissions::Level,
@@ -200,31 +194,6 @@ impl Selector {
             })
             .collect();
         Self::new("Copy to clipboard", Purpose::Copy, options)
-    }
-    pub fn drafts(queue: &super::drafts::Queue) -> Self {
-        let options = queue
-            .drafts()
-            .into_iter()
-            .map(|(slot, text)| {
-                let mut name = crate::copy::preview(&text);
-                if text.trim().contains('\n') && !name.ends_with('…') {
-                    name.push('…');
-                }
-                OptionRow {
-                    badge: Some(match slot {
-                        super::drafts::Slot::Queued(_) => Badge::Queued,
-                        super::drafts::Slot::Paused(_) => Badge::Paused,
-                    }),
-                    search: match slot {
-                        super::drafts::Slot::Queued(_) => "Queued",
-                        super::drafts::Slot::Paused(_) => "Paused",
-                    }
-                    .into(),
-                    ..row(name, "", Choice::Draft(slot))
-                }
-            })
-            .collect();
-        Self::new("Drafts", Purpose::Drafts { delete: None }, options)
     }
     pub fn sessions(sessions: &[crate::sessions::Summary], current: &str) -> Self {
         let options = sessions
@@ -428,21 +397,19 @@ impl Selector {
     }
     pub fn delete_target(&self) -> Option<usize> {
         match &self.purpose {
-            Purpose::Sessions { delete, .. } | Purpose::Drafts { delete } => *delete,
+            Purpose::Sessions { delete, .. } => *delete,
             _ => None,
         }
     }
     pub fn cancel_delete(&mut self) -> bool {
         match &mut self.purpose {
-            Purpose::Sessions { delete, .. } | Purpose::Drafts { delete } => {
-                delete.take().is_some()
-            }
+            Purpose::Sessions { delete, .. } => delete.take().is_some(),
             _ => false,
         }
     }
     pub fn toggle_delete(&mut self) {
         let index = self.filtered.get(self.selected).map(|hit| hit.index);
-        if let Purpose::Sessions { delete, .. } | Purpose::Drafts { delete } = &mut self.purpose {
+        if let Purpose::Sessions { delete, .. } = &mut self.purpose {
             *delete = if *delete == index { None } else { index };
         }
     }

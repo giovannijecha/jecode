@@ -13,13 +13,6 @@ impl App {
         let menu = self.state.selector.take().unwrap();
         match (choice, &menu.purpose) {
             (Choice::Copy(index), Purpose::Copy) => self.choose_copy(index),
-            (Choice::Draft(slot), Purpose::Drafts { .. }) => {
-                let discard = menu.delete_target().is_some_and(|target| {
-                    matches!(menu.options[target].choice, Choice::Draft(marked) if marked == slot)
-                });
-                self.state.selector = Some(menu);
-                self.choose_draft(slot, discard);
-            }
             (Choice::Session(index), Purpose::Sessions { current, .. }) => {
                 let id = self.saved_sessions[index].id.clone();
                 if menu.delete_target() == Some(index) {

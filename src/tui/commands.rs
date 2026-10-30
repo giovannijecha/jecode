@@ -20,14 +20,6 @@ impl App {
             self.warn("Attachments are still importing. Wait before sending your draft.");
             return Ok(false);
         }
-        if self.state.queue.is_editing() {
-            if self.state.editor.prompt().is_empty() {
-                self.warn("The draft is empty · Esc cancels, /drafts discards it");
-            } else {
-                self.finish_draft_edit(true);
-            }
-            return Ok(false);
-        }
         let mut prompt = self.state.editor.prompt();
         if prompt.is_empty() {
             return Ok(false);
@@ -101,7 +93,7 @@ impl App {
             };
             if let Err(error) = self.agent.as_mut().unwrap().prepare_turn(&execution) {
                 self.state.message(Kind::Error, &error);
-                self.keep_failed_prompt(prompt);
+                self.restore_failed_start(prompt);
                 return Ok(false);
             }
             self.state.history.record(&prompt);
@@ -392,19 +384,13 @@ impl App {
         }
     }
 
-    /// Runs `/copy`, `/drafts` or `/terminal`; returns false for other text.
+    /// Runs `/copy`, `/terminal` or another panel command; returns false for other text.
     fn run_immediate(&mut self, text: &str) -> bool {
         let text = text.trim();
         let (name, arguments) = text
             .split_once(char::is_whitespace)
             .map_or((text, ""), |(name, arguments)| (name, arguments.trim()));
-        if name.eq_ignore_ascii_case("/drafts") {
-            if arguments.is_empty() {
-                self.open_drafts();
-            } else {
-                self.warn("Usage: /drafts");
-            }
-        } else if name.eq_ignore_ascii_case("/terminal") {
+        if name.eq_ignore_ascii_case("/terminal") {
             self.open_processes(arguments);
         } else if name.eq_ignore_ascii_case("/agents") {
             if arguments.is_empty() {
@@ -437,7 +423,6 @@ impl App {
 pub(super) fn immediate(name: &str) -> bool {
     [
         "/copy",
-        "/drafts",
         "/terminal",
         "/agents",
         "/ask",

@@ -87,10 +87,15 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     );
     let mut focused = asking(columns, "edit", edit, "MAIN AGENT", 1);
     focused.permission.as_mut().unwrap().focus = Some(1);
-    let mut composer = state(columns);
-    composer.permission_level = Level::Read;
+    let indicator = |level| {
+        let mut composer = state(columns);
+        composer.permission_level = level;
+        composer
+    };
     vec![
-        ("Level indicator · Read", composer),
+        ("Level indicator · Read", indicator(Level::Read)),
+        ("Level indicator · Workspace", indicator(Level::Workspace)),
+        ("Level indicator · Full", indicator(Level::Full)),
         (
             "Request · main agent read",
             asking(columns, "read", read, "MAIN AGENT", 1),

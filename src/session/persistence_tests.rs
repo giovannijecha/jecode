@@ -41,10 +41,10 @@ fn plain_resume_directs_saved_attachment_drafts_to_fullscreen_composer() {
     let file = pool.import_bytes("notes.txt", b"saved notes").unwrap();
     handle.input(Input {
         draft: Draft::from_prompt(Prompt::new("explain".into(), vec![image.clone()])),
-        paused: vec![
-            Draft::from_prompt(Prompt::new("read".into(), vec![file.clone()])),
-            Draft::from_prompt(Prompt::new(String::new(), vec![file.clone()])),
-        ],
+        paused: Some(Draft::from_prompt(Prompt::new(
+            "read".into(),
+            vec![file.clone()],
+        ))),
         ..Input::default()
     });
     handle.flush().unwrap();
@@ -67,15 +67,14 @@ fn plain_resume_directs_saved_attachment_drafts_to_fullscreen_composer() {
     let rendered = String::from_utf8(output).unwrap();
     assert!(rendered.contains("explain [1# Image]"));
     assert!(rendered.contains("read [1# File: notes.txt]"));
-    assert!(rendered.contains("Paused draft 2/2 (not sent; open in the fullscreen composer to review or send):\n[1# File: notes.txt]"));
+    assert!(rendered.contains("Paused draft (not sent; open in the fullscreen composer to review or send):\nread [1# File: notes.txt]"));
     assert!(rendered.contains("open in the fullscreen composer to review or send"));
     assert!(!rendered.contains("/attach"));
     assert!(!rendered.contains(crate::attachments::MARKER));
     assert!(fixture.finish().is_empty());
     let saved = current.sessions().unwrap().snapshot().input;
     assert_eq!(saved.draft.attachments, vec![image]);
-    assert_eq!(saved.paused[0].attachments, vec![file]);
-    assert_eq!(saved.paused[1].attachments, saved.paused[0].attachments);
+    assert_eq!(saved.paused.unwrap().attachments, vec![file]);
 }
 
 #[test]
@@ -121,9 +120,7 @@ fn plain_resume_restores_history_and_displays_unsent_text_without_calling_the_pr
             .contains("Recovered draft (not sent; copy/edit before sending):\nunsent plain draft")
     );
     assert!(
-        output.contains(
-            "Paused draft 1/1 (not sent; copy/edit before sending):\nqueued plain request"
-        )
+        output.contains("Paused draft (not sent; copy/edit before sending):\nqueued plain request")
     );
     assert!(!output.contains("queued plain request\n\nunsent plain draft"));
     assert!(output.contains("/resume"));
@@ -133,7 +130,7 @@ fn plain_resume_restores_history_and_displays_unsent_text_without_calling_the_pr
     assert_ne!(current.sessions().unwrap().id(), id);
     let input = current.sessions().unwrap().snapshot().input;
     assert_eq!(input.draft.text, "unsent plain draft");
-    assert_eq!(input.paused[0].text, "queued plain request");
+    assert_eq!(input.paused.unwrap().text, "queued plain request");
     assert!(input.queued.is_empty());
     let export = std::fs::read_dir(directory.path())
         .unwrap()

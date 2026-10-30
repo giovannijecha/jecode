@@ -349,6 +349,35 @@ impl Handle {
         }
     }
 
+    /// Whether the session already has a generated title.
+    pub fn titled(&self) -> bool {
+        self.0.live.lock().unwrap().document.title.is_some()
+    }
+
+    /// Saves the first generated title; later ones never replace it.
+    pub fn name(&self, title: &str) -> Result<(), String> {
+        let mut live = self.0.live.lock().unwrap();
+        if live.deleted || live.document.title.is_some() {
+            return Ok(());
+        }
+        // Redaction may lengthen it; the saved title keeps the parse limit.
+        let title = live.redactor.text(title);
+        let title: String = title
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(100)
+            .collect();
+        let title = title.trim();
+        if title.is_empty() {
+            return Ok(());
+        }
+        live.document.title = Some(title.into());
+        live.dirty.get_or_insert_with(Instant::now);
+        live.revision = live.revision.wrapping_add(1);
+        drop(live);
+        self.flush()
+    }
+
     /// Capture composer state without copying the conversation or replacing
     /// attachments staged by the line-based chat.
     pub fn capture_input(&self, mut input: Input) {

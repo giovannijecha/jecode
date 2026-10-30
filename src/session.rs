@@ -146,11 +146,6 @@ fn chat_inner(
                 Ok(())
             }),
             ("/copy", "") => copy::print(agent, input, output),
-            ("/drafts", "") => writeln!(
-                output,
-                "Pending drafts are managed in the fullscreen terminal interface."
-            )
-            .map_err(|error| error.to_string()),
             ("/resume", "") => {
                 let previous = agent.sessions();
                 persistence::resume(agent, config, None, input, output, status)

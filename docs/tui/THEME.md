@@ -56,10 +56,10 @@ Tool badges carry the family colour when done and the state otherwise:
 
 | Badge surface | Value | Use |
 | --- | --- | --- |
-| `BADGE_READ` | `#4C4AB2` | Read, List, Search, Map, Skill, Web, Browser, Checkpoint and other tools without a family. |
+| `BADGE_READ` | `#4C4AB2` | Read, List, Search, Map, Skill, Web, Browser, Checkpoint and other tools without a family; the Read level chip. |
 | `BADGE_COORD` | `#2D6363` | Agent, Todo and Ask user receipts. |
-| `BADGE_EDIT` | `#7A3F9E` | Update, Write. |
-| `BADGE_SHELL` | `#3D58A3` | Bash, Exec, Process. |
+| `BADGE_EDIT` | `#7A3F9E` | Update, Write; the Workspace level chip. |
+| `BADGE_SHELL` | `#3D58A3` | Bash, Exec, Process; the Full level chip. |
 | `BADGE_IDLE` | `#34324F` | Running and background badges, `WORK`, attachment and ` current ` chips. |
 | `BADGE_BAD` | `#7A2E3A` | Failed calls. |
 | `BADGE_WARN` | `#6B5222` | Stopped or timed-out calls. |
@@ -73,7 +73,7 @@ text starts at column 2, and right-hand facts end two cells before the edge.
 One blank row separates conversation blocks. Chips, badges, pills and keycaps
 have one cell of padding.
 
-The dock holds, top to bottom: queued drafts, the status row, the composer
+The dock holds, top to bottom: the pending draft, the status row, the composer
 (top rule, draft, bottom rule) and the footer, key hints or an open panel. See
 [Composer and controls](COMPOSER.md).
 
@@ -119,7 +119,7 @@ is the running call's `description` when given, else a verb and a short
 target: `Reading`, `Editing`, `Writing` a file; `Running` a command;
 `Starting` an `exec` program; `Fetching` or `Browsing` a host;
 `Loading skill`; `Saving a checkpoint`. Between calls it names the phase, such
-as `Thinking`, `Working` or `Waiting for your edit`; `Stopping` takes priority
+as `Thinking` or `Working`; `Stopping` takes priority
 after cancellation. Compaction and attachment progress take the label while
 they run. Composer rules turn `FAINT` while a turn works.
 

@@ -11,7 +11,7 @@ fn agent(directory: &Directory, fixture: &HttpFixture, limits: Limits) -> Agent 
 }
 
 fn send(inbox: &Inbox, text: &str) {
-    inbox.update(|entries| {
+    inbox.with(|entries| {
         entries.push(text.into()).unwrap();
         entries.record();
     });

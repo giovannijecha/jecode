@@ -258,10 +258,10 @@ pub(super) fn inside(state: &State) -> Option<Frame> {
         panel.offset.min(end)
     };
     let shown = lines.iter().skip(start).take(room).cloned().collect();
-    let working = matches!(agents::value(record, "state"), "running" | "stopping");
+    // Reading back, the way down is the main conversation's (B8.4).
     let mut keys = vec![key("Esc", "back to agents"), key("↑↓", "scroll")];
-    if working {
-        keys.push(key("End", "follow"));
+    if start < end {
+        keys.push(key("Alt+End", "back to bottom"));
     }
     let foot = panel::row(&keys, columns.saturating_sub(4)).indent("  ", MUTED);
     Some(super::lower_with_chrome(

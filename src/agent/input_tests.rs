@@ -25,7 +25,7 @@ fn content(text: &str) -> String {
 
 /// Submits prompts as the interface does: queued, then recorded in its input.
 fn send(inbox: &Inbox, prompts: &[&str]) {
-    inbox.update(|entries| {
+    inbox.with(|entries| {
         for prompt in prompts {
             entries.push((*prompt).into()).unwrap();
         }
@@ -74,7 +74,6 @@ fn describe(event: &Event) -> Option<String> {
                 .join(", ")
         )),
         Event::ToolFinished { id, .. } => Some(format!("tool {id}")),
-        Event::InputHeld => Some("held".into()),
         _ => None,
     }
 }
@@ -180,73 +179,6 @@ fn input_during_a_tool_batch_waits_for_every_result_and_later_responses_continue
         .collect();
     assert_eq!(roles, ["user", "assistant", "tool", "tool", "user"]);
     assert_eq!(users(&requests[2]), ["start", "during tools", "at the end"]);
-}
-
-#[test]
-fn an_edit_keeps_the_turn_open_until_saved_and_holds_later_messages_behind_it() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![
-        (200, completion("First.", vec![])),
-        (200, completion("Second.", vec![])),
-    ]);
-    let mut agent = agent(&directory, &fixture);
-    let inbox = agent.inbox();
-    send(&inbox, &["edited", "after"]);
-    let held = inbox.with(|entries| entries.prompts().next().unwrap().0);
-    inbox.update(|entries| entries.hold(held).unwrap());
-    let mut log = Vec::new();
-    agent
-        .run_turn("start", &mut |event| {
-            if matches!(event, Event::InputHeld) {
-                inbox.update(|entries| entries.release(Some("edited and saved".into())));
-            }
-            log.extend(describe(&event));
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(
-        log,
-        [
-            "message First.",
-            "held",
-            "accepted edited and saved, after",
-            "message Second.",
-        ]
-    );
-    let requests = fixture.finish();
-    assert_eq!(users(&requests[0]), ["start"]);
-    assert_eq!(users(&requests[1]), ["start", "edited and saved", "after"]);
-}
-
-#[test]
-fn stopping_while_an_edit_holds_the_turn_keeps_its_messages_pending() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![(200, completion("First.", vec![]))]);
-    let mut agent = agent(&directory, &fixture);
-    let inbox = agent.inbox();
-    let cancellation = agent.cancellation();
-    send(&inbox, &["edited"]);
-    let held = inbox.with(|entries| entries.prompts().next().unwrap().0);
-    inbox.update(|entries| entries.hold(held).unwrap());
-    let error = agent
-        .run_turn("start", &mut |event| {
-            if matches!(event, Event::InputHeld) {
-                cancellation.cancel();
-                inbox.wake();
-            }
-            Ok(())
-        })
-        .unwrap_err();
-    assert_eq!(error, "Operation cancelled");
-    assert_eq!(inbox.with(|entries| entries.len()), 1);
-    assert!(
-        !agent
-            .archive()
-            .document()
-            .encode()
-            .contains("\"content\":\"edited\"")
-    );
-    assert_eq!(fixture.finish().len(), 1);
 }
 
 #[test]
@@ -407,7 +339,7 @@ fn accepted_input_is_saved_once_even_when_the_interface_never_shows_it() {
     resumed.resume(&id).unwrap();
     let document = resumed.sessions().unwrap().snapshot();
     assert!(document.input.queued.is_empty());
-    assert!(document.input.paused.is_empty());
+    assert!(document.input.paused.is_none());
     let late = document
         .messages
         .iter()
@@ -431,7 +363,6 @@ fn plain_output_ignores_input_notifications_and_a_turn_without_input_closes() {
             prompts: vec!["not shown".into()],
         })
         .unwrap();
-    console.emit(Event::InputHeld).unwrap();
     agent.run_turn("question", &mut console).unwrap();
     let output = String::from_utf8(output).unwrap();
     assert!(output.contains("Plain answer."));

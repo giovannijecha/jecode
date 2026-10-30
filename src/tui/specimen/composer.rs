@@ -67,12 +67,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     working(&mut long, 4252.0);
     queued(&mut long);
 
-    let mut editing = state(columns);
-    working(&mut editing, 48.2);
-    queued(&mut editing);
-    let slot = editing.queue.slot(0).unwrap();
-    editing.queue.begin_edit(slot, &mut editing.editor).unwrap();
-    editing.event(crate::events::Event::InputHeld);
+    let mut paused = state(columns);
+    queued(&mut paused);
+    paused.queue.pause();
+    paused.editor.insert("run the full test suite");
 
     let mut stopping = state(columns);
     working(&mut stopping, 48.2);
@@ -124,9 +122,9 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ("Context capacity unknown", unknown),
         ("Typing a long draft", typing),
         ("Working", work),
-        ("Working with queued messages", queue),
+        ("Working with a queued draft", queue),
         ("Working past an hour", long),
-        ("Editing a queued message", editing),
+        ("Paused draft", paused),
         ("Stopping", stopping),
         ("Prompt history", history),
         ("Completed turn tools", inspection),

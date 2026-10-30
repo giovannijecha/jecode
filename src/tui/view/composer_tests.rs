@@ -8,14 +8,14 @@ use crate::{
         activity::Activity,
         selector::Selector,
         theme::{
-            ACCENT, CURSOR, DIM, FAINT, MUTED, PILL_SURFACE, SELECTED_SURFACE, STRONG,
-            USER_SURFACE, WARNING,
+            ACCENT, BADGE_EDIT, BADGE_READ, BADGE_SHELL, BADGE_TEXT, CURSOR, DIM, FAINT, MUTED,
+            PILL_SURFACE, SELECTED_SURFACE, STRONG, USER_SURFACE, WARNING,
         },
     },
 };
 
 #[test]
-fn turn_phases_and_waiting_for_an_edit_label_the_status_row() {
+fn turn_phases_label_the_status_row() {
     let mut state = State {
         activity: Some(Activity::new()),
         ..State::default()
@@ -62,16 +62,6 @@ fn turn_phases_and_waiting_for_an_edit_label_the_status_row() {
         assert!(status.starts_with(&format!(" >_ {label} ")), "{status}");
         assert!(status.contains("Esc interrupt · 0."), "{status}");
     }
-    state.queue.push("a draft").unwrap();
-    let slot = state.queue.slot(0).unwrap();
-    state.queue.begin_edit(slot, &mut state.editor).unwrap();
-    state.event(Event::InputHeld);
-    let live = frame(&state, "model", "dir").live;
-    let status = live[0].plain();
-    assert!(status.contains("Waiting for your edit"), "{status}");
-    // The draft edit holds Esc, so the row does not offer it.
-    assert!(!status.contains("Esc"), "{status}");
-    assert!(live[1].plain().starts_with("─ Editing draft 1/1 ─"));
     state.activity.as_mut().unwrap().stopping = true;
     state.event(Event::Recovering {
         attempt: 1,
@@ -115,6 +105,33 @@ fn the_idle_dock_has_an_empty_status_row_accent_rules_and_a_dim_path() {
     assert_eq!(footer.spans[0].style, DIM);
     let chip = footer.spans.last().unwrap();
     assert_eq!((chip.style, chip.background), (MUTED, Some(PILL_SURFACE)));
+}
+
+#[test]
+fn the_level_is_a_chip_on_the_family_surface_and_drops_first_when_narrow() {
+    use crate::permissions::Level;
+    let mut state = State::default();
+    for (level, surface) in [
+        (Level::Read, BADGE_READ),
+        (Level::Workspace, BADGE_EDIT),
+        (Level::Full, BADGE_SHELL),
+    ] {
+        state.permission_level = level;
+        let rule = &frame(&state, "model", "dir").live[3];
+        assert!(rule.plain().ends_with(&format!(" {}  ─", level.name())));
+        let chip = &rule.spans[rule.spans.len() - 2];
+        assert_eq!(chip.text, format!(" {} ", level.name()));
+        assert_eq!(
+            (chip.style, chip.background),
+            (BADGE_TEXT.bold(), Some(surface))
+        );
+    }
+    state.permission_level = Level::Workspace;
+    state.width = 12;
+    assert_eq!(
+        frame(&state, "model", "dir").live[3].plain(),
+        "─".repeat(12)
+    );
 }
 
 #[test]
@@ -166,14 +183,13 @@ fn long_drafts_show_a_third_of_the_screen_centred_on_the_caret() {
 }
 
 #[test]
-fn working_rules_turn_faint_and_queued_drafts_precede_the_status_row() {
+fn working_rules_turn_faint_and_the_pending_draft_precedes_the_status_row() {
     let mut state = State {
         activity: Some(Activity::new()),
         ..State::default()
     };
     state.event(Event::Reasoning);
     state.queue.push("one\ntwo").unwrap();
-    state.queue.push("paused").unwrap();
     state.queue.pause();
     state.notice = Some(crate::tui::Feedback::result(Kind::Warning, "queue notice"));
     let frame = frame(&state, "model", "dir");
@@ -183,9 +199,8 @@ fn working_rules_turn_faint_and_queued_drafts_precede_the_status_row() {
     // Labels end two cells from the edge.
     assert_eq!(text::cells(&queued.plain()), state.width - 2);
     assert_eq!(queued.spans.last().unwrap().style, WARNING);
-    assert!(frame.live[1].plain().ends_with("paused"));
-    assert!(frame.live[2].plain().starts_with(" ▲  queue notice "));
-    assert!(frame.live[3].plain().starts_with("─ Drafts 2 · Alt+↑ ─"));
+    assert!(frame.live[1].plain().starts_with(" ▲  queue notice "));
+    assert!(frame.live[2].plain().starts_with("─ Draft · ↑ ─"));
     let borders: Vec<_> = frame
         .live
         .iter()
@@ -202,26 +217,26 @@ fn working_rules_turn_faint_and_queued_drafts_precede_the_status_row() {
 }
 
 #[test]
-fn queued_drafts_name_their_state_in_dim_and_their_range_when_some_are_hidden() {
+fn the_pending_draft_names_its_state_and_the_rule_offers_up_while_the_composer_is_empty() {
     let mut state = State {
         height: 8,
         ..State::default()
     };
-    for index in 0..3 {
-        state.queue.push(format!("draft {index}")).unwrap();
-    }
-    let rows: Vec<_> = frame(&state, "model", "dir").live;
-    // Eight rows leave three for drafts beside the dock's five.
-    assert_eq!(rows.len(), 8);
+    state.queue.push("draft").unwrap();
+    let rows = frame(&state, "model", "dir").live;
+    assert_eq!(rows.len(), 6);
+    assert!(rows[0].plain().starts_with("› draft"));
     assert!(rows[0].plain().ends_with(" queued"));
     assert_eq!(rows[0].spans.last().unwrap().style, DIM);
-    state.height = 7;
+    assert!(rows[2].plain().starts_with("─ Draft · ↑ ─"));
+    state.editor.insert("typing");
     let rows = frame(&state, "model", "dir").live;
-    assert!(
-        rows[0].plain().ends_with("queued 1–2 / 3"),
-        "{}",
-        rows[0].plain()
-    );
+    assert!(rows[2].plain().starts_with("─ Draft ─"));
+    // The dock keeps its rows when the height leaves none for the draft.
+    state.height = 5;
+    let rows = frame(&state, "model", "dir").live;
+    assert_eq!(rows.len(), 5);
+    assert!(rows.iter().all(|row| !row.plain().contains("queued")));
 }
 
 #[test]
@@ -372,35 +387,7 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
 }
 
 #[test]
-fn draft_contexts_replace_the_footer_with_key_hints() {
-    let mut state = State {
-        activity: Some(Activity::new()),
-        ..State::default()
-    };
-    state.queue.push("queued fix").unwrap();
-    state.queue.push("later fix").unwrap();
-    let slot = state.queue.slot(0).unwrap();
-    state.queue.begin_edit(slot, &mut state.editor).unwrap();
-    let frame_rows = frame(&state, "model", "dir").live;
-    let rows: Vec<_> = frame_rows.iter().map(Line::plain).collect();
-    // The later message, then the dock: the edited message leaves the queue
-    // previews while it is open, and its keys take the footer's row.
-    assert_eq!(rows.len(), 6, "{rows:#?}");
-    assert!(rows[0].starts_with("› later fix") && rows[0].ends_with("queued"));
-    assert!(rows[1].starts_with(" >_ Working ") && !rows[1].contains("Esc"));
-    assert!(rows[2].starts_with("─ Editing draft 1/2 ─"));
-    assert!(rows[3].starts_with("› queued fix"));
-    assert_eq!(rows[5], "   Enter  save    Esc  cancel");
-    let keycap = frame_rows[5]
-        .spans
-        .iter()
-        .find(|span| span.text == " Enter ")
-        .unwrap();
-    assert_eq!(
-        (keycap.style, keycap.background),
-        (STRONG, Some(SELECTED_SURFACE))
-    );
-
+fn prompt_history_replaces_the_footer_with_key_hints() {
     let mut state = State::default();
     state
         .history

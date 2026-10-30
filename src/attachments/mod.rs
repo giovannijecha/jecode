@@ -177,6 +177,18 @@ impl Prompt {
         self.attachments.is_empty() && self.text.trim().is_empty()
     }
 
+    /// Both prompts as one, separated by a blank line; markers keep their order.
+    pub fn join(mut self, other: Prompt) -> Self {
+        if self.is_empty() {
+            return other;
+        }
+        if !other.is_empty() {
+            self.text = format!("{}\n\n{}", self.text.trim_end(), other.text.trim_start());
+            self.attachments.extend(other.attachments);
+        }
+        self
+    }
+
     /// Text with each marker replaced by its numbered label.
     pub fn display(&self) -> String {
         expand(&self.text, &self.attachments)

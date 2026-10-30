@@ -59,6 +59,24 @@ fn labels_are_derived_and_lookalikes_stay_text() {
 }
 
 #[test]
+fn joined_prompts_keep_text_and_attachment_order_and_skip_empty_sides() {
+    let first = Prompt::new(
+        format!("look {MARKER}\n"),
+        vec![attachment("att-1-1-1", "a.png", "image/png")],
+    );
+    let second = Prompt::new(
+        format!("\nthen {MARKER}"),
+        vec![attachment("att-1-1-2", "b.txt", "text/plain")],
+    );
+    let joined = first.clone().join(second.clone());
+    assert_eq!(joined.text, format!("look {MARKER}\n\nthen {MARKER}"));
+    let ids: Vec<_> = joined.attachments.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["att-1-1-1", "att-1-1-2"]);
+    assert_eq!(Prompt::plain(" ").join(second.clone()), second);
+    assert_eq!(first.clone().join(Prompt::plain("\n")), first);
+}
+
+#[test]
 fn prompts_round_trip_and_accept_legacy_strings() {
     let prompt = Prompt::new(
         format!("{MARKER} explain"),

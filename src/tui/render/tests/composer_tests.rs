@@ -118,7 +118,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
     );
     state.event(Event::Message { text: streamed });
     state.activity = None;
-    state.queue.inbox().update(|entries| entries.drain());
+    state.queue.inbox().with(|entries| entries.drain());
     update(&mut renderer, &mut screen, &mut state);
     state
         .editor

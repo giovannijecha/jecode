@@ -134,13 +134,13 @@ fn failure_keeps_meaningful_drafts_and_ignores_whitespace() {
         let draft = app.state.editor.clone();
         tests::finish(&mut app);
         assert_eq!(app.state.editor.text, "Failed request");
-        assert_eq!(app.state.queue.paused.len(), usize::from(keep));
+        assert_eq!(app.state.queue.paused.is_some(), keep);
         let input = app.persistence.as_ref().unwrap().snapshot().input;
-        assert_eq!(input.paused.len(), usize::from(keep));
-        if keep {
-            assert_eq!(app.state.queue.paused[0], draft);
-            assert_eq!(input.paused[0].prompt(), draft.prompt());
-            assert_eq!(input.paused[0].cursor, draft.cursor);
+        assert_eq!(input.paused.is_some(), keep);
+        if let Some(saved) = input.paused {
+            assert_eq!(app.state.queue.paused.as_ref(), Some(&draft));
+            assert_eq!(saved.prompt(), draft.prompt());
+            assert_eq!(saved.cursor, draft.cursor);
         }
         fixture.finish();
     }
@@ -165,15 +165,11 @@ fn escape_before_output_restores_prompt_accepted_followups_and_saved_composer() 
     // Let the socket finish after cancellation, as the worker is being stopped.
     release.send(()).unwrap();
     tests::finish(&mut app);
-    assert_eq!(app.state.editor.text, "Original request");
+    // The unanswered requests return as one draft; newer text is paused.
+    assert_eq!(app.state.editor.text, "Original request\n\nJoined request");
     assert_eq!(
-        app.state
-            .queue
-            .paused
-            .iter()
-            .map(|editor| editor.text.as_str())
-            .collect::<Vec<_>>(),
-        ["Joined request", "Unsent draft"]
+        app.state.queue.pending(),
+        Some(("Unsent draft".into(), true))
     );
     assert!(tests::rows(&app).is_empty());
     let id = app.persistence.as_ref().unwrap().id();
@@ -182,7 +178,7 @@ fn escape_before_output_restores_prompt_accepted_followups_and_saved_composer() 
     let (handle, _) =
         crate::sessions::Handle::open(store, &id, crate::redact::Redactor::empty()).unwrap();
     let saved = handle.snapshot();
-    assert_eq!(saved.input.draft.text, "Original request");
+    assert_eq!(saved.input.draft.text, "Original request\n\nJoined request");
     assert!(saved.records().iter().all(
         |record| !matches!(record, crate::sessions::Record::Text { role, .. } if role == "user")
     ));
@@ -338,18 +334,16 @@ fn failed_queued_preparation_while_recalling_history_keeps_the_failed_prompt_aft
             app.state.editor.text, "Queued task",
             "Escape discarded the recovered prompt"
         );
-        assert!(app.state.queue.paused.contains(&draft));
-        let recalled = app
-            .state
-            .queue
-            .paused
-            .iter()
-            .filter(|editor| editor.text.starts_with("Older prompt"))
-            .count();
-        assert_eq!(recalled, usize::from(edited));
+        // The edited recall and the unsent draft join in one paused draft.
+        let paused = app.state.queue.paused.clone().unwrap();
+        if edited {
+            assert_eq!(paused.text, "Older prompt revised\n\nMy unsent draft");
+        } else {
+            assert_eq!(paused, draft);
+        }
         let input = app.persistence.as_ref().unwrap().snapshot().input;
         assert_eq!(input.draft.text, "Queued task");
-        assert_eq!(input.paused.len(), 1 + usize::from(edited));
+        assert_eq!(input.paused.unwrap().text, paused.text);
         fixture.finish();
     }
 }

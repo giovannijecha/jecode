@@ -158,19 +158,12 @@ fn row(state: &State, position: usize, on: bool, names: usize, columns: usize) -
     highlighted(&mut line, command.name, &matched.positions, STRONG);
     let arguments = command.tui_usage.strip_prefix(command.name).unwrap_or("");
     line.push(arguments, MUTED);
-    let shortcut = if command.name == "/drafts" {
-        Line::new("Alt+↑", MUTED)
-    } else {
-        Line::default()
-    };
-    let room =
-        end.saturating_sub(panel::cells(&shortcut) + 2 * usize::from(command.name == "/drafts"));
-    if room >= 2 + names + 6 {
+    if end >= 2 + names + 6 {
         line = panel::fit(line, 2 + names, None);
         line.push(
-            &text::ellipsize(command.description(true), room - 2 - names),
+            &text::ellipsize(command.description(true), end - 2 - names),
             MUTED,
         );
     }
-    panel::spread(line, shortcut, end, None)
+    panel::spread(line, Line::default(), end, None)
 }

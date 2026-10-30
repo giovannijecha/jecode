@@ -227,7 +227,7 @@ fn queued_exit_pauses_when_the_active_turn_fails() {
     submit(&mut app, "/exit");
     finish(&mut app);
     assert!(!app.exit_requested);
-    assert_eq!(app.state.queue.paused[0].text, "/exit");
+    assert_eq!(app.state.queue.paused.as_ref().unwrap().text, "/exit");
     assert!(app.state.queue.messages().is_empty());
     assert_eq!(fixture.finish().len(), 1);
 }
@@ -260,7 +260,7 @@ fn init_stays_retryable_when_project_instructions_cannot_be_read() {
     submit(&mut app, "/init");
     assert!(app.worker.is_none());
     assert_eq!(app.state.editor.text, "/init");
-    assert!(app.state.queue.paused.is_empty());
+    assert!(app.state.queue.paused.is_none());
     assert!(app.state.notice.as_ref().unwrap().text.contains("UTF-8"));
     assert!(fixture.finish().is_empty());
 }

@@ -254,6 +254,20 @@ fn panel_list_inside_and_nested_escape_keep_the_exact_main_draft() {
     assert!(!app.state.agents_panel.as_ref().unwrap().follow);
     key(&mut app, 35);
     assert!(app.state.agents_panel.as_ref().unwrap().follow);
+    // Alt+Home and Alt+End move the agent's conversation, not the hidden main one.
+    let alt = |app: &mut App, code| {
+        app.input(Decoded::Key(Key {
+            code,
+            modifiers: 1,
+            character: 0,
+        }))
+        .unwrap();
+    };
+    alt(&mut app, 36);
+    assert!(!app.state.agents_panel.as_ref().unwrap().follow);
+    alt(&mut app, 35);
+    assert!(app.state.agents_panel.as_ref().unwrap().follow);
+    assert!(app.state.agents_panel.as_ref().unwrap().inside.is_some());
     let inside = text(&view::frame(&app.state, "fixture/model", "fixture").live);
     assert!(inside.contains("Implement search"), "{inside}");
     assert!(inside.contains("UPDATE  src/search.rs"), "{inside}");
@@ -417,9 +431,10 @@ fn inside_follows_new_rows_until_the_reader_pauses() {
         ..Panel::default()
     });
     let following = text(&view::frame(&state, "fixture/model", "fixture").live);
-    assert!(following.contains("TOOL-29") && following.contains("End  follow"));
+    assert!(following.contains("TOOL-29") && !following.contains("Alt+End"));
     state.agents_panel.as_mut().unwrap().follow = false;
     let paused = text(&view::frame(&state, "fixture/model", "fixture").live);
+    assert!(paused.contains("Alt+End  back to bottom"), "{paused}");
     assert!(paused.contains("TOOL-00") && !paused.contains("TOOL-29"));
 }
 

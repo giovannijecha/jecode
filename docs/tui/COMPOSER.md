@@ -7,8 +7,8 @@ turn before the next model request. Menus open over a running turn: `/settings`,
 What they change for this conversation applies from the next turn; saved
 defaults are saved at once. Commands that start work or replace the
 conversation, such as `/init`, `/resume` and `/new`, wait until the turn ends.
-Up to eight messages can be pending. The draft clears only after Jecode accepts
-it.
+One message can be pending at a time. The draft clears only after Jecode
+accepts it.
 
 The composer sits between two full-width rules: `›` marks the first visible
 row, the draft is `STRONG`, and an empty draft shows `Ask anything…`. Use
@@ -16,8 +16,8 @@ row, the draft is `STRONG`, and an empty draft shows `Ask anything…`. Use
 terminal reports them as distinct keys. Pasted text keeps its line breaks. The
 draft shows up to a third of the screen, five to ten rows, centred on the
 caret; the top rule shows the visible range when some rows are hidden, and
-names the context: `Drafts 3 · Alt+↑` with pending drafts, `Editing draft 1/3`
-or `Prompt history`. Attachment labels are chips edited as one unit. See
+names the context: `Draft · ↑` with a pending draft and an empty composer,
+`Draft` once you type, or `Prompt history`. Attachment labels are chips edited as one unit. See
 [Attachments](../usage/ATTACHMENTS.md) for file drops and clipboard images.
 
 ## Editing keys
@@ -27,7 +27,7 @@ or `Prompt history`. Attachment labels are chips edited as one unit. See
 | `Enter` | Send the draft, or accept it during a turn. |
 | `Ctrl+J` | Insert a newline. |
 | `Left` / `Right`, `Ctrl+Left` / `Ctrl+Right` | Move by character or word. |
-| `Up` / `Down` | Move between visual rows of the draft. |
+| `Up` / `Down` | Move between visual rows of the draft. In an empty composer, `Up` takes the pending draft back. |
 | `Home` / `End`, `Ctrl+A` / `Ctrl+E` | Move to the start or end of the logical line. |
 | `Ctrl+Home` / `Ctrl+End` | Move to the start or end of the whole draft. |
 | `Backspace` / `Delete` | Delete before or after the caret; remove an attachment whole. |
@@ -35,14 +35,12 @@ or `Prompt history`. Attachment labels are chips edited as one unit. See
 | `Ctrl+U` | Delete to the start of the logical line. |
 | `Ctrl+P` / `Ctrl+N` | Browse up to 50 sent prompts; commands are excluded. |
 | `Alt+V` | Attach the clipboard image. `Ctrl+V` remains the terminal's text paste. |
-| `Alt+Up` | Open pending drafts. |
 | `Ctrl+O` | Expand or collapse the latest collaboration receipt, or tools in the latest finished execution turn. |
 | `Ctrl+Q` | Quit; while work runs, ask first. |
 
 Prompt history preserves the unsent draft and caret. `Esc` leaves history and
-returns to that draft. While a draft edit or the history holds the composer,
-its keys (`Enter save · Esc cancel`, `Enter send · Ctrl+P/N history · Esc
-back`) replace the footer.
+returns to that draft. While the history holds the composer, its keys (`Enter
+send · Ctrl+P/N history · Esc back`) replace the footer.
 
 `Ctrl+O` is ignored during generation and becomes available when the worker
 ends, including after a stop or error. It opens all tools from that turn;
@@ -70,37 +68,35 @@ While a turn runs, the status row above the composer shows the blinking `>_`
 caret, the shimmering activity (the running call's description or verb, or the
 turn's phase such as `Thinking`), `Esc interrupt` while Esc stops the turn, the
 elapsed time, which reads in hours past 60 minutes, and the generated tokens.
-The composer rules turn faint and the composer stays editable. Pending
-messages appear above the status row as `› first line…` with `queued` or
-`paused` on the right; Jecode accepts ordinary messages before the active
-turn's next model request. Menus and inspection panels open immediately;
+The composer rules turn faint and the composer stays editable. The pending
+message appears above the status row as `› first line…` with `queued` or
+`paused` on the right; Jecode accepts an ordinary message before the active
+turn's next model request. While it is pending, `Enter` keeps a new message in
+the composer and warns. Menus and inspection panels open immediately;
 commands that start work or replace the conversation wait for the turn to finish.
-If the turn stops or fails, messages that have not joined it become `paused`
-and require review.
+If the turn stops or fails, a message that has not joined it returns to an
+empty composer; otherwise it stays as a `paused` draft that is never sent
+automatically.
 
 When the turn ends, the status row keeps `Done`, `Stopped` or `Failed` with
 its time and facts until the next send. A failed turn also leaves its
 diagnostic as the turn's last conversation row.
 
 If a turn fails or is stopped with no response text or tool card left in the transcript,
-its first prompt returns to the composer with its attachments. Other messages
-already accepted into that unanswered turn become paused drafts; a newer
-composer draft or edit is preserved there too. Returned input disappears from
+its prompts return to the composer with their attachments, joined by a blank
+line. Newer composer text joins the paused draft. Returned input disappears from
 the transcript and is excluded from later model requests, including after
 resuming. Waiting and thinking indicators do not count as output. A streaming
 preview discarded during recovery does not count either. Confirmed response
 text, a retained partial response or a tool card keeps the transcript and
 composer in place, so a new message such as `continue` can resume the work.
 
-Open `/drafts` or press `Alt+Up` to review pending messages, even during a
-turn. Queued drafts appear before paused ones. `Enter` edits the selected
-draft; in the editor, `Enter` saves the edit and `Esc` cancels it. `Ctrl+S`
-sends a paused draft explicitly, including from its editor. `Ctrl+D` marks a
-draft for discard; `Enter` confirms and `Esc` cancels. Queued drafts already
-set for automatic sending cannot be sent again with `Ctrl+S`.
+Press `Up` in an empty composer to take the pending draft back, even during a
+turn, unless Jecode has already accepted it. Edit it or clear it; `Enter`
+queues it again, or sends it when idle.
 
-Jecode saves the composer, pending drafts, and sent-prompt history with the
-conversation. Resuming a session never sends paused drafts automatically.
+Jecode saves the composer, the pending draft, and sent-prompt history with the
+conversation. Resuming a session never sends a paused draft automatically.
 See [Sessions](../usage/SESSIONS.md) for persistence and resume behavior, and
 [Long work](../usage/LONG_WORK.md) for turn recovery and compaction.
 
@@ -145,7 +141,6 @@ title rule and the key row holding `Esc` stay.
   confirms and `Esc` cancels. See [Sessions](../usage/SESSIONS.md).
 - `/copy` selects completed response text, code, or quotes. See
   [Copy](../usage/COPY.md).
-- `/drafts` opens the pending drafts list.
 - `/terminal [ID]` opens active processes or saved output.
 - `/checkpoints [COMMAND]` lists, inspects or restores per-call checkpoints
   and shows the result without a model request. See
@@ -153,7 +148,7 @@ title rule and the key row holding `Esc` stay.
 - `/init` asks the current model to inspect the project and create or update the
   launch directory's `AGENTS.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md).
 - `/exit` quits after the current turn. Its hidden alias `/quit` follows the same
-  queue and pause rules as other drafts. A stopped or failed turn pauses an
+  queue and pause rules as other messages. A stopped or failed turn pauses an
   already queued `/exit` too.
 
 An unknown command reports an error with a spelling suggestion when one is
@@ -168,7 +163,7 @@ follows the tail; the tab row names the mode, `following` or `paused`. Output
 wraps at word boundaries. `Ctrl+D` opens a stop confirmation for the selected
 process; `Enter` confirms and `Esc` or `Ctrl+C` cancels. `Esc` returns from
 the output to the list, then closes the panel. `/terminal stop ID` requests
-the same stop directly. The composer and pending drafts remain available after
+the same stop directly. The composer and the pending draft remain available after
 the panel closes. See [Tools](../usage/TOOLS.md) for process behavior.
 
 ## Reading, quitting, and feedback
@@ -176,7 +171,7 @@ the panel closes. See [Tools](../usage/TOOLS.md) for process behavior.
 `Page Up`/`Page Down` and the mouse wheel browse the conversation. Scrolling
 up holds the reading position while new output arrives, and the row above the
 composer counts the rows below. `Alt+Home` goes to the start; `Alt+End`
-follows the latest output. `Esc` closes an open panel, draft edit, or
+follows the latest output. `Esc` closes an open panel or
 history; otherwise it stops active work, whether or not you are reading. `Ctrl+C` also stops work, closes a panel, or clears an idle
 draft; it never quits. See [Scrolling and resize](RESIZE.md) for reflow and
 terminal restoration.
@@ -193,8 +188,8 @@ Notices take the status row, by lifetime. A result shows `✓` with its subject
 and detail and clears after five seconds or when you start typing; a changed
 setting reads `old → new` with the new value strong. A warning (`▲`) stays
 until your next key and an error (`✕`) until your next send, naming the next
-step as a keycap when there is one, such as `Alt+↑ review` for paused drafts
-or `/settings update key` for a rejected key. A notice gives way only to one
+step as a keycap when there is one, such as `/settings update key` for a
+rejected key. A notice gives way only to one
 at least as severe. Progress such as compaction or attachments takes the
 activity label beside the caret; a retry shows `Retrying in 4s` with the
 attempt and reason, overlaying compaction until it ends. Copy feedback has its

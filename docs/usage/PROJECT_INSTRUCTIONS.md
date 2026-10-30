@@ -26,8 +26,8 @@ asks for concise, verified conventions and build/test commands, preserving usefu
 existing instructions through targeted updates.
 
 In the TUI, `/init` waits in the command queue while a turn is running. Stopping
-or failing that turn pauses it like other pending drafts. Review it in `/drafts`
-before sending again. The generated instructions become active on the next turn.
+or failing that turn pauses it like any pending draft. Take it back with Up in an
+empty composer before sending again. The generated instructions become active on the next turn.
 
 ## Scope and precedence
 

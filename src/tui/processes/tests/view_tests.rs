@@ -86,7 +86,7 @@ fn selection_follows_process_identity_and_the_draft_survives() {
     key(&mut app, ESC, 0);
     assert!(app.state.processes.is_none());
     assert_eq!(app.state.editor.prompt().text, "unsent draft");
-    assert_eq!(app.state.queue.len(), 1);
+    assert!(!app.state.queue.is_empty());
     app.open_processes("process-1-2-3");
     assert!(panel(&app).logs.is_none());
 }

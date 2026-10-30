@@ -59,7 +59,7 @@ impl Observer {
             if running {
                 // The worker can only select an initial assignment while holding
                 // this same state lock. Its handoff drains the inbox atomically.
-                let queued = inbox.update(|entries| {
+                let queued = inbox.with(|entries| {
                     if entries
                         .push(Prompt::plain(format!(
                             "Assignment update v{version}: {instructions}\n\n{context}"
@@ -227,7 +227,6 @@ impl Observer {
                 .find(|w| w.id == id)
                 .ok_or("Collaborator worker is unavailable")?;
             worker.cancellation.cancel();
-            worker.inbox.wake();
             let _ = worker.wake.send(());
             title
         };
@@ -368,7 +367,6 @@ impl Observer {
             index.map(|index| {
                 let worker = state.workers.remove(index);
                 worker.cancellation.cancel();
-                worker.inbox.wake();
                 let _ = worker.wake.send(());
                 worker
             })

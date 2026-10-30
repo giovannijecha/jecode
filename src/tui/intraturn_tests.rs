@@ -74,8 +74,8 @@ fn an_open_panel_does_not_defer_delivery_and_no_completion_shows_between_respons
     let mut app = app(&home, &directory, &fixture);
     start(&mut app, "active");
     submit(&mut app, "joined");
-    key(&mut app, 38, 1);
-    assert!(app.draft_menu_open());
+    key(&mut app, 112, 0);
+    assert!(app.state.information.is_some());
     release.send(()).unwrap();
     wait_until(&mut app, |app| {
         rows(app).contains(&"user: joined".to_owned())
@@ -85,7 +85,7 @@ fn an_open_panel_does_not_defer_delivery_and_no_completion_shows_between_respons
     assert!(app.state.activity.is_some());
     assert_ne!(app.state.status, "Ready");
     assert!(app.state.queue.is_empty());
-    assert!(app.draft_menu_open());
+    assert!(app.state.information.is_some());
     wait_until(&mut app, |app| app.worker.is_none());
     assert_eq!(
         rows(&app),
@@ -128,7 +128,7 @@ fn an_accepted_message_whose_notification_was_lost_is_shown_once_and_not_paused(
     assert!(app.state.queue.is_empty());
     assert_eq!(app.state.history.snapshot(), ["active", "joined"]);
     let input = app.persistence.as_ref().unwrap().snapshot().input;
-    assert!(input.queued.is_empty() && input.paused.is_empty());
+    assert!(input.queued.is_empty() && input.paused.is_none());
     assert_eq!(fixture.finish().len(), 2);
 }
 
@@ -204,56 +204,77 @@ fn quitting_after_acceptance_was_displayed_does_not_duplicate_prompt_history() {
 }
 
 #[test]
-fn cancelling_a_held_edit_delivers_the_message_and_a_later_stop_does_not_requeue_it() {
+fn up_in_an_empty_composer_takes_the_draft_back_and_enter_queues_it_again() {
     let home = Directory::new();
     let directory = Directory::new();
     let (release, gate) = mpsc::channel();
-    let (second, second_gate) = mpsc::channel();
-    let fixture = HttpFixture::streaming(vec![gated(gate), gated(second_gate)]);
+    let fixture = HttpFixture::streaming(vec![
+        gated(gate),
+        Response::Json(200, completion("Done.", vec![])),
+    ]);
     let mut app = app(&home, &directory, &fixture);
     start(&mut app, "active");
     submit(&mut app, "queued");
-    app.input(Decoded::Text("main draft".into())).unwrap();
-    let main = app.state.editor.clone();
-    key(&mut app, 38, 1);
-    key(&mut app, 13, 0);
-    app.input(Decoded::Text(" unsaved".into())).unwrap();
-    release.send(()).unwrap();
-    wait_until(&mut app, |app| {
-        app.state.status.starts_with("Waiting for your edit")
-    });
-    assert!(app.worker.is_some());
-    // Ctrl+C first cancels the edit; the original message joins the turn.
-    key(&mut app, 67, 4);
-    assert_eq!(app.state.editor, main);
-    wait_until(&mut app, |app| {
-        rows(app).contains(&"user: queued".to_owned())
-    });
-    assert!(app.draft_menu_open());
-    key(&mut app, 67, 4);
-    wait_until(&mut app, |app| {
-        matches!(app.state.items.last(), Some(state::Item::Streaming { .. }))
-    });
-    let started = Instant::now();
-    key(&mut app, 67, 4);
-    second.send(()).unwrap();
-    wait_until(&mut app, |app| app.worker.is_none());
-    assert!(started.elapsed() < Duration::from_secs(3));
-    assert!(app.state.queue.is_empty());
-    assert_eq!(app.state.editor, main);
-    assert_eq!(app.state.history.snapshot(), ["active", "queued"]);
+    assert_eq!(app.state.queue.pending(), Some(("queued".into(), false)));
+    // A second message waits in the composer.
+    submit(&mut app, "second");
+    assert_eq!(app.state.editor.text, "second");
+    assert_eq!(app.state.queue.messages(), ["queued"]);
     assert_eq!(
-        rows(&app)
-            .iter()
-            .filter(|row| *row == "user: queued")
-            .count(),
-        1
+        app.state.notice.as_ref().unwrap().text,
+        crate::tui::drafts::PENDING
+    );
+    // With text in the composer, Up only edits it.
+    key(&mut app, 38, 0);
+    assert_eq!(app.state.editor.text, "second");
+    assert_eq!(app.state.queue.messages(), ["queued"]);
+    app.state.editor.take();
+    key(&mut app, 38, 0);
+    assert_eq!(app.state.editor.text, "queued");
+    assert!(app.state.queue.is_empty());
+    submit(&mut app, " edited");
+    assert!(app.state.editor.text.is_empty());
+    assert_eq!(app.state.queue.messages(), ["queued edited"]);
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert_eq!(
+        rows(&app),
+        [
+            "user: active",
+            "assistant: Active.",
+            "user: queued edited",
+            "assistant: Done."
+        ]
     );
     assert_eq!(fixture.finish().len(), 2);
 }
 
 #[test]
-fn quitting_while_an_edit_holds_the_turn_returns_promptly_and_keeps_the_draft() {
+fn up_after_the_agent_accepted_the_draft_changes_nothing() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let (release, gate) = mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![
+        gated(gate),
+        Response::Json(200, completion("Done.", vec![])),
+    ]);
+    let mut app = app(&home, &directory, &fixture);
+    start(&mut app, "active");
+    submit(&mut app, "joined");
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| {
+        rows(app).contains(&"user: joined".to_owned())
+    });
+    key(&mut app, 38, 0);
+    assert!(app.state.editor.text.is_empty());
+    assert!(app.state.queue.is_empty());
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert_eq!(app.state.history.snapshot(), ["active", "joined"]);
+    assert_eq!(fixture.finish().len(), 2);
+}
+
+#[test]
+fn stopping_with_an_empty_composer_returns_the_draft_to_it() {
     let home = Directory::new();
     let directory = Directory::new();
     let (release, gate) = mpsc::channel();
@@ -261,24 +282,50 @@ fn quitting_while_an_edit_holds_the_turn_returns_promptly_and_keeps_the_draft() 
     let mut app = app(&home, &directory, &fixture);
     start(&mut app, "active");
     submit(&mut app, "queued");
-    key(&mut app, 38, 1);
-    key(&mut app, 13, 0);
+    key(&mut app, 27, 0);
     release.send(()).unwrap();
-    wait_until(&mut app, |app| {
-        app.state.status.starts_with("Waiting for your edit")
-    });
-    let handle = app.persistence.clone().unwrap();
-    let started = Instant::now();
-    drop(app);
-    assert!(started.elapsed() < Duration::from_secs(3));
-    let input = handle.snapshot().input;
-    let saved: Vec<_> = input
-        .queued
-        .iter()
-        .map(|prompt| prompt.text.as_str())
-        .chain(input.paused.iter().map(|draft| draft.text.as_str()))
-        .collect();
-    assert_eq!(saved, ["queued"]);
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert_eq!(app.state.editor.text, "queued");
+    assert!(app.state.queue.is_empty());
+    assert!(
+        !app.state
+            .ending
+            .as_ref()
+            .is_some_and(|ending| ending.text.contains("draft paused"))
+    );
+    assert_eq!(app.state.history.snapshot(), ["active"]);
+    assert_eq!(fixture.finish().len(), 1);
+}
+
+#[test]
+fn stopping_with_text_in_the_composer_keeps_the_draft_paused() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let (release, gate) = mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![gated(gate)]);
+    let mut app = app(&home, &directory, &fixture);
+    start(&mut app, "active");
+    submit(&mut app, "queued");
+    app.input(Decoded::Text("typing".into())).unwrap();
+    key(&mut app, 27, 0);
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| app.worker.is_none());
+    assert_eq!(app.state.editor.text, "typing");
+    assert_eq!(app.state.queue.pending(), Some(("queued".into(), true)));
+    assert!(
+        app.state
+            .ending
+            .as_ref()
+            .is_some_and(|ending| ending.text.contains("draft paused"))
+    );
+    app.capture_input();
+    let input = app.persistence.as_ref().unwrap().snapshot().input;
+    assert_eq!(input.paused.unwrap().text, "queued");
+    // A paused draft never sends itself; Up brings it back.
+    app.state.editor.take();
+    key(&mut app, 38, 0);
+    assert_eq!(app.state.editor.text, "queued");
+    assert!(app.state.queue.is_empty());
     assert_eq!(fixture.finish().len(), 1);
 }
 
@@ -314,7 +361,7 @@ fn a_message_sent_after_the_turn_closed_starts_the_next_turn_exactly_once() {
 }
 
 #[test]
-fn a_save_failure_pauses_the_message_and_reports_the_error() {
+fn a_save_failure_returns_the_message_to_the_composer() {
     let home = Directory::new();
     let directory = Directory::new();
     let (release, gate) = mpsc::channel();
@@ -337,14 +384,9 @@ fn a_save_failure_pauses_the_message_and_reports_the_error() {
     release.send(()).unwrap();
     wait_until(&mut app, |app| app.worker.is_none());
     std::fs::set_permissions(&path, original).unwrap();
-    assert_eq!(app.state.queue.paused.len(), 1);
-    assert_eq!(app.state.queue.paused[0].text, "queued");
-    assert!(
-        app.state
-            .ending
-            .as_ref()
-            .is_some_and(|ending| ending.text.contains("1 draft paused"))
-    );
+    // The composer was empty, so the message returns to it.
+    assert_eq!(app.state.editor.text, "queued");
+    assert!(app.state.queue.is_empty());
     assert_eq!(app.state.history.snapshot(), ["active"]);
     assert_eq!(fixture.finish().len(), 1);
 }

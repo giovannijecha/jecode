@@ -149,13 +149,8 @@ fn ready_recovery_does_not_submit_queued_commands_or_an_unfinished_user_request(
     assert_eq!(document.input.draft.text, "è draft");
     assert_eq!(document.input.draft.cursor, 2);
     assert_eq!(
-        document
-            .input
-            .paused
-            .iter()
-            .map(|draft| draft.text.as_str())
-            .collect::<Vec<_>>(),
-        ["/model fixture/queued", "next task"]
+        document.input.paused.as_ref().unwrap().text,
+        "/model fixture/queued\n\nnext task"
     );
     assert!(document.input.queued.is_empty());
     assert!(!document.pending.active);

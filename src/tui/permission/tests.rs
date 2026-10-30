@@ -65,7 +65,7 @@ fn the_level_menu_applies_at_once_and_the_composer_names_the_level() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
-    assert!(screen(&app).contains("Workspace ─"));
+    assert!(screen(&app).contains(" Workspace  ─"));
     app.dispatch("/permissions".into()).unwrap();
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(
@@ -86,7 +86,7 @@ fn the_level_menu_applies_at_once_and_the_composer_names_the_level() {
     text(&mut app, "1");
     assert_eq!(app.permission_observer.level(), Level::Read);
     assert!(notice(&app).contains("Permissions: Workspace → Read · this conversation"));
-    assert!(screen(&app).contains("Read ─"));
+    assert!(screen(&app).contains(" Read  ─"));
     // Remembered opens empty and Esc returns to its row.
     app.dispatch("/permissions".into()).unwrap();
     text(&mut app, "4");

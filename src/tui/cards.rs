@@ -20,7 +20,7 @@ mod streams;
 mod summary;
 mod title;
 mod work;
-pub(in crate::tui) use badge::hang;
+pub(in crate::tui) use badge::{hang, level};
 pub use chapter::{
     activities as chapter_activities, exception as chapter_exception,
     groupable as chapter_groupable, header as chapter_header, label as chapter_label,

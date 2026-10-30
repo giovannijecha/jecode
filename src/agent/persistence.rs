@@ -103,7 +103,12 @@ impl Agent {
         }
         self.refresh_project_instructions()?;
         self.refresh_skills();
-        let before = self.messages.lock().unwrap().len();
+        let messages = self.messages.lock().unwrap();
+        let before = messages.len();
+        let first = !messages
+            .iter()
+            .any(|message| message.get("role").and_then(Value::as_str) == Some("user"));
+        drop(messages);
         let start = Value::object([
             ("type", Value::string("turn_start")),
             ("after_message", Value::number(before)),
@@ -115,6 +120,7 @@ impl Agent {
             self.withdraw_event(&start);
             return Err(error);
         }
+        self.name_session(&prompt, first);
         self.prepared = Some(prompt);
         Ok(())
     }

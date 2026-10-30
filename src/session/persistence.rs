@@ -160,12 +160,10 @@ pub(super) fn resume(
         )
         .map_err(|error| error.to_string())?;
     }
-    for (index, draft) in document.input.paused.iter().enumerate() {
+    if let Some(draft) = &document.input.paused {
         writeln!(
             output,
-            "\nPaused draft {}/{} (not sent; {}):\n{}",
-            index + 1,
-            document.input.paused.len(),
+            "\nPaused draft (not sent; {}):\n{}",
             if draft.attachments.is_empty() {
                 "copy/edit before sending"
             } else {

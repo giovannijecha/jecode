@@ -1,4 +1,4 @@
-use super::{App, editor::Editor};
+use super::App;
 use crate::{
     agent::{Agent, TurnInput},
     attachments::Prompt,
@@ -48,8 +48,8 @@ impl Submission {
 }
 
 impl App {
-    /// Restore the first request, park other accepted input, and preserve any
-    /// new draft or edit. A response or a started tool makes the turn durable.
+    /// Restore the unanswered requests as one draft and park any newer
+    /// composer text. A response or a started tool makes the turn durable.
     pub(super) fn return_unanswered(&mut self, agent: &mut Agent) -> bool {
         let Some(submission) = self.submission.take() else {
             return false;
@@ -59,17 +59,8 @@ impl App {
         }
         self.park_composer_for_restore();
         self.state.history.withdraw(&submission.prompts);
-        let mut prompts = submission.prompts.into_iter();
-        self.state.editor.set(prompts.next().unwrap());
-        let mut paused: Vec<_> = prompts
-            .map(|prompt| {
-                let mut editor = Editor::default();
-                editor.set(prompt);
-                editor
-            })
-            .collect();
-        paused.append(&mut self.state.queue.paused);
-        self.state.queue.paused = paused;
+        let returned = submission.prompts.into_iter().reduce(Prompt::join);
+        self.state.editor.set(returned.unwrap());
         if let Some(index) = &mut self.pending_command {
             *index -= submission
                 .items
@@ -87,7 +78,6 @@ impl App {
         self.state.reset_tool_details();
         self.state.generation = self.state.generation.wrapping_add(1);
         self.state.changed();
-        self.refresh_draft_menu();
         self.edited();
         self.capture_input();
         match agent.save_session() {
@@ -101,19 +91,24 @@ impl App {
         true
     }
 
-    fn park_composer(&mut self) {
-        if !self.state.editor.text.trim().is_empty() || !self.state.editor.attachments.is_empty() {
-            self.state
-                .queue
-                .paused
-                .push(std::mem::take(&mut self.state.editor));
+    /// Pauses a queued draft that has not joined the turn. An empty
+    /// composer takes the paused draft back at once.
+    pub(super) fn pause_draft(&mut self) {
+        self.state.queue.pause();
+        if !self.state.history.is_browsing()
+            && self.state.editor.prompt().is_empty()
+            && let Some(draft) = self.state.queue.paused.take()
+        {
+            self.state.editor = draft;
         }
     }
 
+    fn park_composer(&mut self) {
+        let draft = std::mem::take(&mut self.state.editor);
+        self.state.queue.park(draft);
+    }
+
     fn park_composer_for_restore(&mut self) {
-        if self.state.queue.is_editing() {
-            self.state.queue.save_edit(&mut self.state.editor);
-        }
         if self.state.history.has_edited_recall() {
             self.park_composer();
         }
@@ -122,7 +117,7 @@ impl App {
     }
 
     pub(super) fn restore_failed_start(&mut self, prompt: Prompt) {
-        self.state.queue.pause();
+        self.pause_draft();
         self.park_composer_for_restore();
         self.state.editor.set(prompt);
         self.edited();

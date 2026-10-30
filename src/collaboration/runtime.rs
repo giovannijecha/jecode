@@ -172,7 +172,7 @@ impl Observer {
                         record.pending.clear();
                         // The selected assignment becomes the initial prompt.
                         // Updates sent after this handoff remain in the inbox.
-                        child.inbox().update(|entries| {
+                        child.inbox().with(|entries| {
                             entries.drain();
                         });
                     }

@@ -86,8 +86,8 @@ area and owned tool outputs. It uses the same marker/type checks and rejects
 sessions open in another process. See [SESSIONS.md](SESSIONS.md#delete).
 
 Cleanup is available only when the session is ready. In the TUI, a command
-submitted during generation joins the existing FIFO queue. A stopped/failed
-turn leaves unprocessed commands as paused drafts for review.
+submitted during generation waits as the pending draft. A stopped/failed
+turn leaves an unprocessed command as the paused draft for review.
 Before deleting, Jecode rejects links, junctions and special files and saves
 a cleanup-intent event. Cleanup success or failure is also recorded. An
 interrupted cleanup is never retried automatically. If cleanup fails or Jecode

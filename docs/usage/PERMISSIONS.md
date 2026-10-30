@@ -26,7 +26,8 @@ Workspace and Full can reach the network; the level is not a domain allowlist.
 
 Changing a saved default leaves the current conversation unchanged. `/new`
 uses that default; resume restores the conversation's level and grants.
-The TUI names the current level on the composer's bottom rule.
+The TUI shows the current level as a chip on the composer's bottom rule, on
+the tool-badge colour of what it allows: reading, editing or commands.
 
 Level changes apply to subsequent calls. Already running calls and background
 processes retain their starting authority. The notice identifies this; use

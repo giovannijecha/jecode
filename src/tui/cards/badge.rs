@@ -1,6 +1,7 @@
 //! The ` NAME ` badge that opens every tool row, and the `│` / `└` gutter
 //! its results hang on.
 use super::Status;
+use crate::permissions::Level;
 use crate::tui::{
     line::{Line, Span},
     motion,
@@ -29,6 +30,19 @@ pub(super) fn ink(name: &str) -> Style {
         "Bash" | "Exec" | "Process" => LIT,
         _ => ACCENT,
     }
+}
+
+/// The conversation's level as a chip on the family surface of what it
+/// allows (B12.8): reading, editing, commands.
+pub(in crate::tui) fn level(level: Level) -> Line {
+    let surface = match level {
+        Level::Read => BADGE_READ,
+        Level::Workspace => BADGE_EDIT,
+        Level::Full => BADGE_SHELL,
+    };
+    let mut line = Line::default();
+    line.push_on(&format!(" {} ", level.name()), BADGE_TEXT.bold(), surface);
+    line
 }
 
 /// ` NAME ` at natural width. The state lives on the badge: the family

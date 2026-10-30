@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     events::Event,
-    sessions::{Input, Record},
+    sessions::{Draft, Input, Record},
 };
 
 impl App {
@@ -88,15 +88,18 @@ impl App {
         let editor = &self.state.editor;
         // Capturing also lets the agent accept the queued prompts, so it runs
         // with or without session storage.
-        self.state.queue.capture(editor, |queued, mut paused| {
+        self.state.queue.capture(|queued, mut paused| {
             let Some(handle) = &self.persistence else {
                 return;
             };
             if self.state.history.has_edited_recall() {
-                paused.push(draft(self.state.queue.draft(editor)));
+                paused = Some(paused.map_or_else(
+                    || draft(editor),
+                    |paused| Draft::from_prompt(paused.prompt().join(editor.prompt())),
+                ));
             }
             handle.capture_input(Input {
-                draft: draft(self.state.history.draft(self.state.queue.draft(editor))),
+                draft: draft(self.state.history.draft(editor)),
                 staged: vec![],
                 queued,
                 paused,
@@ -185,19 +188,14 @@ impl App {
                 self.state.activity = None;
                 self.state.information = None;
                 self.state.clear_notice();
-                self.state.queue.reset(
-                    document
-                        .input
-                        .paused
-                        .iter()
-                        .map(|draft| {
-                            let mut editor = Editor::default();
-                            editor.set(draft.prompt());
-                            editor.cursor = draft.cursor;
-                            editor
-                        })
-                        .collect(),
-                );
+                self.state
+                    .queue
+                    .reset(document.input.paused.as_ref().map(|draft| {
+                        let mut editor = Editor::default();
+                        editor.set(draft.prompt());
+                        editor.cursor = draft.cursor;
+                        editor
+                    }));
                 self.state.effort = document.effort.name().into();
                 self.collaboration_seen.clear();
                 self.collaboration_receipt_calls.clear();

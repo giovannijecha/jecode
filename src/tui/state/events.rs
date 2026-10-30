@@ -77,9 +77,6 @@ impl State {
             }
             Event::Reasoning => self.status = "Thinking…".into(),
             Event::Working => self.status = "Working…".into(),
-            Event::InputHeld => {
-                self.status = "Waiting for your edit…".into();
-            }
             // The application shows accepted input with its prompt history.
             Event::Accepted { .. } => {}
             // The application reads permission requests from their queue.

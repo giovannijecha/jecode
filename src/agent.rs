@@ -37,6 +37,8 @@ pub struct Agent {
     questions: crate::ask::Observer,
     permissions: crate::permissions::Permissions,
     child: bool,
+    /// Generate a title after the first request (`name_sessions`).
+    naming: bool,
     inherited_project_instructions: Option<String>,
     collaboration_seen: usize,
 }
@@ -89,6 +91,7 @@ impl Agent {
             questions: crate::ask::Observer::default(),
             permissions: crate::permissions::Permissions::default(),
             child: false,
+            naming: false,
             inherited_project_instructions: None,
             collaboration_seen: 0,
         };
@@ -279,7 +282,7 @@ impl Agent {
                 return Err(error);
             }
             if completion.calls.is_empty() {
-                if self.continue_turn(events)? {
+                if self.accept_input(events)? {
                     continue;
                 }
                 return Ok(());
@@ -375,6 +378,7 @@ mod execution;
 mod history;
 mod input;
 mod lifecycle;
+mod naming;
 mod permission;
 #[cfg(test)]
 mod permission_tests;
@@ -425,6 +429,8 @@ mod local_read_tests;
 mod long_work_tests;
 #[cfg(test)]
 mod map_tests;
+#[cfg(test)]
+mod naming_tests;
 #[cfg(test)]
 mod network_tests;
 #[cfg(test)]
