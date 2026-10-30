@@ -294,7 +294,7 @@ impl Tools {
                     "list" | "search" => discovery::execute(
                         base.unwrap_or(&self.root),
                         name,
-                        &arguments,
+                        &base.map_or_else(|| arguments.clone(), |base| self.rebase(base, &arguments)),
                         cancellation,
                     )
                     .map(|value| (value, None)),
@@ -320,7 +320,10 @@ impl Tools {
                                 .map(|value| (value, None))
                         } else {
                             let (root, arguments) = self.file_arguments(&arguments, false)?;
-                            let root = base.map_or(root, Path::to_path_buf);
+                            let (root, arguments) = match base {
+                                Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
+                                None => (root, arguments),
+                            };
                             attachment::read_file(
                                 self.attachments.as_ref(),
                                 &root,
@@ -332,7 +335,10 @@ impl Tools {
                     }
                     "write" | "edit" => {
                         let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
-                        let root = base.map_or(root, Path::to_path_buf);
+                        let (root, arguments) = match base {
+                            Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
+                            None => (root, arguments),
+                        };
                         // Session temporary files are outside the workspace scope.
                         let checkpoints = self.checkpoints.as_deref().filter(|_| root == self.root);
                         let result = if name == "write" {

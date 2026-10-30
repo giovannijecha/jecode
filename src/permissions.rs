@@ -1,8 +1,8 @@
 //! Conversation permission levels (B12). The user chooses Read, Workspace or
 //! Full; Jecode applies explicit tool boundaries. Workspace asks before file
 //! access or a command outside the working folder, and remembered grants
-//! extend Workspace for the rest of the conversation. What a command does
-//! once it runs is not confined: the boundary is its working directory.
+//! extend Workspace for the rest of the conversation. On Windows, Workspace
+//! commands also run inside the native sandbox (see `sandbox`).
 //!
 //! One shared state serves the main agent and its collaborators: they work
 //! at the conversation's level, their requests reach the user one at a time

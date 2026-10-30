@@ -42,17 +42,19 @@ impl Agent {
     /// A call that may ask, is refused or works outside runs on its own, so
     /// parallel batches hold only calls the level allows inside the folder.
     pub(super) fn gated(&self, call: &ToolCall) -> bool {
-        self.tools
-            .access(&call.name, &call.arguments)
-            .map_or(call.name == "exec", |access| {
-                access.outside || !matches!(self.permissions.check(&access), Verdict::Allow)
-            })
+        self.browser_refused(call, self.permissions.level())
+            || self
+                .tools
+                .access(&call.name, &call.arguments)
+                .map_or(call.name == "exec", |access| {
+                    access.outside || !matches!(self.permissions.check(&access), Verdict::Allow)
+                })
     }
 
-    pub(super) fn permit(&self, call: &ToolCall, events: &mut impl EventSink) -> Gate {
-        let current_level = self.permissions.level();
-        if call.name == "browser"
-            && current_level != Level::Full
+    /// Browser control needs Full; closing or stopping a browser never does.
+    fn browser_refused(&self, call: &ToolCall, level: Level) -> bool {
+        call.name == "browser"
+            && level != Level::Full
             && !matches!(
                 crate::json::parse(&call.arguments)
                     .ok()
@@ -61,14 +63,18 @@ impl Agent {
                     .and_then(Value::as_str),
                 Some("close" | "stop")
             )
-        {
+    }
+
+    pub(super) fn permit(&self, call: &ToolCall, events: &mut impl EventSink) -> Gate {
+        let current_level = self.permissions.level();
+        if self.browser_refused(call, current_level) {
             return Gate::Done(unavailable(
                 "Browser control is available only at the Full permission level; use web for HTTP retrieval",
             ));
         }
         let Some(access) = self.tools.access(&call.name, &call.arguments) else {
             return if call.name == "exec" {
-                Gate::Done(unavailable("Could not verify exec permission; nothing ran"))
+                Gate::Done(unavailable(&self.tools.exec_refusal(&call.arguments)))
             } else {
                 Gate::Run {
                     base: None,
@@ -192,7 +198,7 @@ impl Agent {
     pub(super) fn permission_instructions(&self) -> String {
         match self.permissions.level() {
             Level::Read => "Permissions: Read. Edits, commands, outside paths and browser control are unavailable; web GET/HEAD is available. The user can change /permissions.\n",
-            Level::Workspace => "Permissions: Workspace. Bash and browser control are unavailable; use web for HTTP retrieval. On Windows, use exec powershell.exe -NoProfile -Command. Outside paths and exec cwd ask the user. A local server that needs host access requires the user to choose /permissions full first.\n",
+            Level::Workspace => "Permissions: Workspace. Bash and exec run confined to the folder where the system supports it, otherwise they need Full; browser control is unavailable, so use web for HTTP retrieval. Outside paths and exec cwd ask the user. A local server that needs host access requires the user to choose /permissions full first.\n",
             Level::Full => "Permissions: Full. Bash and exec may work outside the folder.\n",
         }
         .into()

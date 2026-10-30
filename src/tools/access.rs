@@ -27,10 +27,10 @@ impl Tools {
                 Some(self.inside(Kind::Edits, "collaborator integration".into()))
             }
             "agent" if text("action") == Some("create") && creates_isolated(&arguments) => {
-                Some(self.inside(Kind::Edits, "isolated collaborator worktree".into()))
+                Some(self.inside(Kind::Edits, "isolated collaborator copy".into()))
             }
             "agent" if text("action") == Some("close") => {
-                Some(self.inside(Kind::Edits, "collaborator worktree removal".into()))
+                Some(self.inside(Kind::Edits, "collaborator copy removal".into()))
             }
             "process" if text("action") == Some("write") => Some(self.inside(
                 Kind::Runs,
@@ -75,6 +75,44 @@ impl Tools {
             }
             _ => None,
         }
+    }
+
+    /// Why an exec call has no assessable access: its own argument error, so
+    /// the model can correct it.
+    pub fn exec_refusal(&self, arguments: &str) -> String {
+        let error = json::parse(arguments)
+            .and_then(|arguments| {
+                exec::working_directory(&self.root, &arguments)?;
+                exact_command_identity(&arguments)
+            })
+            .err();
+        match error {
+            Some(error) => format!("{error}; nothing ran"),
+            None => "Could not verify exec permission; nothing ran".into(),
+        }
+    }
+
+    /// The approved outside target as the tool must see it: its base and the
+    /// path relative to that base, so a relative argument cannot re-resolve
+    /// against the new root.
+    pub(super) fn rebase(&self, base: &Path, arguments: &Value) -> Value {
+        let mut arguments = arguments.clone();
+        let relative = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .and_then(|path| resolve(&self.root.join(path)))
+            .and_then(|resolved| {
+                let relative = resolved.strip_prefix(base).ok()?;
+                Some(if relative.as_os_str().is_empty() {
+                    ".".to_owned()
+                } else {
+                    relative.to_string_lossy().into_owned()
+                })
+            });
+        if let (Some(relative), Value::Object(fields)) = (relative, &mut arguments) {
+            fields.insert("path".into(), Value::string(relative));
+        }
+        arguments
     }
 
     fn inside(&self, kind: Kind, target: String) -> Access {
