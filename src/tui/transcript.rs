@@ -94,6 +94,7 @@ pub(super) struct Layout {
 }
 
 struct Partial {
+    block: usize,
     markdown: prose::Rows,
     lines: Vec<Line>,
 }
@@ -147,8 +148,9 @@ impl Layout {
         {
             let block = stale.start;
             let mut context = self.contexts[block];
-            let lines = render(state, block, &mut context, columns, self.keycap);
-            rows_left = rows_left.saturating_sub(lines.len().max(1));
+            let Some(lines) = self.bounded(state, block, &mut context, &mut rows_left) else {
+                break;
+            };
             blocks_left -= 1;
             self.blocks[block] = lines;
             let next = block + 1;
@@ -164,53 +166,64 @@ impl Layout {
             };
         }
         while self.stale.is_none() && self.blocks.len() < end && blocks_left > 0 && rows_left > 0 {
-            let item = source(state, self.blocks.len());
             let previous = self.context;
-            if self.partial.is_none()
-                && let Source::Item(item) = &item
-                && item.is_visible()
-                && let Item::Text {
-                    kind: Kind::Assistant,
-                    text,
-                } = item
-            {
-                self.partial = Some(Partial {
-                    markdown: prose::Rows::new(text, columns),
-                    lines: vec![],
-                });
-            }
-            let lines = if let Some(partial) = &mut self.partial {
-                let mut done = false;
-                while rows_left > 0 {
-                    let Some(lines) = partial.markdown.next() else {
-                        done = true;
-                        break;
-                    };
-                    rows_left = rows_left.saturating_sub(lines.len().max(1));
-                    partial.lines.extend(lines);
-                }
-                if !done {
-                    break;
-                }
-                let mut lines = self.partial.take().unwrap().lines;
-                if matches!(item, Source::Item(_)) {
-                    self.context.finish(&mut lines);
-                }
-                lines
-            } else {
-                let lines = render(
-                    state,
-                    self.blocks.len(),
-                    &mut self.context,
-                    columns,
-                    self.keycap,
-                );
-                rows_left = rows_left.saturating_sub(lines.len().max(1));
-                lines
+            let mut context = previous;
+            let Some(lines) = self.bounded(state, self.blocks.len(), &mut context, &mut rows_left)
+            else {
+                break;
             };
+            self.context = context;
             self.contexts.push(previous);
             self.blocks.push(lines);
             blocks_left -= 1;
+        }
+    }
+
+    /// New and invalidated prose share the same row budget. A partial rebuild
+    /// leaves the old cached block visible until its replacement is complete.
+    fn bounded(
+        &mut self,
+        state: &State,
+        block: usize,
+        context: &mut Rows,
+        rows_left: &mut usize,
+    ) -> Option<Vec<Line>> {
+        if self
+            .partial
+            .as_ref()
+            .is_some_and(|partial| partial.block != block)
+        {
+            self.partial = None;
+        }
+        if self.partial.is_none()
+            && let Source::Item(item) = source(state, block)
+            && item.is_visible()
+            && let Item::Text {
+                kind: Kind::Assistant,
+                text,
+            } = item
+        {
+            self.partial = Some(Partial {
+                block,
+                markdown: prose::Rows::new(text, self.columns),
+                lines: vec![],
+            });
+        }
+        if let Some(partial) = &mut self.partial {
+            while *rows_left > 0 {
+                let Some(lines) = partial.markdown.next() else {
+                    let mut lines = self.partial.take().unwrap().lines;
+                    context.finish(&mut lines);
+                    return Some(lines);
+                };
+                *rows_left = rows_left.saturating_sub(lines.len().max(1));
+                partial.lines.extend(lines);
+            }
+            None
+        } else {
+            let lines = render(state, block, context, self.columns, self.keycap);
+            *rows_left = rows_left.saturating_sub(lines.len().max(1));
+            Some(lines)
         }
     }
 
@@ -378,5 +391,7 @@ impl Layout {
 
 #[cfg(test)]
 mod markdown_tests;
+#[cfg(test)]
+mod rebuild_tests;
 #[cfg(test)]
 mod tests;
