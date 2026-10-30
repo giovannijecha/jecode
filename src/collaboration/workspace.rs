@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod copy;
 mod files;
 mod review;
 mod tree;
@@ -31,6 +32,10 @@ pub struct Workspace {
     mode: Mode,
     root: PathBuf,
     baseline: BTreeMap<String, files::Fingerprint>,
+    /// Modification times that identify unchanged copied files; see `copy`.
+    stamps: BTreeMap<String, u64>,
+    /// Project entries the copy could not include.
+    omitted: tree::Omitted,
 }
 
 impl Workspace {
@@ -53,6 +58,8 @@ impl Workspace {
                 mode,
                 root: project,
                 baseline: BTreeMap::new(),
+                stamps: BTreeMap::new(),
+                omitted: tree::Omitted::default(),
             });
         }
         valid_id(id)?;
@@ -72,6 +79,8 @@ impl Workspace {
             mode,
             root,
             baseline: BTreeMap::new(),
+            stamps: BTreeMap::new(),
+            omitted: tree::Omitted::default(),
         };
         match fs::create_dir(&workspace.storage) {
             Ok(()) => {}
@@ -103,38 +112,10 @@ impl Workspace {
                 .map_err(|error| format!("Could not create isolated copy: {error}"))?;
             let base = workspace.storage.join("base");
             fs::create_dir(&base).map_err(|error| format!("Could not create baseline: {error}"))?;
-            let source = tree::inventory(&workspace.project)?;
-            let mut baseline = BTreeMap::new();
-            let mut observed = BTreeMap::new();
-            for name in &source {
-                files::validate_name(name)?;
-                let original = files::observe(&workspace.project, name)?;
-                if !matches!(original, files::Fingerprint::Directory { .. }) {
-                    files::copy_entry(&workspace.project, &workspace.root, name, &original)?;
-                }
-                files::save_baseline(&workspace.project, &base, name, &original)?;
-                if original.exists() {
-                    baseline.insert(name.clone(), original.clone());
-                }
-                observed.insert(name.clone(), original);
-            }
-            let mut directories: Vec<_> = observed
-                .iter()
-                .filter(|(_, state)| matches!(state, files::Fingerprint::Directory { .. }))
-                .collect();
-            directories.sort_by_key(|(name, _)| std::cmp::Reverse(name.matches('/').count()));
-            for (name, state) in directories {
-                files::copy_entry(&workspace.project, &workspace.root, name, state)?;
-            }
-            if tree::inventory(&workspace.project)? != source {
-                return Err("Project file inventory changed during workspace preparation".into());
-            }
-            for (name, original) in &observed {
-                if files::observe(&workspace.project, name)? != *original {
-                    return Err(format!("{name} changed during workspace preparation"));
-                }
-            }
-            workspace.baseline = baseline;
+            let prepared = copy::prepare(&workspace.project, &workspace.root, &base)?;
+            workspace.baseline = prepared.baseline;
+            workspace.stamps = prepared.stamps;
+            workspace.omitted = prepared.omitted;
             workspace.save(true)?;
             Ok(())
         })();
@@ -155,6 +136,10 @@ impl Workspace {
     }
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+    /// Project entries the isolated copy left out, if any.
+    pub fn omitted(&self) -> Option<Value> {
+        (self.omitted.count > 0).then(|| self.omitted.value())
     }
     pub fn inspect(&self) -> Result<Value, String> {
         review::inspect(self)?.value(self)
@@ -218,6 +203,8 @@ impl Workspace {
             id: id.into(),
             mode: Mode::Isolated,
             baseline: BTreeMap::new(),
+            stamps: BTreeMap::new(),
+            omitted: tree::Omitted::default(),
         };
         let marker = storage.join("baseline.json");
         if crate::disk::metadata_if_present(&marker)
@@ -280,6 +267,8 @@ impl Workspace {
                 id,
                 mode,
                 baseline: BTreeMap::new(),
+                stamps: BTreeMap::new(),
+                omitted: tree::Omitted::default(),
             });
         }
         valid_id(&id)?;
@@ -291,6 +280,8 @@ impl Workspace {
             mode,
             root,
             baseline: BTreeMap::new(),
+            stamps: BTreeMap::new(),
+            omitted: tree::Omitted::default(),
         };
         workspace.verify_owner()?;
         let bytes = fs::read(workspace.storage.join("baseline.json"))
@@ -330,6 +321,15 @@ impl Workspace {
             }
             workspace.baseline.insert(name.clone(), fingerprint);
         }
+        // Older markers have neither; every file is then hashed.
+        if let Some(Value::Object(stamps)) = value.get("modified") {
+            for (name, stamp) in stamps {
+                if let Some(stamp) = stamp.as_usize() {
+                    workspace.stamps.insert(name.clone(), stamp as u64);
+                }
+            }
+        }
+        workspace.omitted = tree::Omitted::from_value(value.get("omitted"));
         Ok(workspace)
     }
 
@@ -379,10 +379,17 @@ impl Workspace {
             .iter()
             .map(|(name, state)| (name.clone(), state.value()))
             .collect();
+        let stamps = self
+            .stamps
+            .iter()
+            .map(|(name, stamp)| (name.clone(), Value::number(stamp)))
+            .collect();
         let value = Value::object([
             ("owner", self.value()),
             ("ready", Value::Bool(ready)),
             ("entries", Value::Object(entries)),
+            ("modified", Value::Object(stamps)),
+            ("omitted", self.omitted.value()),
         ]);
         crate::disk::atomic_write(
             &self.storage.join("baseline.json"),

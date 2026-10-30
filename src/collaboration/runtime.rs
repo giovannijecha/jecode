@@ -46,6 +46,7 @@ impl Observer {
             (format!("a{}", state.last_number), store)
         };
         let workspace = Workspace::prepare(project, &store, &id, mode)?;
+        let omitted = workspace.omitted();
         let child = match make_child(&id, workspace.root()) {
             Ok(child) => child,
             Err(error) => {
@@ -145,10 +146,12 @@ impl Observer {
             wake,
             task: Some(task),
         });
-        Ok(Value::object([
-            ("id", Value::string(id)),
-            ("number", Value::number(number)),
-        ]))
+        let mut created =
+            Value::object([("id", Value::string(id)), ("number", Value::number(number))]);
+        if let (Value::Object(fields), Some(omitted)) = (&mut created, omitted) {
+            fields.insert("omitted_from_copy".into(), omitted);
+        }
+        Ok(created)
     }
 
     fn run_child(&self, id: String, mut child: Agent, receive: mpsc::Receiver<()>) {

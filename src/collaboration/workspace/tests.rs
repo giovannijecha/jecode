@@ -290,36 +290,6 @@ fn ignored_agent_instructions_and_text_evidence_are_available() {
 }
 
 #[test]
-fn failed_copy_cleans_owned_tree_and_allows_retry() {
-    let (_temp, project, storage) = fixture();
-    // The copy fails after the tree exists: the source cannot be read on
-    // Windows, and Unix allows a name the workspace cannot represent.
-    #[cfg(windows)]
-    let blocker = {
-        use std::os::windows::fs::OpenOptionsExt;
-        fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(project.join("tracked.txt"))
-            .unwrap()
-    };
-    #[cfg(unix)]
-    let blocker = {
-        let path = project.join("bad\\name.txt");
-        fs::write(&path, "x").unwrap();
-        path
-    };
-    assert!(Workspace::prepare(&project, &storage, "a1", Mode::Isolated).is_err());
-    assert!(!storage.join("a1").exists());
-    #[cfg(windows)]
-    drop(blocker);
-    #[cfg(unix)]
-    fs::remove_file(blocker).unwrap();
-    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
-    workspace.close().unwrap();
-}
-
-#[test]
 fn modified_baseline_content_cannot_support_review_or_integration() {
     let (_temp, project, storage) = fixture();
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
@@ -444,33 +414,5 @@ fn closing_removes_links_without_touching_their_targets() {
     );
 }
 
-#[test]
-fn snapshot_does_not_follow_project_directory_links() {
-    let (temp, project, storage) = fixture();
-    let outside = temp.path().join("outside");
-    fs::create_dir(&outside).unwrap();
-    fs::write(outside.join("canary.txt"), "keep\n").unwrap();
-    link_directory(&outside, &project.join("outside-link"));
-    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated);
-    #[cfg(windows)]
-    if let Err(error) = &workspace {
-        // Creating a copied symbolic link can require developer privileges.
-        assert!(error.contains("1314"), "{error}");
-        assert!(!storage.join("a1").exists());
-        assert_eq!(
-            fs::read_to_string(outside.join("canary.txt")).unwrap(),
-            "keep\n"
-        );
-        return;
-    }
-    let workspace = workspace.unwrap();
-    assert!(workspace.root().join("outside-link").exists());
-    assert!(changed(&workspace.inspect().unwrap()).is_empty());
-    workspace.close().unwrap();
-    assert_eq!(
-        fs::read_to_string(outside.join("canary.txt")).unwrap(),
-        "keep\n"
-    );
-}
-
+mod copying;
 mod directories;

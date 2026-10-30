@@ -45,6 +45,8 @@ impl Entry {
 pub(super) struct Review {
     entries: Vec<Entry>,
     token: String,
+    /// Copy entries this comparison cannot represent, such as sockets.
+    unsupported: tree::Omitted,
 }
 
 impl Review {
@@ -57,16 +59,25 @@ impl Review {
             }
             changed.push(value);
         }
-        Ok(Value::object([
+        let mut value = Value::object([
             ("changed", Value::Array(changed)),
             ("review_token", Value::string(self.token)),
             (
                 "scope",
                 Value::string(
-                    "Project entries excluding .git/.jecode metadata and root target/.tmp directories",
+                    "Project entries excluding .git/.jecode metadata and root target/.tmp entries",
                 ),
             ),
-        ]))
+        ]);
+        if let Value::Object(fields) = &mut value {
+            if let Some(omitted) = workspace.omitted() {
+                fields.insert("omitted_from_copy".into(), omitted);
+            }
+            if self.unsupported.count > 0 {
+                fields.insert("unsupported_in_copy".into(), self.unsupported.value());
+            }
+        }
+        Ok(value)
     }
 }
 
@@ -75,19 +86,29 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
         return Ok(Review {
             entries: Vec::new(),
             token: "shared".into(),
+            unsupported: tree::Omitted::default(),
         });
     }
     workspace.verify_owner()?;
+    let (items, unsupported) = tree::inventory(&workspace.root)?;
     let mut names: BTreeSet<_> = workspace.baseline.keys().cloned().collect();
-    names.extend(tree::inventory(&workspace.root)?);
+    names.extend(items.keys().cloned());
     let mut entries = Vec::new();
     for name in names {
         files::validate_name(&name)?;
+        if unsupported.names.contains(&name) {
+            continue;
+        }
         let baseline = workspace
             .baseline
             .get(&name)
             .cloned()
             .unwrap_or(files::Fingerprint::Absent);
+        if let Some(item) = items.get(&name)
+            && unchanged(workspace, &name, item, &baseline)
+        {
+            continue;
+        }
         let child = files::observe(&workspace.root, &name)?;
         if child == baseline {
             continue;
@@ -103,7 +124,48 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
     let encoded = Value::Array(entries.iter().map(Entry::value).collect()).encode();
     let digest = hash::digest(encoded.as_bytes());
     let token = format!("{:016x}{:016x}", digest.0[0], digest.0[1]);
-    Ok(Review { entries, token })
+    Ok(Review {
+        entries,
+        token,
+        unsupported,
+    })
+}
+
+/// Whether a copied file still has the size, mode and preserved modification
+/// time recorded when it was copied, so its content need not be hashed. Any
+/// write moves the modification time to the present, which preparation kept
+/// apart from every recorded time.
+fn unchanged(
+    workspace: &Workspace,
+    name: &str,
+    item: &tree::Item,
+    baseline: &files::Fingerprint,
+) -> bool {
+    let (Some(stamp), files::Fingerprint::File { size, mode, .. }) =
+        (workspace.stamps.get(name), baseline)
+    else {
+        return false;
+    };
+    if !matches!(item.kind, tree::Kind::File) {
+        return false;
+    }
+    // Directory listings on Windows can lag a file still open for writing.
+    #[cfg(windows)]
+    let Ok(metadata) = fs::symlink_metadata(&item.path) else {
+        return false;
+    };
+    #[cfg(not(windows))]
+    let metadata = &item.metadata;
+    metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.len() == *size
+        && files::mode(&metadata) == *mode
+        && metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|elapsed| u64::try_from(elapsed.as_nanos()).ok())
+            == Some(*stamp)
 }
 
 pub(super) fn integrate(
@@ -199,19 +261,29 @@ pub(super) fn integrate(
             failed.push(issue(&entry.path, &error));
             break;
         }
-        if let files::Fingerprint::Directory { mode } = entry.child {
-            directory_modes.push((
-                entry.path.clone(),
-                files::observe(&workspace.project, &entry.path)?,
-                mode,
-            ));
-        }
         applied.push(Value::string(&entry.path));
+        // The path is installed: from here a failure is reported with it.
+        if let files::Fingerprint::Directory { mode } = entry.child {
+            match files::observe(&workspace.project, &entry.path) {
+                Ok(prepared) => directory_modes.push((entry.path.clone(), prepared, mode)),
+                Err(error) => {
+                    failed.push(issue(&entry.path, &error));
+                    break;
+                }
+            }
+        }
     }
     for (name, prepared, mode) in directory_modes.into_iter().rev() {
-        if files::observe(&workspace.project, &name)? != prepared {
-            failed.push(issue(&name, "Directory changed before applying its mode"));
-            continue;
+        match files::observe(&workspace.project, &name) {
+            Ok(current) if current == prepared => {}
+            Ok(_) => {
+                failed.push(issue(&name, "Directory changed before applying its mode"));
+                continue;
+            }
+            Err(error) => {
+                failed.push(issue(&name, &error));
+                continue;
+            }
         }
         if let Err(error) = files::apply_mode(&files::path(&workspace.project, &name)?, mode) {
             failed.push(issue(&name, &error));
