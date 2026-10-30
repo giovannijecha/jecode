@@ -242,6 +242,13 @@ temporary storage, checkpoint archives and the personal [skill library](SKILLS.m
 This is useful for isolated development. The command interpreter and HTTP
 adapters are embedded in Jecode; `JECODE_BASH` and `JECODE_CURL` are not used.
 
+HTTP proxies follow the platform. Windows uses the system proxy configuration
+through WinHTTP's automatic proxy mode, and macOS uses the system proxy settings;
+neither reads `HTTP_PROXY` or `HTTPS_PROXY`. Linux reads `HTTPS_PROXY`,
+`HTTP_PROXY` (or their lowercase forms) and `NO_PROXY`, supports only `http://`
+proxies without credentials, and fails a request rather than bypassing a proxy
+with another scheme. Loopback requests never use a proxy.
+
 `/model`, `/effort` and `/routing` change the conversation without
 changing saved defaults. Changing the OpenRouter key in `/settings` refreshes
 authentication for an active OpenRouter conversation; otherwise it registers

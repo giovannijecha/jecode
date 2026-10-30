@@ -2,7 +2,7 @@
 // Stdin: base64 URL, base64 method, timeout milliseconds (0: no total limit),
 // header count, base64 name/value pairs, body length, then the raw body.
 // Stdout: HTTP headers followed by body. WinHTTP uses the system proxy
-// configuration (automatic detection); HTTP(S)_PROXY variables are not read.
+// configuration (automatic proxy mode); HTTP(S)_PROXY variables are not read.
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
