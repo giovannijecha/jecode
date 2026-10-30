@@ -308,6 +308,30 @@ fn cyclic_intermediate_link_is_copied_without_resolving_its_target() {
 
 #[cfg(unix)]
 #[test]
+fn unresolved_absolute_project_link_follows_later_changes_in_the_copy() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, project, storage) = fixture();
+    symlink("missing", project.join("alias")).unwrap();
+    symlink(project.join("alias/../goal"), project.join("link")).unwrap();
+
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    assert_eq!(
+        fs::read_link(workspace.root().join("link")).unwrap(),
+        Path::new("alias/../goal")
+    );
+    fs::create_dir(workspace.root().join("missing")).unwrap();
+    fs::write(workspace.root().join("goal"), "child\n").unwrap();
+    assert_eq!(
+        fs::read_to_string(workspace.root().join("link")).unwrap(),
+        "child\n"
+    );
+    assert!(fs::read_to_string(project.join("link")).is_err());
+    workspace.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn inaccessible_outside_target_keeps_its_original_anchor() {
     use std::os::unix::fs::symlink;
 
@@ -322,10 +346,15 @@ fn inaccessible_outside_target_keeps_its_original_anchor() {
     let prepared = Workspace::prepare(&project, &storage, "a1", Mode::Isolated);
     files::apply_mode(&restricted, 0o755).unwrap();
     let workspace = prepared.unwrap();
+    let destination = restricted.join("missing");
+    fs::write(&destination, "outside\n").unwrap();
+    let link = workspace.root().join("link");
+    assert!(fs::read_link(&link).unwrap().is_absolute());
     assert_eq!(
-        fs::read_link(workspace.root().join("link")).unwrap(),
-        outside.join("restricted/missing")
+        fs::canonicalize(&link).unwrap(),
+        fs::canonicalize(&destination).unwrap()
     );
+    assert_eq!(fs::read_to_string(&link).unwrap(), "outside\n");
     assert!(workspace.omitted().is_none());
     workspace.close().unwrap();
 }

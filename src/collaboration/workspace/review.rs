@@ -90,9 +90,9 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
         });
     }
     workspace.verify_owner()?;
-    let (items, unsupported) = tree::inventory(&workspace.root)?;
+    let (child_names, unsupported) = tree::inventory(&workspace.root)?;
     let mut names: BTreeSet<_> = workspace.baseline.keys().cloned().collect();
-    names.extend(items.keys().cloned());
+    names.extend(child_names);
     let mut entries = Vec::new();
     for name in names {
         files::validate_name(&name)?;

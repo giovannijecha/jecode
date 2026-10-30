@@ -1,7 +1,7 @@
 use super::files;
 use crate::disk;
 use crate::json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -185,14 +185,14 @@ pub(super) fn walk(
     Ok(omitted)
 }
 
-/// The names and metadata `walk` visits, for comparing a copy.
-pub(super) fn inventory(root: &Path) -> Result<(BTreeMap<String, Item>, Omitted), String> {
-    let mut items = BTreeMap::new();
+/// The names `walk` visits, for comparing a copy.
+pub(super) fn inventory(root: &Path) -> Result<(BTreeSet<String>, Omitted), String> {
+    let mut names = BTreeSet::new();
     let omitted = walk(root, |item| {
-        items.insert(item.name.clone(), item);
+        names.insert(item.name);
         Ok(())
     })?;
-    Ok((items, omitted))
+    Ok((names, omitted))
 }
 
 fn join(prefix: &str, component: &str) -> String {
