@@ -1,20 +1,29 @@
-//! A short startup probe for OSC 11. It consumes only a complete background
-//! reply and replays every other input event to the ordinary key decoder.
+//! The OSC 11 background probe. During a short startup window a complete
+//! reply decides the background; after it, one late reply is still consumed
+//! for the rest of the session, so it never reaches the composer as Alt+],
+//! text and Ctrl+G. Every other input event is replayed to the key decoder.
 
 use super::terminal::Input;
 use std::time::{Duration, Instant};
 
 const QUERY: &str = "\x1b]11;?\x07";
 const TIMEOUT: Duration = Duration::from_millis(800);
+/// How long a lone Escape waits for the rest of a reply.
 const PREFIX_TIMEOUT: Duration = Duration::from_millis(150);
+/// The longest pause between bytes once a reply is recognized.
+const REPLY_GAP: Duration = Duration::from_millis(1000);
 const LIMIT: usize = 48;
 
 pub(super) struct Probe {
     started: Instant,
     pending: Vec<Input>,
     bytes: Vec<u8>,
-    pending_at: Option<Instant>,
+    /// When the last held byte arrived.
+    last_at: Option<Instant>,
+    /// The window in which a reply decides the background.
     active: bool,
+    /// No reply has been consumed yet.
+    watching: bool,
     native_hint: Option<bool>,
 }
 
@@ -26,49 +35,74 @@ impl Probe {
             .write_all(QUERY.as_bytes())
             .and_then(|()| stdout.flush())
             .map_err(|error| format!("Could not query terminal background: {error}"))?;
-        Ok(Self {
-            started: Instant::now(),
-            pending: Vec::new(),
-            bytes: Vec::new(),
-            pending_at: None,
-            active: true,
-            native_hint: None,
-        })
+        Ok(Self::new())
     }
 
-    #[cfg(test)]
-    fn for_test() -> Self {
+    fn new() -> Self {
         Self {
             started: Instant::now(),
             pending: Vec::new(),
             bytes: Vec::new(),
-            pending_at: None,
+            last_at: None,
             active: true,
+            watching: true,
             native_hint: None,
         }
     }
 
-    pub fn wait(&self) -> Option<Duration> {
-        self.active.then(|| {
-            let overall = TIMEOUT.saturating_sub(self.started.elapsed());
-            self.pending_at.map_or(overall, |started| {
-                overall.min(PREFIX_TIMEOUT.saturating_sub(started.elapsed()))
-            })
-        })
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self::new()
     }
 
+    /// A lone Escape leaves at the decoder's pace; a recognized reply may
+    /// pause longer between its bytes.
+    fn gap(&self) -> Duration {
+        if self.bytes.len() > 1 {
+            REPLY_GAP
+        } else {
+            PREFIX_TIMEOUT
+        }
+    }
+
+    pub fn wait(&self) -> Option<Duration> {
+        let window = self
+            .active
+            .then(|| TIMEOUT.saturating_sub(self.started.elapsed()));
+        let gap = self
+            .last_at
+            .map(|at| self.gap().saturating_sub(at.elapsed()));
+        match (window, gap) {
+            (Some(window), Some(gap)) => Some(window.min(gap)),
+            (window, gap) => window.or(gap),
+        }
+    }
+
+    /// Ends the window, with the native hint when no reply came, and
+    /// releases held bytes whose reply stalled.
     pub fn expire(&mut self) -> (Vec<Input>, Option<bool>) {
+        let mut hint = None;
         if self.active && self.started.elapsed() >= TIMEOUT {
             self.active = false;
-            return (self.flush(), self.native_hint.take());
+            hint = self.native_hint.take();
         }
-        if self
-            .pending_at
-            .is_some_and(|started| started.elapsed() >= PREFIX_TIMEOUT)
-        {
-            return (self.flush(), None);
+        let stalled = self.last_at.is_some_and(|at| at.elapsed() >= self.gap());
+        (if stalled { self.release() } else { Vec::new() }, hint)
+    }
+
+    /// A lone Escape that waited here is already a key: the decoder must not
+    /// hold it again.
+    fn release(&mut self) -> Vec<Input> {
+        #[cfg(any(windows, test))]
+        if self.bytes == [27] {
+            self.flush();
+            return vec![Input::Key(super::terminal::Key {
+                code: 27,
+                modifiers: 0,
+                character: 0,
+            })];
         }
-        (Vec::new(), None)
+        self.flush()
     }
 
     /// Returns events to decode and whether the terminal reported a light base.
@@ -81,7 +115,7 @@ impl Probe {
             }
             other => other,
         };
-        if !self.active {
+        if !self.watching {
             return (vec![event], None);
         }
         let units: Vec<Input> = match event {
@@ -113,24 +147,27 @@ impl Probe {
                 push(&mut ready, unit);
                 continue;
             };
-            if !self.active {
+            if !self.watching {
                 push(&mut ready, unit);
                 continue;
             }
-            if self.bytes.is_empty() {
-                self.pending_at = Some(Instant::now());
-            }
+            self.last_at = Some(Instant::now());
             self.bytes.push(byte);
             self.pending.push(unit);
             match candidate(&self.bytes) {
                 Match::More if self.bytes.len() < LIMIT => {}
                 Match::Reply(value) => {
-                    light = Some(value);
+                    // A late reply is consumed without changing the palette
+                    // the window already settled.
+                    if self.active {
+                        light = Some(value);
+                        self.native_hint = None;
+                    }
                     self.pending.clear();
                     self.bytes.clear();
-                    self.pending_at = None;
+                    self.last_at = None;
                     self.active = false;
-                    self.native_hint = None;
+                    self.watching = false;
                 }
                 _ => {
                     for event in self.flush() {
@@ -144,7 +181,7 @@ impl Probe {
 
     fn flush(&mut self) -> Vec<Input> {
         self.bytes.clear();
-        self.pending_at = None;
+        self.last_at = None;
         let pending = std::mem::take(&mut self.pending);
         let mut ready = Vec::new();
         for event in pending {
@@ -322,15 +359,58 @@ mod tests {
     }
 
     #[test]
-    fn timeout_replays_partial_input_without_a_background_decision() {
+    fn a_stalled_reply_is_replayed_without_a_background_decision() {
         let mut probe = Probe::for_test();
         let (events, light) = probe.feed(Input::Paste("\x1b]11;rgb:ffff".encode_utf16().collect()));
         assert!(events.is_empty() && light.is_none());
+        // The window closing does not cut a reply in progress.
         probe.started -= TIMEOUT;
+        let (events, fallback) = probe.expire();
+        assert!(events.is_empty() && fallback.is_none());
+        probe.last_at = Some(Instant::now() - REPLY_GAP);
         let (events, fallback) = probe.expire();
         assert_eq!(fallback, None);
         assert!(
             matches!(&events[..], [Input::Paste(units)] if String::from_utf16(units).unwrap() == "\x1b]11;rgb:ffff")
+        );
+    }
+
+    fn paste(text: &str) -> Input {
+        Input::Paste(text.encode_utf16().collect())
+    }
+
+    #[test]
+    fn a_reply_slower_than_a_lone_escape_still_decides_the_background() {
+        let mut probe = Probe::for_test();
+        assert!(probe.feed(paste("\x1b]11;rgb:ff")).0.is_empty());
+        // Longer than the lone-Escape wait, shorter than the reply gap.
+        probe.last_at = Some(Instant::now() - PREFIX_TIMEOUT * 2);
+        assert!(probe.expire().0.is_empty());
+        let (events, light) = probe.feed(paste("ff/ffff/ffff\x07"));
+        assert!(events.is_empty());
+        assert_eq!(light, Some(true));
+    }
+
+    #[test]
+    fn one_late_reply_is_consumed_after_the_window_and_later_input_passes() {
+        let mut probe = Probe::for_test();
+        probe.native_hint = Some(false);
+        probe.started -= TIMEOUT;
+        let (events, fallback) = probe.expire();
+        assert!(events.is_empty());
+        assert_eq!(fallback, Some(false));
+        assert_eq!(probe.wait(), None, "no timer while nothing is held");
+        // The late reply arrives split, then typing follows in the same event.
+        assert!(probe.feed(paste("\x1b]11;rgb:0000/")).0.is_empty());
+        let (events, light) = probe.feed(paste("0000/0000\x1b\\draft"));
+        assert_eq!(light, None, "the settled palette stays");
+        assert!(
+            matches!(&events[..], [Input::Paste(units)] if String::from_utf16(units).unwrap() == "draft")
+        );
+        // A second sequence is ordinary input again.
+        let (events, _) = probe.feed(paste("\x1b]11;rgb:0/0/0\x07"));
+        assert!(
+            matches!(&events[..], [Input::Paste(units)] if String::from_utf16(units).unwrap() == "\x1b]11;rgb:0/0/0\x07")
         );
     }
 
@@ -339,9 +419,10 @@ mod tests {
         let mut probe = Probe::for_test();
         let (events, light) = probe.feed(Input::Paste(vec![27]));
         assert!(events.is_empty() && light.is_none());
-        probe.pending_at = Some(Instant::now() - PREFIX_TIMEOUT);
+        probe.last_at = Some(Instant::now() - PREFIX_TIMEOUT);
         let (events, fallback) = probe.expire();
-        assert!(matches!(&events[..], [Input::Paste(units)] if units == &[27]));
+        // Released as the Escape key, which the decoder does not hold again.
+        assert!(matches!(&events[..], [Input::Key(key)] if key.code == 27 && key.character == 0));
         assert!(fallback.is_none() && probe.active);
         let unicode: Vec<u16> = "β🙂".encode_utf16().collect();
         let (events, light) = probe.feed(Input::Paste(unicode.clone()));
