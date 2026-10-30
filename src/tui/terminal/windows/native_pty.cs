@@ -437,12 +437,12 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Send("\x1b[1;3F"); Thread.Sleep(150);
                 pty.Send("\x10"); pty.Wait("Prompt history");
                 pty.Send("\x0e"); Thread.Sleep(150);
-                pty.Send("\x1b[1;3A"); pty.Wait("No pending drafts");
-                pty.Send("\x1b"); Thread.Sleep(150);
                 pty.Send("\x1b[6~"); Thread.Sleep(100);
                 pty.Send("\x1b[5~"); Thread.Sleep(100);
+                int draftKept = pty.Mark();
                 pty.Send("\x1b[A"); Thread.Sleep(100); pty.Send("\x1b[B");
                 pty.Resize(40, 12); pty.Resize(5, 2); pty.Resize(80, 24);
+                pty.Wait("kept draft", draftKept);
                 pty.Send("\x11");
                 pty.Wait("jecode closed · 1 prompt · 2 tools");
                 pty.Wait("   jecode resume ");

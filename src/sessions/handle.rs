@@ -354,6 +354,17 @@ impl Handle {
         self.0.live.lock().unwrap().document.title.is_some()
     }
 
+    /// The naming request may outlive the active session. Its writer must not
+    /// keep the session lease while the provider is still responding.
+    pub(crate) fn namer(&self) -> impl FnOnce(&str) + Send + 'static {
+        let shared = Arc::downgrade(&self.0);
+        move |title| {
+            if let Some(shared) = shared.upgrade() {
+                let _ = Handle(shared).name(title);
+            }
+        }
+    }
+
     /// Saves the first generated title; later ones never replace it.
     pub fn name(&self, title: &str) -> Result<(), String> {
         let mut live = self.0.live.lock().unwrap();

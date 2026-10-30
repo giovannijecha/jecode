@@ -25,7 +25,9 @@ another process cannot be resumed at the same time.
 After the first request is saved, Jecode asks the session's model in the
 background for a short title in the request's language and keeps it for the
 session's life. Until it arrives, or if that request fails, the title is the
-first request itself.
+first request itself. A single-prompt command can exit before the background
+request finishes. Switching away from a session also ends its pending title
+update; its first request remains the title.
 
 The exit summary prints `jecode resume SESSION_ID` after a successful save.
 Resume restores the conversation, tool results, backend, model, effort, routing,

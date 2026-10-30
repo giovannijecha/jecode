@@ -274,6 +274,41 @@ fn up_after_the_agent_accepted_the_draft_changes_nothing() {
 }
 
 #[test]
+fn recovery_keeps_queued_input_before_a_newer_edited_history_recall() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut current = app(&home, &directory, &fixture);
+    current
+        .agent
+        .as_mut()
+        .unwrap()
+        .prepare_turn("first request")
+        .unwrap();
+    current.state.history.record("earlier prompt");
+    current.state.editor.insert("unsent draft");
+    current.state.editor.cursor = 3;
+    current.state.queue.push("queued first").unwrap();
+    key(&mut current, 80, 4);
+    current.input(Decoded::Text(" revised".into())).unwrap();
+    current.persist_input(true);
+    let id = current.persistence.as_ref().unwrap().id();
+    drop(current);
+
+    let mut resumed = app(&home, &directory, &fixture);
+    resumed.resume_session(&id);
+    assert_eq!(resumed.state.editor.text, "unsent draft");
+    assert_eq!(resumed.state.editor.cursor, 3);
+    assert_eq!(
+        resumed.state.queue.pending(),
+        Some(("queued first\n\nearlier prompt revised".into(), true))
+    );
+    resumed.poll().unwrap();
+    assert!(resumed.worker.is_none());
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn stopping_with_an_empty_composer_returns_the_draft_to_it() {
     let home = Directory::new();
     let directory = Directory::new();

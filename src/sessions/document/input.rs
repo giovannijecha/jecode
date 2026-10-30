@@ -93,18 +93,17 @@ impl Input {
     /// Joins every unsent message into the one paused draft, which resuming
     /// never sends automatically.
     pub fn recover(&mut self) {
-        let mut parked = std::mem::take(&mut self.queued);
-        if let Some(previous) = self.previous.take() {
-            parked.push(std::mem::replace(&mut self.draft, previous).prompt());
-        }
+        let parked = std::mem::take(&mut self.queued);
+        let edited = self
+            .previous
+            .take()
+            .map(|previous| std::mem::replace(&mut self.draft, previous).prompt());
         // A paused draft alone keeps its caret.
-        if !parked.is_empty() {
-            self.paused = self
-                .paused
-                .take()
-                .map(|draft| draft.prompt())
+        if !parked.is_empty() || edited.is_some() {
+            self.paused = parked
                 .into_iter()
-                .chain(parked)
+                .chain(self.paused.take().map(|draft| draft.prompt()))
+                .chain(edited)
                 .reduce(Prompt::join)
                 .filter(|prompt| !prompt.is_empty())
                 .map(Draft::from_prompt);

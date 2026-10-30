@@ -16,7 +16,7 @@ impl Agent {
     /// Names the session in the background after its first request is saved.
     /// A failed request keeps the title taken from the request itself.
     pub(super) fn name_session(&self, prompt: &Prompt, first: bool) {
-        let Some(handle) = self.persistence.clone() else {
+        let Some(handle) = self.persistence.as_ref() else {
             return;
         };
         if !self.naming || self.child || !first || handle.titled() {
@@ -27,6 +27,7 @@ impl Agent {
         };
         client.clone_routing_from(self.client.as_ref());
         client.set_routing(self.client.routing());
+        let name = handle.namer();
         let request = prompt
             .display()
             .chars()
@@ -42,16 +43,18 @@ impl Agent {
                 ("content", Value::string(request)),
             ]),
         ];
-        std::thread::spawn(move || {
-            let title = client.prepare_turn().ok().and_then(|_| {
-                client
-                    .sample(&messages, false, None, None, &mut |_| Ok(()))
-                    .ok()
+        let _ = std::thread::Builder::new()
+            .name("jecode-session-title".into())
+            .spawn(move || {
+                let title = client.prepare_turn().ok().and_then(|_| {
+                    client
+                        .sample(&messages, false, None, None, &mut |_| Ok(()))
+                        .ok()
+                });
+                if let Some(title) = title.and_then(|completion| clean(&completion.text)) {
+                    name(&title);
+                }
             });
-            if let Some(title) = title.and_then(|completion| clean(&completion.text)) {
-                let _ = handle.name(&title);
-            }
-        });
     }
 }
 

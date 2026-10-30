@@ -56,10 +56,10 @@ row and `/help` name the shortcut.
 
 If a collaboration receipt is newer than the last ordinary tool card, `Ctrl+O`
 toggles that receipt's historical assignment snapshots. `/agents` opens a
-read-only list immediately, including during generation. Enter opens Activity,
-Assignment and Result tabs. Esc returns detail → list → main draft, preserving
-the draft and caret. Activity follows output until scrolled; End resumes
-following. Inspecting a result never marks it reviewed. See
+read-only list immediately, including during generation. Enter opens the
+collaborator's conversation. Esc returns conversation → list → main draft,
+preserving the draft and caret. The view follows output until scrolled;
+`Alt+End` resumes following. Inspecting a result never marks it reviewed. See
 [collaborating agents](../usage/COLLABORATION.md).
 
 ## Activity and queue

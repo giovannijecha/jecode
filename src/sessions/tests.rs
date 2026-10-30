@@ -214,7 +214,7 @@ fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
     input.recover();
     assert_eq!(input.draft.text, "earlier draft");
     assert_eq!(input.draft.cursor, 2);
-    let joined = "already paused\n\nfirst queued\n\nsecond queued\n\nedited latest";
+    let joined = "first queued\n\nsecond queued\n\nalready paused\n\nedited latest";
     assert_eq!(
         input.paused,
         Some(Draft {
