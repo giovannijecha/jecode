@@ -137,16 +137,18 @@ impl Context {
         }
         let recent = source.get(self.measured_end..)?;
         let assistant = recent.first()?;
+        // Providers count replayed reasoning only within a tool-call chain; after
+        // a new user message they drop it, which would understate the growth.
         if assistant.get("role").and_then(Value::as_str) != Some("assistant")
             || recent
                 .iter()
                 .skip(1)
-                .any(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
+                .any(|message| message.get("role").and_then(Value::as_str) != Some("tool"))
         {
             return None;
         }
         // The prior response's provider token count includes its opaque reasoning.
-        // Remove it from both sides before learning the new tool/user text density.
+        // Remove it from both sides before learning the new tool text density.
         let base_tokens = self.input_tokens?.checked_add(self.output_tokens?)?;
         let base_bytes = self
             .measured_bytes?

@@ -59,6 +59,22 @@ fn replayed_reasoning_is_removed_before_learning_text_growth() {
 }
 
 #[test]
+fn a_new_user_turn_without_replayed_reasoning_cannot_lower_text_density() {
+    let mut context = Context::default();
+    let mut source = vec![message("system", "Agent"), message("user", "Inspect")];
+    measure(&mut context, &source, Some(1000), Some(3000));
+    let density = context.calibration;
+    source.push(message("assistant", "Done."));
+    let pasted = "pasted log line ".repeat(1250);
+    source.push(message("user", &pasted));
+    // The provider dropped the 3,000 earlier reasoning tokens from this input.
+    let input = 1000 + 2 + pasted.len() / 4;
+    measure(&mut context, &source, Some(input), Some(20));
+    assert_eq!(context.calibration, density);
+    assert_eq!(context.input_tokens, Some(input));
+}
+
+#[test]
 fn missing_usage_keeps_the_old_baseline_and_cannot_recalibrate_it() {
     let mut context = Context::default();
     let mut source = vec![message("system", "Agent"), message("user", "Inspect")];
