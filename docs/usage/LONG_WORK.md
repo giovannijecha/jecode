@@ -66,6 +66,11 @@ For example, a 500,000-token effective window at 75% has a 375,000-token input
 budget regardless of the turn's `↓` total. The selected account may expose less
 context than the public model specification.
 
+OpenRouter measurements and native response data are scoped to the API key
+through a saved SHA-256 digest; the key itself stays out of the conversation.
+Changing the key clears the previous key's measurements. Older sessions without
+a credential scope remain readable as portable history.
+
 Input returned to the composer is withdrawn from the model's history view:
 neither `history:N` nor `history:requests` exposes that attempt. Submitting it
 again creates a new history entry. The original attempt remains in the saved

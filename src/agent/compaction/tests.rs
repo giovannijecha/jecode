@@ -6,7 +6,7 @@ fn recent_retention_counts_known_reasoning_instead_of_only_visible_bytes() {
     let directory = Directory::new();
     let client = crate::backend::openrouter::OpenRouter::fixture("http://127.0.0.1:1".into());
     let agent = Agent::new(client, crate::tools::Tools::new(directory.path()).unwrap());
-    let origin = crate::conversation::Origin::new("openrouter", "fixture/model");
+    let origin = agent.identity();
     let mut source = agent.messages.lock().unwrap().clone();
     source.push(Value::object([
         ("role", Value::string("user")),

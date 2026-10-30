@@ -13,6 +13,92 @@ fn openai_client(fixture: &HttpFixture) -> OpenAi {
     OpenAi::with_api(api, "fixture-model".into()).unwrap()
 }
 
+fn metered_reply() -> Value {
+    let mut response = completion("Done", vec![]);
+    if let Value::Object(fields) = &mut response {
+        fields.insert(
+            "usage".into(),
+            Value::object([
+                ("prompt_tokens", Value::number(1000)),
+                ("completion_tokens", Value::number(75_000)),
+            ]),
+        );
+    }
+    response
+}
+
+#[test]
+fn replacing_an_openrouter_key_clears_only_the_previous_credentials_usage() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(200, metered_reply()), (200, metered_reply())]);
+    let client = OpenRouter::fixture(fixture.endpoint.clone());
+    let api = client.api();
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    agent.run_turn("Inspect.", &mut |_| Ok(())).unwrap();
+    let identity = agent.identity();
+    assert_eq!(agent.context_status().tokens, Some(76_000));
+    agent
+        .replace_backend(Box::new(
+            OpenRouter::with_api(
+                api.clone().with_key("isolated-fixture-key".into()).unwrap(),
+                "fixture/model".into(),
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    assert_eq!(agent.identity(), identity);
+    assert_eq!(agent.context_status().tokens, Some(76_000));
+    let next_api = api.with_key("different-isolated-key".into()).unwrap();
+    agent
+        .replace_backend(Box::new(
+            OpenRouter::with_api(next_api, "fixture/model".into()).unwrap(),
+        ))
+        .unwrap();
+    assert_ne!(agent.identity(), identity);
+    assert_eq!(agent.context_status().tokens, None);
+    assert_eq!(agent.context.input_tokens, None);
+    assert_eq!(agent.context.calibration, None);
+    assert!(agent.locked_estimate() < 75_000);
+    let saved = agent.archive().document().encode();
+    assert!(!saved.contains("isolated-fixture-key"));
+    assert!(!saved.contains("different-isolated-key"));
+    agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
+    assert_eq!(agent.context_status().tokens, Some(76_000));
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(!requests[1].body.encode().contains("fixture-reasoning"));
+}
+
+#[test]
+fn resumed_openrouter_usage_requires_the_same_credential() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![(200, metered_reply())]);
+    let client = OpenRouter::fixture(fixture.endpoint.clone());
+    let api = client.api();
+    let mut first = Agent::new(client, Tools::new(directory.path()).unwrap());
+    first.enable_sessions(home.path()).unwrap();
+    first.run_turn("Inspect.", &mut |_| Ok(())).unwrap();
+    let id = first.sessions().unwrap().id();
+    drop(first);
+    for same_key in [true, false] {
+        let api = if same_key {
+            api.clone()
+        } else {
+            api.clone()
+                .with_key("different-isolated-key".into())
+                .unwrap()
+        };
+        let client = OpenRouter::with_api(api, "fixture/model".into()).unwrap();
+        let mut resumed = Agent::new(client, Tools::new(directory.path()).unwrap());
+        resumed.enable_sessions(home.path()).unwrap();
+        resumed.resume(&id).unwrap();
+        assert_eq!(resumed.context_status().tokens, same_key.then_some(76_000));
+        assert_eq!(resumed.locked_estimate() >= 75_000, same_key);
+    }
+    assert_eq!(fixture.finish().len(), 1);
+}
+
 fn sse(kind: &str, response: Value) -> String {
     format!(
         "data: {}\n\n",

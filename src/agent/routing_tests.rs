@@ -7,6 +7,24 @@ use std::collections::BTreeMap;
 
 const PIN: &str = "two/fp8";
 
+#[test]
+fn a_new_key_keeps_the_same_models_conversation_routing() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let client = OpenRouter::fixture(fixture.endpoint.clone());
+    let api = client.api();
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    agent.set_routing(Routing::Endpoint(PIN.into()));
+    let next = OpenRouter::with_api(
+        api.with_key("different-isolated-key".into()).unwrap(),
+        "fixture/model".into(),
+    )
+    .unwrap();
+    agent.install_backend(Box::new(next), false).unwrap();
+    assert_eq!(agent.routing(), Routing::Endpoint(PIN.into()));
+    assert!(fixture.finish().is_empty());
+}
+
 /// Three measured endpoints: medians of 40 tok/s and 1 s make Auto prefer at
 /// least 20 tok/s and at most 2 s. `two/fp8/eu` extends the pinned slug.
 fn listing() -> Value {

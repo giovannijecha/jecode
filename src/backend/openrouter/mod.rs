@@ -31,6 +31,7 @@ pub(super) const CREDENTIAL_ENV: &[&str] = &["OPENROUTER_API_KEY"];
 #[derive(Clone)]
 pub struct Api {
     api_key: String,
+    account: String,
     base_url: String,
     cancellation: Cancellation,
 }
@@ -56,10 +57,13 @@ pub fn validate_key(key: &str) -> Result<(), String> {
 impl Api {
     pub fn new(api_key: String) -> Result<Self, String> {
         validate_key(&api_key)?;
+        let cancellation = Cancellation::default();
+        let account = crate::auth::key_scope(&api_key, &cancellation)?;
         Ok(Self {
             api_key,
+            account,
             base_url: BASE_URL.into(),
-            cancellation: Cancellation::default(),
+            cancellation,
         })
     }
 
@@ -96,6 +100,7 @@ impl Api {
     }
     pub fn with_key(mut self, key: String) -> Result<Self, String> {
         validate_key(&key)?;
+        self.account = crate::auth::key_scope(&key, &self.cancellation)?;
         self.api_key = key;
         Ok(self)
     }
@@ -103,8 +108,15 @@ impl Api {
     #[cfg(test)]
     pub fn fixture(endpoint: &str) -> Self {
         assert!(endpoint.starts_with("http://127.0.0.1:"));
+        static ACCOUNT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
         Self {
             api_key: "isolated-fixture-key".into(),
+            account: ACCOUNT
+                .get_or_init(|| {
+                    crate::auth::key_scope("isolated-fixture-key", &Cancellation::default())
+                        .unwrap()
+                })
+                .clone(),
             base_url: endpoint.trim_end_matches("/chat/completions").into(),
             cancellation: Cancellation::default(),
         }

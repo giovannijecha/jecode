@@ -110,7 +110,8 @@ fn validated_key_is_used_by_later_menus_while_the_agent_is_held() {
         .services
         .with_credential("replacement-fixture-key".into())
         .unwrap();
-    app.defer(held::Deferred::Key(services));
+    app.finish_key("replacement-fixture-key".into(), Ok(services))
+        .unwrap();
     app.open_model_providers(false);
     super::tests::wait_until(&mut app, |app| app.job.is_none());
     let requests = fixture.finish();

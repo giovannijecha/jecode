@@ -15,6 +15,9 @@ impl Backend for OpenRouter {
     fn id(&self) -> &'static str {
         "openrouter"
     }
+    fn account(&self) -> Option<String> {
+        Some(self.api.account.clone())
+    }
     fn model(&self) -> &str {
         self.model()
     }
@@ -44,7 +47,7 @@ impl Backend for OpenRouter {
         pool: Option<&Pool>,
         emit: &mut dyn FnMut(backend::Update) -> Result<(), String>,
     ) -> Result<backend::Completion, backend::Failure> {
-        let origin = Origin::new(self.id(), self.model());
+        let origin = Origin::with_account(self.id(), self.model(), self.account());
         let projected: Vec<_> = messages
             .iter()
             .map(|message| conversation::project(message, &origin))
@@ -154,6 +157,9 @@ impl Backend for OpenRouter {
 impl Service for Api {
     fn id(&self) -> &'static str {
         "openrouter"
+    }
+    fn account(&self) -> Option<String> {
+        Some(self.account.clone())
     }
     fn with_credential(&self, key: String) -> Result<Arc<dyn Service>, String> {
         Ok(Arc::new(self.clone().with_key(key)?))
