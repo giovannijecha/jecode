@@ -1,16 +1,19 @@
 // Linux HTTP/1.1 adapter over OS sockets and the OS-supplied OpenSSL TLS ABI.
-// Stdin protocol matches http.cs. No external program or development headers.
+// Stdin protocol matches winhttp.cs. No external program or development headers.
 #define _POSIX_C_SOURCE 200809L
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 typedef struct ssl_ctx_st SSL_CTX;
@@ -107,7 +110,33 @@ static int valid_text(const unsigned char *text, size_t size) {
            memchr(text, '\n', size) == NULL;
 }
 
-struct channel { int socket; SSL_CTX *ctx; SSL *ssl; };
+static int decimal(const char *text, unsigned long long *value) {
+    if (!text || *text < '0' || *text > '9') return 0;
+    char *end = NULL;
+    errno = 0;
+    *value = strtoull(text, &end, 10);
+    return errno == 0 && *end == 0;
+}
+
+// Bounds each address attempt so a blackholed route cannot stall for minutes.
+static int connect_within(int socket_fd, const struct sockaddr *address, socklen_t size, int milliseconds) {
+    int flags = fcntl(socket_fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK) < 0) return 0;
+    int connected = connect(socket_fd, address, size) == 0;
+    if (!connected && errno == EINPROGRESS) {
+        struct pollfd ready = { .fd = socket_fd, .events = POLLOUT, .revents = 0 };
+        int polled;
+        do polled = poll(&ready, 1, milliseconds); while (polled < 0 && errno == EINTR);
+        int error = 0;
+        socklen_t length = sizeof(error);
+        connected = polled == 1 &&
+            getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0 && error == 0;
+    }
+    return connected && fcntl(socket_fd, F_SETFL, flags) == 0;
+}
+
+// Line reads are served from a per-connection buffer; body reads drain it first.
+struct channel { int socket; SSL_CTX *ctx; SSL *ssl; unsigned char pending[16384]; size_t start, end; };
 static int send_bytes(struct channel *channel, const void *bytes, size_t size) {
     const unsigned char *cursor = bytes;
     while (size) {
@@ -120,16 +149,29 @@ static int send_bytes(struct channel *channel, const void *bytes, size_t size) {
     }
     return 1;
 }
-static int receive_bytes(struct channel *channel, void *bytes, size_t size) {
+static int read_socket(struct channel *channel, void *bytes, size_t size) {
     int count = size > 16384 ? 16384 : (int)size;
     return channel->ssl ? ssl_read(channel->ssl, bytes, count)
                         : (int)recv(channel->socket, bytes, count, 0);
 }
+static int receive_bytes(struct channel *channel, void *bytes, size_t size) {
+    if (channel->start == channel->end) return read_socket(channel, bytes, size);
+    size_t count = channel->end - channel->start;
+    if (count > size) count = size;
+    memcpy(bytes, channel->pending + channel->start, count);
+    channel->start += count;
+    return (int)count;
+}
 static int receive_line(struct channel *channel, char *line, size_t capacity) {
     size_t used = 0;
     while (used + 1 < capacity) {
-        char byte;
-        if (receive_bytes(channel, &byte, 1) != 1) return 0;
+        if (channel->start == channel->end) {
+            int count = read_socket(channel, channel->pending, sizeof(channel->pending));
+            if (count <= 0) return 0;
+            channel->start = 0;
+            channel->end = (size_t)count;
+        }
+        char byte = (char)channel->pending[channel->start++];
         line[used++] = byte;
         if (byte == '\n') { line[used] = 0; return 1; }
     }
@@ -247,12 +289,14 @@ done:
 
 int main(void) {
     int result = 1;
+    const char *failure = "Native HTTP request failed";
     size_t url_len = 0, method_len = 0, body_len = 0;
+    unsigned long long timeout_ms = 0, body_size = 0;
     unsigned char *url = decoded_line(&url_len), *method = decoded_line(&method_len), *body = NULL;
     struct channel channel = { .socket = -1, .ctx = NULL, .ssl = NULL };
     char *timeout = line(), *header_count = line();
-    if (!url || !method || !timeout || !header_count || !valid_text(url, url_len) ||
-        !valid_text(method, method_len)) goto done;
+    if (!url || !method || !decimal(timeout, &timeout_ms) || !header_count ||
+        !valid_text(url, url_len) || !valid_text(method, method_len)) goto done;
     long count = strtol(header_count, NULL, 10);
     if (count < 0 || count > 1000) goto done;
     char **names = calloc((size_t)count + 1, sizeof(char *));
@@ -265,8 +309,13 @@ int main(void) {
         if (!names[i] || !values[i] || !valid_text((unsigned char *)names[i], n) ||
             !valid_text((unsigned char *)values[i], v)) goto done_headers;
     }
-    body = decoded_line(&body_len);
-    if (!body) goto done_headers;
+    char *body_line = line();
+    int body_known = decimal(body_line, &body_size) && body_size < SIZE_MAX;
+    free(body_line);
+    if (!body_known) goto done_headers;
+    body_len = (size_t)body_size;
+    body = malloc(body_len ? body_len : 1);
+    if (!body || (body_len && fread(body, 1, body_len, stdin) != body_len)) goto done_headers;
     int secure = strncmp((char *)url, "https://", 8) == 0;
     char *authority = (char *)url + (secure ? 8 : 7);
     if (!secure && strncmp((char *)url, "http://", 7)) goto done_headers;
@@ -290,7 +339,7 @@ int main(void) {
     int proxy = 0;
     const char *proxy_url = getenv(secure ? "HTTPS_PROXY" : "HTTP_PROXY");
     if (!proxy_url) proxy_url = getenv(secure ? "https_proxy" : "http_proxy");
-    if (proxy_url && strncmp(proxy_url, "http://", 7) == 0 &&
+    if (proxy_url && *proxy_url &&
         strcmp(host, "localhost") && strcmp(host, "127.0.0.1") && strcmp(host, "::1")) {
         const char *no_proxy = getenv("NO_PROXY");
         if (!no_proxy) no_proxy = getenv("no_proxy");
@@ -309,7 +358,14 @@ int main(void) {
             }
         }
         if (!bypass) {
-            const char *origin = proxy_url + 7;
+            const char *origin = proxy_url;
+            if (strstr(proxy_url, "://")) {
+                if (strncasecmp(proxy_url, "http://", 7)) {
+                    failure = "Native HTTP supports only http:// proxies; unset or change HTTP(S)_PROXY";
+                    free(hostport); goto done_headers;
+                }
+                origin += 7;
+            }
             size_t length = strcspn(origin, "/");
             proxy_hostport = strndup(origin, length);
             if (!proxy_hostport || strchr(proxy_hostport, '@')) { free(hostport); free(proxy_hostport); goto done_headers; }
@@ -323,14 +379,25 @@ int main(void) {
     struct addrinfo hints = {0}, *addresses = NULL;
     hints.ai_socktype = SOCK_STREAM;
     if (getaddrinfo(connect_host, connect_port, &hints, &addresses)) { free(hostport); free(proxy_hostport); goto done_headers; }
+    int attempt = timeout_ms && timeout_ms < 10000 ? (int)timeout_ms : 10000;
     for (struct addrinfo *address = addresses; address; address = address->ai_next) {
         channel.socket = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
-        if (channel.socket >= 0 && connect(channel.socket, address->ai_addr, address->ai_addrlen) == 0) break;
+        if (channel.socket >= 0 &&
+            connect_within(channel.socket, address->ai_addr, address->ai_addrlen, attempt)) break;
         if (channel.socket >= 0) close(channel.socket);
         channel.socket = -1;
     }
     freeaddrinfo(addresses);
     if (channel.socket < 0) { free(hostport); free(proxy_hostport); goto done_headers; }
+    if (timeout_ms) {
+        // Matches WinHTTP: each send or receive waits at most the timeout, capped at 120 s.
+        unsigned long long limit = timeout_ms < 120000 ? timeout_ms : 120000;
+        struct timeval wait = { .tv_sec = (time_t)(limit / 1000), .tv_usec = (suseconds_t)(limit % 1000 * 1000) };
+        if (setsockopt(channel.socket, SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof(wait)) ||
+            setsockopt(channel.socket, SOL_SOCKET, SO_SNDTIMEO, &wait, sizeof(wait))) {
+            free(hostport); free(proxy_hostport); goto done_headers;
+        }
+    }
     if (secure && proxy) {
         char connect_request[2048], reply[65536];
         if (snprintf(connect_request, sizeof(connect_request),
@@ -343,6 +410,8 @@ int main(void) {
         }
         do { if (!receive_line(&channel, reply, sizeof(reply))) { free(hostport); free(proxy_hostport); goto done_headers; } }
         while (strcmp(reply, "\r\n") != 0);
+        // TLS starts on a clean tunnel; buffered bytes past the reply are unexpected.
+        if (channel.start != channel.end) { free(hostport); free(proxy_hostport); goto done_headers; }
     }
     if (secure) {
         if (!load_tls()) { free(hostport); free(proxy_hostport); goto done_headers; }
@@ -395,6 +464,6 @@ done:
     if (channel.ctx) ssl_ctx_free(channel.ctx);
     if (channel.socket >= 0) close(channel.socket);
     free(url); free(method); free(body); free(timeout); free(header_count);
-    if (result) fputs("Native HTTP request failed\n", stderr);
+    if (result) fprintf(stderr, "%s\n", failure);
     return result;
 }

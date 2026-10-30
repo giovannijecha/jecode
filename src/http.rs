@@ -27,18 +27,17 @@ pub(crate) fn run(
         use std::os::windows::process::CommandExt;
         command.creation_flags(crate::process::CREATE_NO_WINDOW);
     }
+    let body = request.body.unwrap_or_default();
     let mut input = String::new();
-    input.push_str(&encode(request.url.as_bytes()));
+    input.push_str(&encode(wire_url(request.url).as_bytes()));
     input.push('\n');
     input.push_str(&encode(request.method.as_bytes()));
     input.push('\n');
-    input.push_str(
-        &request
-            .timeout
-            .unwrap_or(Duration::from_secs(600))
-            .as_millis()
-            .to_string(),
-    );
+    // Zero means no total limit: streamed responses rely on the idle limit.
+    let timeout = request
+        .timeout
+        .map_or(0, |timeout| timeout.as_millis().max(1));
+    input.push_str(&timeout.to_string());
     input.push('\n');
     input.push_str(&request.headers.len().to_string());
     input.push('\n');
@@ -48,13 +47,15 @@ pub(crate) fn run(
         input.push_str(&encode(value.as_bytes()));
         input.push('\n');
     }
-    input.push_str(&encode(request.body.unwrap_or_default()));
+    input.push_str(&body.len().to_string());
     input.push('\n');
+    let mut input = input.into_bytes();
+    input.extend_from_slice(body);
     // The native helper owns no descendants; the runner enforces cancellation
     // and inactivity while forwarding each response chunk to the caller.
     process::run_leaf(
         &mut command,
-        Some(input.into_bytes()),
+        Some(input),
         request.timeout,
         request.output_limit,
         cancellation,
@@ -65,6 +66,32 @@ pub(crate) fn run(
 
 fn encode(bytes: &[u8]) -> String {
     crate::attachments::base64::encode(bytes)
+}
+
+/// Percent-encodes path and query bytes that some system URL parsers reject,
+/// such as non-ASCII text or `|` before macOS 14. Valid `%XX` escapes stay.
+fn wire_url(url: &str) -> String {
+    let authority = url.find("://").map_or(0, |index| index + 3);
+    let start = url[authority..]
+        .find(['/', '?', '#'])
+        .map_or(url.len(), |index| authority + index);
+    let (origin, rest) = url.split_at(start);
+    let bytes = rest.as_bytes();
+    let mut wire = String::with_capacity(url.len());
+    wire.push_str(origin);
+    for (index, &byte) in bytes.iter().enumerate() {
+        let escape = byte == b'%'
+            && bytes
+                .get(index + 1..index + 3)
+                .is_some_and(|hex| hex.iter().all(u8::is_ascii_hexdigit));
+        if byte.is_ascii_graphic() && !b"\"<>[\\]^`{|}".contains(&byte) && (byte != b'%' || escape)
+        {
+            wire.push(char::from(byte));
+        } else {
+            wire.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    wire
 }
 
 #[derive(Default)]
@@ -127,6 +154,16 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
 
     #[test]
+    fn wire_url_escapes_rejected_bytes_and_keeps_escapes() {
+        assert_eq!(
+            wire_url("https://Example.com:8443/a|b/caffè?q={x}^&p=%2F&bad=%zz#f"),
+            "https://Example.com:8443/a%7Cb/caff%C3%A8?q=%7Bx%7D%5E&p=%2F&bad=%25zz#f"
+        );
+        assert_eq!(wire_url("http://[::1]:80"), "http://[::1]:80");
+        assert_eq!(wire_url("http://h/a[1]%4"), "http://h/a%5B1%5D%254");
+    }
+
+    #[test]
     fn child_fixture() {
         let Ok(url) = std::env::var("JECODE_HTTP_CHILD_FIXTURE") else {
             return;
@@ -138,7 +175,7 @@ mod tests {
                 url: &url,
                 method: "POST",
                 headers: &[("X-Fixture-Request", "seen")],
-                body: Some(b"payload"),
+                body: Some(b"pay\nload\0\r\n"),
                 timeout: Some(Duration::from_secs(5)),
                 idle: None,
                 output_limit: 0,
@@ -207,7 +244,7 @@ mod tests {
         let (first, fixture, body) = server.finish();
         assert_eq!(first, "POST / HTTP/1.1\r\n");
         assert!(fixture);
-        assert_eq!(body, b"payload");
+        assert_eq!(body, b"pay\nload\0\r\n");
     }
 
     #[cfg(windows)]
@@ -406,8 +443,8 @@ mod tests {
                     method: "GET",
                     headers: &[],
                     body: None,
-                    timeout: Some(Duration::from_secs(5)),
-                    idle: None,
+                    timeout: None,
+                    idle: Some(Duration::from_secs(5)),
                     output_limit: 4096,
                 },
                 &Cancellation::default(),

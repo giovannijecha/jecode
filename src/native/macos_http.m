@@ -4,6 +4,7 @@
 #import <CFNetwork/CFNetwork.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,11 +74,11 @@ int main(void) {
         size_t size = 0;
         NSString *url_text = nil, *method = nil, *host = nil;
         NSURL *url = nil;
-        NSData *body = nil;
+        NSMutableData *body = nil;
         CFHTTPMessageRef request = NULL, response = NULL;
         CFReadStreamRef stream = NULL;
         CFDictionaryRef proxy = NULL;
-        unsigned long long timeout_ms = 0, count = 0;
+        unsigned long long timeout_ms = 0, count = 0, body_size = 0;
         unsigned long long expected = 0, received = 0;
         int has_expected = 0, head = 0;
         BOOL loopback = NO;
@@ -88,8 +89,9 @@ int main(void) {
         url_text = decoded(line);
         if (getline(&line, &capacity, stdin) < 0) goto done;
         method = decoded(line);
+        // A zero timeout means no total limit; the caller enforces inactivity.
         if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &timeout_ms) ||
-            !timeout_ms || timeout_ms > (unsigned long long)UINT_MAX * 1000) goto done;
+            timeout_ms > (unsigned long long)UINT_MAX * 1000) goto done;
         if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &count) || count > 1000) goto done;
         if (!url_text || !method) goto done;
         url = [NSURL URLWithString:url_text];
@@ -106,12 +108,12 @@ int main(void) {
                 [value containsString:@"\r"] || [value containsString:@"\n"]) goto done;
             CFHTTPMessageSetHeaderFieldValue(request, (__bridge CFStringRef)name, (__bridge CFStringRef)value);
         }
-        if (getline(&line, &capacity, stdin) < 0) goto done;
-        size = strlen(line);
-        if (size && line[size - 1] == '\n') line[--size] = 0;
-        if (size && line[size - 1] == '\r') line[size - 1] = 0;
-        body = [[NSData alloc] initWithBase64EncodedString:[NSString stringWithUTF8String:line] options:0];
-        if (!body) goto done;
+        // The raw body follows its decimal length line.
+        if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &body_size) ||
+            body_size >= SIZE_MAX) goto done;
+        size = (size_t)body_size;
+        body = [NSMutableData dataWithLength:size];
+        if (!body || (size && fread(body.mutableBytes, 1, size, stdin) != size)) goto done;
         if (body.length || [method isEqual:@"POST"] || [method isEqual:@"PUT"] || [method isEqual:@"PATCH"])
             CFHTTPMessageSetBody(request, (__bridge CFDataRef)body);
         head = [method isEqual:@"HEAD"];
@@ -124,7 +126,7 @@ int main(void) {
             proxy = CFNetworkCopySystemProxySettings();
             if (proxy && !CFReadStreamSetProperty(stream, kCFStreamPropertyHTTPProxy, proxy)) goto done;
         }
-        alarm((unsigned)((timeout_ms + 999) / 1000));
+        if (timeout_ms) alarm((unsigned)((timeout_ms + 999) / 1000));
         if (!CFReadStreamOpen(stream)) goto done;
         first = CFReadStreamRead(stream, buffer, sizeof(buffer));
         response = (CFHTTPMessageRef)CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);

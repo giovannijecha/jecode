@@ -1,6 +1,8 @@
 // Windows HTTP boundary through WinHTTP. This helper is embedded at build time.
-// Stdin: base64 URL, base64 method, timeout milliseconds, header count,
-// base64 name/value pairs, base64 body. Stdout: HTTP headers followed by body.
+// Stdin: base64 URL, base64 method, timeout milliseconds (0: no total limit),
+// header count, base64 name/value pairs, body length, then the raw body.
+// Stdout: HTTP headers followed by body. WinHTTP uses the system proxy
+// configuration (automatic detection); HTTP(S)_PROXY variables are not read.
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -51,21 +53,24 @@ public static class JecodeHttp {
     public static int Main() {
         IntPtr session = IntPtr.Zero, connection = IntPtr.Zero, request = IntPtr.Zero;
         try {
-            using (var input = new StreamReader(Console.OpenStandardInput(), Encoding.ASCII)) {
+            using (var input = new BufferedStream(Console.OpenStandardInput())) {
                 string url = DecodeText(Required(input));
                 string method = DecodeText(Required(input));
-                int timeout = int.Parse(Required(input));
-                int count = int.Parse(Required(input));
-                if (timeout < 1 || count < 0 || count > 1000 || !Token(method))
-                    throw new InvalidDataException();
+                int timeout = Number(Required(input));
+                int count = Number(Required(input));
+                if (count > 1000 || !Token(method))
+                    throw new InvalidDataException("Native HTTP request is invalid");
                 var uri = new Uri(url, UriKind.Absolute);
                 if ((uri.Scheme != "http" && uri.Scheme != "https") ||
                     uri.UserInfo.Length != 0 || uri.Host.Length == 0)
-                    throw new InvalidDataException();
+                    throw new InvalidDataException("Native HTTP URL is invalid");
                 session = WinHttpOpen(null, uri.IsLoopback ? NoProxy : AutomaticProxy, null, null, 0);
                 Require(session, "open");
-                int receiveTimeout = Math.Min(timeout, 120000);
-                Check(WinHttpSetTimeouts(session, 10000, 10000, receiveTimeout, receiveTimeout), "timeouts");
+                // Without a total limit, the per-operation limits still bound silence.
+                int connectTimeout = timeout == 0 ? 10000 : Math.Min(timeout, 10000);
+                int receiveTimeout = timeout == 0 ? 120000 : Math.Min(timeout, 120000);
+                Check(WinHttpSetTimeouts(session, connectTimeout, connectTimeout,
+                    receiveTimeout, receiveTimeout), "timeouts");
                 connection = WinHttpConnect(session, uri.Host, checked((ushort)uri.Port), 0);
                 Require(connection, "connect");
                 uint flags = uri.Scheme == "https" ? Secure : 0;
@@ -82,12 +87,16 @@ public static class JecodeHttp {
                     string name = DecodeText(Required(input));
                     string value = DecodeText(Required(input));
                     if (!Token(name) || value.IndexOfAny(new char[] { '\r', '\n', '\0' }) >= 0)
-                        throw new InvalidDataException();
+                        throw new InvalidDataException("Native HTTP request header is invalid");
                     Check(WinHttpAddRequestHeaders(request, name + ": " + value + "\r\n",
                         UInt32.MaxValue, AddHeader), "header");
                 }
-                byte[] body = Convert.FromBase64String(Required(input));
-                if (body.LongLength > UInt32.MaxValue) throw new InvalidDataException();
+                byte[] body = new byte[Number(Required(input))];
+                for (int filled = 0; filled < body.Length;) {
+                    int read = input.Read(body, filled, body.Length - filled);
+                    if (read <= 0) throw new EndOfStreamException("Native HTTP request is incomplete");
+                    filled += read;
+                }
                 GCHandle pinned = default(GCHandle);
                 try {
                     IntPtr pointer = IntPtr.Zero;
@@ -129,7 +138,8 @@ public static class JecodeHttp {
             }
             return 0;
         } catch (Exception error) {
-            Console.Error.WriteLine(error is IOException && error.Message.StartsWith("Native HTTP")
+            bool described = error is IOException || error is InvalidDataException;
+            Console.Error.WriteLine(described && error.Message.StartsWith("Native HTTP")
                 ? error.Message : "Native HTTP request failed: " + error.GetType().Name);
             return 1;
         } finally {
@@ -194,10 +204,21 @@ public static class JecodeHttp {
             ? "Native HTTP request timed out"
             : "Native HTTP " + stage + " failed (" + code + ")");
     }
-    static string Required(StreamReader input) {
-        string line = input.ReadLine();
-        if (line == null) throw new EndOfStreamException("Native HTTP request is incomplete");
-        return line;
+    static string Required(Stream input) {
+        var line = new StringBuilder();
+        for (;;) {
+            int next = input.ReadByte();
+            if (next < 0) throw new EndOfStreamException("Native HTTP request is incomplete");
+            if (next == '\n') break;
+            if (next != '\r') line.Append((char)next);
+        }
+        return line.ToString();
+    }
+    static int Number(string line) {
+        int value;
+        if (!Int32.TryParse(line, NumberStyles.None, CultureInfo.InvariantCulture, out value))
+            throw new InvalidDataException("Native HTTP request is invalid");
+        return value;
     }
     static string DecodeText(string line) {
         return new UTF8Encoding(false, true).GetString(Convert.FromBase64String(line));
