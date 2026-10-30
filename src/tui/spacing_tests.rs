@@ -336,7 +336,7 @@ fn the_lower_area_stays_at_the_bottom_with_space_before_notices_activity_and_que
     assert!(
         frame.live[frame.composer + 2]
             .plain()
-            .starts_with("─ Drafts 1")
+            .starts_with("─ Draft · ↑ ─")
     );
     state.items.clear();
     let empty = view::frame(&state, "model", "directory");

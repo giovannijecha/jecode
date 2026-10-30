@@ -1,7 +1,7 @@
 //! A permission request takes the composer's place (B12.4): below the
 //! `? Waiting for permission` pill, between two `accent` rules, the call as
 //! it will run, its access and three choices, then the keys. The title and
-//! the level ride the top rule; nothing ranks one level above another.
+//! the level chip (B12.8) ride the top rule.
 
 use super::{
     composer, footer,
@@ -22,7 +22,7 @@ const CHOICES: [&str; 3] = ["Approve", "Approve and remember", "Deny"];
 
 pub(super) fn block(
     pending: &Pending,
-    level: &str,
+    level: crate::permissions::Level,
     status: Line,
     columns: usize,
     height: usize,
@@ -30,7 +30,7 @@ pub(super) fn block(
     let rule = |label: &[Line], aside: &Line| composer::rule(columns, ACCENT, label, aside);
     let mut parts = vec![
         (status, Part::Chrome),
-        (rule(&title(pending), &Line::new(level, MUTED)), Part::Keep),
+        (rule(&title(pending), &cards::level(level)), Part::Keep),
     ];
     for row in facts(pending, panel::text_width(columns)) {
         parts.push((panel::indent(row, columns), Part::Keep));

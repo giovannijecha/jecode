@@ -11,8 +11,9 @@ pub const GROUPS: [&str; 4] = ["Conversation", "Model", "Workspace", "Jecode"];
 impl Command {
     pub fn group(&self) -> &'static str {
         match self.name {
-            "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/agents" | "/ask" | "/todo"
-            | "/exit" => GROUPS[0],
+            "/new" | "/resume" | "/copy" | "/export" | "/agents" | "/ask" | "/todo" | "/exit" => {
+                GROUPS[0]
+            }
             "/model" | "/effort" | "/routing" | "/permissions" => GROUPS[1],
             "/settings" | "/help" => GROUPS[3],
             _ => GROUPS[2],
@@ -28,7 +29,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 20] = [
+pub const COMMANDS: [Command; 19] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -138,12 +139,6 @@ pub const COMMANDS: [Command; 20] = [
         plain_usage: Some("/todo"),
     },
     Command {
-        name: "/drafts",
-        description: "Edit or discard pending drafts in the terminal interface",
-        tui_usage: "/drafts",
-        plain_usage: None,
-    },
-    Command {
         name: "/exit",
         description: "Quit after pending work completes",
         tui_usage: "/exit",
@@ -151,7 +146,7 @@ pub const COMMANDS: [Command; 20] = [
     },
 ];
 
-const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nAlt+Up        Open pending drafts (also /drafts)\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Quit, asking first while work runs\nCtrl+D        In /terminal, mark stop; in /resume or /drafts, mark deletion; Enter confirms, Esc cancels\nCtrl+S        Send or queue a paused draft in /drafts\ni             In active terminal output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
+const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nUp            Edit the pending draft from an empty composer\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Quit, asking first while work runs\nCtrl+D        In /terminal, mark stop; in /resume, mark deletion; Enter confirms, Esc cancels\ni             In active terminal output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
 const PLAIN_CONTROLS: &str = "/terminal write ID TEXT   Send one line directly to an interactive process\n/terminal interrupt ID    Send Ctrl+C to an interactive process\n/terminal resize ID C R   Resize its terminal to C columns and R rows\n/terminal stop ID         Request a stop for a background process\n\nUse fullscreen direct input for hidden password entry.\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
 
 pub fn help(tui: bool) -> String {

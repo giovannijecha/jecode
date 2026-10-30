@@ -133,8 +133,8 @@ cargo test --locked --offline tui::terminal::windows::native_tests::native_windo
 ```
 
 The fixture checks a full-width console grid, Unicode and dropped-path input,
-wheel/page navigation, prompt history, endpoint selection and resize. It then
-checks saved drafts and restoration of the shell screen, console modes and output
+wheel/page navigation, prompt history, draft preservation, endpoint selection
+and resize. It then checks restoration of the shell screen, console modes and output
 code page. Separate scenarios terminate the owner and terminal guardian.
 
 Checkpoint preimages use standard-library file I/O and operating-system file

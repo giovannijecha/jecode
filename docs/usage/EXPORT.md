@@ -16,7 +16,7 @@ including reasoning fields, stays in `jecode_origin` with its backend and model;
 legacy original messages retain their stored shape. Events retain local command results, compaction summaries,
 recovery and turn errors, including incomplete streamed text. An export taken
 during an operation can contain a tool call whose result has not arrived yet.
-Unsent composer text and paused drafts are not included.
+Unsent composer text and the pending draft are not included.
 
 The additive `build` object records the executable's OS, architecture, profile
 (`debug` or `release`, inferred from Rust debug assertions), and a fingerprint

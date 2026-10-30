@@ -43,7 +43,10 @@ fn skills_catalog_is_local_keeps_drafts_and_restores_its_saved_details() {
         if command == "/skills" && details == &[("review".into(), "Inspect a change.".into())]
     )));
     assert_eq!(resumed.state.editor.text, "unfinished draft");
-    assert_eq!(resumed.state.queue.paused[0].text, "queued draft");
+    assert_eq!(
+        resumed.state.queue.paused.as_ref().unwrap().text,
+        "queued draft"
+    );
     assert!(resumed.worker.is_none());
 }
 

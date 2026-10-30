@@ -215,12 +215,10 @@ pub struct Worker {
     pub events: EventReceiver,
     task: Option<JoinHandle<(Agent, Result<(), String>)>>,
     cancellation: Cancellation,
-    inbox: crate::inbox::Inbox,
 }
 impl Worker {
     pub fn continue_question(mut agent: Agent) -> Self {
         let cancellation = agent.cancellation();
-        let inbox = agent.inbox();
         cancellation.reset();
         let (sender, events) = event_channel();
         let token = cancellation.clone();
@@ -234,12 +232,10 @@ impl Worker {
             events,
             task: Some(task),
             cancellation,
-            inbox,
         }
     }
     pub fn continue_collaboration(mut agent: Agent) -> Self {
         let cancellation = agent.cancellation();
-        let inbox = agent.inbox();
         let (sender, events) = event_channel();
         let token = cancellation.clone();
         let task = thread::spawn(move || {
@@ -252,12 +248,10 @@ impl Worker {
             events,
             task: Some(task),
             cancellation,
-            inbox,
         }
     }
     pub fn start(mut agent: Agent, prompt: crate::attachments::Prompt) -> Self {
         let cancellation = agent.cancellation();
-        let inbox = agent.inbox();
         cancellation.reset();
         let (sender, events) = event_channel();
         let token = cancellation.clone();
@@ -269,7 +263,6 @@ impl Worker {
             events,
             task: Some(task),
             cancellation,
-            inbox,
         }
     }
     pub fn finished(&self) -> bool {
@@ -282,10 +275,9 @@ impl Worker {
             .join()
             .map_err(|_| "Agent worker failed".into())
     }
-    /// Requests cancellation and wakes a turn waiting for a queued edit.
+    /// Requests cancellation.
     pub fn cancel(&self) {
         self.cancellation.cancel();
-        self.inbox.wake();
     }
 }
 impl Drop for Worker {

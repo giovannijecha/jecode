@@ -162,18 +162,18 @@ fn alt_end_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priori
     assert_eq!(app.state.editor, draft);
     key(&mut app, 33, 0);
     paint(&mut app, &mut screen);
-    app.open_drafts();
+    app.open_settings();
     paint(&mut app, &mut screen);
     assert!(screen.visible().contains("Alt+End  back to bottom"));
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
-    assert!(!app.draft_menu_open());
+    assert!(app.state.selector.is_none());
     assert!(screen.visible().contains("Alt+End  back to bottom"));
     assert!(!app.state.activity.as_ref().unwrap().stopping);
-    app.open_drafts();
+    app.open_settings();
     key(&mut app, 35, 1);
     paint(&mut app, &mut screen);
-    assert!(app.draft_menu_open());
+    assert!(app.state.selector.is_some());
     assert!(!screen.visible().contains("back to bottom"));
     key(&mut app, 27, 0);
     key(&mut app, 67, 4);
@@ -183,6 +183,6 @@ fn alt_end_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priori
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(app.state.editor.text, "active request");
-    assert_eq!(app.state.queue.paused[0], draft);
+    assert_eq!(app.state.queue.paused.as_ref(), Some(&draft));
     assert_eq!(fixture.finish().len(), 1);
 }

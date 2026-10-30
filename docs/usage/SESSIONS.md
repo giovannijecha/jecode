@@ -16,11 +16,18 @@ jecode --plain resume SESSION_ID
 
 `jecode resume` opens a folder-scoped picker. In the TUI, `/resume` opens the
 same picker and `/resume ID` opens a specific session. The picker shows the
-most recently updated sessions first, each with the first request as the title
-and a compact age (`5m`, `2h`, `3d`); typing filters by title, backend, model
-or ID. The plain picker lists all of them on each row. Once saved, the active
-session appears as `current`; selecting it returns to the composer. A session already open in another
-process cannot be resumed at the same time.
+most recently updated sessions first, each with its title and a compact age
+(`5m`, `2h`, `3d`); typing filters by title, backend, model or ID. The plain
+picker lists all of them on each row. Once saved, the active session appears
+as `current`; selecting it returns to the composer. A session already open in
+another process cannot be resumed at the same time.
+
+After the first request is saved, Jecode asks the session's model in the
+background for a short title in the request's language and keeps it for the
+session's life. Until it arrives, or if that request fails, the title is the
+first request itself. A single-prompt command can exit before the background
+request finishes. Switching away from a session also ends its pending title
+update; its first request remains the title.
 
 The exit summary prints `jecode resume SESSION_ID` after a successful save.
 Resume restores the conversation, tool results, backend, model, effort, routing,
@@ -29,7 +36,7 @@ prompt history and saved input. It uses the current credential for that backend
 tools. `/settings` defaults are unchanged.
 Use `/new` to save the old conversation and start an independent one with those
 defaults when their provider is available. Otherwise, it keeps the active
-provider, model and effort. The unsent composer and pending drafts move to the
+provider, model and effort. The unsent composer and the pending draft move to the
 new conversation. Without a usable selection, an action banner points to
 model or provider configuration and leaves the current conversation intact.
 
@@ -57,15 +64,14 @@ session list and store `model: null`, rather than a made-up model identifier.
 Resuming such a draft uses the current selection, or keeps waiting for
 configuration. Its text and attachment bytes remain intact.
 
-The TUI saves the composer, caret, queued messages, paused drafts and sent
-prompt history after a session has a request or attachment. On resume, queued
-messages become separate paused drafts; the composer retains its own text.
+The TUI saves the composer, caret, the pending draft and sent prompt history
+after a session has a request or attachment. On resume, a queued message
+becomes the paused draft; the composer retains its own text.
 Sent attachments stay in the conversation and prompt history; only unsent
 input returns to the composer.
-Open `/drafts` or press Alt+Up to review them. Enter edits a draft; Ctrl+S
-sends it explicitly. Nothing pending runs automatically after resume or an
-interruption. In `--plain`, recovered drafts are displayed for copying and
-editing, while the TUI remains the place to manage paused drafts.
+Press Up in an empty composer to take the paused draft back; Enter sends it.
+Nothing pending runs automatically after resume or an interruption. In
+`--plain`, recovered drafts are displayed for copying and editing.
 
 If the initial save fails, Jecode does not start the provider request or a
 tool. Restore storage access, review the retained drafts and send the intended
@@ -109,8 +115,8 @@ Deleting the current session opens a fresh conversation with the saved
 model and effort defaults, or the active selection if the default provider is
 unavailable. Without a usable selection, configuration is required before
 deleting the current session; other saved sessions can still be deleted.
-Its context and sent prompt history are cleared; unsent composer text, queued
-messages and paused drafts are kept. The new
+Its context and sent prompt history are cleared; unsent composer text and the
+pending draft are kept. The new
 session is saved when a request is sent or inherited input contains
 attachments. If deletion fails partway through, some owned files may already
 be gone. Read the error and retry from `/resume`; Jecode removes the last valid

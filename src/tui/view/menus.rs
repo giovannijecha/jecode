@@ -7,7 +7,7 @@ use crate::tui::{
     motion,
     selector::{Badge, Choice, Hit, Purpose, Selector},
     text,
-    theme::{ACCENT, BAD, BADGE_IDLE, BODY, DIM, LIT, MUTED, STRONG, Style, WARNING},
+    theme::{ACCENT, BAD, BADGE_IDLE, BODY, LIT, MUTED, STRONG, Style},
 };
 
 /// The ` current ` chip and the gap before it.
@@ -97,7 +97,6 @@ fn noun(menu: &Selector) -> String {
         Purpose::Models { .. } => "models".into(),
         Purpose::Providers { .. } => "providers".into(),
         Purpose::Sessions { .. } => "conversations".into(),
-        Purpose::Drafts { .. } => "drafts".into(),
         _ => menu.title.to_lowercase(),
     }
 }
@@ -136,20 +135,6 @@ fn aside(menu: &Selector) -> Line {
         Purpose::Remembered { .. } => "this conversation".into(),
         Purpose::Key => "~/.jecode/config.json".into(),
         Purpose::AutoCompact => "this and new conversations".into(),
-        Purpose::Drafts { .. } => {
-            let queued = menu
-                .options
-                .iter()
-                .filter(|option| option.badge == Some(Badge::Queued))
-                .count();
-            let paused = menu.options.len() - queued;
-            [(queued, "queued"), (paused, "paused")]
-                .into_iter()
-                .filter(|(count, _)| *count > 0)
-                .map(|(count, state)| format!("{count} {state}"))
-                .collect::<Vec<_>>()
-                .join(" · ")
-        }
         _ => String::new(),
     };
     Line::new(&text, MUTED)
@@ -173,13 +158,6 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
                 width,
             );
         }
-        Purpose::Drafts { .. } if deleting => {
-            return panel::confirm(
-                "Discard this draft?",
-                &[key("Enter", "discard"), key("Esc", "cancel")],
-                width,
-            );
-        }
         Purpose::Account {
             confirm_sign_out: true,
         } => {
@@ -189,9 +167,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
                 width,
             );
         }
-        Purpose::Sessions { .. } | Purpose::Drafts { .. } | Purpose::Remembered { .. }
-            if menu.options.is_empty() =>
-        {
+        Purpose::Sessions { .. } | Purpose::Remembered { .. } if menu.options.is_empty() => {
             close.to_vec()
         }
         Purpose::Sessions { .. } => vec![
@@ -200,18 +176,6 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
             key("Ctrl+D", "delete"),
             close[0],
         ],
-        Purpose::Drafts { .. } => {
-            let paused = matches!(
-                menu.chosen(),
-                Some(Choice::Draft(crate::tui::drafts::Slot::Paused(_)))
-            );
-            let mut keys = vec![key("↑↓", "move").optional(), key("Enter", "edit")];
-            if paused {
-                keys.push(key("Ctrl+S", "send"));
-            }
-            keys.extend([key("Ctrl+D", "discard"), close[0]]);
-            keys
-        }
         Purpose::Remembered { .. } => vec![
             key("↑↓", "move").optional(),
             key("Ctrl+D", "revoke"),
@@ -249,8 +213,6 @@ fn table_width(menu: &Selector, columns: usize) -> usize {
 fn list(menu: &Selector, columns: usize, room: usize) -> Vec<(Line, Part)> {
     let empty = if menu.options.is_empty() && matches!(menu.purpose, Purpose::Sessions { .. }) {
         Some("No saved conversations")
-    } else if menu.options.is_empty() && matches!(menu.purpose, Purpose::Drafts { .. }) {
-        Some("No pending drafts")
     } else if menu.options.is_empty() && matches!(menu.purpose, Purpose::Remembered { .. }) {
         Some("Nothing remembered")
     } else if menu.filtered.is_empty() {
@@ -363,13 +325,7 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
     let deleting = menu.delete_target() == Some(hit.index);
     let end = columns.saturating_sub(2);
     let mut line = Line::default();
-    let style = if deleting {
-        BAD
-    } else if matches!(menu.purpose, Purpose::Drafts { .. }) {
-        BODY
-    } else {
-        STRONG
-    };
+    let style = if deleting { BAD } else { STRONG };
     // The badge leaves before the marker and a few cells of the name.
     let right = Some(badge(value.badge.as_ref()))
         .filter(|right| end >= 2 + 4 + 2 + panel::cells(right))
@@ -422,8 +378,6 @@ pub(super) fn badge(badge: Option<&Badge>) -> Line {
         Some(Badge::Current) => line.push_on(" current ", LIT, BADGE_IDLE),
         Some(Badge::Default) => line.push("default", MUTED),
         Some(Badge::Note(note)) => line.push(note, MUTED),
-        Some(Badge::Queued) => line.push("queued", DIM),
-        Some(Badge::Paused) => line.push("paused", WARNING),
         None => {}
     }
     line

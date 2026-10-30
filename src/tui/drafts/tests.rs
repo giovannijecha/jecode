@@ -1,174 +1,89 @@
 use super::*;
 
 #[test]
-fn five_identical_prompts_remain_five_distinct_paused_drafts() {
+fn one_draft_is_pending_and_a_second_waits_in_the_composer() {
     let mut queue = Queue::default();
-    for _ in 0..5 {
-        queue.push("same prompt").unwrap();
-    }
+    assert!(queue.is_empty());
+    queue.push("first").unwrap();
+    assert_eq!(queue.pending(), Some(("first".into(), false)));
+    assert_eq!(queue.push("second").unwrap_err(), PENDING);
+    assert_eq!(queue.messages(), ["first"]);
+
     queue.pause();
     assert!(queue.messages().is_empty());
-    assert_eq!(queue.len(), 5);
-    assert_eq!(queue.paused.len(), 5);
-    assert!(queue.paused.iter().all(|draft| draft.text == "same prompt"));
-    let (queued, paused) = queue.snapshot(&Editor::default());
-    assert!(queued.is_empty());
-    assert_eq!(paused.len(), 5);
-    assert_eq!(queue.take(Slot::Paused(2)).unwrap(), "same prompt");
-    assert_eq!(queue.len(), 4);
+    assert_eq!(queue.pending(), Some(("first".into(), true)));
+    assert_eq!(queue.push("second").unwrap_err(), PENDING);
 }
 
 #[test]
-fn queue_edit_save_cancel_and_discard_affect_only_selected_slot() {
+fn taking_the_draft_back_returns_it_until_the_agent_accepts_it() {
     let mut queue = Queue::default();
-    queue.push("first").unwrap();
-    queue.push("second").unwrap();
-    queue.push("third").unwrap();
-    let mut editor = Editor::default();
-    editor.insert("unfinished composer");
-    editor.cursor = 4;
+    queue.push("queued").unwrap();
+    assert_eq!(queue.take().unwrap().text, "queued");
+    assert!(queue.is_empty());
+    assert!(queue.take().is_none());
 
-    queue
-        .begin_edit(queue.slot(1).unwrap(), &mut editor)
-        .unwrap();
-    assert_eq!(queue.edit_index(), Some(1));
-    editor.replace("second revised".into());
-    assert_eq!(queue.draft(&editor).text, "unfinished composer");
-    assert_eq!(queue.draft(&editor).cursor, 4);
-    let (queued, _) = queue.snapshot(&editor);
-    assert_eq!(queued, ["first", "second revised", "third"]);
-    assert!(queue.save_edit(&mut editor));
-    assert_eq!(editor.text, "unfinished composer");
-    assert_eq!(editor.cursor, 4);
-    assert_eq!(queue.messages()[1], "second revised");
-
-    queue
-        .begin_edit(queue.slot(0).unwrap(), &mut editor)
-        .unwrap();
-    editor.replace("unsaved".into());
-    assert!(queue.cancel_edit(&mut editor));
-    assert_eq!(queue.messages()[0], "first");
-    assert_eq!(editor.cursor, 4);
-    assert!(queue.discard(queue.slot(1).unwrap()));
-    assert_eq!(queue.messages(), ["first", "third"]);
-    assert_eq!(editor.text, "unfinished composer");
-}
-
-#[test]
-fn pause_during_edit_preserves_slot_and_live_snapshot() {
-    let mut queue = Queue::default();
-    queue.push("automatic one").unwrap();
-    queue.push("automatic two").unwrap();
-    let mut already_paused = Editor::default();
-    already_paused.replace("already paused".into());
-    already_paused.cursor = 2;
-    queue.paused.push(already_paused);
-    let mut editor = Editor::default();
-    editor.insert("main draft");
-    editor.cursor = 3;
-    queue
-        .begin_edit(queue.slot(1).unwrap(), &mut editor)
-        .unwrap();
-    editor.replace("live revision".into());
-    editor.cursor = 5;
-
-    queue.pause();
-    assert_eq!(queue.edit_index(), Some(1));
-    assert_eq!(queue.len(), 3);
-    assert!(queue.messages().is_empty());
-    let (queued, paused) = queue.snapshot(&editor);
-    assert!(queued.is_empty());
-    assert_eq!(paused[0].text, "automatic one");
-    assert_eq!(paused[1].text, "live revision");
-    assert_eq!(paused[1].cursor, 5);
-    assert_eq!(paused[2].text, "already paused");
-    assert!(queue.save_edit(&mut editor));
-    assert_eq!(queue.paused[1].text, "live revision");
-    assert_eq!(queue.paused[1].cursor, 5);
-    assert_eq!(editor.text, "main draft");
-    assert_eq!(editor.cursor, 3);
-}
-
-#[test]
-fn appending_automatic_message_keeps_paused_edit_in_its_original_slot() {
-    let mut queue = Queue::default();
-    queue.push("automatic").unwrap();
-    let mut paused = Editor::default();
-    paused.replace("paused original".into());
-    paused.cursor = 4;
-    queue.paused.push(paused);
-    let mut editor = Editor::default();
-    editor.insert("main");
-    queue
-        .begin_edit(queue.slot(1).unwrap(), &mut editor)
-        .unwrap();
-    editor.replace("paused revision".into());
-    editor.cursor = 6;
-
-    queue.push("new automatic").unwrap();
-    assert_eq!(queue.edit_index(), Some(2));
-    let (queued, paused) = queue.snapshot(&editor);
-    assert_eq!(queued, ["automatic", "new automatic"]);
-    assert_eq!(paused[0].text, "paused revision");
-    assert_eq!(paused[0].cursor, 6);
-    queue.pause();
-    assert_eq!(queue.edit_index(), Some(2));
-    assert!(queue.save_edit(&mut editor));
-    assert_eq!(queue.paused[2].text, "paused revision");
-    assert_eq!(editor.text, "main");
-}
-
-#[test]
-fn accepted_messages_cannot_be_edited_or_discarded() {
-    let mut queue = Queue::default();
-    queue.push("first").unwrap();
-    queue.push("second").unwrap();
-    let first = queue.slot(0).unwrap();
-    let second = queue.slot(1).unwrap();
-    queue.capture(&Editor::default(), |_, _| ());
-    let accepted = queue.inbox().accept(|_, _| Ok(())).unwrap();
-    assert_eq!(accepted, ["first", "second"]);
-    let mut editor = Editor::default();
-    editor.insert("composer");
-    assert_eq!(
-        queue.begin_edit(first, &mut editor).unwrap_err(),
-        "This message was already sent."
-    );
-    assert_eq!(editor.text, "composer");
-    assert!(!queue.is_editing());
-    assert!(!queue.discard(second));
+    queue.push("accepted").unwrap();
+    queue.capture(|queued, paused| {
+        assert_eq!(queued, ["accepted"]);
+        assert!(paused.is_none());
+    });
+    assert_eq!(queue.inbox().accept(|_, _| Ok(())).unwrap(), ["accepted"]);
+    assert!(queue.take().is_none());
     assert!(queue.is_empty());
 }
 
 #[test]
-fn an_edit_holds_later_messages_and_only_captured_ones_are_deliverable() {
+fn a_paused_draft_is_taken_back_with_its_caret() {
     let mut queue = Queue::default();
-    queue.push("first").unwrap();
-    queue.push("second").unwrap();
-    assert!(!queue.inbox().with(|entries| entries.ready()));
     let mut editor = Editor::default();
-    queue
-        .begin_edit(queue.slot(1).unwrap(), &mut editor)
-        .unwrap();
-    editor.replace("second revised".into());
-    let (queued, _) = queue.snapshot(&editor);
-    assert_eq!(queued, ["first", "second revised"]);
-    let accepted = queue
-        .inbox()
-        .accept(|_, remaining| {
-            assert_eq!(remaining, ["second revised"]);
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(accepted, ["first"]);
-    assert_eq!(queue.edit_index(), Some(0));
+    editor.insert("paused text");
+    editor.cursor = 3;
+    queue.paused = Some(editor);
+    let taken = queue.take().unwrap();
+    assert_eq!((taken.text.as_str(), taken.cursor), ("paused text", 3));
+    assert!(queue.is_empty());
+}
 
-    queue.push("third").unwrap();
-    queue.snapshot(&editor);
+#[test]
+fn parking_joins_text_into_the_one_paused_draft() {
+    let mut queue = Queue::default();
+    let draft = |text: &str| {
+        let mut editor = Editor::default();
+        editor.insert(text);
+        editor.cursor = 1;
+        editor
+    };
+    queue.park(draft("   "));
+    assert!(queue.paused.is_none());
+    queue.park(draft("older"));
+    assert_eq!(queue.paused.as_ref().unwrap().cursor, 1);
+    queue.park(draft("newer"));
+    assert_eq!(queue.paused.as_ref().unwrap().text, "older\n\nnewer");
+    queue.capture(|queued, paused| {
+        assert!(queued.is_empty());
+        assert_eq!(paused.unwrap().text, "older\n\nnewer");
+    });
+}
+
+#[test]
+fn only_captured_messages_are_deliverable() {
+    let mut queue = Queue::default();
+    queue.push("uncaptured").unwrap();
     assert!(queue.inbox().accept(|_, _| Ok(())).unwrap().is_empty());
-    assert!(queue.save_edit(&mut editor));
-    let accepted = queue.inbox().accept(|_, _| Ok(())).unwrap();
-    assert_eq!(accepted, ["second revised", "third"]);
+    queue.capture(|_, _| ());
+    assert_eq!(queue.inbox().accept(|_, _| Ok(())).unwrap(), ["uncaptured"]);
+}
+
+#[test]
+fn reset_replaces_the_pending_draft() {
+    let mut queue = Queue::default();
+    queue.push("queued").unwrap();
+    let mut editor = Editor::default();
+    editor.insert("restored");
+    queue.reset(Some(editor));
+    assert!(queue.messages().is_empty());
+    assert_eq!(queue.pending(), Some(("restored".into(), true)));
 }
 
 #[test]

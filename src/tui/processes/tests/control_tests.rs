@@ -111,7 +111,7 @@ fn stopping_from_a_paused_log_preserves_the_draft_and_the_active_turn() {
     assert!(!app.state.activity.as_ref().unwrap().stopping);
     assert_eq!(app.state.editor.prompt().text, "keep this draft");
     assert_eq!(app.state.history.snapshot(), history);
-    assert_eq!(app.state.queue.len(), 1);
+    assert!(!app.state.queue.is_empty());
 
     create(&directory, "turn");
     wait_until(&mut app, |app| app.worker.is_none());

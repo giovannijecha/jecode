@@ -104,7 +104,6 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
             | Event::BackendFailure { .. }
             | Event::RequestDiscarded
             | Event::Accepted { .. }
-            | Event::InputHeld
             | Event::UserQuestion { .. }
             | Event::PermissionRequest { .. }
             | Event::Context(_)

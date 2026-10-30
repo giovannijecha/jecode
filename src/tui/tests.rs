@@ -354,8 +354,9 @@ fn cancellation_keeps_matching_results_stops_pending_writes_and_allows_another_t
         messages[4].get("tool_call_id").and_then(Value::as_str),
         Some("pending")
     );
-    assert!(app.state.editor.text.is_empty());
-    assert_eq!(app.state.queue.paused[0].text, "/export");
+    // The stopped turn returns the waiting command to the empty composer.
+    assert_eq!(app.state.editor.text, "/export");
+    assert!(app.state.queue.is_empty());
     app.state.editor.take();
     submit(&mut app, "Continue.");
     finish(&mut app);

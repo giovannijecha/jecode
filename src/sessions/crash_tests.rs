@@ -85,9 +85,9 @@ fn forced_process_exit_releases_lock_and_recovers_an_actual_write_with_unknown_o
     );
     assert_eq!(saved.input.draft.text, "unfinished draft");
     assert_eq!(saved.input.draft.cursor, 3);
-    assert_eq!(saved.input.paused.len(), 1);
-    assert_eq!(saved.input.paused[0].text, "queued follow-up");
-    assert_eq!(saved.input.paused[0].cursor, "queued follow-up".len());
+    let paused = saved.input.paused.as_ref().unwrap();
+    assert_eq!(paused.text, "queued follow-up");
+    assert_eq!(paused.cursor, "queued follow-up".len());
     assert!(!saved.pending.active);
     assert!(saved.input.queued.is_empty());
     assert_eq!(fs::read_to_string(&marker).unwrap(), "written exactly once");

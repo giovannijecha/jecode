@@ -148,7 +148,7 @@ fn native_ctrl_o_waits_for_the_whole_turn_preserves_drafts_and_resets_on_accepte
     assert_eq!(flags(&app.state), [true; 3]);
     std::fs::remove_file(directory.path().join("AGENTS.md")).unwrap();
     assert_eq!(app.state.editor.text, "Next request.");
-    assert!(app.state.queue.paused.is_empty());
+    assert!(app.state.queue.paused.is_none());
     app.state.editor.replace("Retry next request.".into());
     key(&mut app, 13, 0);
     assert!(app.worker.is_some());
@@ -225,7 +225,7 @@ fn resume_keeps_one_execution_turn_across_accepted_follow_up_messages() {
     agent
         .run_turn("Start the work.", &mut |event| {
             if matches!(&event, Event::ToolStarted { id, .. } if id == "first") {
-                inbox.update(|entries| {
+                inbox.with(|entries| {
                     entries.push("Follow up within this turn.".into()).unwrap();
                     entries.record();
                 });

@@ -338,7 +338,7 @@ fn accepted_input_updates_context_before_a_summary_starts() {
                     matches!(&event, Event::Message { .. })
                 };
                 if submit && !submitted {
-                    inbox.update(|entries| {
+                    inbox.with(|entries| {
                         entries.push(update.clone().into()).unwrap();
                         entries.record();
                     });

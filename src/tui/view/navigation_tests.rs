@@ -129,37 +129,23 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
 }
 
 #[test]
-fn queue_overflow_uses_its_first_preview_without_displacing_the_next_message() {
+fn the_pending_draft_row_fits_short_heights_and_narrow_widths() {
     let mut state = State {
-        height: 11,
+        height: 6,
         ..State::default()
     };
-    for index in 0..8 {
-        state.queue.push(format!("queued request {index}")).unwrap();
-    }
+    state.queue.push("queued request").unwrap();
     let frame = composer_frame(&state, "model", "directory");
-    assert_eq!(frame.live.len(), 11);
-    assert!(frame.live[0].plain().starts_with("› queued request 0"));
-    assert!(frame.live[0].plain().ends_with("queued 1–6 / 8"));
-    assert!(frame.live[5].plain().starts_with("› queued request 5"));
-    assert!(
-        !frame
-            .live
-            .iter()
-            .any(|row| row.plain().contains("more queued"))
-    );
-    state.height = 6;
-    let short = composer_frame(&state, "model", "directory");
-    assert!(short.live[0].plain().starts_with("› queued request 0"));
-    assert!(short.live[0].plain().ends_with("queued 1–1 / 8"));
+    assert_eq!(frame.live.len(), 6);
+    assert!(frame.live[0].plain().starts_with("› queued request"));
+    assert!(frame.live[0].plain().ends_with("queued"));
     for width in [12, 20] {
         state.width = width;
         let narrow = composer_frame(&state, "model", "directory");
         assert!(narrow.live[0].plain().starts_with("› queued"));
-        assert!(!narrow.live[0].plain().contains('/'));
         assert!(text::cells(&narrow.live[0].plain()) <= width);
     }
-    assert_eq!(state.queue.messages().len(), 8);
+    assert_eq!(state.queue.messages(), ["queued request"]);
 }
 
 #[test]

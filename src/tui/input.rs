@@ -137,6 +137,11 @@ impl App {
             return Ok(false);
         }
         if key.alt() && !key.ctrl() && matches!(key.code, 35 | 36) {
+            // Inside an agent its conversation is the one on screen.
+            if self.agents_inside() {
+                self.agents_key(key);
+                return Ok(false);
+            }
             self.renderer.scroll(if key.code == 36 {
                 super::viewport::Scroll::Start
             } else {
@@ -180,18 +185,6 @@ impl App {
             }
             self.state.information = None;
         }
-        if self.state.queue.is_editing() && (key.code == 27 || key.ctrl() && key.code == 67) {
-            self.finish_draft_edit(false);
-            return Ok(false);
-        }
-        if key.ctrl()
-            && !key.alt()
-            && !key.shift()
-            && key.code == 83
-            && (self.draft_menu_open() || self.state.queue.is_editing())
-        {
-            return self.send_paused_draft();
-        }
         if key.ctrl() && key.code == 67 {
             if self.state.selector.is_some() {
                 self.close_selector();
@@ -224,15 +217,6 @@ impl App {
         if !key.ctrl() && !key.alt() && matches!(key.code, 33 | 34) {
             self.renderer
                 .scroll(super::viewport::Scroll::Page(key.code == 33));
-            return Ok(false);
-        }
-        if key.alt() && key.code == 38 {
-            self.state.feedback_input(true);
-            self.open_drafts();
-            return Ok(false);
-        }
-        if key.alt() && key.code == 40 {
-            // Draft management has one panel; Alt+Down no longer discards text.
             return Ok(false);
         }
         if key.alt() && !key.ctrl() && key.code == 86 {
@@ -273,17 +257,18 @@ impl App {
             }
             112 if self.checkpoint_job.is_none() && self.deletion_job.is_none() => self.help(),
             80 | 78 if key.ctrl() => {
-                if self.state.queue.is_editing() {
-                    self.warn(
-                        "Save this draft with Enter or cancel with Esc before browsing history",
-                    );
-                    return Ok(false);
-                }
                 self.state
                     .history
                     .navigate(&mut self.state.editor, key.code == 80);
                 self.state.feedback_input(true);
                 self.edited();
+            }
+            38 if !key.ctrl()
+                && !key.alt()
+                && self.state.editor.text.is_empty()
+                && !self.state.queue.is_empty() =>
+            {
+                self.take_draft();
             }
             38 | 40 if !key.ctrl() => {
                 self.state
@@ -384,10 +369,17 @@ impl App {
     }
 
     pub(super) fn edited(&mut self) {
-        if self.state.queue.is_editing() {
-            self.state.suggestions.dismiss();
-        } else {
-            self.state.suggestions.refresh(&self.state.editor.text);
+        self.state.suggestions.refresh(&self.state.editor.text);
+    }
+
+    /// Up in an empty composer takes the pending draft back for editing;
+    /// Enter queues it again. Nothing changes once the agent accepted it.
+    fn take_draft(&mut self) {
+        if let Some(draft) = self.state.queue.take() {
+            self.state.editor = draft;
+            self.state.feedback_input(true);
+            self.edited();
+            self.capture_input();
         }
     }
     pub(super) fn warn(&mut self, text: &str) {
@@ -420,10 +412,6 @@ impl App {
         if self.copy_selector_open() {
             self.state.selector = None;
             self.copy_targets.clear();
-            return;
-        }
-        if self.draft_menu_open() {
-            self.state.selector = None;
             return;
         }
         if self.close_provider_panel() || self.close_permissions_menu() {

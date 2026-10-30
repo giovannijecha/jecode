@@ -12,12 +12,12 @@ fn tui_submission_keeps_a_failed_draft_and_loads_rules_when_retried() {
     assert_eq!(app.archive.messages.lock().unwrap().len(), 1);
     assert!(app.state.notice.as_ref().unwrap().text.contains("UTF-8"));
     assert_eq!(app.state.editor.text, "Inspect the project");
-    assert!(app.state.queue.paused.is_empty());
+    assert!(app.state.queue.paused.is_none());
     fs::write(path, "TUI project rules").unwrap();
     assert!(!app.submit().unwrap());
     finish(&mut app);
     assert_eq!(app.state.status, "Ready");
-    assert!(app.state.queue.paused.is_empty());
+    assert!(app.state.queue.paused.is_none());
     let requests = fixture.finish();
     assert_eq!(requests.len(), 1);
     let messages = requests[0]

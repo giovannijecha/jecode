@@ -163,21 +163,6 @@ fn routing(
 }
 
 fn states(columns: usize) -> Vec<(&'static str, State)> {
-    let mut drafts = state(columns);
-    drafts.queue.push("also update the README").unwrap();
-    drafts
-        .queue
-        .push("and bump the version\nin Cargo.toml")
-        .unwrap();
-    drafts.queue.pause();
-    drafts.queue.push("run the full test suite").unwrap();
-    let mut discard = Selector::drafts(&drafts.queue);
-    drafts.selector = Some(Selector::drafts(&drafts.queue));
-    let mut discarding = state(columns);
-    discard.move_selection(false);
-    discard.toggle_delete();
-    discarding.selector = Some(discard);
-
     let mut search = Selector::models(&models(), false, MODEL);
     search.editor.insert("son");
     search.refresh();
@@ -348,8 +333,6 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             selecting(columns, Selector::sessions(&sessions(), "current")),
         ),
         ("Resume · delete", selecting(columns, delete)),
-        ("Drafts", drafts),
-        ("Drafts · discard", discarding),
         (
             "Copy",
             selecting(

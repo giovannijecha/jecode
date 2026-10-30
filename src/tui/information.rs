@@ -29,7 +29,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("Ctrl+J", "New line · Shift/Alt+Enter when supported"),
             ("Ctrl+P/N", "Sent prompt history · commands are excluded"),
-            ("Alt+↑", "Open pending drafts · edit or discard one message"),
+            ("↑", "Edit the pending draft from an empty composer"),
         ],
     ),
     (
@@ -53,11 +53,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             (
                 "Ctrl+D",
-                "/resume, /drafts: mark deletion · /terminal: mark a process to stop · Enter confirms, Esc cancels",
-            ),
-            (
-                "Ctrl+S",
-                "/drafts: send a paused draft · joins the active turn while working",
+                "/resume: mark deletion · /terminal: mark a process to stop · Enter confirms, Esc cancels",
             ),
             (
                 "Tab",

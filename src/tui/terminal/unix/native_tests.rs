@@ -106,13 +106,14 @@ fn controls_and_terminal_lifetime() {
     assert!(!terminal.directory().join("command-started").exists());
     terminal.send(b"\r");
     terminal.wait_file("command-started");
-    terminal.send(b"queued follow-up\rkept draft\x03");
+    terminal.send(b"queued follow-up\r\x1b[A edited\rkept draft\x03");
     terminal.wait("Stopped");
     terminal.send(b"\x03second prompt\r");
-    terminal.wait("Native second answer");
+    let answer = terminal.wait("Native second answer");
+    terminal.wait_after("Done", answer);
     terminal.send(b"\x1b[<64;10;5M");
     terminal.wait("back to bottom");
-    terminal.send(b"\x1b[5~\x1b[6~\x1b[A\x1b[B");
+    terminal.send(b"\x1b[5~\x1b[6~");
     terminal.send("\x1b[200~unsent β🙂\nkept\x1b[201~".as_bytes());
     terminal.send(b"\x11");
     let resume = terminal.wait("PTY_PHASE_RESUME");
@@ -289,8 +290,10 @@ fn native_pty_fixture() {
         prompts
     );
     assert!(saved.input.queued.is_empty());
-    assert_eq!(saved.input.paused.len(), 1);
-    assert_eq!(saved.input.paused[0].text, "queued follow-up");
+    assert_eq!(
+        saved.input.paused.as_ref().unwrap().text,
+        "queued follow-up edited"
+    );
     assert!(
         saved
             .events

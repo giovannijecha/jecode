@@ -40,6 +40,8 @@ pub struct Document {
     pub routing: Routing,
     /// The level the conversation started at; later changes are events.
     pub permissions: Option<crate::permissions::Level>,
+    /// The model's name for the work, generated once after the first request.
+    pub title: Option<String>,
 }
 
 impl Document {
@@ -63,6 +65,7 @@ impl Document {
             context: crate::context::Context::default(),
             routing: Routing::Auto,
             permissions: None,
+            title: None,
         })
     }
 
@@ -86,6 +89,7 @@ impl Document {
             context: self.context.clone(),
             routing: self.routing.clone(),
             permissions: self.permissions,
+            title: self.title.clone(),
         }
     }
 
@@ -105,6 +109,9 @@ impl Document {
     }
 
     pub fn title(&self) -> String {
+        if let Some(title) = &self.title {
+            return title.clone();
+        }
         let draft = self.input.draft.prompt().display();
         let text = self
             .messages
@@ -191,6 +198,10 @@ impl Document {
                 "permissions",
                 self.permissions
                     .map_or(Value::Null, |level| Value::string(level.id())),
+            ),
+            (
+                "title",
+                self.title.as_ref().map_or(Value::Null, Value::string),
             ),
         ])
     }
@@ -287,6 +298,17 @@ impl Document {
                 .get("permissions")
                 .and_then(Value::as_str)
                 .and_then(crate::permissions::Level::parse),
+            title: match value.get("title") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(title))
+                    if !title.is_empty()
+                        && title.chars().count() <= 100
+                        && !title.chars().any(char::is_control) =>
+                {
+                    Some(title.clone())
+                }
+                _ => return Err("Invalid session title".into()),
+            },
         };
         Ok(document)
     }

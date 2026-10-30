@@ -171,24 +171,6 @@ fn search_keeps_session_metadata_and_routing_prices_out_of_rows() {
 }
 
 #[test]
-fn draft_search_keeps_queued_and_paused_statuses() {
-    let mut queue = crate::tui::drafts::Queue::default();
-    for index in 0..8 {
-        queue.push(format!("Draft {index}")).unwrap();
-    }
-    queue.pause();
-    queue.push("Later draft").unwrap();
-    let mut menu = Selector::drafts(&queue);
-    assert!(menu.searchable);
-    menu.editor.insert("Queued");
-    menu.refresh();
-    assert_eq!(menu.filtered.len(), 1);
-    menu.editor.replace("Paused".into());
-    menu.refresh();
-    assert_eq!(menu.filtered.len(), 8);
-}
-
-#[test]
 fn model_rows_drop_a_listing_name_that_only_restates_the_id() {
     assert!(restates(
         "anthropic/claude-opus-5.5",

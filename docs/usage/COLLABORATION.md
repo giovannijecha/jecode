@@ -173,8 +173,9 @@ edits show their hunks as in the main conversation, read from the agent's own
 saved history; if that history is unavailable, the card keeps its `+` and `−`
 line counts. One row
 of keys replaces the composer, status row and footer: `Esc back to agents`,
-`↑↓ scroll` and, while the agent works, `End follow`. The view follows new
-output; scrolling pauses it and End resumes following. Esc returns from the
+`↑↓ scroll` and, while reading back, `Alt+End back to bottom`. The view follows
+new output; scrolling up pauses it and Alt+End returns to the bottom, as in the
+main conversation. Esc returns from the
 agent to the list, then to the main conversation with its draft and caret. The
 list says `Esc close`. While `/agents` is open, Esc does not interrupt the main
 turn, and the readback shortcut is Alt+End. There is no child chat or

@@ -87,7 +87,7 @@ fn failed_submit_keeps_the_turn_ready_and_retry_sends_the_request_once() {
     assert!(current.worker.is_none());
     assert!(!current.persistence.as_ref().unwrap().active());
     assert_eq!(current.state.editor.text, "Retry this request");
-    assert!(current.state.queue.paused.is_empty());
+    assert!(current.state.queue.paused.is_none());
     assert_eq!(current.archive.messages.lock().unwrap().len(), 3);
     current.agent.as_mut().unwrap().clean_temporary().unwrap();
     current.submit().unwrap();
@@ -112,13 +112,12 @@ fn failed_submit_keeps_the_turn_ready_and_retry_sends_the_request_once() {
 }
 
 #[test]
-fn failed_queued_preparation_returns_all_unsent_work_in_order() {
+fn failed_queued_preparation_returns_unsent_work_in_order() {
     let home = Directory::new();
     let directory = Directory::new();
     let mut current = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
     saved_exchange(&current);
     current.state.queue.push("first queued").unwrap();
-    current.state.queue.push("second queued").unwrap();
     current.state.editor.replace("current draft".into());
     current.persist_input(true);
     let path = journal(&home, &current);
@@ -134,14 +133,8 @@ fn failed_queued_preparation_returns_all_unsent_work_in_order() {
     assert_eq!(current.archive.messages.lock().unwrap().len(), 3);
     assert_eq!(current.state.editor.text, "first queued");
     assert_eq!(
-        current
-            .state
-            .queue
-            .paused
-            .iter()
-            .map(|draft| draft.text.as_str())
-            .collect::<Vec<_>>(),
-        ["second queued", "current draft"]
+        current.state.queue.pending(),
+        Some(("current draft".into(), true))
     );
     current.persist_input(true);
     let saved = current.persistence.as_ref().unwrap().snapshot();
@@ -184,15 +177,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .editor
         .replace("original β draft\nsecond line".into());
     first.state.editor.cursor = 5;
-    first.state.queue.push("first queued").unwrap();
-    first.state.queue.push("last queued").unwrap();
-    let slot = first.state.queue.slot(1).unwrap();
-    first
-        .state
-        .queue
-        .begin_edit(slot, &mut first.state.editor)
-        .unwrap();
-    first.state.editor.insert(" revised");
+    first.state.queue.push("queued").unwrap();
     first.persist_input(true);
     assert!(first.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, change: Some(change), .. } if name == "write" && change.created && change.added == 1)));
     let id = first.persistence.as_ref().unwrap().id();
@@ -224,16 +209,8 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
     assert_eq!(resumed.config.settings.model, "fixture/model");
     assert_eq!(resumed.state.editor.text, "original β draft\nsecond line");
     assert_eq!(resumed.state.editor.cursor, 5);
-    assert_eq!(
-        resumed
-            .state
-            .queue
-            .paused
-            .iter()
-            .map(|draft| draft.text.as_str())
-            .collect::<Vec<_>>(),
-        ["first queued", "last queued revised"]
-    );
+    // A queued message returns paused and never sends itself.
+    assert_eq!(resumed.state.queue.pending(), Some(("queued".into(), true)));
     assert!(resumed.state.queue.messages().is_empty());
     assert!(resumed.worker.is_none());
     resumed.poll().unwrap();
@@ -405,11 +382,11 @@ fn browsing_prompt_history_persists_the_unsent_draft_instead_of_the_recalled_pro
     assert_eq!(saved.draft.text, "unsent draft");
     assert_eq!(saved.draft.cursor, 2);
     assert_eq!(saved.history, ["earlier prompt"]);
-    assert!(saved.paused.is_empty());
+    assert!(saved.paused.is_none());
 }
 
 #[test]
-fn an_edited_history_recall_is_recovered_as_one_separate_paused_draft() {
+fn an_edited_history_recall_is_recovered_as_the_paused_draft() {
     let home = Directory::new();
     let directory = Directory::new();
     let mut current = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
@@ -435,11 +412,11 @@ fn an_edited_history_recall_is_recovered_as_one_separate_paused_draft() {
         assert_eq!(input.draft.cursor, main.cursor);
         assert_eq!(
             input.paused,
-            [crate::sessions::Draft {
+            Some(crate::sessions::Draft {
                 text: recall.text.clone(),
                 cursor: recall.cursor,
                 ..Default::default()
-            }]
+            })
         );
     }
     let id = current.persistence.as_ref().unwrap().id();
@@ -447,7 +424,7 @@ fn an_edited_history_recall_is_recovered_as_one_separate_paused_draft() {
     let mut resumed = app(&home, &directory, "http://127.0.0.1:1/chat/completions");
     resumed.resume_session(&id);
     assert_eq!(resumed.state.editor, main);
-    assert_eq!(resumed.state.queue.paused, [recall]);
+    assert_eq!(resumed.state.queue.paused, Some(recall));
     assert!(resumed.state.queue.messages().is_empty());
     resumed.poll().unwrap();
     assert!(resumed.worker.is_none());

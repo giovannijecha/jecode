@@ -2,7 +2,6 @@ use super::Agent;
 use crate::{
     attachments::Prompt,
     events::{Event, EventSink},
-    inbox::Boundary,
     sessions::Stage,
 };
 
@@ -18,28 +17,6 @@ impl Agent {
         events.emit(Event::Accepted { prompts })?;
         self.emit_context(events)?;
         Ok(true)
-    }
-
-    /// Ends a response without tool calls: submitted messages continue the
-    /// turn, and an edit that holds one back keeps the turn open until it ends.
-    pub(super) fn continue_turn(&self, events: &mut impl EventSink) -> Result<bool, String> {
-        loop {
-            match self
-                .inbox
-                .close(|prompts, queued| self.append_input(prompts, queued))?
-            {
-                Boundary::Accepted(prompts) => {
-                    events.emit(Event::Accepted { prompts })?;
-                    self.emit_context(events)?;
-                    return Ok(true);
-                }
-                Boundary::Closed => return Ok(false),
-                Boundary::Held => {
-                    events.emit(Event::InputHeld)?;
-                    self.inbox.wait(&self.cancellation)?;
-                }
-            }
-        }
     }
 
     /// Records accepted messages and the remaining queue in one checkpoint.

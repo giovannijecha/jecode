@@ -147,11 +147,11 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
         .unwrap()
         .text;
     assert!(app.agent.is_none() && app.worker.is_some());
-    let queued = app.state.queue.len();
+    let queued = app.state.queue.is_empty();
 
     // Opening is local and immediate: nothing is queued for the model.
     submit(&mut app, "/terminal");
-    assert_eq!(app.state.queue.len(), queued);
+    assert_eq!(app.state.queue.is_empty(), queued);
     assert!(app.state.editor.prompt().text.is_empty());
     assert_eq!(app.state.history.snapshot(), history);
     assert_eq!(panel(&app).processes.len(), 1);

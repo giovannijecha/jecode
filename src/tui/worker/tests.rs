@@ -242,42 +242,6 @@ fn cancelling_a_worker_during_a_stream_cannot_block_shutdown() {
 }
 
 #[test]
-fn cancelling_wakes_a_turn_waiting_for_a_queued_edit() {
-    use crate::test_support::{HttpFixture, completion};
-    let fixture = HttpFixture::new(vec![(200, completion("Done.", vec![]))]);
-    let directory = Directory::new();
-    let agent = Agent::new(
-        OpenRouter::fixture(fixture.endpoint.clone()),
-        Tools::new(directory.path()).unwrap(),
-    );
-    let inbox = agent.inbox();
-    inbox.update(|entries| {
-        let id = entries.push("being edited".into()).unwrap();
-        entries.record();
-        entries.hold(id).unwrap();
-    });
-    let worker = Worker::start(agent, "start".into());
-    let started = Instant::now();
-    while !matches!(
-        worker.events.recv_timeout(Duration::from_secs(3)).unwrap(),
-        Event::InputHeld
-    ) {
-        assert!(started.elapsed() < Duration::from_secs(3));
-    }
-    assert!(!worker.finished());
-    let started = Instant::now();
-    worker.cancel();
-    while !worker.finished() {
-        assert!(started.elapsed() < Duration::from_secs(3));
-        thread::sleep(Duration::from_millis(5));
-    }
-    let (_, result) = worker.finish().unwrap();
-    assert_eq!(result.unwrap_err(), "Operation cancelled");
-    assert_eq!(inbox.with(|entries| entries.len()), 1);
-    fixture.finish();
-}
-
-#[test]
 fn queued_events_wake_the_loop_once_per_drain_and_when_the_worker_ends() {
     use std::sync::{
         Arc,

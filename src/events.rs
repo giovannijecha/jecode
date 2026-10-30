@@ -48,8 +48,6 @@ pub enum Event {
     Accepted {
         prompts: Vec<crate::attachments::Prompt>,
     },
-    /// The turn waits for an edit that holds back a submitted message.
-    InputHeld,
     /// The projected next request changed: input, usage, tools, reduction or capacity.
     Context(crate::context::Status),
     /// A response reported how many tokens it generated, reasoning included.

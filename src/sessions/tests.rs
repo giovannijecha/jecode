@@ -198,11 +198,11 @@ fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
             ..Default::default()
         },
         queued: vec!["first queued".into(), "second queued".into()],
-        paused: vec![Draft {
+        paused: Some(Draft {
             text: "already paused".into(),
             cursor: 7,
             ..Default::default()
-        }],
+        }),
         previous: Some(Draft {
             text: "earlier draft".into(),
             cursor: 2,
@@ -214,30 +214,14 @@ fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
     input.recover();
     assert_eq!(input.draft.text, "earlier draft");
     assert_eq!(input.draft.cursor, 2);
+    let joined = "first queued\n\nsecond queued\n\nalready paused\n\nedited latest";
     assert_eq!(
         input.paused,
-        [
-            Draft {
-                text: "first queued".into(),
-                cursor: "first queued".len(),
-                ..Default::default()
-            },
-            Draft {
-                text: "second queued".into(),
-                cursor: "second queued".len(),
-                ..Default::default()
-            },
-            Draft {
-                text: "already paused".into(),
-                cursor: 7,
-                ..Default::default()
-            },
-            Draft {
-                text: "edited latest".into(),
-                cursor: 3,
-                ..Default::default()
-            },
-        ]
+        Some(Draft {
+            text: joined.into(),
+            cursor: joined.len(),
+            ..Default::default()
+        })
     );
     assert_eq!(input.history, ["last prompt", "  prompt"]);
     assert!(input.queued.is_empty());
@@ -267,35 +251,28 @@ fn queue_and_withdrawn_edit_recover_in_order_without_losing_the_prior_draft() {
 }
 
 #[test]
-fn saved_paused_drafts_round_trip_and_legacy_snapshots_migrate() {
+fn a_saved_paused_draft_round_trips_and_recovery_joins_pending_input() {
     let directory = Directory::new();
     let mut doc = document(&directory);
-    doc.input.paused = vec![
-        Draft {
-            text: "same 🙂".into(),
-            cursor: "same ".len(),
-            ..Default::default()
-        },
-        Draft {
-            text: "same 🙂".into(),
-            cursor: "same 🙂".len(),
-            ..Default::default()
-        },
-    ];
+    doc.input.paused = Some(Draft {
+        text: "same 🙂".into(),
+        cursor: "same ".len(),
+        ..Default::default()
+    });
     assert_eq!(
         Document::parse(&doc.value()).unwrap().input.paused,
         doc.input.paused
     );
 
-    let Value::Object(mut legacy) = doc.value() else {
+    let Value::Object(mut saved) = doc.value() else {
         unreachable!()
     };
-    let Value::Object(input) = legacy.get_mut("input").unwrap() else {
+    let Value::Object(input) = saved.get_mut("input").unwrap() else {
         unreachable!()
     };
     input.remove("paused");
-    let mut parsed = Document::parse(&Value::Object(legacy)).unwrap();
-    assert!(parsed.input.paused.is_empty());
+    let mut parsed = Document::parse(&Value::Object(saved)).unwrap();
+    assert!(parsed.input.paused.is_none());
     parsed.input.queued = vec!["same 🙂".into(), "same 🙂".into()];
     parsed.input.draft = Draft {
         text: "withdrawn".into(),
@@ -310,20 +287,13 @@ fn saved_paused_drafts_round_trip_and_legacy_snapshots_migrate() {
     parsed.recover();
     assert_eq!(parsed.input.draft.text, "original");
     assert_eq!(parsed.input.draft.cursor, 1);
-    assert_eq!(
-        parsed
-            .input
-            .paused
-            .iter()
-            .map(|draft| draft.text.as_str())
-            .collect::<Vec<_>>(),
-        ["same 🙂", "same 🙂", "withdrawn"]
-    );
-    assert_eq!(parsed.input.paused[2].cursor, 4);
+    let paused = parsed.input.paused.unwrap();
+    assert_eq!(paused.text, "same 🙂\n\nsame 🙂\n\nwithdrawn");
+    assert_eq!(paused.cursor, paused.text.len());
 }
 
 #[test]
-fn five_identical_pending_inputs_stay_separate_after_repeated_recovery() {
+fn identical_pending_inputs_join_once_and_recovery_is_stable() {
     let mut input = Input {
         draft: Draft {
             text: "repeat".into(),
@@ -331,17 +301,19 @@ fn five_identical_pending_inputs_stay_separate_after_repeated_recovery() {
             ..Default::default()
         },
         queued: vec!["repeat".into(), "repeat".into(), "repeat".into()],
-        paused: vec![Draft {
+        paused: Some(Draft {
             text: "repeat".into(),
             cursor: 1,
             ..Default::default()
-        }],
+        }),
         ..Input::default()
     };
     input.recover();
-    assert_eq!(input.paused.len(), 4);
     assert_eq!(input.draft.text, "repeat");
-    assert!(input.paused.iter().all(|draft| draft.text == "repeat"));
+    assert_eq!(
+        input.paused.as_ref().unwrap().text,
+        ["repeat"; 4].join("\n\n")
+    );
     let once = input.clone();
     input.recover();
     assert_eq!(input, once);
@@ -388,7 +360,7 @@ fn invalid_context_cursor_scope_and_future_format_are_rejected() {
     };
     assert!(Document::parse(&invalid.value()).is_err());
     invalid = doc.clone();
-    invalid.input.paused.push(Draft {
+    invalid.input.paused = Some(Draft {
         text: "è".into(),
         cursor: 1,
         ..Default::default()
@@ -446,11 +418,11 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
         "è [redacted]"
     );
     handle.input(Input {
-        paused: vec![Draft {
+        paused: Some(Draft {
             text: format!("before {key} after"),
             cursor: format!("before {key}").len(),
             ..Default::default()
-        }],
+        }),
         ..Input::default()
     });
     handle.flush().unwrap();
@@ -458,7 +430,7 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
     assert!(!saved.contains(key));
     let doc = store.fixture_load(&id).unwrap();
     assert_eq!(
-        &doc.input.paused[0].text[..doc.input.paused[0].cursor],
+        &doc.input.paused.as_ref().unwrap().text[..doc.input.paused.as_ref().unwrap().cursor],
         "before [redacted]"
     );
 }

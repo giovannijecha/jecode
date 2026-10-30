@@ -15,7 +15,6 @@ mod conversations;
 mod copy;
 mod delete;
 mod display;
-mod draft_menu;
 mod drafts;
 mod editor;
 mod feedback;

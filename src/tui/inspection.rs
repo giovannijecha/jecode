@@ -7,7 +7,6 @@ impl App {
         }
         if self.idle()
             && !super::view::panel_open(&self.state)
-            && !self.state.queue.is_editing()
             && let Some((expanded, count)) = self.state.toggle_tools()
         {
             self.state.notify(Feedback::result(

@@ -1,5 +1,5 @@
-//! The composer state a session keeps: draft, queued prompts, staged
-//! attachments and an unanswered question's answers.
+//! The composer state a session keeps: draft, queued prompts, the paused
+//! draft, staged attachments and an unanswered question's answers.
 
 use super::{integer, prompt_list, prompts, required, string};
 use crate::attachments::{Attachment, Prompt};
@@ -68,7 +68,7 @@ pub struct Input {
     /// Attachments staged by the line-based chat for its next message.
     pub staged: Vec<Attachment>,
     pub queued: Vec<Prompt>,
-    pub paused: Vec<Draft>,
+    pub paused: Option<Draft>,
     pub previous: Option<Draft>,
     pub history: Vec<Prompt>,
 }
@@ -76,7 +76,7 @@ pub struct Input {
 impl Input {
     pub(crate) fn attachment_ids(&self) -> BTreeSet<String> {
         std::iter::once(&self.draft)
-            .chain(&self.paused)
+            .chain(self.paused.iter())
             .chain(self.previous.iter())
             .flat_map(|draft| &draft.attachments)
             .chain(
@@ -90,17 +90,23 @@ impl Input {
             .collect()
     }
 
+    /// Joins every unsent message into the one paused draft, which resuming
+    /// never sends automatically.
     pub fn recover(&mut self) {
-        if !self.queued.is_empty() {
-            let mut queued: Vec<_> = self.queued.drain(..).map(Draft::from_prompt).collect();
-            queued.append(&mut self.paused);
-            self.paused = queued;
-        }
-        if let Some(previous) = self.previous.take() {
-            let edited = std::mem::replace(&mut self.draft, previous);
-            if !edited.text.is_empty() {
-                self.paused.push(edited);
-            }
+        let parked = std::mem::take(&mut self.queued);
+        let edited = self
+            .previous
+            .take()
+            .map(|previous| std::mem::replace(&mut self.draft, previous).prompt());
+        // A paused draft alone keeps its caret.
+        if !parked.is_empty() || edited.is_some() {
+            self.paused = parked
+                .into_iter()
+                .chain(self.paused.take().map(|draft| draft.prompt()))
+                .chain(edited)
+                .reduce(Prompt::join)
+                .filter(|prompt| !prompt.is_empty())
+                .map(Draft::from_prompt);
         }
         self.history.retain(|prompt| {
             !prompt.attachments.is_empty() || !prompt.text.trim_start().starts_with('/')
@@ -112,7 +118,7 @@ impl Input {
         !self.draft.text.is_empty()
             || !self.staged.is_empty()
             || !self.queued.is_empty()
-            || !self.paused.is_empty()
+            || self.paused.is_some()
             || self.previous.is_some()
     }
 
@@ -140,7 +146,7 @@ impl Input {
                 .map(|question| question.redacted(redactor)),
             staged: self.staged.clone(),
             queued: self.queued.iter().map(prompt).collect(),
-            paused: self.paused.iter().map(draft).collect(),
+            paused: self.paused.as_ref().map(draft),
             previous: self.previous.as_ref().map(draft),
             history: self.history.iter().map(prompt).collect(),
         }
@@ -162,7 +168,7 @@ impl Input {
             ("queued", prompts(&self.queued)),
             (
                 "paused",
-                Value::Array(self.paused.iter().map(Draft::value).collect()),
+                self.paused.as_ref().map_or(Value::Null, Draft::value),
             ),
             (
                 "previous",
@@ -175,11 +181,8 @@ impl Input {
     pub(super) fn parse(value: &Value) -> Result<Self, String> {
         let queued = prompt_list(value, "queued", 8)?;
         let paused = match value.get("paused") {
-            None => Vec::new(),
-            Some(Value::Array(values)) => {
-                values.iter().map(Draft::parse).collect::<Result<_, _>>()?
-            }
-            Some(_) => return Err("Invalid saved paused drafts".into()),
+            None | Some(Value::Null) => None,
+            Some(value) => Some(Draft::parse(value)?),
         };
         let history = prompt_list(value, "history", 50)?;
         Ok(Self {

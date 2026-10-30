@@ -113,7 +113,7 @@ impl App {
                 }
                 result => {
                     let error = result.err().unwrap_or_else(|| "Turn interrupted".into());
-                    self.state.queue.pause();
+                    self.pause_draft();
                     self.state.clear_progress();
                     let returned = self.return_unanswered(&mut agent);
                     let backend_failure = self.state.backend_failure.take();
@@ -128,7 +128,7 @@ impl App {
                             .map_or(error.as_str(), |(_, diagnostic)| diagnostic.as_str());
                         self.state.diagnostic(&agent.redact(diagnostic));
                     }
-                    let paused = self.state.queue.len();
+                    let paused = self.state.queue.paused.is_some();
                     let facts = [
                         activity
                             .as_ref()
@@ -141,12 +141,7 @@ impl App {
                             None
                         },
                         self.save_error.clone().filter(|_| returned),
-                        (paused > 0).then(|| {
-                            format!(
-                                "{paused} {} paused",
-                                if paused == 1 { "draft" } else { "drafts" }
-                            )
-                        }),
+                        paused.then(|| "draft paused".into()),
                     ];
                     self.state.status = "Turn interrupted".into();
                     let mut notice = Feedback::ending(
@@ -159,11 +154,8 @@ impl App {
                     );
                     if key {
                         notice = notice.action("/settings", "update key");
-                    } else if paused > 0 {
-                        notice = notice.action("Alt+↑", "review");
                     }
                     self.state.notify(notice);
-                    self.refresh_draft_menu();
                     self.edited();
                 }
             }
@@ -175,11 +167,7 @@ impl App {
             dirty = true;
         }
         dirty |= self.poll_copy();
-        while self.idle()
-            && self.state.selector.is_none()
-            && self.state.information.is_none()
-            && !self.state.queue.is_editing()
-        {
+        while self.idle() && self.state.selector.is_none() && self.state.information.is_none() {
             let Some(prompt) = self.state.queue.pop_front() else {
                 break;
             };
@@ -295,7 +283,6 @@ impl App {
             self.state
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
         }
-        self.refresh_draft_menu();
         self.capture_input();
     }
 }
