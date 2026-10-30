@@ -480,3 +480,26 @@ fn narrow_key_rows_keep_enter_and_escape_before_movement() {
     assert!(one.contains("Enter") && one.contains("Esc"), "{one}");
     assert!(!one.contains("move"), "{one}");
 }
+
+#[test]
+fn narrow_key_rows_keep_their_primary_key_and_never_vanish() {
+    let resume = [panel::key("/resume", "all conversations")];
+    let opening = [
+        panel::key("/", "commands"),
+        panel::key("Alt+V", "image"),
+        panel::key("Ctrl+O", "expand"),
+        panel::key("Ctrl+Q", "quit"),
+    ];
+    for width in [8, 12, 20, 30] {
+        let one = panel::row(&resume, width).plain();
+        assert!(one.contains("/res"), "{width}: {one:?}");
+        let first = panel::row(&opening, width).plain();
+        assert!(first.starts_with(" / "), "{width}: {first:?}");
+        assert!(!first.contains("Ctrl+Q"), "{width}: {first:?}");
+    }
+    let wide = panel::row(&opening, 40).plain();
+    assert!(
+        wide.contains("commands") && wide.contains("image"),
+        "{wide}"
+    );
+}

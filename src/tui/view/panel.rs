@@ -282,21 +282,27 @@ pub(super) fn keys(keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
 
 /// Keep the primary action and Escape visible. Movement hints leave first,
 /// even when a caller did not mark them optional. Multi-row callers may keep
-/// other required controls below.
+/// other required controls below. The primary action, the first key that is
+/// not a movement hint, and the last key never leave: a row too narrow for
+/// them is cut by `shortened` instead.
 fn trim_keys(shown: &mut Vec<Key<'_>>, width: usize, single_row: bool) {
-    while cells(&caps(shown, MUTED)) > width {
+    let moves = |key: &Key<'_>| matches!(key.label, "move" | "scroll" | "questions");
+    while shown.len() > 1 && cells(&caps(shown, MUTED)) > width {
         let has_escape = shown.iter().any(|key| key.key == "Esc");
-        let protected = |key: &Key<'_>| {
-            key.key == "Enter" || key.key == "Esc" || !has_escape && key.key == "Ctrl+D"
+        let primary = shown.iter().position(|key| !moves(key));
+        let protected = |index: usize| {
+            let key = &shown[index];
+            Some(index) == primary
+                || key.key == "Enter"
+                || key.key == "Esc"
+                || !has_escape && key.key == "Ctrl+D"
         };
-        let movement = shown.iter().position(|key| {
-            !protected(key) && matches!(key.label, "move" | "scroll" | "questions")
-        });
-        let optional = shown
-            .iter()
-            .rposition(|key| key.optional && !protected(key));
+        let movement = (0..shown.len()).find(|&index| !protected(index) && moves(&shown[index]));
+        let optional = (0..shown.len())
+            .rev()
+            .find(|&index| shown[index].optional && !protected(index));
         let expendable = single_row
-            .then(|| shown.iter().rposition(|key| !protected(key)))
+            .then(|| (0..shown.len()).rev().find(|&index| !protected(index)))
             .flatten();
         let Some(index) = movement.or(optional).or(expendable) else {
             break;
