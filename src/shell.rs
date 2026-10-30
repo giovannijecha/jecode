@@ -108,6 +108,8 @@ struct Shell {
     last_background: Option<u32>,
     /// Status of the last command substitution in the current command.
     substitution: Cell<Option<i32>>,
+    /// A closed output pipe ends this execution scope even when `set -e` is off.
+    broken_output: bool,
 }
 
 impl Shell {
@@ -129,6 +131,7 @@ impl Shell {
             jobs: Vec::new(),
             last_background: None,
             substitution: Cell::new(None),
+            broken_output: false,
         }
     }
 
@@ -161,20 +164,20 @@ impl Shell {
         self.exit.unwrap_or(status)
     }
 
-    fn expand(&self, word: &Word) -> Result<String, String> {
-        Ok(self.fields(word)?.join(" "))
+    fn expand(&self, word: &Word, io: &Io) -> Result<String, String> {
+        Ok(self.fields(word, io)?.join(" "))
     }
 
     /// Expands words into arguments; `"$@"` yields one per positional argument.
-    fn words(&self, words: &[Word]) -> Result<Vec<String>, String> {
+    fn words(&self, words: &[Word], io: &Io) -> Result<Vec<String>, String> {
         let mut result = Vec::with_capacity(words.len());
         for word in words {
-            result.extend(self.fields(word)?);
+            result.extend(self.fields(word, io)?);
         }
         Ok(result)
     }
 
-    fn fields(&self, word: &Word) -> Result<Vec<String>, String> {
+    fn fields(&self, word: &Word, io: &Io) -> Result<Vec<String>, String> {
         let mut fields = Vec::new();
         let mut current = String::new();
         for part in &word.0 {
@@ -188,7 +191,7 @@ impl Shell {
                     }
                 }
             } else {
-                self.expand_part(part, &mut current)?;
+                self.expand_part(part, &mut current, io)?;
             }
         }
         if word.0 != [Part::AllArguments] || !self.positional.is_empty() {
@@ -197,7 +200,7 @@ impl Shell {
         Ok(fields)
     }
 
-    fn expand_part(&self, part: &Part, result: &mut String) -> Result<(), String> {
+    fn expand_part(&self, part: &Part, result: &mut String, io: &Io) -> Result<(), String> {
         match part {
             Part::Literal(text) => result.push_str(text),
             Part::Status => result.push_str(&self.status.to_string()),
@@ -212,7 +215,7 @@ impl Shell {
                     result.push_str(&pid.to_string());
                 }
             }
-            Part::Command(script) => result.push_str(&self.substitute(script)?),
+            Part::Command(script) => result.push_str(&self.substitute(script, io)?),
             Part::Variable(name) => {
                 let value = if let Some((name, fallback)) = name.split_once(":-") {
                     self.variables
@@ -232,12 +235,15 @@ impl Shell {
 
     /// Runs `$(script)` in a child shell. Its output is substituted whatever
     /// its status, which becomes `$?` for an assignment-only command.
-    fn substitute(&self, script: &str) -> Result<String, String> {
+    fn substitute(&self, script: &str, io: &Io) -> Result<String, String> {
         let mut command = crate::shell::command(script)?;
+        let stdin = io.stdin.stdio().map_err(|error| error.to_string())?;
+        let stderr = io.stderr.stdio(2).map_err(|error| error.to_string())?;
         command
             .current_dir(&self.cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped());
+            .stdin(stdin)
+            .stdout(Stdio::piped())
+            .stderr(stderr);
         for (name, value) in self.variables.iter() {
             command.env(name, value);
         }

@@ -2,7 +2,7 @@ use super::*;
 use std::io::Read;
 
 /// `tr -d`, streaming standard input to standard output.
-pub(super) fn tr(args: &[String], io: &Io) -> Outcome {
+pub(super) fn tr(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     if args.len() != 3 || args[1] != "-d" {
         return Err("tr: only -d CHARACTERS is supported".into());
     }
@@ -28,10 +28,19 @@ pub(super) fn tr(args: &[String], io: &Io) -> Outcome {
             .collect();
         match writer.write_all(&filtered) {
             Ok(()) => {}
-            Err(error) if closed(&error) => return Ok((1, Vec::new(), Vec::new())),
+            Err(error) if closed(&error) => {
+                shell.broken_output = true;
+                return Ok((1, Vec::new(), Vec::new()));
+            }
             Err(error) => return Err(format!("tr: {error}")),
         }
     }
-    writer.flush().map_err(|error| format!("tr: {error}"))?;
+    if let Err(error) = writer.flush() {
+        if closed(&error) {
+            shell.broken_output = true;
+            return Ok((1, Vec::new(), Vec::new()));
+        }
+        return Err(format!("tr: {error}"));
+    }
     ok(Vec::new())
 }

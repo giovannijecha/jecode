@@ -5,7 +5,7 @@ type Assignments = Vec<(String, String)>;
 impl Shell {
     pub(super) fn simple(&mut self, simple: &Simple, io: &Io) -> i32 {
         self.substitution.set(None);
-        let (args, local_env) = match self.prepare(simple) {
+        let (args, local_env) = match self.prepare(simple, io) {
             Ok(prepared) => prepared,
             Err(error) => {
                 io.report(&error);
@@ -63,7 +63,10 @@ impl Shell {
                 }
                 match sink.write_all(&data) {
                     Ok(()) => {}
-                    Err(error) if streams::closed(&error) => return 1,
+                    Err(error) if streams::closed(&error) => {
+                        self.broken_output = true;
+                        return 1;
+                    }
                     Err(error) => {
                         io.report(&error.to_string());
                         return 1;
@@ -81,8 +84,12 @@ impl Shell {
 
     /// Expands a simple command's words and separates leading `NAME=value`
     /// assignments, which apply to the command's environment only.
-    pub(super) fn prepare(&self, simple: &Simple) -> Result<(Vec<String>, Assignments), String> {
-        let mut args = self.words(&simple.words)?;
+    pub(super) fn prepare(
+        &self,
+        simple: &Simple,
+        io: &Io,
+    ) -> Result<(Vec<String>, Assignments), String> {
+        let mut args = self.words(&simple.words, io)?;
         let count = args.iter().take_while(|arg| assignment(arg)).count();
         let local_env = args
             .drain(..count)
@@ -102,7 +109,7 @@ impl Shell {
                 io.stdout = io.stderr.try_clone().map_err(|error| error.to_string())?;
                 continue;
             }
-            let target = self.expand(&redirect.target)?;
+            let target = self.expand(&redirect.target, &io)?;
             if redirect.mode == "<" {
                 io.stdin = if target == "/dev/null" {
                     Source::Null
@@ -137,18 +144,47 @@ impl Shell {
     }
 
     fn external(
-        &self,
+        &mut self,
         args: &[String],
         local_env: &[(String, String)],
         io: &Io,
     ) -> Result<i32, String> {
         let mut command = self.program(args);
         self.attach(&mut command, io, local_env)?;
+        // Only an external stage writing to a pipeline needs a relay. It lets
+        // this shell observe an actual closed downstream pipe while preserving
+        // the child's direct stdin and stderr attachments.
+        let relay_sink = if matches!(&io.stdout, Sink::Pipe(_)) {
+            command.stdout(Stdio::piped());
+            Some(io.stdout.try_clone().map_err(|error| error.to_string())?)
+        } else {
+            None
+        };
         let mut child = command
             .spawn()
             .map_err(|error| format!("{}: {error}", args[0]))?;
         drop(command);
-        let status = child.wait().map_err(|error| error.to_string())?;
+        let relay = relay_sink.map(|sink| {
+            let mut stdout = child.stdout.take().expect("piped external stdout");
+            std::thread::spawn(move || {
+                let mut writer = &sink;
+                io::copy(&mut stdout, &mut writer)
+            })
+        });
+        let status = child.wait();
+        // EOF can arrive after the direct child exits if a descendant inherited
+        // its stdout. The relay stays until that real writer closes.
+        if let Some(result) = relay {
+            match result.join().map_err(|_| "stdout relay panicked")? {
+                Ok(_) => {}
+                Err(error) if streams::closed(&error) => {
+                    self.broken_output = true;
+                    return Ok(1);
+                }
+                Err(error) => return Err(format!("stdout relay: {error}")),
+            }
+        }
+        let status = status.map_err(|error| error.to_string())?;
         Ok(status.code().unwrap_or(1))
     }
 

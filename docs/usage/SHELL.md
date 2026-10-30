@@ -16,13 +16,16 @@ state such as `cd` and assignments lasts only for that call.
 - Command substitution `$(command)` with UTF-8 output and trailing newlines
   removed. It runs in a separate Jecode shell; output is limited to 1 MiB. Its
   output is used whatever its exit status, and an assignment-only command such
-  as `x=$(command)` sets `$?` to that status.
+  as `x=$(command)` sets `$?` to that status. It reads the active input stream
+  and writes diagnostics to the active error stream.
 - Sequential commands separated by semicolons or newlines, `&&`, `||`,
   pipelines (`|`), and background commands (`&`). A newline or comment after
   `&&`, `||` or `|` continues the command on the next line. Pipeline stages run
   concurrently, each in its own subshell. A background command, pipeline or
   subshell runs in a child shell that expands it there; `wait` waits for
-  background jobs started in that call.
+  background jobs started in that call. A producer writing to a closed
+  downstream pipe stops, including inside compound commands; commands after
+  the pipeline still run.
 - `NAME=value command` sets `NAME` for that command only, including built-ins,
   pipeline stages and background jobs.
 - Input (`<`) and output (`>`, `>>`, `2>`, `2>>`, `>&2`) redirection. A

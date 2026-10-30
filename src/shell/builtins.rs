@@ -162,7 +162,7 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
             ok(output)
         }
         "mktemp" => mktemp(shell, args),
-        "tr" => tr(args, io),
+        "tr" => tr(shell, args, io),
         "ls" => {
             let paths: Vec<&str> = args[1..]
                 .iter()
@@ -273,7 +273,7 @@ fn ok(output: Vec<u8>) -> Outcome {
 }
 
 /// Streams files or standard input to standard output.
-fn cat(shell: &Shell, args: &[String], io: &Io) -> Outcome {
+fn cat(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     let stdin = ["-".to_owned()];
     let operands = if args.len() == 1 {
         &stdin[..]
@@ -291,17 +291,26 @@ fn cat(shell: &Shell, args: &[String], io: &Io) -> Outcome {
         };
         match copied {
             Ok(_) => {}
-            Err(error) if closed(&error) => return Ok((1, Vec::new(), Vec::new())),
+            Err(error) if closed(&error) => {
+                shell.broken_output = true;
+                return Ok((1, Vec::new(), Vec::new()));
+            }
             Err(error) => return Err(format!("cat: {error}")),
         }
     }
-    stdout.flush().map_err(|e| format!("cat: {e}"))?;
+    if let Err(error) = stdout.flush() {
+        if closed(&error) {
+            shell.broken_output = true;
+            return Ok((1, Vec::new(), Vec::new()));
+        }
+        return Err(format!("cat: {error}"));
+    }
     ok(Vec::new())
 }
 
 /// Runs a script file in a fresh shell with its own positional arguments;
 /// its state and `exit` do not reach the caller.
-fn script(shell: &Shell, args: &[String], io: &Io) -> Outcome {
+fn script(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     let Some(path) = args.get(1) else {
         return Err(format!("{}: expected script path", args[0]));
     };
@@ -310,7 +319,9 @@ fn script(shell: &Shell, args: &[String], io: &Io) -> Outcome {
     let mut child = Shell::with(shell.cwd.clone(), Variables::clone(&shell.variables));
     child.positional = args[2..].to_vec();
     child.arg_zero = path.clone();
-    Ok((child.run_script(&text, io), Vec::new(), Vec::new()))
+    let status = child.run_script(&text, io);
+    shell.broken_output |= child.broken_output;
+    Ok((status, Vec::new(), Vec::new()))
 }
 
 fn test(shell: &Shell, args: &[String]) -> Outcome {

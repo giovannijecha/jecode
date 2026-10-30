@@ -4,7 +4,7 @@ use parser::{AndOr, Item};
 impl Shell {
     pub(super) fn run_list(&mut self, list: &List, io: &Io) -> i32 {
         for item in list {
-            if self.exit.is_some() {
+            if self.exit.is_some() || self.broken_output {
                 break;
             }
             if let Some(source) = &item.background {
@@ -20,7 +20,7 @@ impl Shell {
         self.status = self.pipeline(&and_or.first, io);
         let mut ran_last = and_or.rest.is_empty();
         for (index, (op, pipeline)) in and_or.rest.iter().enumerate() {
-            if self.exit.is_some() {
+            if self.exit.is_some() || self.broken_output {
                 return;
             }
             ran_last = (*op == "&&") == (self.status == 0);
@@ -44,14 +44,20 @@ impl Shell {
         if let [only] = stages {
             return self.node(only, io);
         }
-        self.streaming_pipeline(stages, io).unwrap_or_else(|error| {
-            io.report(&error);
-            1
-        })
+        match self.streaming_pipeline(stages, io) {
+            Ok((status, broken_output)) => {
+                self.broken_output |= broken_output;
+                status
+            }
+            Err(error) => {
+                io.report(&error);
+                1
+            }
+        }
     }
 
     /// Runs every stage concurrently in its own subshell, connected by pipes.
-    fn streaming_pipeline(&self, stages: &[Node], io: &Io) -> Result<i32, String> {
+    fn streaming_pipeline(&self, stages: &[Node], io: &Io) -> Result<(i32, bool), String> {
         std::thread::scope(|scope| {
             let mut handles = Vec::new();
             let mut upstream = None;
@@ -75,12 +81,12 @@ impl Shell {
                 let mut shell = self.fork();
                 handles.push(scope.spawn(move || {
                     let status = shell.node(stage, &stage_io);
-                    shell.exit.unwrap_or(status)
+                    (shell.exit.unwrap_or(status), shell.broken_output)
                 }));
             }
-            let mut last = 0;
+            let mut last = (0, false);
             for handle in handles {
-                last = handle.join().unwrap_or(1);
+                last = handle.join().unwrap_or((1, false));
             }
             Ok(last)
         })
@@ -123,11 +129,14 @@ impl Shell {
                 let mut last = 0;
                 loop {
                     let status = self.condition(condition, io);
+                    if self.broken_output {
+                        return status;
+                    }
                     if self.exit.is_some() || (status == 0) == *until {
                         break;
                     }
                     last = self.body(body, io);
-                    if self.exit.is_some() {
+                    if self.exit.is_some() || self.broken_output {
                         break;
                     }
                 }
@@ -139,7 +148,7 @@ impl Shell {
             } => {
                 for (condition, body) in branches {
                     let status = self.condition(condition, io);
-                    if self.exit.is_some() {
+                    if self.exit.is_some() || self.broken_output {
                         return status;
                     }
                     if status == 0 {
@@ -151,6 +160,7 @@ impl Shell {
             Compound::Subshell(list) => {
                 let mut shell = self.fork();
                 let status = shell.run_list(list, io);
+                self.broken_output |= shell.broken_output;
                 shell.exit.unwrap_or(status)
             }
         }
@@ -172,8 +182,8 @@ impl Shell {
 
     fn for_loop(&mut self, name: &Word, values: &[Word], body: &List, io: &Io) -> i32 {
         let expanded = self
-            .expand(name)
-            .and_then(|name| Ok((name, self.words(values)?)));
+            .expand(name, io)
+            .and_then(|name| Ok((name, self.words(values, io)?)));
         let (name, values) = match expanded {
             Ok(expanded) => expanded,
             Err(error) => {
@@ -189,7 +199,7 @@ impl Shell {
         for value in values {
             self.variables.set(&name, value);
             status = self.body(body, io);
-            if self.exit.is_some() {
+            if self.exit.is_some() || self.broken_output {
                 break;
             }
         }
@@ -197,7 +207,7 @@ impl Shell {
     }
 
     fn counted_for(&mut self, header: [&Word; 4], body: &List, io: &Io) -> i32 {
-        let [init, name, limit, increment] = header.map(|word| self.expand(word));
+        let [init, name, limit, increment] = header.map(|word| self.expand(word, io));
         let parsed = (|| {
             let init = init.ok()?;
             let (variable, start) = init.split_once('=')?;
@@ -220,7 +230,7 @@ impl Shell {
         for value in start..limit {
             self.variables.set(&name, value.to_string());
             status = self.body(body, io);
-            if self.exit.is_some() {
+            if self.exit.is_some() || self.broken_output {
                 break;
             }
         }
@@ -268,7 +278,7 @@ impl Shell {
 
     /// A lone simple command starts directly, so `$!` names the program.
     fn background_simple(&self, simple: &Simple, io: &Io) -> Result<Option<Command>, String> {
-        let (args, local_env) = self.prepare(simple)?;
+        let (args, local_env) = self.prepare(simple, io)?;
         if args.is_empty() {
             return Ok(None);
         }
