@@ -9,22 +9,14 @@ use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-/// A recorded modification time must be this much older than preparation, so
-/// a write in the same coarse timestamp tick cannot look unchanged.
-const SETTLED: Duration = Duration::from_secs(2);
 
 pub(super) struct Prepared {
     pub(super) baseline: BTreeMap<String, Fingerprint>,
-    /// Copied files whose size, mode and this modification time (nanoseconds
-    /// since the Unix epoch) identify unchanged content without hashing.
-    pub(super) stamps: BTreeMap<String, u64>,
     pub(super) omitted: Omitted,
 }
 
 enum Outcome {
-    Copied(Fingerprint, Option<u64>),
+    Copied(Fingerprint),
     Vanished,
     Omitted(String),
 }
@@ -35,10 +27,8 @@ thread_local! {
 }
 
 pub(super) fn prepare(project: &Path, tree: &Path, base: &Path) -> Result<Prepared, String> {
-    let settled = SystemTime::now().checked_sub(SETTLED).unwrap_or(UNIX_EPOCH);
     let mut buffer = vec![0u8; 256 * 1024];
     let mut baseline = BTreeMap::new();
-    let mut stamps = BTreeMap::new();
     let mut directories = Vec::new();
     let mut skipped = Vec::new();
     let mut omitted = tree::walk(project, |item| {
@@ -53,24 +43,20 @@ pub(super) fn prepare(project: &Path, tree: &Path, base: &Path) -> Result<Prepar
                     mode: files::mode(&item.metadata),
                 };
                 directories.push((copy, state.clone()));
-                Outcome::Copied(state, None)
+                Outcome::Copied(state)
             }
             Kind::File => copy_file(
                 &item.path,
                 &copy,
                 &files::path(base, &item.name)?,
                 &item.metadata,
-                settled,
                 &mut buffer,
             )
             .map_err(|error| format!("Could not copy {}: {error}", item.name))?,
             Kind::Link => copy_link(project, tree, &item.name, &item.metadata)?,
         };
         match outcome {
-            Outcome::Copied(state, stamp) => {
-                if let Some(stamp) = stamp {
-                    stamps.insert(item.name.clone(), stamp);
-                }
+            Outcome::Copied(state) => {
                 baseline.insert(item.name, state);
             }
             Outcome::Vanished => {}
@@ -91,11 +77,7 @@ pub(super) fn prepare(project: &Path, tree: &Path, base: &Path) -> Result<Prepar
             files::apply_mode(path, *mode)?;
         }
     }
-    Ok(Prepared {
-        baseline,
-        stamps,
-        omitted,
-    })
+    Ok(Prepared { baseline, omitted })
 }
 
 /// Copy one file to `copy` and `saved` from a single read. A source that
@@ -105,7 +87,6 @@ fn copy_file(
     copy: &Path,
     saved: &Path,
     listed: &fs::Metadata,
-    settled: SystemTime,
     buffer: &mut [u8],
 ) -> Result<Outcome, String> {
     let mut input = match File::open(source) {
@@ -189,18 +170,11 @@ fn copy_file(
     output
         .set_permissions(permissions)
         .map_err(|error| error.to_string())?;
-    let stamp = modified
-        .filter(|modified| written == size && *modified < settled)
-        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .and_then(|elapsed| u64::try_from(elapsed.as_nanos()).ok());
-    Ok(Outcome::Copied(
-        Fingerprint::File {
-            size: written,
-            digest,
-            mode,
-        },
-        stamp,
-    ))
+    Ok(Outcome::Copied(Fingerprint::File {
+        size: written,
+        digest,
+        mode,
+    }))
 }
 
 /// Whether an opened handle is the entry the walk listed, so a path swapped
@@ -256,35 +230,56 @@ fn copy_link(
     if let Err(error) = created {
         return Ok(Outcome::Omitted(format!("Could not create link: {error}")));
     }
-    Ok(Outcome::Copied(files::observe(tree, name)?, None))
+    Ok(Outcome::Copied(files::observe(tree, name)?))
 }
 
 /// The target a copied link should have. `name` is the link's project path.
 fn retarget(project: &Path, name: &str, target: &Path) -> PathBuf {
     let parent: Vec<&str> = name.split('/').collect();
     let parent = &parent[..parent.len() - 1];
-    let resolved = if target.is_absolute() {
-        let Some(inside) = strip_root(&plain(project), &plain(target)) else {
-            return target.to_path_buf();
-        };
-        Some(inside)
+    let source_parent = project.join(parent.join("/"));
+    let path = if target.is_absolute() {
+        plain(target)
     } else {
-        let mut parts: Vec<String> = parent.iter().map(|part| (*part).to_owned()).collect();
-        let mut escaped = false;
-        for component in target.components() {
-            match component {
-                Component::CurDir => {}
-                Component::ParentDir => escaped |= parts.pop().is_none(),
-                Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-                Component::RootDir | Component::Prefix(_) => return target.to_path_buf(),
-            }
+        source_parent.join(target)
+    };
+    let resolved = match resolve_target(&path) {
+        Resolution::Full(resolved) => resolved,
+        Resolution::Partial(prefix, suffix) => {
+            // A prefix outside the project anchors a relative target at its
+            // original location. Keep the unresolved suffix verbatim: it may
+            // contain another link followed by `..`.
+            let exits_early = leaves_project_before_a_name(parent.len(), target);
+            return if !target.is_absolute()
+                && (strip_root(&plain(project), &plain(&prefix)).is_none() || exits_early)
+            {
+                if exits_early {
+                    path
+                } else {
+                    plain(&prefix.join(suffix))
+                }
+            } else {
+                target.to_path_buf()
+            };
         }
-        (!escaped).then_some(parts)
+        Resolution::Unknown => return target.to_path_buf(),
     };
-    let Some(inside) = resolved else {
-        // A relative link that leaves the project keeps its destination.
-        return lexical(&project.join(parent.join("/")).join(target));
+    let Some(inside) = strip_root(&plain(project), &plain(&resolved)) else {
+        return if target.is_absolute() {
+            if strip_root(&plain(project), &plain(target)).is_some() {
+                plain(&resolved)
+            } else {
+                target.to_path_buf()
+            }
+        } else {
+            plain(&resolved)
+        };
     };
+    // Relative paths must retain their spelling: an intermediate symlink can
+    // change what a following `..` means after it is copied.
+    if !target.is_absolute() {
+        return target.to_path_buf();
+    }
     let common = parent
         .iter()
         .zip(&inside)
@@ -301,6 +296,53 @@ fn retarget(project: &Path, name: &str, target: &Path) -> PathBuf {
         relative.push(".");
     }
     relative
+}
+
+/// Leading `..` components can leave the project before any component that
+/// might be a link. Such a target must stay anchored at the source project.
+fn leaves_project_before_a_name(mut depth: usize, target: &Path) -> bool {
+    for component in target.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir if depth == 0 => return true,
+            Component::ParentDir => depth -= 1,
+            _ => return false,
+        }
+    }
+    false
+}
+
+enum Resolution {
+    Full(PathBuf),
+    Partial(PathBuf, PathBuf),
+    Unknown,
+}
+
+/// Resolve existing components using the filesystem. A missing suffix can be
+/// normalized only if no link or other filesystem error obstructed the walk.
+fn resolve_target(path: &Path) -> Resolution {
+    let mut uncertain = false;
+    for prefix in path.ancestors() {
+        match fs::canonicalize(prefix) {
+            Ok(resolved) => {
+                let suffix = path.strip_prefix(prefix).expect("ancestor is a prefix");
+                return if uncertain {
+                    Resolution::Partial(resolved, suffix.to_path_buf())
+                } else {
+                    Resolution::Full(lexical(&resolved.join(suffix)))
+                };
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                if fs::symlink_metadata(prefix)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                {
+                    uncertain = true;
+                }
+            }
+            Err(_) => uncertain = true,
+        }
+    }
+    Resolution::Unknown
 }
 
 /// `path` relative to `root` after lexical normalization, when inside it.
@@ -368,10 +410,16 @@ fn plain(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Directory;
 
     #[test]
     fn links_into_the_project_are_rewritten_relative_to_the_copy() {
-        let project = std::env::temp_dir().join("jecode-retarget").join("project");
+        let temp = Directory::new();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(temp.path().join("elsewhere")).unwrap();
+        fs::create_dir(temp.path().join("sibling")).unwrap();
+        let project = plain(&fs::canonicalize(project).unwrap());
         let inside = project.join("node_modules").join(".pnpm").join("pkg");
         assert_eq!(
             retarget(&project, "node_modules/pkg", &inside),
@@ -391,27 +439,28 @@ mod tests {
         );
         assert_eq!(
             retarget(&project, "link", Path::new("sub/./x/../y")),
-            Path::new("sub").join("y")
+            Path::new("sub/./x/../y")
         );
         assert_eq!(retarget(&project, "link", &project), Path::new("."));
-        let outside = std::env::temp_dir().join("elsewhere");
+        let outside = plain(&fs::canonicalize(temp.path().join("elsewhere")).unwrap());
         assert_eq!(retarget(&project, "a/link", &outside), outside);
         assert_eq!(
             retarget(&project, "link", Path::new("../sibling")),
-            project.parent().unwrap().join("sibling")
+            plain(&fs::canonicalize(temp.path().join("sibling")).unwrap())
         );
     }
 
     #[cfg(windows)]
     #[test]
     fn verbatim_and_case_variants_of_the_project_are_inside() {
-        let project = Path::new(r"C:\Work\Project");
+        let temp = Directory::new();
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("store/pkg")).unwrap();
+        let project = plain(&fs::canonicalize(project).unwrap());
+        let lower = project.to_string_lossy().to_lowercase();
+        let verbatim = PathBuf::from(format!(r"\\?\{lower}\store\pkg"));
         assert_eq!(
-            retarget(
-                project,
-                "node_modules/pkg",
-                Path::new(r"\\?\c:\work\project\store\pkg")
-            ),
+            retarget(&project, "node_modules/pkg", &verbatim),
             Path::new("..").join("store").join("pkg")
         );
     }

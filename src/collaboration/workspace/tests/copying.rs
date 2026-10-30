@@ -96,7 +96,7 @@ fn entries_the_copy_cannot_hold_are_omitted_and_reported() {
 }
 
 #[test]
-fn copied_files_with_recorded_times_still_detect_same_size_edits() {
+fn copied_files_detect_edits_even_with_the_original_modification_time() {
     let (_temp, project, storage) = fixture();
     let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
     for name in ["tracked.txt", "other.txt"] {
@@ -109,7 +109,6 @@ fn copied_files_with_recorded_times_still_detect_same_size_edits() {
             .unwrap();
     }
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
-    assert_eq!(workspace.stamps.len(), 2);
     assert_eq!(
         fs::metadata(workspace.root().join("tracked.txt"))
             .unwrap()
@@ -117,12 +116,40 @@ fn copied_files_with_recorded_times_still_detect_same_size_edits() {
             .unwrap(),
         old
     );
-    assert!(changed(&workspace.inspect().unwrap()).is_empty());
+    let original = workspace.inspect().unwrap();
+    assert!(changed(&original).is_empty());
     fs::write(workspace.root().join("tracked.txt"), "edit\n").unwrap();
-    assert_eq!(changed(&workspace.inspect().unwrap()), vec!["tracked.txt"]);
+    fs::File::options()
+        .write(true)
+        .open(workspace.root().join("tracked.txt"))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let review = workspace.inspect().unwrap();
+    assert_eq!(changed(&review), vec!["tracked.txt"]);
+    assert_ne!(review.get("review_token"), original.get("review_token"));
+    let marker = storage.join("a1/baseline.json");
+    let mut saved = json::parse(&fs::read_to_string(&marker).unwrap()).unwrap();
+    if let Value::Object(fields) = &mut saved {
+        fields.insert(
+            "modified".into(),
+            Value::object([("tracked.txt", Value::number(1))]),
+        );
+    }
+    fs::write(&marker, saved.encode()).unwrap();
     let restored = Workspace::from_value(&workspace.value()).unwrap();
-    assert_eq!(restored.stamps, workspace.stamps);
     assert_eq!(changed(&restored.inspect().unwrap()), vec!["tracked.txt"]);
+    let result = restored
+        .integrate(
+            &["tracked.txt".into()],
+            review.get("review_token").unwrap().as_str().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(result.get("applied").unwrap().as_array().unwrap().len(), 1);
+    assert_eq!(
+        fs::read_to_string(project.join("tracked.txt")).unwrap(),
+        "edit\n"
+    );
     restored.close().unwrap();
 }
 
@@ -189,6 +216,118 @@ fn links_into_the_project_resolve_inside_the_copy() {
         fs::read_to_string(store.join("index.js")).unwrap(),
         "original\n"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn copied_links_resolve_parent_components_after_intermediate_links() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, project, storage) = fixture();
+    fs::create_dir_all(project.join("real/sub")).unwrap();
+    fs::create_dir(project.join("real/target")).unwrap();
+    fs::write(project.join("real/target/file.txt"), "original\n").unwrap();
+    symlink("real/sub", project.join("alias")).unwrap();
+    symlink("alias/../target", project.join("relative-link")).unwrap();
+    symlink(
+        project.join("alias/../target"),
+        project.join("absolute-link"),
+    )
+    .unwrap();
+
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    let destination = fs::canonicalize(workspace.root().join("real/target")).unwrap();
+    for name in ["relative-link", "absolute-link"] {
+        let link = workspace.root().join(name);
+        assert_eq!(fs::canonicalize(&link).unwrap(), destination);
+        assert_ne!(
+            fs::canonicalize(&link).unwrap(),
+            fs::canonicalize(project.join(name)).unwrap()
+        );
+    }
+    assert_eq!(
+        fs::read_link(workspace.root().join("relative-link")).unwrap(),
+        Path::new("alias/../target")
+    );
+    fs::write(workspace.root().join("relative-link/file.txt"), "child\n").unwrap();
+    assert_eq!(
+        fs::read_to_string(project.join("real/target/file.txt")).unwrap(),
+        "original\n"
+    );
+    workspace.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn copied_link_through_outside_alias_keeps_original_destination() {
+    use std::os::unix::fs::symlink;
+
+    let (temp, project, storage) = fixture();
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(outside.join("sub")).unwrap();
+    fs::create_dir(outside.join("target")).unwrap();
+    symlink(outside.join("sub"), project.join("alias")).unwrap();
+    symlink("alias/../target", project.join("link")).unwrap();
+    symlink(
+        project.join("alias/../target"),
+        project.join("absolute-link"),
+    )
+    .unwrap();
+
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    for name in ["link", "absolute-link"] {
+        assert_eq!(
+            fs::read_link(workspace.root().join(name)).unwrap(),
+            fs::canonicalize(outside.join("target")).unwrap()
+        );
+        assert_eq!(
+            fs::canonicalize(workspace.root().join(name)).unwrap(),
+            fs::canonicalize(outside.join("target")).unwrap()
+        );
+    }
+    workspace.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cyclic_intermediate_link_is_copied_without_resolving_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, project, storage) = fixture();
+    symlink("cycle", project.join("cycle")).unwrap();
+    symlink("cycle/../target", project.join("link")).unwrap();
+
+    let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
+    assert_eq!(
+        fs::read_link(workspace.root().join("link")).unwrap(),
+        Path::new("cycle/../target")
+    );
+    assert!(workspace.omitted().is_none());
+    workspace.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn inaccessible_outside_target_keeps_its_original_anchor() {
+    use std::os::unix::fs::symlink;
+
+    let (temp, project, storage) = fixture();
+    let outside = temp.path().join("outside");
+    let restricted = outside.join("restricted");
+    fs::create_dir(&outside).unwrap();
+    fs::create_dir(&restricted).unwrap();
+    symlink("../outside/restricted/missing", project.join("link")).unwrap();
+    files::apply_mode(&restricted, 0o000).unwrap();
+
+    let prepared = Workspace::prepare(&project, &storage, "a1", Mode::Isolated);
+    files::apply_mode(&restricted, 0o755).unwrap();
+    let workspace = prepared.unwrap();
+    assert_eq!(
+        fs::read_link(workspace.root().join("link")).unwrap(),
+        outside.join("restricted/missing")
+    );
+    assert!(workspace.omitted().is_none());
+    workspace.close().unwrap();
 }
 
 #[test]

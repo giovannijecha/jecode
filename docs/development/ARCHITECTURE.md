@@ -295,9 +295,9 @@ owned storage without Git (`collaboration/workspace/copy.rs`): one walk reads
 each file once and writes the same bytes to the copy and the saved baseline
 while fingerprinting them, so the baseline is what was copied. Entries the copy
 cannot hold are omitted and reported rather than failing preparation; links
-into the project are rewritten to resolve inside the copy. Copied files keep
-their modification times, and comparison hashes only files whose size, mode or
-time differ from the record. Comparison produces bounded evidence and a token
+into the project resolve inside the copy. Copied files keep their modification
+times, while comparison hashes file content regardless of those timestamps.
+Comparison produces bounded evidence and a token
 over baseline, child and current states; integration rechecks selected paths
 and reports partial outcomes. Closing a copy made by the earlier Git worktree
 version also removes its `.git/worktrees` entry when that entry names the copy.

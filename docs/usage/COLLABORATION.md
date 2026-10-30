@@ -113,11 +113,12 @@ count and up to 50 named paths and reasons:
 - links that cannot be created, such as symbolic links or junctions on Windows
   without Developer Mode or administrator rights.
 
-A copied link whose target lies inside the project is rewritten relative to
-the link, so it resolves inside the copy and never into the original project.
-Other link targets are kept. Commands that rely on omitted links, such as a
-package manager's linked `node_modules`, may need the links recreated in the
-copy, for example by reinstalling there.
+A copied link whose target lies inside the project resolves inside the copy:
+absolute targets are rewritten relative to the link, while relative targets
+keep their original path. Relative targets that leave the project are made
+absolute so they retain their original destination. Commands that rely on
+omitted links, such as a package manager's linked `node_modules`, may need the
+links recreated in the copy, for example by reinstalling there.
 
 If a copy cannot be written, Jecode reports the filesystem error and any
 incomplete cleanup without starting the worker. This is file isolation; command
@@ -127,10 +128,9 @@ effects separately.
 `diff` returns changed paths, baseline/child/current fingerprints, bounded change
 evidence and a review token. For longer files, request `diff` with `path`; byte
 pages default to 16384 and accept at most 65536 bytes. Binary or unsupported text
-is identified rather than presented as a complete text diff. A copied file whose
-size, mode and preserved modification time still match the copy is treated as
-unchanged without rereading it; files modified within two seconds before
-preparation are always reread. Sockets or similar entries a command created in
+is identified rather than presented as a complete text diff. File contents are
+read for each comparison, even when size, mode and modification time match the
+copy. Sockets or similar entries a command created in
 the copy are listed as `unsupported_in_copy`.
 
 `integrate` rechecks the token and each selected path. Main-project changes since

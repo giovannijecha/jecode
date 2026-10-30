@@ -104,11 +104,6 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
             .get(&name)
             .cloned()
             .unwrap_or(files::Fingerprint::Absent);
-        if let Some(item) = items.get(&name)
-            && unchanged(workspace, &name, item, &baseline)
-        {
-            continue;
-        }
         let child = files::observe(&workspace.root, &name)?;
         if child == baseline {
             continue;
@@ -129,45 +124,6 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
         token,
         unsupported,
     })
-}
-
-/// Whether a copied file still has the size, mode and preserved modification
-/// time recorded when it was copied, so its content need not be hashed. Any
-/// write moves the modification time to the present, which preparation kept
-/// apart from every recorded time.
-fn unchanged(
-    workspace: &Workspace,
-    name: &str,
-    item: &tree::Item,
-    baseline: &files::Fingerprint,
-) -> bool {
-    let (Some(stamp), files::Fingerprint::File { size, mode, .. }) =
-        (workspace.stamps.get(name), baseline)
-    else {
-        return false;
-    };
-    if !matches!(item.kind, tree::Kind::File) {
-        return false;
-    }
-    // Directory listings on Windows can lag a file still open for writing.
-    #[cfg(windows)]
-    let Ok(observed) = fs::symlink_metadata(&item.path) else {
-        return false;
-    };
-    #[cfg(windows)]
-    let metadata = &observed;
-    #[cfg(not(windows))]
-    let metadata = &item.metadata;
-    metadata.is_file()
-        && !metadata.file_type().is_symlink()
-        && metadata.len() == *size
-        && files::mode(metadata) == *mode
-        && metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .and_then(|elapsed| u64::try_from(elapsed.as_nanos()).ok())
-            == Some(*stamp)
 }
 
 pub(super) fn integrate(
