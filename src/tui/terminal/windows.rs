@@ -4,7 +4,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    mpsc::{self, Receiver},
+    mpsc::{self, Receiver, Sender},
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -14,6 +14,7 @@ static NEXT_CHANNEL: AtomicU64 = AtomicU64::new(0);
 
 pub struct Terminal {
     pub input: Receiver<Input>,
+    wake: Sender<Input>,
     pub size: (usize, usize),
     control: ChildStdin,
     child: Child,
@@ -64,6 +65,7 @@ impl Terminal {
         let reader_file = channel;
         let control = child.stdin.take().unwrap();
         let (sender, input) = mpsc::channel();
+        let wake = sender.clone();
         let reader = thread::spawn(move || {
             for line in BufReader::new(reader_file).lines() {
                 let event = match line {
@@ -77,6 +79,7 @@ impl Terminal {
         });
         let mut terminal = Self {
             input,
+            wake,
             size: (80, 24),
             control,
             child,
@@ -107,6 +110,14 @@ impl Terminal {
             }
         }
         Ok(terminal)
+    }
+
+    /// Posts `Input::Wake` into the input channel.
+    pub fn waker(&self) -> super::Waker {
+        let wake = self.wake.clone();
+        super::Waker::new(move || {
+            let _ = wake.send(Input::Wake);
+        })
     }
 
     pub fn check(&mut self) -> Result<(), String> {

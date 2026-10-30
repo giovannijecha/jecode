@@ -217,7 +217,7 @@ impl App {
         self.state.activity = Some(super::activity::Activity::new());
         self.state.backend_failure = None;
         self.state.status = "Reviewing collaborator work…".into();
-        self.worker = Some(super::Worker::continue_collaboration(agent));
+        self.run_worker(super::Worker::continue_collaboration(agent));
         true
     }
 

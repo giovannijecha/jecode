@@ -119,7 +119,8 @@ impl App {
             self.process_observer = self.agent.as_ref().unwrap().processes();
             self.collaboration_auto_resume = true;
             self.collaboration_return_pending = false;
-            self.worker = Some(Worker::start(self.hold(), execution));
+            let worker = Worker::start(self.hold(), execution);
+            self.run_worker(worker);
             self.state.status = "Starting...".into();
             return Ok(false);
         }

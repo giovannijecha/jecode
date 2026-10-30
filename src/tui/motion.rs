@@ -34,6 +34,34 @@ pub fn set_frame(frame: usize) {
     TEST_FRAME.with(|cell| cell.set(frame));
 }
 
+/// What animated rows show of time: the motion frame, the turn's elapsed
+/// seconds and a retry countdown's seconds. The loop redraws an animation
+/// only when this changes.
+pub fn clock(state: &super::state::State) -> (usize, Option<u64>, Option<u64>) {
+    let now = std::time::Instant::now();
+    (
+        frame(),
+        state
+            .activity
+            .as_ref()
+            .map(|activity| activity.elapsed().as_secs()),
+        state
+            .recovery
+            .as_ref()
+            .and_then(|recovery| recovery.until)
+            .map(|until| until.saturating_duration_since(now).as_secs()),
+    )
+}
+
+/// A scanner runs outside a turn: a waiting panel or idle progress.
+pub fn loading(state: &super::state::State) -> bool {
+    state.current_progress().is_some()
+        || state
+            .selector
+            .as_ref()
+            .is_some_and(|menu| matches!(menu.purpose, super::selector::Purpose::Loading))
+}
+
 /// `>` fixed, `_` on for 400 ms and off for 400 ms. `tone` recolours both
 /// glyphs, as retries do in `WARNING`.
 pub fn caret(frame: usize, tone: Option<Style>) -> Line {

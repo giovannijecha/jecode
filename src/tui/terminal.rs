@@ -44,6 +44,22 @@ pub enum Input {
     Bytes(Vec<u8>),
     Size(Geometry),
     Error(String),
+    /// Another thread has work for the loop, such as agent events.
+    Wake,
+}
+
+/// Wakes the input loop from another thread, as terminal input would.
+#[derive(Clone)]
+pub struct Waker(std::sync::Arc<dyn Fn() + Send + Sync>);
+
+impl Waker {
+    pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(wake))
+    }
+
+    pub fn wake(&self) {
+        (self.0)();
+    }
 }
 
 pub(super) const LEAVE: &str =

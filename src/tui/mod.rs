@@ -215,6 +215,14 @@ impl App {
         }
     }
 
+    /// Runs a turn whose events wake the loop as soon as they are queued.
+    fn run_worker(&mut self, worker: Worker) {
+        if let Some(terminal) = &self.terminal {
+            worker.events.wake_with(terminal.waker());
+        }
+        self.worker = Some(worker);
+    }
+
     /// A turn, deletion or restore is running; new prompts wait in the queue.
     fn busy(&self) -> bool {
         self.worker.is_some() || self.deletion_job.is_some() || self.checkpoint_job.is_some()
@@ -261,6 +269,7 @@ pub(crate) fn launch(
     let mut decoder = Decoder::default();
     let mut dirty = true;
     let mut pending = None;
+    let mut drawn_clock = None;
     loop {
         app.terminal.as_mut().unwrap().check()?;
         dirty |= app.poll()?;
@@ -275,6 +284,10 @@ pub(crate) fn launch(
             .chain(app.terminal.as_ref().unwrap().input.try_iter().take(64))
             .collect();
         for event in events {
+            // Worker events were polled above; a wake carries no input.
+            if matches!(event, Input::Wake) {
+                continue;
+            }
             let (forwarded, light) = background.feed(event);
             if let Some(light) = light {
                 app.renderer.set_light_background(light);
@@ -308,6 +321,7 @@ pub(crate) fn launch(
                 .redactor
                 .text(&app.archive.directory.to_string_lossy());
             app.renderer.draw(&app.state, &model, &directory)?;
+            drawn_clock = Some(motion::clock(&app.state));
             dirty = false;
         }
         match app.terminal.as_ref().unwrap().input.recv_timeout({
@@ -315,7 +329,15 @@ pub(crate) fn launch(
             let delay = app
                 .state
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
-            let delay = if app.worker.is_some() || app.checkpoint_job.is_some() {
+            // Worker events wake the loop; only a finishing turn and a
+            // restore are polled.
+            let delay = if app
+                .worker
+                .as_ref()
+                .is_some_and(|worker| worker.events.closed())
+            {
+                delay.min(Duration::from_millis(1))
+            } else if app.checkpoint_job.is_some() {
                 delay.min(Duration::from_millis(16))
             } else {
                 delay
@@ -323,7 +345,7 @@ pub(crate) fn launch(
             let delay = delay.min(background.wait().unwrap_or(Duration::MAX));
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
-            } else if loading(&app.state) {
+            } else if motion::loading(&app.state) {
                 delay.min(motion::FRAME)
             } else if app.state.processes.is_some() {
                 delay.min(processes::REFRESH)
@@ -342,72 +364,11 @@ pub(crate) fn launch(
                     }
                     dirty = true;
                 }
-                dirty |= app.state.activity.is_some() || loading(&app.state);
+                // Animation draws once per motion frame or clock second.
+                dirty |= (app.state.activity.is_some() || motion::loading(&app.state))
+                    && drawn_clock != Some(motion::clock(&app.state));
             }
         }
-    }
-}
-
-/// A scanner runs outside a turn: a waiting panel or idle progress.
-fn loading(state: &state::State) -> bool {
-    state.current_progress().is_some()
-        || state
-            .selector
-            .as_ref()
-            .is_some_and(|menu| matches!(menu.purpose, selector::Purpose::Loading))
-}
-
-impl App {
-    fn terminal_event(&mut self, event: Input, decoder: &mut Decoder) -> Result<bool, String> {
-        match event {
-            #[cfg(unix)]
-            Input::Bytes(bytes) => {
-                for decoded in decoder.bytes(&bytes) {
-                    if self.input(decoded)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            #[cfg(any(windows, test))]
-            Input::Key(key) => {
-                for decoded in decoder.key(key) {
-                    if self.input(decoded)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            #[cfg(any(windows, test))]
-            Input::Scroll(amount) => {
-                self.input(Decoded::Scroll(amount))?;
-            }
-            #[cfg(windows)]
-            Input::Modes(..) => {}
-            #[cfg(windows)]
-            Input::NativeBackground(..) => {}
-            Input::Size(size) => {
-                self.state.width = size.width;
-                self.state.height = size.height;
-                self.renderer
-                    .resized((size.width, size.height), Instant::now());
-            }
-            #[cfg(any(windows, test))]
-            Input::PasteOverflow => {
-                *decoder = Decoder::default();
-                self.input(Decoded::Error)?;
-            }
-            #[cfg(any(windows, test))]
-            Input::Paste(text) => match decoder.paste(&text) {
-                Ok(text) if !text.is_empty() => {
-                    self.input(Decoded::Paste(text))?;
-                }
-                Err(()) => {
-                    self.input(Decoded::Error)?;
-                }
-                _ => {}
-            },
-            Input::Error(error) => return Err(error),
-        }
-        Ok(false)
     }
 }
 

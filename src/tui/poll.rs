@@ -1,8 +1,72 @@
-use super::{App, Feedback, Kind, activity, feedback::Ending};
+use super::{
+    App, Feedback, Kind, activity,
+    feedback::Ending,
+    keys::{Decoded, Decoder},
+    terminal::Input,
+};
 use crate::{attachments::Prompt, backend::FailureReason, events::Event};
 use std::time::Instant;
 
 impl App {
+    /// Applies one terminal input; `true` asks to quit.
+    pub(super) fn terminal_event(
+        &mut self,
+        event: Input,
+        decoder: &mut Decoder,
+    ) -> Result<bool, String> {
+        match event {
+            #[cfg(unix)]
+            Input::Bytes(bytes) => {
+                for decoded in decoder.bytes(&bytes) {
+                    if self.input(decoded)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            #[cfg(any(windows, test))]
+            Input::Key(key) => {
+                for decoded in decoder.key(key) {
+                    if self.input(decoded)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            #[cfg(any(windows, test))]
+            Input::Scroll(amount) => {
+                self.input(Decoded::Scroll(amount))?;
+            }
+            #[cfg(windows)]
+            Input::Modes(..) => {}
+            #[cfg(windows)]
+            Input::NativeBackground(..) => {}
+            Input::Size(size) => {
+                self.state.width = size.width;
+                self.state.height = size.height;
+                self.renderer
+                    .resized((size.width, size.height), Instant::now());
+            }
+            #[cfg(any(windows, test))]
+            Input::PasteOverflow => {
+                *decoder = Decoder::default();
+                self.input(Decoded::Error)?;
+            }
+            #[cfg(any(windows, test))]
+            Input::Paste(text) => match decoder.paste(&text) {
+                Ok(text) if !text.is_empty() => {
+                    self.input(Decoded::Paste(text))?;
+                }
+                Err(()) => {
+                    self.input(Decoded::Error)?;
+                }
+                _ => {}
+            },
+            Input::Error(error) => return Err(error),
+            // Worker events are polled with the loop; a wake carries no input.
+            Input::Wake => {}
+        }
+        Ok(false)
+    }
+
     pub(super) fn poll(&mut self) -> Result<bool, String> {
         let mut dirty = self.state.expire_feedback(Instant::now());
         dirty |= self.poll_auth_updates();

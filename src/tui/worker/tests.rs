@@ -276,3 +276,44 @@ fn cancelling_wakes_a_turn_waiting_for_a_queued_edit() {
     assert_eq!(inbox.with(|entries| entries.len()), 1);
     fixture.finish();
 }
+
+#[test]
+fn queued_events_wake_the_loop_once_per_drain_and_when_the_worker_ends() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let (sender, receiver) = event_channel();
+    let cancellation = Cancellation::default();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&wakes);
+    let send = |event| sender.send(event, &cancellation).unwrap();
+    send(Event::Message {
+        text: "early".into(),
+    });
+    // Events queued before the waker arrive wake the loop at once.
+    receiver.wake_with(super::super::terminal::Waker::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    for index in 0..50 {
+        send(Event::Streaming {
+            text: index.to_string(),
+        });
+    }
+    assert_eq!(
+        wakes.load(Ordering::SeqCst),
+        1,
+        "a burst waits for the drain"
+    );
+    while receiver.try_recv().is_ok() {}
+    send(Event::Streaming {
+        text: "next".into(),
+    });
+    assert_eq!(wakes.load(Ordering::SeqCst), 2);
+    receiver.try_recv().unwrap();
+    assert!(!receiver.closed());
+    drop(sender);
+    assert_eq!(wakes.load(Ordering::SeqCst), 3);
+    assert!(receiver.closed());
+}

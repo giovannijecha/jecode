@@ -393,7 +393,8 @@ impl App {
                 if pending_question {
                     self.state.begin_tool_turn();
                     self.state.activity = Some(super::activity::Activity::new());
-                    self.worker = Some(super::Worker::continue_question(self.hold()));
+                    let worker = super::Worker::continue_question(self.hold());
+                    self.run_worker(worker);
                 }
                 self.state.changed();
             }
