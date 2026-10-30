@@ -8,6 +8,7 @@ use std::sync::Mutex;
 pub struct Store {
     pub(super) directory: PathBuf,
     pub(super) bucket: PathBuf,
+    attachment_bucket: PathBuf,
     temporary: PathBuf,
 }
 
@@ -74,7 +75,16 @@ impl Store {
 
     /// Session-owned copies of attached files, shared by this project's sessions.
     pub fn attachments(&self) -> crate::attachments::Pool {
-        crate::attachments::Pool::new(self.bucket.join("attachments"))
+        crate::attachments::Pool::new(self.attachment_bucket.join("attachments"))
+    }
+
+    /// The session tree that owns this store's shared attachment pool.
+    pub(crate) fn attachment_bucket(&self) -> &Path {
+        &self.attachment_bucket
+    }
+
+    pub(crate) fn share_attachments(&mut self, parent: &Store) {
+        self.attachment_bucket = parent.attachment_bucket.clone();
     }
 
     /// Where this project's session documents and journals live.
@@ -111,9 +121,11 @@ impl Store {
         let bucket = directory_key(&directory).bytes().fold(0u128, |key, byte| {
             key.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
         });
+        let attachment_bucket = home.join("sessions").join(format!("{bucket:032x}"));
         Ok(Self {
             directory,
-            bucket: home.join("sessions").join(format!("{bucket:032x}")),
+            bucket: attachment_bucket.clone(),
+            attachment_bucket,
             temporary: home.join("tmp").join(format!("{bucket:032x}")),
         })
     }

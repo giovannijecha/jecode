@@ -253,7 +253,7 @@ impl Agent {
             .join("child-home");
         crate::disk::ensure_private_directory(&child_home)
             .map_err(|error| format!("Could not prepare collaborator storage: {error}"))?;
-        child.enable_sessions(&child_home)?;
+        child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
         child.enable_checkpoints(&child_home);
         child.skills.configure(&home);
         child
@@ -290,6 +290,8 @@ fn optional_number(value: &Value, name: &str) -> Result<Option<usize>, String> {
         .transpose()
 }
 
+#[cfg(test)]
+mod attachment_tests;
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]

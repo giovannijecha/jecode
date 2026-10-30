@@ -11,13 +11,11 @@ use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+
+mod collection;
 
 /// Largest file an attachment may hold.
 pub const LIMIT: u64 = 1024 * 1024 * 1024;
-/// Unreferenced assets younger than this may belong to another process's
-/// draft that has not reached disk yet.
-const GRACE: Duration = Duration::from_secs(600);
 const HEAD: usize = 64 * 1024;
 /// Large still images may get a lower-detail derived view to reduce upload
 /// size on every request.
@@ -198,59 +196,6 @@ impl Pool {
         for suffix in ["json", "partial", "view.png", "view.jpg", "view.partial"] {
             let _ = fs::remove_file(self.directory.join(format!("{id}.{suffix}")));
         }
-    }
-
-    /// Removes assets no session file, live state or recent import refers to.
-    /// `released` assets skip the grace period: their owner was deleted.
-    pub fn collect(
-        &self,
-        sessions: &Path,
-        live: &BTreeSet<String>,
-        released: &BTreeSet<String>,
-    ) -> Result<usize, String> {
-        let Ok(entries) = fs::read_dir(&self.directory) else {
-            return Ok(0);
-        };
-        let mut referenced = live.clone();
-        for entry in fs::read_dir(sessions)
-            .map_err(|error| format!("Cannot inspect sessions: {error}"))?
-            .flatten()
-        {
-            // Session locks hold no references and stay locked while open.
-            let lock = entry.file_name().to_string_lossy().ends_with(".lock");
-            if !lock && entry.file_type().is_ok_and(|kind| kind.is_file()) {
-                let bytes = fs::read(entry.path())
-                    .map_err(|error| format!("Cannot inspect sessions: {error}"))?;
-                referenced.extend(references(&bytes));
-            }
-        }
-        let now = SystemTime::now();
-        // The youngest entry of an asset decides its age.
-        let mut ages = std::collections::BTreeMap::<String, Duration>::new();
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let id = name.split('.').next().unwrap_or_default().to_owned();
-            if !super::valid_id(&id) {
-                continue;
-            }
-            let age = entry
-                .metadata()
-                .and_then(|metadata| metadata.modified())
-                .ok()
-                .and_then(|modified| now.duration_since(modified).ok())
-                .unwrap_or_default();
-            ages.entry(id)
-                .and_modify(|current| *current = (*current).min(age))
-                .or_insert(age);
-        }
-        let mut removed = 0;
-        for (id, age) in ages {
-            if !referenced.contains(&id) && (released.contains(&id) || age >= GRACE) {
-                self.remove(&id);
-                removed += 1;
-            }
-        }
-        Ok(removed)
     }
 }
 

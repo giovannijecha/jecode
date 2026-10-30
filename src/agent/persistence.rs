@@ -7,11 +7,22 @@ use std::path::Path;
 
 impl Agent {
     pub fn enable_sessions(&mut self, home: &Path) -> Result<(), String> {
+        self.enable_sessions_with_attachments(home, None)
+    }
+
+    pub(super) fn enable_sessions_with_attachments(
+        &mut self,
+        home: &Path,
+        attachment_store: Option<&Store>,
+    ) -> Result<(), String> {
         if self.persistence.is_none() {
             self.skills.configure(home);
             self.tools.configure_browser_profiles(home);
             self.tools.configure_project_map(home);
-            let store = Store::new(home.to_path_buf(), self.tools.root())?;
+            let mut store = Store::new(home.to_path_buf(), self.tools.root())?;
+            if let Some(parent) = attachment_store {
+                store.share_attachments(parent);
+            }
             self.tools.configure_session_home(home);
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),

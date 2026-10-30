@@ -19,6 +19,12 @@ map tools. Their tool catalog excludes `agent`; runtime dispatch also rejects
 delegation from a collaborator. Child processes, browser handles, scratch output
 and session histories belong to the individual worker.
 
+The main agent and its collaborators share the project's attachment pool.
+Pass an `attachment:ID` reference in the assignment or context so the worker
+can read the stored image, PDF or file. References keep the same IDs in shared
+and isolated workspaces, including attachments added after a worker starts.
+Files imported by a collaborator are also readable by the main agent.
+
 ## Assign and coordinate
 
 The main model supplies an objective, file or component scope, relevant source

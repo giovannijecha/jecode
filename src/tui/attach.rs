@@ -155,7 +155,9 @@ impl App {
                 live.extend(crate::attachments::references(message.encode().as_bytes()));
             }
             let none = std::collections::BTreeSet::new();
-            let _ = store.attachments().collect(store.bucket(), &live, &none);
+            let _ = store
+                .attachments()
+                .collect(store.attachment_bucket(), &live, &none);
         }
     }
 
