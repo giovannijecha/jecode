@@ -196,7 +196,7 @@ and `DIM` while running:
 | New Write | `New file · N lines`, then the first six numbered source rows. |
 | Checkpoint | One quiet result with the hidden row count. |
 | Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines · no checkpoint` follows in `DIM`. |
-| Failed command | `Exit N · first line` in `BAD` on at most two rows, a muted position, up to two more `BAD` stderr rows. |
+| Failed command | `Exit N · diagnostic` in `BAD` on at most two rows, a muted position, up to two more `BAD` stderr rows. Recognized Node uncaught-exception headers give way to the actual error. |
 | Stopped command | `Cancelled after 6.0s` or `Timed out after …`, `· partial output` when some was captured, and the hidden line count. |
 | Background | `p3 running · latest line`; Process reports `stopping`, `stopped` or `status unknown`. A process list shows one count. |
 | Web | The page title, size and host. |
@@ -204,7 +204,10 @@ and `DIM` while running:
 | Error | The decoded message in `BAD`; a missing path reads `Not found`. |
 
 Compact cards skip blank output lines and fold the hidden count into the
-result. Capture limits stay visible as muted notes, such as `stdout trimmed to
+result. Node exception logs render terminal controls as a readable transcript;
+Ctrl+O retains the complete diagnostic, including the runtime header. Saved
+output bytes and the program or wrapper's reported exit code remain intact.
+Capture limits stay visible as muted notes, such as `stdout trimmed to
 the last 64 KiB of 89 KiB · full output saved`. Checkpoint saves are quiet:
 partial coverage shows a warning; missing coverage joins a routine call's
 result, while file cards keep their warning.

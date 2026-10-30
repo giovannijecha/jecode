@@ -392,6 +392,8 @@ mod discovery_tests;
 #[cfg(test)]
 mod edit_fallback_tests;
 #[cfg(test)]
+pub(super) mod failure_tests;
+#[cfg(test)]
 mod files_tests;
 #[cfg(test)]
 mod map_tests;

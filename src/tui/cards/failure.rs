@@ -72,8 +72,9 @@ pub(super) fn rows(tool: &Tool<'_>, columns: usize, guide: &str) -> Vec<Line> {
             .get("exit_code")
             .filter(|code| **code != Value::Null)
             .map_or_else(|| "unknown".into(), Value::encode);
-        let first = entries
-            .first()
+        let headline = streams::headline(&entries, true);
+        let first = headline
+            .and_then(|index| entries.get(index))
             .map(|entry| entry.text.as_str())
             .unwrap_or("");
         (
@@ -91,7 +92,7 @@ pub(super) fn rows(tool: &Tool<'_>, columns: usize, guide: &str) -> Vec<Line> {
                         .to_owned()
                 })
                 .unwrap_or_default(),
-            usize::from(!first.is_empty()),
+            headline.map_or(0, |index| index + 1),
         )
     };
     let mut lead = Line::new(&text::clean(&message), BAD);

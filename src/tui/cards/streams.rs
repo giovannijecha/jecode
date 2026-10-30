@@ -15,7 +15,9 @@ pub(super) struct Entry {
 
 fn display(result: &Value, stream: &str) -> String {
     let raw = field(result, stream);
-    if stream == "stdout" && result.get("tty") == Some(&Value::Bool(true)) {
+    if (stream == "stdout" && result.get("tty") == Some(&Value::Bool(true)))
+        || (stream == "stderr" && raw.starts_with("node:internal/"))
+    {
         terminal_output::transcript(raw)
     } else {
         raw.to_owned()
@@ -61,14 +63,25 @@ fn exact(result: &Value, failed: bool) -> Vec<Entry> {
         .collect()
 }
 
-/// The line that names the result: the first error of a failure, otherwise
-/// the last line of stdout.
+/// The line that names the result: the first error of a failure, skipping
+/// Node's uncaught-exception preamble, otherwise the last line of stdout.
 pub(super) fn headline(entries: &[Entry], failed: bool) -> Option<usize> {
     if failed
         && entries
             .first()
             .is_some_and(|entry| entry.stream == "stderr")
     {
+        if let [source, call, caret, message, ..] = entries
+            && source.text.trim_start().starts_with("node:internal/")
+            && call
+                .text
+                .trim_start()
+                .starts_with("triggerUncaughtException(")
+            && caret.text.trim().chars().all(|character| character == '^')
+            && message.stream == "stderr"
+        {
+            return Some(3);
+        }
         return Some(0);
     }
     entries
