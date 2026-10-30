@@ -16,10 +16,17 @@ mkdir -p "$package"
 cp "$target_root/release/jecode" "$package/jecode"
 cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" "$package/"
 mkdir -p "$package/docs"
+# Without -L, find neither follows nor matches symbolic links.
 find "$script_dir/docs" -type f ! -name 'HARNESS*' ! -name AGENTS.md ! -name CLAUDE.md | while IFS= read -r document; do
     relative=${document#"$script_dir/docs/"}
     mkdir -p "$package/docs/$(dirname "$relative")"
     cp "$document" "$package/docs/$relative"
 done
 chmod 755 "$package/jecode"
+if command -v sha256sum >/dev/null 2>&1; then
+    digest=$(sha256sum "$package/jecode")
+else
+    digest=$(shasum -a 256 "$package/jecode")
+fi
+printf '%s  jecode\n' "${digest%% *}" > "$package/SHA256SUMS"
 printf 'Prepared local package: %s\n' "$package"

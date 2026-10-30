@@ -99,9 +99,10 @@ requests. The historical account timings above were not repeated.
 - Optional PNG/JPEG view generation skips originals above 16 MiB to avoid
   loading and duplicating large files during import. PDF annotation assets
   retain exact provider bytes without generating unused views.
-- Windows system curl retains direct launch. Configured executables and PATH
-  fallbacks retain descendant supervision; a wrapper fixture verifies that
-  cancellation prevents its child from finishing work.
+- At the time, Windows system curl kept direct launch while configured
+  executables and PATH fallbacks kept descendant supervision. Embedded native
+  HTTP adapters have since replaced curl; `JECODE_CURL` and PATH lookups no
+  longer apply.
 - OpenAI preserves `Retry-After` on HTTP and SSE failures, sharing the existing
   seconds/date parser with OpenRouter. Fixtures cover both error paths.
 - Periodic partial response saves use background autosave; the first visible
@@ -271,6 +272,16 @@ It writes `target/measurements/windows-process.csv`, measuring one initial
 supervised launch and then three alternating direct/supervised pairs. A cached
 supervisor may already exist, so the initial launch is not necessarily a fresh
 compile. Recorded historical results above came from separate comparison runs.
+
+### Embedded adapter lookup
+
+Measured **2026-10-30** on Windows in a debug test build, 50 warm lookups each
+after one initial extraction. Before, every lookup discovered storage, hashed the
+embedded bytes and read back the cached file; the 1.8 MB shell adapter cost
+116 ms and the HTTP adapter 0.70 ms per lookup. Each process now verifies an
+adapter fully once and later rechecks only the cached entry's type and length:
+both lookups cost about 32 µs. Release builds hash faster, so their absolute
+saving is smaller; it was not measured.
 
 ## Per-call recovery
 
