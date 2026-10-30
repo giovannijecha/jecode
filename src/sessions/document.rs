@@ -66,6 +66,29 @@ impl Document {
         })
     }
 
+    /// A copy without messages or events, for a checkpoint that appends only
+    /// the history its journal lacks.
+    pub(super) fn without_history(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            created: self.created,
+            updated: self.updated,
+            directory: self.directory.clone(),
+            model: self.model.clone(),
+            backend: self.backend.clone(),
+            legacy_origin: self.legacy_origin.clone(),
+            effort: self.effort,
+            compatible_from: self.compatible_from,
+            messages: Vec::new(),
+            events: Vec::new(),
+            pending: self.pending.clone(),
+            input: self.input.clone(),
+            context: self.context.clone(),
+            routing: self.routing.clone(),
+            permissions: self.permissions,
+        }
+    }
+
     pub fn meaningful(&self) -> bool {
         self.messages
             .iter()

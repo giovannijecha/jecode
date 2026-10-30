@@ -12,9 +12,10 @@ impl Handle {
         archive: &Archive,
         event: crate::json::Value,
     ) -> Result<crate::json::Value, String> {
+        // The same lock order as checkpoints: disk access, then history.
+        let _io = self.0.io.lock().unwrap();
         let messages = archive.messages.lock().unwrap();
         let mut events = archive.events.lock().unwrap();
-        let _io = self.0.io.lock().unwrap();
         let mut live = self.0.live.lock().unwrap();
         if live.deleted {
             return Err("This session was deleted; start a new conversation".into());

@@ -82,7 +82,12 @@ pub(super) fn load(store: &Store, id: &str, stamp: &Stamp) -> Option<Summary> {
     })
 }
 
-pub(super) fn save(store: &Store, document: &Document, observed: &Stamp) -> Result<(), String> {
+pub(super) fn save(
+    store: &Store,
+    document: &Document,
+    title: &str,
+    observed: &Stamp,
+) -> Result<(), String> {
     if stamp(store, &document.id).as_ref() != Some(observed) {
         return Ok(());
     }
@@ -94,7 +99,7 @@ pub(super) fn save(store: &Store, document: &Document, observed: &Stamp) -> Resu
             "working_directory",
             Value::string(document.directory.to_string_lossy()),
         ),
-        ("title", Value::string(document.title())),
+        ("title", Value::string(title)),
         ("backend", Value::string(&document.backend)),
         (
             "model",

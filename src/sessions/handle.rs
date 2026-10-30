@@ -1,4 +1,4 @@
-use super::{Document, Input, Pending, Store, context, now, storage::Lease};
+use super::{Document, Input, Pending, Store, context, storage::Lease};
 use crate::{export::Archive, redact::Redactor};
 use std::sync::{
     Arc, Mutex,
@@ -6,7 +6,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+mod autosave;
 mod receipts;
+mod save;
 
 const SAVE_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -18,6 +20,13 @@ struct Shared {
     io: Mutex<()>,
     background_save: AtomicBool,
     background_result: Mutex<Option<Result<(), String>>>,
+    autosave: Arc<autosave::Autosave>,
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        self.autosave.stop();
+    }
 }
 
 struct Live {
@@ -78,6 +87,7 @@ impl Handle {
             io: Mutex::new(()),
             background_save: AtomicBool::new(false),
             background_result: Mutex::new(None),
+            autosave: Arc::default(),
         }))
     }
 
@@ -190,9 +200,11 @@ impl Handle {
         if let Stage::ToolBatchResult(receipt) = &stage {
             context::validate_batch_receipt(receipt)?;
         }
+        // Disk access is awaited first: a save in progress never holds up the
+        // conversation's own history.
+        let _io = self.0.io.lock().unwrap();
         let messages = archive.messages.lock().unwrap();
         let events = archive.events.lock().unwrap();
-        let _io = self.0.io.lock().unwrap();
         let mut live = self.0.live.lock().unwrap();
         if live.deleted {
             return Err("This session was deleted; start a new conversation".into());
@@ -230,6 +242,10 @@ impl Handle {
             .map(|event| live.redactor.value(event))
             .collect::<Vec<_>>();
         live.document.events.extend(appended);
+        // The redacted tail is copied: the conversation's own history is free
+        // again before the save validates and writes.
+        drop(events);
+        drop(messages);
         live.document.model = has_model.then(|| live.redactor.text(&archive.model));
         live.document.backend = archive.backend.clone();
         live.document.legacy_origin = archive.legacy_origin.clone();
@@ -395,69 +411,16 @@ impl Handle {
         if !due || self.0.background_save.swap(true, Ordering::AcqRel) {
             return Ok(false);
         }
-        let handle = self.clone();
-        match std::thread::Builder::new()
-            .name("jecode-autosave".into())
-            .spawn(move || {
-                let result = handle.flush();
-                *handle.0.background_result.lock().unwrap() = Some(result);
-                handle.0.background_save.store(false, Ordering::Release);
-            }) {
-            Ok(_) => Ok(false),
-            Err(error) => {
-                self.0.background_save.store(false, Ordering::Release);
-                Err(format!("Could not start autosave: {error}"))
-            }
+        if let Err(error) = self.0.autosave.request(&self.0) {
+            self.0.background_save.store(false, Ordering::Release);
+            return Err(error);
         }
+        Ok(false)
     }
 
     pub fn flush(&self) -> Result<(), String> {
         let _io = self.0.io.lock().unwrap();
         self.save_locked_io()
-    }
-
-    fn save_locked_io(&self) -> Result<(), String> {
-        let (document, store, lease, revision, validated) = {
-            let mut live = self.0.live.lock().unwrap();
-            if live.deleted || live.dirty.is_none() {
-                return Ok(());
-            }
-            if !live.document.meaningful() && live.lease.is_none() {
-                live.dirty = None;
-                return Ok(());
-            }
-            // A failed attempt remains dirty, with a bounded interval before retry.
-            live.dirty = Some(Instant::now());
-            let mut validated = live.validated.clone();
-            context::validate_from(&live.document, &mut validated)?;
-            let mut document = live.document.clone();
-            document.updated = now();
-            (
-                document,
-                live.store.clone(),
-                live.lease.clone(),
-                live.revision,
-                validated,
-            )
-        };
-        let lease = match lease {
-            Some(lease) => lease,
-            None => {
-                let lease = Arc::new(store.create(&document.id)?);
-                self.0.live.lock().unwrap().lease = Some(lease.clone());
-                lease
-            }
-        };
-        let result = lease.save(&document);
-        if result.is_ok() {
-            let mut live = self.0.live.lock().unwrap();
-            live.validated = validated;
-            live.document.updated = document.updated;
-            if live.revision == revision {
-                live.dirty = None;
-            }
-        }
-        result
     }
 
     pub(crate) fn delete(
