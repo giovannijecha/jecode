@@ -80,8 +80,6 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
     let (mut agent, _) = measured_growth_agent(&directory, &fixture);
     // The rejected request learns a 75% ceiling. Reserve room above the
     // current fixed prompt and tool catalog while removable history grows.
-    let window = agent.fixture_capacity(8_192, 75);
-    agent.client.fixture_limits(window, None);
     let raw = {
         let mut uncalibrated = agent.context.clone();
         uncalibrated.calibration = None;
@@ -91,7 +89,16 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
             .unwrap();
         uncalibrated.estimate_growth(&messages, measured, agent.client.inputs())
     };
-    let extra = window.saturating_sub(raw).saturating_add(512);
+    let window = agent
+        .fixture_capacity(8_192, 75)
+        .max(raw.saturating_add(8_192));
+    agent.client.fixture_limits(window, None);
+    let (tokens, bytes) = agent.context.calibration.unwrap();
+    let extra = crate::context::threshold(window, 99)
+        .saturating_sub(raw)
+        .saturating_sub(512)
+        .saturating_mul(bytes)
+        / tokens;
     const NOTE: &str = "Earlier inspection note. ";
     agent.messages.lock().unwrap().insert(
         2,
@@ -159,6 +166,20 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
                 vec![],
             ),
         ),
+        (
+            200,
+            completion(
+                "Original objective retained, including the last portion.",
+                vec![],
+            ),
+        ),
+        (
+            200,
+            completion(
+                "Original objective retained, including the last portion.",
+                vec![],
+            ),
+        ),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -173,7 +194,9 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
         .messages
         .lock()
         .unwrap()
-        .extend(crate::test_support::prior_compactable_exchange(fixed));
+        .extend(crate::test_support::prior_compactable_exchange(
+            fixed.saturating_mul(3),
+        ));
     agent.set_auto_compact(90);
     agent
         .run_turn(&prompt, &mut |event| {
@@ -189,14 +212,14 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
             && message.get("content").and_then(Value::as_str) == Some(prompt.as_str())
     }));
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 6);
     assert!(
-        requests[1..3]
+        requests[1..5]
             .iter()
             .all(|request| request.body.get("tools").is_none())
     );
-    assert!(requests[3].body.get("tools").is_some());
-    assert!(requests[3].body.encode().contains("last portion"));
+    assert!(requests[5].body.get("tools").is_some());
+    assert!(requests[5].body.encode().contains("last portion"));
     assert_eq!(
         agent
             .messages
@@ -214,8 +237,12 @@ fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt()
 fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
     let directory = Directory::new();
     let home = Directory::new();
-    std::fs::write(directory.path().join("source"), "evidence\n".repeat(2000)).unwrap();
-    let mut first = completion(
+    std::fs::write(
+        directory.path().join("source"),
+        "evidence and inspected data remain available\n".repeat(2000),
+    )
+    .unwrap();
+    let first = completion(
         "",
         vec![tool_call(
             "read",
@@ -226,16 +253,6 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
             ]),
         )],
     );
-    if let Value::Object(fields) = &mut first {
-        // Budget-relative synthetic usage keeps compaction at the post-read boundary as the catalog grows.
-        fields.insert(
-            "usage".into(),
-            Value::object([(
-                "prompt_tokens",
-                Value::number(6000 + crate::tools::encoded_size()),
-            )]),
-        );
-    }
     let fixture = HttpFixture::new(vec![
         (200, first),
         (
@@ -249,7 +266,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
     let client = OpenRouter::fixture(fixture.endpoint.clone());
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.enable_sessions(home.path()).unwrap();
-    let capacity = agent.fixture_capacity(6_000, 80);
+    let capacity = agent.fixture_capacity(40_000, 80);
     agent.client.fixture_limits(capacity, Some(4096));
     agent.prepare_turn("Inspect").unwrap();
     let handle = agent.sessions().unwrap();
@@ -281,6 +298,9 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
     agent.save_session().unwrap();
     let saved = handle.store().fixture_load(&handle.id()).unwrap();
     assert_eq!(saved.context.from, 1);
+    assert!(!saved.events.iter().any(|event| {
+        event.get("command").and_then(Value::as_str) == Some("Context compaction")
+    }));
     assert_eq!(saved.messages.len(), 4);
     assert!(saved.messages[3].encode().contains("evidence"));
     assert_eq!(fixture.finish().len(), 2);
@@ -343,7 +363,7 @@ fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
         &[Value::string(constraint)]
     );
     assert!(agent.context.summary.len() > 8192);
-    assert!(agent.context_status().tokens < capacity);
+    assert!(agent.locked_estimate() < capacity);
     assert_eq!(agent.messages.lock().unwrap().len(), 6);
     assert_eq!(
         agent

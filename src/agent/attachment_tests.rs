@@ -322,19 +322,18 @@ fn text_only_model_does_not_budget_for_unsent_image_parts() {
         .prepare_turn(Prompt::new(MARKER.to_string(), vec![image]))
         .unwrap();
     let messages = agent.messages.lock().unwrap().clone();
-    let projected = agent.projected_context(&agent.context, &messages);
-    let bare = projected
+    let request = agent.transport_messages();
+    let bare = request
         .iter()
         .map(|message| message.encode().len())
         .sum::<usize>()
-        + crate::tools::encoded_size()
-        + agent.request_environment().len();
+        + crate::tools::encoded_size();
     assert_eq!(
         agent.context_estimate(&agent.environment(), &messages),
-        bare
+        bare.div_ceil(4)
     );
     let request = crate::backend::openrouter::attachments::materialize(
-        projected,
+        request,
         agent.tools.attachments(),
         agent.client.inputs(),
     )

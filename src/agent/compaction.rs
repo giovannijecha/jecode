@@ -9,16 +9,21 @@ use crate::{
 
 impl Agent {
     /// Applies from the next model request of the active conversation.
-    pub fn set_auto_compact(&mut self, percent: u8) {
-        self.auto_compact = percent;
+    pub fn set_auto_compact(&self, percent: u8) {
+        self.auto_compact
+            .store(percent, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// The projected next request against the effective window, for display.
+    pub fn auto_compact_percent(&self) -> u8 {
+        self.auto_compact.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Only counts actually reported for this provider, model and account.
     pub fn context_status(&self) -> context::Status {
         context::Status {
-            tokens: self.locked_estimate(),
-            capacity: self.context.capacity(self.client.known_limits()),
-            auto_compact: self.auto_compact,
+            tokens: self.context.reported.tokens_for(&self.identity()),
+            capacity: self.client.known_limits().map(|limits| limits.context),
+            auto_compact: self.auto_compact_percent(),
         }
     }
 
@@ -49,13 +54,13 @@ impl Agent {
                 continue;
             }
             let timing = super::timing::RequestTiming::start();
-            self.emit_context(events)?;
             // Summarization and event delivery can take time. Include restores
             // observed during that work before constructing the next request.
             self.reload_restored_instructions();
             let seen = self.collaboration.latest_return_sequence();
-            let mut messages = self.transport_messages();
-            super::continuation::end_with_user_turn(&mut messages);
+            let request = self.transport_request();
+            self.emit_context(events)?;
+            let messages = &request.messages;
             self.collaboration_seen = seen;
             let output_tokens = limits.and_then(|limits| {
                 limits.output.map(|_| {
@@ -67,7 +72,7 @@ impl Agent {
                             .min(limits.context),
                         ..limits
                     };
-                    limits.output_allowance(self.locked_estimate())
+                    limits.output_allowance(request.estimated_tokens)
                 })
             });
             if output_tokens == Some(0) {
@@ -93,7 +98,7 @@ impl Agent {
             // Rebuild after every retry wait so newly observed restores and
             // submitted messages reach the next provider request as well.
             let result = self.complete_attempt(
-                &messages,
+                messages,
                 true,
                 output_tokens,
                 &mut retries,
@@ -103,8 +108,8 @@ impl Agent {
             match result {
                 Ok(None) => {}
                 Ok(Some(completion)) => {
-                    let input_end = self.messages.lock().unwrap().len();
-                    self.context.observe(completion.usage.as_ref(), input_end);
+                    self.context
+                        .record_request(completion.usage.as_ref(), request.measurement);
                     if let Some(tokens) = completion
                         .usage
                         .as_ref()
@@ -112,10 +117,6 @@ impl Agent {
                     {
                         emit(Event::Generated { tokens })?;
                     }
-                    self.context.calibrate(
-                        self.context_bytes(&messages)
-                            .saturating_add(crate::tools::encoded_size_for(!self.child)),
-                    );
                     return Ok(completion);
                 }
                 Err(error) if error.kind == FailureKind::Context => {
@@ -176,10 +177,11 @@ impl Agent {
         };
         // One configured budget triggers reduction, sizes previews and the
         // retained view, and checks the result. Provider rejections force it.
-        let input_budget = self.context.budget(limits, self.auto_compact);
+        let percent = self.auto_compact_percent();
+        let input_budget = self.context.budget(limits, percent);
         let budget_text = format!(
             "the auto-compact budget ({}% of {} tokens)",
-            self.auto_compact,
+            percent,
             self.context
                 .capacity(Some(limits))
                 .unwrap_or(limits.context)
@@ -192,8 +194,7 @@ impl Agent {
             let mut preview = self.context.clone();
             preview.preview_until = original.len();
             preview.preview_limit = (input_budget / 12).clamp(512, 2048);
-            preview.input_tokens = None;
-            preview.measured_end = 0;
+            preview.clear_measurement();
             let after = self.context_bytes(&self.projected_context(&preview, &original));
             let large_output = original[self.context.from..].iter().any(|message| {
                 message.get("role").and_then(Value::as_str) == Some("tool")
@@ -212,17 +213,11 @@ impl Agent {
             });
             if large_output
                 && after < before
-                && self
-                    .projected_estimate(&preview, &original)
-                    .saturating_add(self.request_environment_for(&environment, &original).len())
-                    < input_budget
+                && self.context_estimate_for(&preview, &environment, &original) < input_budget
             {
                 // Keep every conversation group and its proof. A native preview
                 // can remove oversized tool payloads without a model summary.
                 drop(original);
-                events.emit(Event::ContextCompacted {
-                    text: "Large tool results shown as context previews · full original results remain readable in history".into(),
-                })?;
                 let previous = std::mem::replace(&mut self.context, preview);
                 if let Err(error) = self.checkpoint(Stage::Preserve) {
                     self.context = previous;
@@ -237,6 +232,9 @@ impl Agent {
                         ("after_bytes".into(), after.to_string()),
                     ],
                 );
+                events.emit(Event::ContextCompacted {
+                    text: "Large tool results shown as context previews · full original results remain readable in history".into(),
+                })?;
                 return Ok(false);
             }
         }
@@ -246,18 +244,16 @@ impl Agent {
         let end = self.recent_boundary(&original, input_budget / 4);
         // Summarize the older prefix and keep recent complete exchanges verbatim.
         let mut next = self.context.clone();
+        next.clear_measurement();
         next.from = end;
         next.skill_references = self.redact(&self.skill_checkpoint_instructions());
         next.preview_until = end;
         next.preview_limit = (input_budget / 12).clamp(512, 2048);
         next.request_limit = (input_budget / 4).max(1024);
         next.summary = " ".into();
-        let fixed = next.estimate_bytes(
-            self.context_bytes(&self.projected_context(&next, &original))
-                .saturating_add(crate::tools::encoded_size_for(!self.child))
-                .saturating_add(self.request_environment_for(&environment, &original).len())
-                .saturating_add(768),
-        );
+        let fixed = self
+            .context_estimate_for(&next, &environment, &original)
+            .saturating_add(next.estimate_bytes(768));
         let limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
         if limit < 512 {
             return Err(format!(
@@ -293,15 +289,9 @@ impl Agent {
             self.summarize(&transcript, &requests, limits, limit, events)?;
         next.summary = self.redact(&summary);
         next.summary_output_tokens = output_floor;
-        next.input_tokens = None;
-        next.measured_end = 0;
         let environment = self.environment();
         let original = self.messages.lock().unwrap();
-        if self
-            .projected_estimate(&next, &original)
-            .saturating_add(self.request_environment_for(&environment, &original).len())
-            >= input_budget
-        {
+        if self.context_estimate_for(&next, &environment, &original) >= input_budget {
             return Err(format!(
                 "The summary and original user requests do not fit {budget_text}; the previous context and original session are preserved. Raise Auto-compact at in /settings or choose a model with more context."
             ));
@@ -314,20 +304,21 @@ impl Agent {
         let count = end - self.context.from;
         let previous = std::mem::replace(&mut self.context, next);
         let text = format!("Context compacted · {count} messages summarized");
-        self.record_local_details(
+        if let Err(error) = self.checkpoint(Stage::Preserve) {
+            self.context = previous;
+            return Err(error);
+        }
+        let mut event = self.local_details_event(
             "Context compaction",
             "Conversation summary prepared",
             "notice",
             &[("model".into(), self.model().into())],
         );
-        if let Some(Value::Object(event)) = self.events.lock().unwrap().last_mut() {
-            event.insert("summary".into(), Value::string(&self.context.summary));
-            event.insert("context_from".into(), Value::number(end));
+        if let Value::Object(fields) = &mut event {
+            fields.insert("summary".into(), Value::string(&self.context.summary));
+            fields.insert("context_from".into(), Value::number(end));
         }
-        if let Err(error) = self.checkpoint(Stage::Preserve) {
-            self.context = previous;
-            return Err(error);
-        }
+        self.events.lock().unwrap().push(event);
         events.emit(Event::ContextCompacted { text })?;
         Ok(true)
     }
@@ -335,17 +326,40 @@ impl Agent {
     fn recent_boundary(&self, messages: &[Value], budget: usize) -> usize {
         let mut boundary = messages.len();
         let mut bytes = 0usize;
+        let mut measured = 0usize;
+        let mut media = 0usize;
+        let origin = self.identity();
         let active_start = crate::attachments::active_view_start(messages);
         for index in (self.context.from..messages.len()).rev() {
             if self.context.returned.contains(&index) {
                 continue;
             }
-            bytes = bytes.saturating_add(context::bytes_for_message(
-                &messages[index],
-                index >= active_start,
-                self.client.inputs(),
-            ));
-            if self.context.estimate_bytes(bytes) > budget {
+            let message = &messages[index];
+            if let Some(tokens) = crate::conversation::output_tokens_for(message, &origin) {
+                measured = measured.saturating_add(tokens);
+            } else {
+                let weight = if index >= active_start
+                    || message.get("role").and_then(Value::as_str) != Some("tool")
+                {
+                    crate::attachments::weight_for(message, self.client.inputs())
+                } else {
+                    0
+                };
+                let size = context::bytes_for_message(
+                    message,
+                    index >= active_start,
+                    self.client.inputs(),
+                );
+                bytes = bytes.saturating_add(size.saturating_sub(weight));
+                media = media.saturating_add(weight);
+            }
+            if self
+                .context
+                .estimate_bytes(bytes)
+                .saturating_add(measured)
+                .saturating_add(media)
+                > budget
+            {
                 break;
             }
             // A tool call and all its results must stay on the same side.

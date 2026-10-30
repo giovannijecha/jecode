@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn the_final_accounting_choice_can_repeat_the_terminal_finish_reason() {
+    let mut stream = Stream::default();
+    let mut reported = Vec::new();
+    let content = delta(
+        Value::object([("content", Value::string("Done"))]),
+        Value::string("stop"),
+    );
+    let accounting = "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120}}\n\ndata: [DONE]\n\n";
+    stream
+        .feed(format!("{content}{accounting}").as_bytes(), &mut |update| {
+            if let Update::Usage(usage) = update {
+                reported.push(usage.context_tokens());
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(reported, [Some(120)]);
+    let completion = stream.finish("").unwrap();
+    assert_eq!(completion.text, "Done");
+    assert_eq!(completion.usage.unwrap().context_tokens(), Some(120));
+}
+use std::cell::RefCell;
+
 fn delta(value: Value, finish: Value) -> String {
     format!(
         "data: {}\n\n",
@@ -66,6 +90,7 @@ fn fragmented_utf8_sse_preserves_reasoning_and_assembles_tool_arguments() {
                     Update::TextDelta(value) => text.push_str(&value),
                     Update::Reasoning => thinking = true,
                     Update::Working => {}
+                    Update::Usage(_) => {}
                     Update::Waiting { .. } => unreachable!("parser cannot dispatch a request"),
                 };
                 Ok(())
@@ -85,6 +110,72 @@ fn fragmented_utf8_sse_preserves_reasoning_and_assembles_tool_arguments() {
             .unwrap(),
         &[reasoning]
     );
+}
+
+#[test]
+fn usage_only_chunks_emit_live_counts_and_survive_completion() {
+    let mut stream = Stream::default();
+    let reported = RefCell::new(Vec::new());
+    let mut emit = |update| {
+        if let Update::Usage(usage) = update {
+            reported.borrow_mut().push(usage);
+        }
+        Ok(())
+    };
+    let text = delta(
+        Value::object([("content", Value::string("Done"))]),
+        Value::string("stop"),
+    );
+    stream.feed(text.as_bytes(), &mut emit).unwrap();
+    let input = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":10,\"total_tokens\":110}}\n\n";
+    stream.feed(input.as_bytes(), &mut emit).unwrap();
+    assert_eq!(
+        reported
+            .borrow()
+            .iter()
+            .map(|usage| usage.context_tokens())
+            .collect::<Vec<_>>(),
+        [Some(110)]
+    );
+    let partial = "data: {\"choices\":[],\"usage\":{\"completion_tokens\":20}}\n\n";
+    stream.feed(partial.as_bytes(), &mut emit).unwrap();
+    assert_eq!(
+        reported.borrow().last().unwrap().context_tokens(),
+        Some(120)
+    );
+    let total = "data: {\"choices\":[],\"usage\":{\"total_tokens\":125}}\n\ndata: [DONE]\n\n";
+    stream.feed(total.as_bytes(), &mut emit).unwrap();
+    assert_eq!(
+        reported
+            .borrow()
+            .iter()
+            .map(|usage| usage.context_tokens())
+            .collect::<Vec<_>>(),
+        [Some(110), Some(120), Some(125)]
+    );
+    let completion = stream.finish("").unwrap();
+    let usage = completion.usage.unwrap();
+    assert_eq!(usage.input_tokens, Some(100));
+    assert_eq!(usage.output_tokens, Some(20));
+    assert_eq!(usage.total_tokens, Some(125));
+}
+
+#[test]
+fn error_chunk_still_emits_provider_usage() {
+    let mut stream = Stream::default();
+    let mut reported = Vec::new();
+    let failure = "data: {\"usage\":{\"total_tokens\":0},\"error\":{\"message\":\"failed\"}}\n\n";
+    assert!(
+        stream
+            .feed(failure.as_bytes(), &mut |update| {
+                if let Update::Usage(usage) = update {
+                    reported.push(usage.context_tokens());
+                }
+                Ok(())
+            })
+            .is_err()
+    );
+    assert_eq!(reported, [Some(0)]);
 }
 
 #[test]

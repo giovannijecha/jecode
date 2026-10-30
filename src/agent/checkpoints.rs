@@ -64,7 +64,7 @@ impl Agent {
             .is_some_and(|session| session.take_restored_instructions())
         {
             let _ = self.refresh_project_instructions();
-            self.context.reset_usage();
+            self.context.reset_projection();
         }
     }
 

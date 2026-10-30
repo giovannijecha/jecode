@@ -19,8 +19,7 @@ impl Agent {
 
     pub(super) fn refresh_skills(&mut self) {
         if self.skills.refresh() {
-            self.context.input_tokens = None;
-            self.context.measured_end = 0;
+            self.context.clear_measurement();
         }
     }
 

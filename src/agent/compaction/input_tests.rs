@@ -109,6 +109,10 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
             200,
             completion("Original and updated objectives retained.", vec![]),
         ),
+        (
+            200,
+            completion("Original and updated objectives retained.", vec![]),
+        ),
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -148,7 +152,7 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
         2,
     );
     assert!(
-        agent.context_status().tokens
+        agent.locked_estimate()
             >= crate::context::threshold(limits.context, crate::context::AUTO_COMPACT_DEFAULT)
     );
     let inbox = agent.inbox();
@@ -175,16 +179,16 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
     let requests = fixture.finish();
     assert!(sent);
     assert_eq!(summaries_started, 2);
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 4);
     assert!(
-        requests[..2]
+        requests[..3]
             .iter()
             .all(|request| request.body.get("tools").is_none())
     );
     assert!(!requests[0].body.encode().contains("updated requirement"));
-    assert!(requests[1].body.encode().contains("updated requirement"));
-    assert!(requests[2].body.get("tools").is_some());
     assert!(requests[2].body.encode().contains("updated requirement"));
+    assert!(requests[3].body.get("tools").is_some());
+    assert!(requests[3].body.encode().contains("updated requirement"));
     assert_eq!(
         agent
             .messages

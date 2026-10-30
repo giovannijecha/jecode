@@ -10,7 +10,12 @@ use crate::{
 /// This request-only note ends the request with a user turn instead; the
 /// transcript never stores it.
 pub(super) fn end_with_user_turn(messages: &mut Vec<Value>) {
-    let last = messages.last();
+    if let Some(note) = note_after(messages.last()) {
+        messages.push(note);
+    }
+}
+
+pub(super) fn note_after(last: Option<&Value>) -> Option<Value> {
     let open = match last
         .and_then(|message| message.get("role"))
         .and_then(Value::as_str)
@@ -22,15 +27,15 @@ pub(super) fn end_with_user_turn(messages: &mut Vec<Value>) {
             .is_none_or(|calls| calls.is_empty()),
         _ => false,
     };
-    if open {
-        messages.push(Value::object([
+    open.then(|| {
+        Value::object([
             ("role", Value::string("user")),
             (
                 "content",
                 Value::string("No new user message. Continue from the current session state."),
             ),
-        ]));
-    }
+        ])
+    })
 }
 
 impl Agent {

@@ -62,7 +62,7 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
     // native catalog grows; the recent exchange must still fit verbatim.
     let original = history(
         &mut agent,
-        &"Earlier findings ".repeat(crate::tools::encoded_size() / 32),
+        &"Earlier findings ".repeat(crate::tools::encoded_size() / 8),
     );
     // Reserve room for the retained exchange and summary independently of
     // native prompt/catalog wording. This test checks continuity, not a 24K limit.
@@ -160,7 +160,11 @@ fn expired_tool_view_does_not_shrink_the_recent_tail() {
         ]),
         message("tool", &receipt.encode()),
     ];
-    let budget = crate::context::bytes_for(&messages[2..], agent.client.inputs());
+    let media = crate::attachments::weight_for(&messages[7], agent.client.inputs());
+    let budget = agent
+        .context
+        .estimate_bytes(crate::context::bytes_for(&messages[2..], agent.client.inputs()) - media)
+        + media;
     assert_eq!(agent.recent_boundary(&messages, budget), 2);
 }
 
@@ -181,7 +185,7 @@ fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let original = history(&mut agent, &"Earlier findings ".repeat(4000));
+    let original = history(&mut agent, &"Earlier findings ".repeat(10000));
     // Leave room for native instructions and the retained exchange while
     // keeping the transcript large enough to require a second portion.
     let fixed = agent.current_system_message().encode().len()
@@ -247,7 +251,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
     };
     let result = agent.execute_tool(&call);
     agent.tool_result(&call, &result);
-    let capacity = agent.fixture_capacity(8_192, 80);
+    let capacity = agent.fixture_capacity(32_000, 80);
     agent.messages.lock().unwrap().extend([
         Value::object([
             ("role", Value::string("assistant")),

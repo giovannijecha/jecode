@@ -4,9 +4,17 @@ use crate::{
     json::Value,
     tools::Tools,
 };
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, atomic::AtomicU8},
+    time::Duration,
+};
 
 impl Agent {
+    pub(crate) fn auto_compact_preference(&self) -> Arc<AtomicU8> {
+        Arc::clone(&self.auto_compact)
+    }
+
     pub(super) fn agent_tool(&self, arguments: &Value) -> Result<Value, String> {
         if self.child {
             return Err("Collaborators cannot delegate or manage agents".into());
@@ -220,7 +228,7 @@ impl Agent {
         // Every agent works at the conversation's level and shares its grants.
         child.permissions = self.permissions.for_agent(id);
         child.accounts = self.accounts.clone();
-        child.auto_compact = self.auto_compact;
+        child.auto_compact = self.auto_compact_preference();
         child.routing_preferences = self.routing_preferences.clone();
         child.redactor.include(self.redactor.clone());
         if mode == Mode::Isolated {

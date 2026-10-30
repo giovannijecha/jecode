@@ -19,6 +19,8 @@ pub(super) struct Facts {
     pub has_model: bool,
     pub model: String,
     pub effort: Effort,
+    /// A live preference shared with the execution worker and its collaborators.
+    pub auto_compact: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub routing: Routing,
     routing_preferences: Option<BTreeMap<(String, String), Routing>>,
     /// The listing cached for `model`.
@@ -38,6 +40,7 @@ impl Facts {
             has_model: agent.has_model(),
             model: agent.model().into(),
             effort: agent.effort(),
+            auto_compact: agent.auto_compact_preference(),
             routing: agent.routing(),
             routing_preferences: agent.routing_preferences_snapshot(),
             endpoints: agent.cached_endpoints(agent.model()),
@@ -78,8 +81,6 @@ pub(super) enum Deferred {
         backend: String,
         preferences: BTreeMap<String, Routing>,
     },
-    /// The saved auto-compact threshold changed.
-    AutoCompact,
     Register(Services),
     /// The active ChatGPT account changed.
     Credentials,
@@ -178,11 +179,6 @@ impl App {
                         .as_mut()
                         .unwrap()
                         .set_backend_routing_preferences(&backend, preferences);
-                }
-                Deferred::AutoCompact => {
-                    let percent = self.config.settings.auto_compact;
-                    self.agent.as_mut().unwrap().set_auto_compact(percent);
-                    self.refresh_context();
                 }
                 Deferred::Register(services) => {
                     let agent = self.agent.as_mut().unwrap();

@@ -48,7 +48,7 @@ pub enum Event {
     Accepted {
         prompts: Vec<crate::attachments::Prompt>,
     },
-    /// The projected next request changed: input, usage, tools, reduction or capacity.
+    /// The provider's reported context count, capacity or configured threshold changed.
     Context(crate::context::Status),
     /// A response reported how many tokens it generated, reasoning included.
     Generated {

@@ -17,9 +17,9 @@ const NARROW: usize = 44;
 const MODEL: &str = "anthropic/claude-sonnet-5.5";
 const DIRECTORY: &str = r"C:\Projects\example";
 
-/// The engine projection shown by the footer: 122,400 of 200,000 tokens.
+/// A provider usage snapshot shown by the footer: 122,400 of 200,000 tokens.
 const STATUS: Status = Status {
-    tokens: 122_400,
+    tokens: Some(122_400),
     capacity: Some(200_000),
     auto_compact: 80,
 };
@@ -116,9 +116,15 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         capacity: None,
         ..STATUS
     });
+    let mut unmeasured = state(columns);
+    unmeasured.context = Some(Status {
+        tokens: None,
+        ..STATUS
+    });
 
     vec![
         ("Idle", idle),
+        ("Provider usage unknown", unmeasured),
         ("Context capacity unknown", unknown),
         ("Typing a long draft", typing),
         ("Working", work),

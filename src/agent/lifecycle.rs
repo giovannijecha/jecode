@@ -173,7 +173,7 @@ impl Agent {
             self.context.skill_references = self.redact(&self.skill_checkpoint_instructions());
         }
         let calibration = self.context.calibration;
-        self.context.reset_usage();
+        self.context.reset_projection();
         self.context.calibration = calibration;
         self.prepared = None;
         self.project_instructions.clear();

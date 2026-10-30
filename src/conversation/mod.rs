@@ -91,6 +91,40 @@ pub fn has_origin(message: &Value) -> bool {
     message.get(ENVELOPE).is_some()
 }
 
+/// Durable accounting stays outside provider extras, so it never reaches the wire.
+pub(crate) fn record_output_tokens(message: &mut Value, tokens: Option<usize>) {
+    if let Some(tokens) = tokens
+        && let Value::Object(fields) = message
+        && let Some(Value::Object(origin)) = fields.get_mut(ENVELOPE)
+    {
+        origin.insert("output_tokens".into(), Value::number(tokens));
+    }
+}
+
+pub(crate) fn output_tokens(message: &Value) -> Option<usize> {
+    message.get(ENVELOPE)?.get("output_tokens")?.as_usize()
+}
+
+pub(crate) fn output_tokens_for(message: &Value, current: &Origin) -> Option<usize> {
+    (Origin::parse(message.get(ENVELOPE)?).ok().as_ref() == Some(current))
+        .then(|| output_tokens(message))
+        .flatten()
+}
+
+/// A different model or account receives portable text, not the measured native response.
+pub(crate) fn retain_output_measurement(message: &mut Value, current: &Origin) {
+    if message
+        .get(ENVELOPE)
+        .and_then(|value| Origin::parse(value).ok())
+        .as_ref()
+        != Some(current)
+        && let Value::Object(fields) = message
+        && let Some(Value::Object(origin)) = fields.get_mut(ENVELOPE)
+    {
+        origin.remove("output_tokens");
+    }
+}
+
 /// Marks a newly received message and moves nonportable fields into its
 /// original backend's envelope. Already marked messages retain their origin.
 pub fn stamp(message: &mut Value, origin: &Origin) {

@@ -77,7 +77,7 @@ pub(super) fn console() {
         height,
         collaboration: vec![record()],
         context: Some(Status {
-            tokens: 34_000,
+            tokens: Some(34_000),
             capacity: Some(100_000),
             auto_compact: 80,
         }),

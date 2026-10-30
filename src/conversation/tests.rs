@@ -17,9 +17,14 @@ fn account_owned_items_only_return_to_the_same_verified_registration() {
     ]);
     let mut stored = original.clone();
     stamp(&mut stored, &account_a);
+    record_output_tokens(&mut stored, Some(75_000));
+    assert_eq!(output_tokens(&stored), Some(75_000));
     assert_eq!(Origin::parse(&account_a.value()).unwrap(), account_a);
     assert_eq!(project(&stored, &account_a), original);
     for other in [account_b, Origin::new("openai", "model")] {
+        let mut counted = stored.clone();
+        retain_output_measurement(&mut counted, &other);
+        assert_eq!(output_tokens(&counted), None);
         let projected = project(&stored, &other);
         assert!(projected.get("openai_items").is_none());
         assert_eq!(

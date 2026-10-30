@@ -79,7 +79,7 @@ impl Agent {
             ("result", Value::string(self.redact(status))),
             ("after_message", Value::number(boundary)),
         ]));
-        self.context.reset_usage();
+        self.context.reset_projection();
     }
 }
 

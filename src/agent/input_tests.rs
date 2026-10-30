@@ -215,21 +215,18 @@ fn a_retry_is_rebuilt_with_messages_sent_while_it_waited() {
 fn messages_sent_during_compaction_join_the_request_after_it() {
     let directory = Directory::new();
     let prompt = "original objective ".repeat(1500);
-    let fixture = HttpFixture::new(vec![
-        (
-            400,
-            Value::object([(
-                "error",
-                Value::object([
-                    ("code", Value::string("context_length_exceeded")),
-                    ("message", Value::string("Maximum context length exceeded")),
-                ]),
-            )]),
-        ),
-        (200, completion("Original objective retained.", vec![])),
-        (200, completion("Original objective retained.", vec![])),
-        (200, completion("Finished.", vec![])),
-    ]);
+    let mut responses = vec![(
+        400,
+        Value::object([(
+            "error",
+            Value::object([
+                ("code", Value::string("context_length_exceeded")),
+                ("message", Value::string("Maximum context length exceeded")),
+            ]),
+        )]),
+    )];
+    responses.extend((0..6).map(|_| (200, completion("Original objective retained.", vec![]))));
+    let fixture = HttpFixture::new(responses);
     let mut agent = agent(&directory, &fixture);
     let fixed = agent.current_system_message().encode().len()
         + crate::tools::encoded_size()
@@ -256,10 +253,27 @@ fn messages_sent_during_compaction_join_the_request_after_it() {
         })
         .unwrap();
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 4);
-    assert!(!requests[1].body.encode().contains("during compaction"));
+    assert_eq!(requests.len(), 7);
+    assert!(
+        requests[..6]
+            .iter()
+            .all(|request| !request.body.encode().contains("during compaction"))
+    );
+    assert!(
+        requests[1..6]
+            .iter()
+            .all(|request| request.body.get("tools").is_none())
+    );
+    assert!(requests[6].body.get("tools").is_some());
     assert_eq!(
-        users(&requests[3]).last().map(String::as_str),
+        users(&requests[6])
+            .iter()
+            .filter(|text| text.as_str() == "during compaction")
+            .count(),
+        1
+    );
+    assert_eq!(
+        users(&requests[6]).last().map(String::as_str),
         Some("during compaction")
     );
 }

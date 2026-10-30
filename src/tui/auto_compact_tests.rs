@@ -129,3 +129,28 @@ fn cancelling_or_a_failed_save_keeps_the_previous_threshold_active_and_saved() {
     assert_preference(&app, 80);
     assert!(fixture.finish().is_empty());
 }
+
+#[test]
+fn a_saved_threshold_reaches_the_worker_before_it_returns_the_agent() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let agent = app.hold();
+    assert!(app.agent.is_none());
+    open(&mut app);
+    app.state.selector.as_mut().unwrap().editor.set("55".into());
+    enter(&mut app);
+    assert_eq!(agent.context_status().auto_compact, 55);
+    assert_eq!(app.state.context.unwrap().auto_compact, 55);
+    let mut queued = app.state.context.unwrap();
+    queued.auto_compact = 80;
+    app.worker_event(crate::events::Event::Context(queued));
+    assert_eq!(app.state.context.unwrap().auto_compact, 55);
+    assert_eq!(app.config.store.load().unwrap().unwrap().auto_compact, 55);
+    assert!(app.deferred.is_empty());
+    app.agent = Some(agent);
+    app.apply_deferred();
+    app.refresh_context();
+    assert_preference(&app, 55);
+    assert!(fixture.finish().is_empty());
+}

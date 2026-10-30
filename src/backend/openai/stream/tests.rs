@@ -1,4 +1,135 @@
 use super::*;
+use std::cell::RefCell;
+
+#[test]
+fn usage_arrives_before_completion_and_preserves_provider_total() {
+    let mut stream = Stream::default();
+    let reported = RefCell::new(Vec::new());
+    let mut emit = |update| {
+        if let Update::Usage(usage) = update {
+            reported.borrow_mut().push(usage);
+        }
+        Ok(())
+    };
+    let update = Value::object([
+        ("type", Value::string("response.in_progress")),
+        (
+            "response",
+            Value::object([(
+                "usage",
+                Value::object([
+                    ("input_tokens", Value::number(500)),
+                    ("output_tokens", Value::number(0)),
+                    ("total_tokens", Value::number(500)),
+                ]),
+            )]),
+        ),
+    ]);
+    stream.event(&update.encode(), &mut emit).unwrap();
+    assert_eq!(
+        reported
+            .borrow()
+            .iter()
+            .map(|usage| usage.context_tokens())
+            .collect::<Vec<_>>(),
+        [Some(500)]
+    );
+
+    let partial = Value::object([
+        ("type", Value::string("response.in_progress")),
+        (
+            "response",
+            Value::object([(
+                "usage",
+                Value::object([("output_tokens", Value::number(20))]),
+            )]),
+        ),
+    ]);
+    stream.event(&partial.encode(), &mut emit).unwrap();
+    assert_eq!(
+        reported.borrow().last().unwrap().context_tokens(),
+        Some(520)
+    );
+
+    let completed = Value::object([
+        ("type", Value::string("response.completed")),
+        (
+            "response",
+            Value::object([
+                ("status", Value::string("completed")),
+                (
+                    "output",
+                    Value::Array(vec![Value::object([
+                        ("type", Value::string("message")),
+                        ("role", Value::string("assistant")),
+                        (
+                            "content",
+                            Value::Array(vec![Value::object([
+                                ("type", Value::string("output_text")),
+                                ("text", Value::string("Done")),
+                            ])]),
+                        ),
+                    ])]),
+                ),
+                (
+                    "usage",
+                    Value::object([
+                        ("input_tokens", Value::number(500)),
+                        ("output_tokens", Value::number(20)),
+                        ("total_tokens", Value::number(530)),
+                    ]),
+                ),
+            ]),
+        ),
+    ]);
+    stream.event(&completed.encode(), &mut emit).unwrap();
+    assert_eq!(
+        reported
+            .borrow()
+            .iter()
+            .map(|usage| usage.context_tokens())
+            .collect::<Vec<_>>(),
+        [Some(500), Some(520), Some(530)]
+    );
+    assert_eq!(
+        stream.finish().unwrap().usage.unwrap().total_tokens,
+        Some(530)
+    );
+}
+
+#[test]
+fn failed_and_incomplete_responses_emit_reported_usage() {
+    for (kind, total) in [("response.failed", 0), ("response.incomplete", 7)] {
+        let mut stream = Stream::default();
+        let mut reported = Vec::new();
+        let event = Value::object([
+            ("type", Value::string(kind)),
+            (
+                "response",
+                Value::object([
+                    (
+                        "usage",
+                        Value::object([("total_tokens", Value::number(total))]),
+                    ),
+                    (
+                        "error",
+                        Value::object([("message", Value::string("Stopped"))]),
+                    ),
+                ]),
+            ),
+        ]);
+        stream
+            .event(&event.encode(), &mut |update| {
+                if let Update::Usage(usage) = update {
+                    reported.push(usage.context_tokens());
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(reported, [Some(total)]);
+        assert!(stream.finish().is_err());
+    }
+}
 
 #[test]
 fn assistant_messages_are_separated_in_stream_and_saved_completion() {

@@ -10,6 +10,7 @@ pub(super) struct Stream {
     data: String,
     items: BTreeMap<usize, Value>,
     terminal: Option<Result<Value, Failure>>,
+    usage: Option<Usage>,
     has_text: bool,
     text_item: Option<usize>,
     message_boundary: bool,
@@ -52,11 +53,20 @@ impl Stream {
             return Err("OpenAI sent an event after the terminal response".into());
         }
         let event = json::parse(data)?;
-        match event
+        let kind = event
             .get("type")
             .and_then(Value::as_str)
-            .ok_or("OpenAI stream event has no type")?
+            .ok_or("OpenAI stream event has no type")?;
+        if let Some(usage) = event
+            .get("response")
+            .and_then(|response| response.get("usage"))
+            .and_then(parse_usage)
         {
+            let current = self.usage.get_or_insert_default();
+            current.update(usage);
+            emit(Update::Usage(*current))?;
+        }
+        match kind {
             "response.output_text.delta" | "response.refusal.delta" => {
                 if let Some(delta) = event.get("delta").and_then(Value::as_str)
                     && !delta.is_empty()
@@ -235,18 +245,7 @@ impl Stream {
                 Value::Array(calls.iter().map(ToolCall::value).collect()),
             );
         }
-        let usage = response.get("usage").map(|usage| Usage {
-            input_tokens: usage.get("input_tokens").and_then(Value::as_usize),
-            output_tokens: usage.get("output_tokens").and_then(Value::as_usize),
-            cached_tokens: usage
-                .get("input_tokens_details")
-                .and_then(|details| details.get("cached_tokens"))
-                .and_then(Value::as_usize),
-            cache_write_tokens: usage
-                .get("input_tokens_details")
-                .and_then(|details| details.get("cache_write_tokens"))
-                .and_then(Value::as_usize),
-        });
+        let usage = self.usage;
         // The plan reports no prices; cache reads still show the cache at work.
         let charges = usage.as_ref().and_then(|usage| {
             let cached = usage.cached_tokens.unwrap_or(0);
@@ -267,6 +266,23 @@ impl Stream {
             postprocess_error: None,
         })
     }
+}
+
+fn parse_usage(value: &Value) -> Option<Usage> {
+    let usage = Usage {
+        input_tokens: value.get("input_tokens").and_then(Value::as_usize),
+        output_tokens: value.get("output_tokens").and_then(Value::as_usize),
+        total_tokens: value.get("total_tokens").and_then(Value::as_usize),
+        cached_tokens: value
+            .get("input_tokens_details")
+            .and_then(|details| details.get("cached_tokens"))
+            .and_then(Value::as_usize),
+        cache_write_tokens: value
+            .get("input_tokens_details")
+            .and_then(|details| details.get("cache_write_tokens"))
+            .and_then(Value::as_usize),
+    };
+    (usage != Usage::default()).then_some(usage)
 }
 
 #[cfg(test)]
