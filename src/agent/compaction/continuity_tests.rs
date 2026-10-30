@@ -82,6 +82,22 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
         .unwrap();
     assert_eq!(agent.context.from, 3);
     assert_eq!(*agent.messages.lock().unwrap(), original);
+    let handle = agent.sessions().unwrap();
+    let saved = handle.store().fixture_load(&handle.id()).unwrap();
+    let event = saved
+        .events
+        .iter()
+        .find(|event| event.get("command").and_then(Value::as_str) == Some("Context compaction"))
+        .expect("The compaction record must be saved with the reduced context");
+    assert_eq!(
+        event.get("summary").and_then(Value::as_str),
+        Some(saved.context.summary.as_str())
+    );
+    assert_eq!(
+        event.get("context_from").and_then(Value::as_usize),
+        Some(saved.context.from)
+    );
+    drop(handle);
     let projected = agent.transport_messages();
     assert!(projected.ends_with(&original[3..]));
     assert!(projected[1].encode().contains("preserve protected.txt"));

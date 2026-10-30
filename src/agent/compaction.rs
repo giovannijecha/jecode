@@ -219,11 +219,7 @@ impl Agent {
                 // can remove oversized tool payloads without a model summary.
                 drop(original);
                 let previous = std::mem::replace(&mut self.context, preview);
-                if let Err(error) = self.checkpoint(Stage::Preserve) {
-                    self.context = previous;
-                    return Err(error);
-                }
-                self.record_local_details(
+                let event = self.local_details_event(
                     "Context previews",
                     "Reduced large tool payloads without summarizing conversation",
                     "notice",
@@ -232,6 +228,12 @@ impl Agent {
                         ("after_bytes".into(), after.to_string()),
                     ],
                 );
+                self.events.lock().unwrap().push(event.clone());
+                if let Err(error) = self.checkpoint(Stage::Compaction) {
+                    self.context = previous;
+                    self.withdraw_event(&event);
+                    return Err(error);
+                }
                 events.emit(Event::ContextCompacted {
                     text: "Large tool results shown as context previews · full original results remain readable in history".into(),
                 })?;
@@ -304,10 +306,6 @@ impl Agent {
         let count = end - self.context.from;
         let previous = std::mem::replace(&mut self.context, next);
         let text = format!("Context compacted · {count} messages summarized");
-        if let Err(error) = self.checkpoint(Stage::Preserve) {
-            self.context = previous;
-            return Err(error);
-        }
         let mut event = self.local_details_event(
             "Context compaction",
             "Conversation summary prepared",
@@ -318,7 +316,12 @@ impl Agent {
             fields.insert("summary".into(), Value::string(&self.context.summary));
             fields.insert("context_from".into(), Value::number(end));
         }
-        self.events.lock().unwrap().push(event);
+        self.events.lock().unwrap().push(event.clone());
+        if let Err(error) = self.checkpoint(Stage::Compaction) {
+            self.context = previous;
+            self.withdraw_event(&event);
+            return Err(error);
+        }
         events.emit(Event::ContextCompacted { text })?;
         Ok(true)
     }
@@ -385,5 +388,7 @@ mod tests;
 
 #[cfg(test)]
 mod continuity_tests;
+#[cfg(all(test, windows))]
+mod persistence_tests;
 #[cfg(test)]
 mod preview_tests;

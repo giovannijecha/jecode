@@ -87,6 +87,11 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
     let saved = handle.store().fixture_load(&handle.id()).unwrap();
     assert_eq!(saved.messages, original);
     assert_eq!(saved.context.preview_until, 4);
+    assert!(
+        saved.events.iter().any(|event| {
+            event.get("command").and_then(Value::as_str) == Some("Context previews")
+        })
+    );
     let retrieved = agent.execute_tool(&crate::backend::openrouter::ToolCall {
         id: "original".into(),
         name: "read".into(),

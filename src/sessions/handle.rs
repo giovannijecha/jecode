@@ -59,6 +59,8 @@ pub enum Stage {
     Preserve,
     /// A backend selection must either be saved in full or leave its old state.
     Selection,
+    /// A reduced context and its receipt must be saved together or rolled back.
+    Compaction,
 }
 
 impl Handle {
@@ -215,7 +217,7 @@ impl Handle {
         {
             return Err("Session history cannot shrink; start a new conversation instead".into());
         }
-        let selection = matches!(stage, Stage::Selection)
+        let replacement = matches!(stage, Stage::Selection | Stage::Compaction)
             .then(|| (live.document.clone(), live.validated.clone()));
         let preparation = matches!(
             stage,
@@ -300,7 +302,7 @@ impl Handle {
                 live.document.pending.completed.clear();
             }
             Stage::Ready => live.document.pending = Pending::default(),
-            Stage::Accept(_) | Stage::Preserve | Stage::Selection => {}
+            Stage::Accept(_) | Stage::Preserve | Stage::Selection | Stage::Compaction => {}
         }
         live.dirty.get_or_insert_with(Instant::now);
         live.revision = live.revision.wrapping_add(1);
@@ -308,7 +310,7 @@ impl Handle {
         drop(live);
         let result = self.save_locked_io();
         if result.is_err()
-            && let Some((document, validated)) = selection
+            && let Some((document, validated)) = replacement
         {
             let mut live = self.0.live.lock().unwrap();
             // UI input can be captured during the save; retain its latest value.
