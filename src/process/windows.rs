@@ -1,5 +1,6 @@
 use super::RunError;
 use crate::cancel::Cancellation;
+use crate::sandbox::MARKER;
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -12,18 +13,24 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const SANDBOX_ENV: &str = "JECODE_INTERNAL_SANDBOX_POLICY";
+const STOP_DEADLINE: Duration = Duration::from_secs(5);
+const HANDSHAKE_STOPPED: &str = "Windows process supervisor stopped before the command started";
+const COMPLETION_MISSING: &str =
+    "Windows process supervisor ended without completion status; command outcome is unknown";
 static NEXT_PIPE: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 #[path = "windows/sandbox_tests.rs"]
 mod sandbox_tests;
+
+/// The supervisor's completion report, delivered once by its reader thread.
+pub(super) type Report = mpsc::Receiver<Result<i32, String>>;
 
 pub(super) struct Spawned {
     pub child: Child,
     pub stdout: ChildStdout,
     pub writer: JoinHandle<io::Result<()>>,
     /// The supervisor's completion report; None for a directly started leaf.
-    pub completion: Option<JoinHandle<Result<i32, String>>>,
+    pub completion: Option<Report>,
     pub control: Option<File>,
     pub target_pid: u32,
 }
@@ -96,9 +103,20 @@ pub(super) fn spawn(
             Ok(Handshake::Stage(stage)) => last_stage = stage,
             Ok(Handshake::Done(stdout, Ok(target_pid))) => {
                 let _ = handshake.join();
-                let mut completion_file = connect_completion(&mut child, &pipe_name, cancellation)?;
-                let control = connect_control(&mut child, &pipe_name, cancellation)?;
-                let completion = thread::spawn(move || read_completion(&mut completion_file));
+                // The supervisor creates both channels before its handshake.
+                let mut completion_file =
+                    connect(&mut child, &pipe_name, "completion", false, cancellation)?;
+                let control = connect(
+                    &mut child,
+                    &format!("{pipe_name}-stop"),
+                    "stop",
+                    true,
+                    cancellation,
+                )?;
+                let (report, completion) = mpsc::channel();
+                thread::spawn(move || {
+                    let _ = report.send(read_completion(&mut completion_file));
+                });
                 return Ok(Spawned {
                     child,
                     stdout,
@@ -128,10 +146,24 @@ pub(super) fn spawn(
                 let _ = child.wait();
                 let _ = handshake.join();
                 let _ = writer.join();
+                // A supervisor that exited on its own may have reported why
+                // after the last receive; prefer that over a generic message.
+                let mut reported = None;
+                for event in receiver.try_iter() {
+                    match event {
+                        Handshake::Stage(stage) => last_stage = stage,
+                        Handshake::Done(_, Err(message)) if message != HANDSHAKE_STOPPED => {
+                            reported = Some(message);
+                        }
+                        Handshake::Done(..) => {}
+                    }
+                }
                 return Err(RunError {
                     started: false,
                     message: if cancellation.requested() {
                         "Operation cancelled".into()
+                    } else if let Some(message) = reported {
+                        message
                     } else {
                         format!(
                             "Windows process supervisor did not initialize (last stage: {}; exit code: {})",
@@ -180,10 +212,19 @@ pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Sp
     })
 }
 
+/// The sandbox policy carried by the trusted marker. An empty marker carries
+/// no policy and is treated exactly like an absent one, so a command is
+/// prepared as confined only when the supervisor will also confine it.
+pub(crate) fn sandbox_policy(command: &Command) -> Option<&OsStr> {
+    command
+        .get_envs()
+        .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(MARKER))
+        .and_then(|(_, value)| value)
+        .filter(|value| !value.is_empty())
+}
+
 fn configure(helper: &mut Command, command: &Command) {
-    if command.get_envs().any(|(key, value)| {
-        key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV) && value.is_some()
-    }) {
+    if sandbox_policy(command).is_some() {
         // A confined child inherits the helper's environment. Start it only
         // with the environment selected for this command by the Rust policy.
         helper.env_clear();
@@ -198,7 +239,7 @@ fn configure(helper: &mut Command, command: &Command) {
     }
     crate::auth::isolate_environment(helper);
     for (key, value) in command.get_envs() {
-        if key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV) {
+        if key.to_string_lossy().eq_ignore_ascii_case(MARKER) {
             continue;
         }
         if let Some(value) = value {
@@ -207,10 +248,12 @@ fn configure(helper: &mut Command, command: &Command) {
             helper.env_remove(key);
         }
     }
-    helper.env_remove(SANDBOX_ENV);
+    helper.env_remove(MARKER);
 }
 
-fn ordinary_path(path: &std::path::Path) -> std::path::PathBuf {
+/// Strips a `\\?\` or `\\?\UNC\` prefix, which child working directories
+/// such as cmd.exe's do not accept.
+pub(crate) fn ordinary_path(path: &std::path::Path) -> std::path::PathBuf {
     let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
     let verbatim = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
     if !wide.starts_with(&verbatim) {
@@ -234,26 +277,31 @@ fn encode_command(command: &Command, pipe_name: &str) -> Vec<u8> {
     for argument in command.get_args() {
         write_string(&mut data, argument);
     }
-    let policy = command
-        .get_envs()
-        .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV))
-        .and_then(|(_, value)| value);
-    write_string(&mut data, policy.unwrap_or_else(|| OsStr::new("")));
+    write_string(
+        &mut data,
+        sandbox_policy(command).unwrap_or_else(|| OsStr::new("")),
+    );
     data
 }
 
-fn connect_completion(
+/// Opens one of the supervisor's private channels. They exist before the
+/// handshake completes, so the first attempt normally succeeds; retries back
+/// off from 1 ms for a supervisor that is still starting them.
+fn connect(
     child: &mut Child,
     name: &str,
+    channel: &str,
+    write: bool,
     cancellation: &Cancellation,
 ) -> Result<File, RunError> {
     let path = format!(r"\\.\pipe\{name}");
     let started = Instant::now();
+    let mut delay = Duration::from_millis(1);
     loop {
-        if let Ok(file) = OpenOptions::new().read(true).open(&path) {
+        if let Ok(file) = OpenOptions::new().read(!write).write(write).open(&path) {
             return Ok(file);
         }
-        if cancellation.requested() || started.elapsed() >= Duration::from_secs(5) {
+        if cancellation.requested() || started.elapsed() >= STOP_DEADLINE {
             let _ = child.kill();
             let _ = child.wait();
             return Err(RunError {
@@ -261,61 +309,35 @@ fn connect_completion(
                 message: if cancellation.requested() {
                     "Operation cancelled while starting process".into()
                 } else {
-                    "Windows process supervisor did not open its completion channel; command outcome is unknown".into()
+                    format!(
+                        "Windows process supervisor did not open its {channel} channel; command outcome is unknown"
+                    )
                 },
             });
         }
         if matches!(child.try_wait(), Ok(Some(_))) {
             return Err(RunError {
                 started: true,
-                message: "Windows process supervisor exited before completion channel opened; command outcome is unknown".into(),
+                message: format!(
+                    "Windows process supervisor exited before its {channel} channel opened; command outcome is unknown"
+                ),
             });
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(delay);
+        delay = (delay * 2).min(Duration::from_millis(10));
     }
 }
 
-fn connect_control(
-    child: &mut Child,
-    name: &str,
-    cancellation: &Cancellation,
-) -> Result<File, RunError> {
-    let path = format!(r"\\.\pipe\{name}-stop");
-    let started = Instant::now();
-    loop {
-        if let Ok(file) = OpenOptions::new().write(true).open(&path) {
-            return Ok(file);
-        }
-        if cancellation.requested() || started.elapsed() >= Duration::from_secs(5) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(RunError {
-                started: true,
-                message: "Windows process supervisor did not open its stop channel; command outcome is unknown".into(),
-            });
-        }
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return Err(RunError {
-                started: true,
-                message: "Windows process supervisor exited before its stop channel opened; command outcome is unknown".into(),
-            });
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-pub(super) fn completion(reader: JoinHandle<Result<i32, String>>) -> Result<i32, String> {
-    reader
-        .join()
+pub(super) fn completion(report: Report) -> Result<i32, String> {
+    report
+        .recv()
         .map_err(|_| "Windows process completion worker failed".to_string())?
 }
 
 fn read_completion(file: &mut File) -> Result<i32, String> {
     let mut flag = [0];
-    file.read_exact(&mut flag).map_err(|_| {
-        "Windows process supervisor ended without completion status; command outcome is unknown"
-            .to_string()
-    })?;
+    file.read_exact(&mut flag)
+        .map_err(|_| COMPLETION_MISSING.to_string())?;
     let mut bytes = [0; 4];
     file.read_exact(&mut bytes)
         .map_err(|_| "Windows process supervisor sent incomplete completion status".to_string())?;
@@ -349,9 +371,9 @@ fn write_string(data: &mut Vec<u8>, value: &OsStr) {
 fn read_handshake(stdout: &mut ChildStdout, mut progress: impl FnMut(u8)) -> Result<u32, String> {
     let mut flag = [0];
     loop {
-        stdout.read_exact(&mut flag).map_err(|_| {
-            "Windows process supervisor stopped before the command started".to_string()
-        })?;
+        stdout
+            .read_exact(&mut flag)
+            .map_err(|_| HANDSHAKE_STOPPED.to_string())?;
         if flag[0] == 2 {
             let mut stage = [0];
             stdout
@@ -406,32 +428,39 @@ fn stage_name(stage: u8) -> &'static str {
     }
 }
 
-pub(super) fn terminate(child: &mut Child, control: Option<&File>) -> Result<(), String> {
-    if child
+/// Stops the supervised boundary and consumes its completion report.
+/// Returns whether the supervisor confirmed that its job has no processes.
+///
+/// A stop request is acknowledged by the report, which the supervisor sends
+/// only after the job is empty. If that fails, killing the supervisor closes
+/// the only job handle and its kill-on-close limit ends the job; a killed
+/// supervisor cannot report, so its missing report is not an error.
+pub(super) fn terminate(
+    child: &mut Child,
+    control: Option<&File>,
+    completion: &mut Option<Report>,
+) -> Result<bool, String> {
+    let exited = child
         .try_wait()
         .map_err(|error| format!("Could not inspect process supervisor: {error}"))?
-        .is_some()
+        .is_some();
+    let report = completion.take();
+    let stopped = if exited {
+        // An exited supervisor has already written its report or closed it.
+        report.map(|report| report.recv_timeout(STOP_DEADLINE))
+    } else if let (Some(mut control), Some(report)) = (control, report)
+        && control.write_all(&[1]).is_ok()
     {
-        return Ok(());
-    }
-    if let Some(control) = control {
-        let mut control = control;
-        if control.write_all(&[1]).is_ok() {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                if child
-                    .try_wait()
-                    .map_err(|error| format!("Could not inspect process supervisor: {error}"))?
-                    .is_some()
-                {
-                    return Ok(());
-                }
-                if Instant::now() >= deadline {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
+        Some(report.recv_timeout(STOP_DEADLINE))
+    } else {
+        None
+    };
+    match stopped {
+        Some(Ok(Ok(_))) => return Ok(true),
+        // The supervisor could not confirm that its job is empty.
+        Some(Ok(Err(message))) if message != COMPLETION_MISSING => return Err(message),
+        _ if exited => return Ok(false),
+        _ => {}
     }
     child
         .kill()
@@ -439,5 +468,15 @@ pub(super) fn terminate(child: &mut Child, control: Option<&File>) -> Result<(),
     child
         .wait()
         .map_err(|error| format!("Could not wait for process supervisor: {error}"))?;
-    Ok(())
+    Ok(false)
+}
+
+/// Reaps a supervisor after its report and output have ended. It exits right
+/// after reporting; one that remains is killed so no supervisor outlives
+/// the run.
+pub(super) fn reap(child: &mut Child) {
+    if matches!(child.try_wait(), Ok(None)) {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
 }

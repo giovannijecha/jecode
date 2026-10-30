@@ -2,13 +2,12 @@
 //! so its console child inherits the existing Job Object lifetime.
 
 use crate::cancel::Cancellation;
+use crate::sandbox::MARKER;
 use std::fs::{File, OpenOptions};
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-
-const SANDBOX_ENV: &str = "JECODE_INTERNAL_SANDBOX_POLICY";
 
 /// Prepare the owned ConPTY host for the already validated executable command.
 /// The target's working directory and explicit environment changes are applied
@@ -30,10 +29,7 @@ pub(super) fn command(
     if cols == 0 || rows == 0 || cols > i16::MAX as u16 || rows > i16::MAX as u16 {
         return Err("Windows PTY size must be between 1 and 32767 cells".into());
     }
-    if target.get_envs().any(|(key, value)| {
-        key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV)
-            && value.is_some_and(|value| !value.is_empty())
-    }) {
+    if crate::process::sandbox_policy(target).is_some() {
         return Err("Workspace interactive terminals cannot attach to Windows ConPTY under process security confinement; use Full for tty or run exec without tty".into());
     }
     if cancellation.requested() {
@@ -47,10 +43,10 @@ pub(super) fn command(
         .arg(target.get_program())
         .args(target.get_args());
     if let Some(directory) = target.get_current_dir() {
-        host.current_dir(directory);
+        host.current_dir(crate::process::ordinary_path(directory));
     }
     for (key, value) in target.get_envs() {
-        if key.to_string_lossy().eq_ignore_ascii_case(SANDBOX_ENV) {
+        if key.to_string_lossy().eq_ignore_ascii_case(MARKER) {
             continue;
         }
         if let Some(value) = value {
@@ -59,7 +55,7 @@ pub(super) fn command(
             host.env_remove(key);
         }
     }
-    host.env_remove(SANDBOX_ENV);
+    host.env_remove(MARKER);
     Ok(host)
 }
 
@@ -150,6 +146,20 @@ fn verify_server(
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
+
+    #[test]
+    fn host_gets_an_ordinary_directory_and_no_empty_marker() {
+        let mut target = Command::new("cmd.exe");
+        target.current_dir(r"\\?\C:\Windows").env(MARKER, "");
+        let host = command(&target, "endpoint-1", 80, 24, &Cancellation::default()).unwrap();
+        assert_eq!(
+            host.get_current_dir(),
+            Some(std::path::Path::new(r"C:\Windows"))
+        );
+        assert!(host.get_envs().all(|(key, value)| {
+            !key.to_string_lossy().eq_ignore_ascii_case(MARKER) || value.is_none()
+        }));
+    }
 
     #[test]
     fn rejects_pipe_served_by_unexpected_process() {

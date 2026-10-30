@@ -3,7 +3,7 @@ use crate::cancel::Cancellation;
 use std::process::Stdio;
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex, mpsc};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -12,9 +12,9 @@ mod unix;
 mod windows;
 
 mod capture;
-use capture::{Capture, capture};
+use capture::{Capture, Events, capture};
 #[cfg(windows)]
-pub(crate) use windows::CREATE_NO_WINDOW;
+pub(crate) use windows::{CREATE_NO_WINDOW, ordinary_path, sandbox_policy};
 
 pub struct Output {
     pub stdout: Vec<u8>,
@@ -200,11 +200,10 @@ pub struct Started {
     child: Child,
     stdout: Arc<Mutex<Capture>>,
     stderr: Arc<Mutex<Capture>>,
-    readers: [JoinHandle<()>; 2],
-    chunks: mpsc::Receiver<Vec<u8>>,
+    events: Events,
     writer: Option<JoinHandle<std::io::Result<()>>>,
     #[cfg(windows)]
-    completion: Option<JoinHandle<Result<i32, String>>>,
+    completion: Option<windows::Report>,
     #[cfg(windows)]
     control: Option<std::fs::File>,
     #[cfg(windows)]
@@ -253,21 +252,23 @@ fn start(
     let started = Instant::now();
     let stdout = Arc::new(Mutex::new(Capture::default()));
     let stderr = Arc::new(Mutex::new(Capture::default()));
-    let (sender, chunks) = mpsc::channel();
+    let (sender, events) = mpsc::channel();
     let [stdout_spool, stderr_spool] = options.spools;
-    let stdout_reader = capture(
+    capture(
         child_stdout,
         Arc::clone(&stdout),
         options.limit,
-        options.observed.then_some(sender),
+        sender.clone(),
+        options.observed,
         options.tail,
         stdout_spool,
     );
-    let stderr_reader = capture(
+    capture(
         child.stderr.take().unwrap(),
         Arc::clone(&stderr),
         options.limit,
-        None,
+        sender,
+        false,
         options.tail,
         stderr_spool,
     );
@@ -277,8 +278,7 @@ fn start(
         child,
         stdout,
         stderr,
-        readers: [stdout_reader, stderr_reader],
-        chunks,
+        events: Events::new(events),
         writer,
         #[cfg(windows)]
         completion,
@@ -311,8 +311,7 @@ impl Started {
             mut child,
             stdout,
             stderr,
-            readers: [stdout_reader, stderr_reader],
-            chunks,
+            mut events,
             writer,
             #[cfg(windows)]
             mut completion,
@@ -333,37 +332,32 @@ impl Started {
         let mut cleanup_error = None;
         #[cfg(windows)]
         let mut terminated = false;
-        #[cfg(windows)]
-        let mut termination_confirmed = false;
+        // Stops the boundary; Ok(true) when the job's emptiness was confirmed.
         macro_rules! terminate_owned {
             ($child:expr) => {{
                 #[cfg(windows)]
                 {
-                    windows::terminate($child, control.as_ref())
+                    windows::terminate($child, control.as_ref(), &mut completion)
                 }
                 #[cfg(unix)]
                 {
-                    unix::terminate($child)
+                    unix::terminate($child).map(|()| false)
                 }
             }};
         }
 
         loop {
-            while let Ok(chunk) = chunks.try_recv() {
+            events.collect();
+            for chunk in events.chunks() {
                 last_activity = Instant::now();
                 if observer_error.is_none() {
                     observer_error = observer(&chunk).err();
                 }
             }
-            if observer_error.is_some() {
-                #[cfg(windows)]
-                {
-                    terminated = true;
-                }
-                cleanup_error = terminate_owned!(&mut child).err();
-                break;
-            }
-            if stdout.lock().unwrap().error.is_some() || stderr.lock().unwrap().error.is_some() {
+            if observer_error.is_some()
+                || stdout.lock().unwrap().error.is_some()
+                || stderr.lock().unwrap().error.is_some()
+            {
                 #[cfg(windows)]
                 {
                     terminated = true;
@@ -385,8 +379,7 @@ impl Started {
                 }
             }
             if status.is_some()
-                && stdout_reader.is_finished()
-                && stderr_reader.is_finished()
+                && events.readers_finished()
                 && writer.as_ref().is_none_or(JoinHandle::is_finished)
             {
                 break;
@@ -401,36 +394,32 @@ impl Started {
                 {
                     terminated = true;
                 }
-                cleanup_error = terminate_owned!(&mut child).err();
-                #[cfg(windows)]
-                if cleanup_error.is_none()
-                    && let Some(report) = completion.take()
-                {
-                    match windows::completion(report) {
-                        Ok(_) => termination_confirmed = true,
-                        Err(error) => cleanup_error = Some(error),
+                let confirmed = match terminate_owned!(&mut child) {
+                    Ok(confirmed) => confirmed,
+                    Err(error) => {
+                        cleanup_error = Some(error);
+                        false
                     }
-                }
+                };
                 #[cfg(unix)]
                 {
                     status = child.try_wait().ok().flatten().or(status);
                 }
                 // An inherited pipe must not make an already timed-out command block forever.
-                let drain_started = Instant::now();
-                #[cfg(windows)]
-                let drain_limit = if termination_confirmed {
+                let drain_limit = if confirmed {
                     Duration::from_secs(5)
                 } else {
                     Duration::from_millis(250)
                 };
-                #[cfg(unix)]
-                let drain_limit = Duration::from_millis(250);
-                while !(stdout_reader.is_finished() && stderr_reader.is_finished())
-                    && drain_started.elapsed() < drain_limit
-                {
-                    thread::sleep(Duration::from_millis(5));
+                let deadline = Instant::now() + drain_limit;
+                while !events.readers_finished() {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    events.wait(remaining);
                 }
-                if !stdout_reader.is_finished() || !stderr_reader.is_finished() {
+                if !events.readers_finished() {
                     cleanup_error.get_or_insert_with(|| {
                         "Process cleanup could not be confirmed: output capture remains active"
                             .into()
@@ -438,18 +427,32 @@ impl Started {
                 }
                 break;
             }
-            thread::sleep(Duration::from_millis(10));
+            // Output and stream ends wake the loop at once; the interval
+            // bounds how late exit, cancellation and deadlines are noticed.
+            events.wait(Duration::from_millis(10));
+        }
+        #[cfg(windows)]
+        if terminated {
+            windows::reap(&mut child);
         }
 
-        while let Ok(chunk) = chunks.try_recv() {
+        events.collect();
+        for chunk in events.chunks() {
             if observer_error.is_none() {
                 observer_error = observer(&chunk).err();
             }
         }
+        let cleanup = |error: Option<String>| error.map_or(String::new(), |e| format!("; {e}"));
         if let Some(error) = observer_error {
+            return Err(format!("{error}{}", cleanup(cleanup_error)).into());
+        }
+        let mut stdout = stdout.lock().unwrap();
+        let mut stderr = stderr.lock().unwrap();
+        // A failed capture is why the run stopped; cleanup only adds detail.
+        if let Some(error) = stdout.error.as_ref().or(stderr.error.as_ref()) {
             return Err(format!(
-                "{error}{}",
-                cleanup_error.map_or(String::new(), |cleanup| format!("; {cleanup}"))
+                "Could not read process output: {error}{}",
+                cleanup(cleanup_error)
             )
             .into());
         }
@@ -464,14 +467,13 @@ impl Started {
             return Err(message.into());
         }
 
+        // A stopped run consumed the report while terminating; the
+        // supervisor's exit code is not the command's then.
         #[cfg(windows)]
         let native_exit_code = match completion {
-            Some(completion) => {
-                let code = windows::completion(completion).map_err(RunError::from)?;
-                (!terminated).then_some(code)
-            }
-            None if !terminated => status.and_then(|status| status.code()),
-            None => None,
+            _ if terminated => None,
+            Some(report) => Some(windows::completion(report).map_err(RunError::from)?),
+            None => status.and_then(|status| status.code()),
         };
 
         let input_error = if !timed_out && !cancelled {
@@ -485,11 +487,6 @@ impl Started {
         } else {
             None
         };
-        let mut stdout = stdout.lock().unwrap();
-        let mut stderr = stderr.lock().unwrap();
-        if let Some(error) = stdout.error.as_ref().or(stderr.error.as_ref()) {
-            return Err(format!("Could not read process output: {error}").into());
-        }
         Ok(Output {
             stdout: std::mem::take(&mut stdout.bytes),
             stderr: std::mem::take(&mut stderr.bytes),
@@ -517,5 +514,7 @@ impl Started {
 mod env_tests;
 #[cfg(all(test, windows))]
 mod leaf_tests;
+#[cfg(all(test, windows))]
+mod stop_tests;
 #[cfg(test)]
 mod tests;
