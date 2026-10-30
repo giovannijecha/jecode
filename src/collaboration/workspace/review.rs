@@ -151,15 +151,17 @@ fn unchanged(
     }
     // Directory listings on Windows can lag a file still open for writing.
     #[cfg(windows)]
-    let Ok(metadata) = fs::symlink_metadata(&item.path) else {
+    let Ok(observed) = fs::symlink_metadata(&item.path) else {
         return false;
     };
+    #[cfg(windows)]
+    let metadata = &observed;
     #[cfg(not(windows))]
     let metadata = &item.metadata;
     metadata.is_file()
         && !metadata.file_type().is_symlink()
         && metadata.len() == *size
-        && files::mode(&metadata) == *mode
+        && files::mode(metadata) == *mode
         && metadata
             .modified()
             .ok()

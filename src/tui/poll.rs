@@ -1,9 +1,6 @@
-use super::{
-    App, Feedback, Kind, activity,
-    feedback::Ending,
-    keys::{Decoded, Decoder},
-    terminal::Input,
-};
+#[cfg(any(windows, test))]
+use super::keys::Decoded;
+use super::{App, Feedback, Kind, activity, feedback::Ending, keys::Decoder, terminal::Input};
 use crate::{attachments::Prompt, backend::FailureReason, events::Event};
 use std::time::Instant;
 
