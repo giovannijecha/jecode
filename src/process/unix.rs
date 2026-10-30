@@ -122,14 +122,16 @@ fn before_start(message: String) -> RunError {
 }
 
 pub(super) fn terminate(child: &mut Child) -> Result<(), String> {
-    let mut cleanup = Command::new(crate::native::helper("process_unix")?);
-    cleanup
-        .args(["kill-group", &child.id().to_string()])
-        .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    let group = child.id().to_string();
+    // The root is killed below even when the group cleanup cannot start.
     let result = (|| {
+        let mut cleanup = Command::new(crate::native::helper("process_unix")?);
+        cleanup
+            .args(["kill-group", &group])
+            .env("LC_ALL", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
         let mut cleanup = cleanup
             .spawn()
             .map_err(|error| format!("Could not start process-group cleanup: {error}"))?;
