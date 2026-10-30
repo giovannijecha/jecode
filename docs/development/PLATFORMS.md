@@ -93,9 +93,12 @@ has priority over data still buffered in the bridge.
 
 Windows builds the owned adapters with its system .NET compiler and uses Windows
 10+ ConPTY at runtime. Unix builds the owned bridges with system `cc` during the
-Cargo build; runtime uses the embedded binaries without a compiler. Linux
+Cargo build; runtime uses the embedded binaries without a compiler. `CC`
+overrides it. Cross builds need `CC_<target>` or `TARGET_CC`, except between
+macOS architectures, where `cc -arch` is used. Linux
 enumerates `/proc` to clean up interactive job-control groups;
-macOS uses its system `/bin/ps`. Development builds deny compiler warnings.
+macOS uses its system `/bin/ps`. Debug builds deny C compiler warnings;
+release builds report them without failing.
 Control sockets need a native Unix temporary filesystem; WSL's Windows-backed
 mounts do not support them. Local input bypasses model messages and tool-call
 history, while output that the target echoes remains visible and retained.

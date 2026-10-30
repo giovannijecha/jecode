@@ -126,8 +126,8 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
     ] {
         println!("cargo:rerun-if-changed={source}");
         let binary = out.join(format!("jecode-{name}"));
-        let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
-        command.args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"]);
+        let mut command = c_compiler();
+        command.arg("-std=c11");
         command.arg(source).arg("-o").arg(&binary);
         if target == "macos" {
             command.arg("-D_DARWIN_C_SOURCE");
@@ -140,8 +140,8 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
     {
         println!("cargo:rerun-if-changed={crypto}");
         let binary = out.join("jecode-openai_crypto");
-        let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
-        command.args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"]);
+        let mut command = c_compiler();
+        command.arg("-std=c11");
         command.arg(&crypto).arg("-o").arg(&binary);
         if target == "linux" {
             command.arg("-ldl");
@@ -159,8 +159,7 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
     {
         println!("cargo:rerun-if-changed={http}");
         let binary = out.join("jecode-http");
-        let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
-        command.args(["-O2", "-Wall", "-Wextra", "-Werror"]);
+        let mut command = c_compiler();
         if target == "linux" {
             command.arg("-std=c11");
         } else {
@@ -177,8 +176,8 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
     }
     if target == "linux" {
         let binary = out.join("jecode-clipboard_linux");
-        let mut command = Command::new(env::var_os("CC").unwrap_or_else(|| "cc".into()));
-        command.args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"]);
+        let mut command = c_compiler();
+        command.arg("-std=c11");
         for source in [
             "src/native/linux_clipboard.c",
             "src/native/linux_clipboard_x11.c",
@@ -192,6 +191,49 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
         checked(&mut command, "clipboard_linux");
         assets.push(("clipboard_linux".into(), binary));
     }
+}
+
+/// Selects the C compiler for the Cargo target. Cross builds use the usual
+/// `CC_<target>`/`TARGET_CC`/`CC` variables; between macOS architectures the
+/// system `cc` receives `-arch`. Development builds deny warnings; release
+/// builds do not, so a newer system compiler cannot break user builds.
+fn c_compiler() -> Command {
+    let triple = env::var("TARGET").expect("Cargo TARGET");
+    let host = env::var("HOST").expect("Cargo HOST");
+    let names = [
+        format!("CC_{triple}"),
+        format!("CC_{}", triple.replace('-', "_")),
+        "TARGET_CC".into(),
+        "CC".into(),
+    ];
+    for name in &names {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    let configured = names.iter().find_map(env::var_os);
+    let mut command = if let Some(compiler) = configured {
+        Command::new(compiler)
+    } else if triple == host {
+        Command::new("cc")
+    } else if triple.ends_with("-apple-darwin") && host.ends_with("-apple-darwin") {
+        let mut command = Command::new("cc");
+        let architecture = match triple.split('-').next().unwrap_or_default() {
+            "aarch64" => "arm64",
+            other => other,
+        };
+        command.args(["-arch", architecture]);
+        command
+    } else {
+        panic!(
+            "Cross-compiling Jecode's C adapters for {triple} on {host} needs a target C \
+             compiler: set CC_{} or TARGET_CC",
+            triple.replace('-', "_")
+        );
+    };
+    command.args(["-O2", "-Wall", "-Wextra"]);
+    if env::var("PROFILE").as_deref() == Ok("debug") {
+        command.arg("-Werror");
+    }
+    command
 }
 
 fn checked(command: &mut Command, name: &str) {
