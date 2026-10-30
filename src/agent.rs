@@ -8,7 +8,7 @@ use crate::export::{Archive, Messages};
 use crate::json::Value;
 use crate::tools::Tools;
 pub use retraction::TurnInput;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::AtomicU8};
 
 pub struct Agent {
     client: Box<dyn Backend>,
@@ -24,7 +24,7 @@ pub struct Agent {
     prepared: Option<crate::attachments::Prompt>,
     context: crate::context::Context,
     /// User preference, not session state: resumed conversations use the current value.
-    auto_compact: u8,
+    auto_compact: Arc<AtomicU8>,
     project_instructions: String,
     skills: crate::skills::Library,
     used_skills: std::collections::BTreeSet<String>,
@@ -51,7 +51,8 @@ impl Agent {
         let fixed = self.current_system_message().encode().len()
             + crate::tools::encoded_size()
             + self.request_environment_for(&self.environment(), &[]).len();
-        (fixed + headroom)
+        crate::context::Context::default()
+            .estimate_bytes(fixed + headroom)
             .saturating_mul(100)
             .div_ceil(usize::from(auto_percent))
     }
@@ -80,7 +81,7 @@ impl Agent {
             persistence: None,
             prepared: None,
             context: crate::context::Context::default(),
-            auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            auto_compact: Arc::new(AtomicU8::new(crate::context::AUTO_COMPACT_DEFAULT)),
             project_instructions: String::new(),
             skills: crate::skills::Library::default(),
             used_skills: std::collections::BTreeSet::new(),
@@ -260,8 +261,26 @@ impl Agent {
                 return Err("Operation cancelled".into());
             }
             let completion = self.next_completion(limits, events)?;
-            let message = completion.message;
-            self.messages.lock().unwrap().push(message);
+            let mut message = completion.message;
+            crate::conversation::record_output_tokens(
+                &mut message,
+                completion
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| usage.output_tokens),
+            );
+            {
+                let mut messages = self.messages.lock().unwrap();
+                if completion
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| usage.input_tokens)
+                    .is_some_and(|tokens| tokens > 0)
+                {
+                    self.context.output_message = Some(messages.len());
+                }
+                messages.push(message);
+            }
             if let Err(error) = self.checkpoint(crate::sessions::Stage::Completion) {
                 self.cancel_calls(&completion.calls);
                 return Err(error);
@@ -333,8 +352,19 @@ impl Agent {
         kind: &str,
         details: &[(String, String)],
     ) {
+        let event = self.local_details_event(command, result, kind, details);
+        self.events.lock().unwrap().push(event);
+    }
+
+    fn local_details_event(
+        &self,
+        command: &str,
+        result: &str,
+        kind: &str,
+        details: &[(String, String)],
+    ) -> Value {
         let after_message = self.messages.lock().unwrap().len();
-        self.events.lock().unwrap().push(Value::object([
+        Value::object([
             ("type", Value::string("local_command")),
             ("command", Value::string(self.redact(command))),
             ("result", Value::string(self.redact(result))),
@@ -356,7 +386,7 @@ impl Agent {
             ("model", Value::string(self.model())),
             ("effort", Value::string(self.effort().name())),
             ("after_message", Value::number(after_message)),
-        ]));
+        ])
     }
 }
 
@@ -408,6 +438,8 @@ mod compaction_tests;
 #[cfg(test)]
 mod context_estimate_tests;
 #[cfg(test)]
+mod context_measurement_tests;
+#[cfg(test)]
 mod context_status_tests;
 #[cfg(test)]
 mod context_tests;
@@ -437,6 +469,8 @@ mod network_tests;
 mod persistence_tests;
 #[cfg(test)]
 mod process_tests;
+#[cfg(test)]
+mod provider_usage_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

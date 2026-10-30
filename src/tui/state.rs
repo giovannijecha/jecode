@@ -117,7 +117,7 @@ pub struct State {
     pub todo_panel: Option<super::todo::Panel>,
     /// Decides which todo_list calls create a plan; only those have a row.
     pub todo_calls: super::todo::Calls,
-    /// The engine's latest projection for the footer; None renders no indicator.
+    /// The latest provider usage snapshot for the footer; None renders no indicator.
     pub context: Option<crate::context::Status>,
     /// The recent conversations offered before the first prompt.
     pub opening: Opening,

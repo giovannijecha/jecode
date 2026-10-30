@@ -66,6 +66,9 @@ pub enum Update {
         request_bytes: usize,
     },
     Reasoning,
+    /// Cumulative provider counters for this request, emitted as soon as available.
+    /// Missing fields are unknown; adapters normalize any provider deltas first.
+    Usage(Usage),
     /// Newly generated text, appended to the current attempt's response.
     TextDelta(String),
     Working,
@@ -86,8 +89,33 @@ pub struct Completion {
 pub struct Usage {
     pub input_tokens: Option<usize>,
     pub output_tokens: Option<usize>,
+    pub total_tokens: Option<usize>,
     pub cached_tokens: Option<usize>,
     pub cache_write_tokens: Option<usize>,
+}
+
+impl Usage {
+    /// Merge snapshots for the same request without summing them.
+    /// Component updates make an older total stale.
+    pub fn update(&mut self, newer: Self) {
+        if newer.total_tokens.is_some() {
+            self.total_tokens = newer.total_tokens;
+        } else if newer.input_tokens.is_some() || newer.output_tokens.is_some() {
+            self.total_tokens = None;
+        }
+        self.input_tokens = newer.input_tokens.or(self.input_tokens);
+        self.output_tokens = newer.output_tokens.or(self.output_tokens);
+        self.cached_tokens = newer.cached_tokens.or(self.cached_tokens);
+        self.cache_write_tokens = newer.cache_write_tokens.or(self.cache_write_tokens);
+    }
+
+    /// Tokens in the active context, using only provider-reported counters.
+    pub fn context_tokens(self) -> Option<usize> {
+        self.total_tokens.or_else(|| {
+            self.input_tokens
+                .map(|input| input.saturating_add(self.output_tokens.unwrap_or(0)))
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -265,6 +293,8 @@ pub trait Backend: Send {
     fn inputs(&self) -> Inputs;
     fn limits(&mut self) -> Result<Option<Limits>, Failure>;
     fn known_limits(&self) -> Option<Limits>;
+    /// Report usage through `Update::Usage` when the provider supplies it;
+    /// `Completion::usage` also supports providers with only a final measurement.
     fn sample(
         &self,
         messages: &[Value],

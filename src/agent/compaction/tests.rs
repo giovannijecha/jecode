@@ -2,6 +2,29 @@ use super::*;
 use crate::test_support::{Directory, HttpFixture};
 
 #[test]
+fn recent_retention_counts_known_reasoning_instead_of_only_visible_bytes() {
+    let directory = Directory::new();
+    let client = crate::backend::openrouter::OpenRouter::fixture("http://127.0.0.1:1".into());
+    let agent = Agent::new(client, crate::tools::Tools::new(directory.path()).unwrap());
+    let origin = agent.identity();
+    let mut source = agent.messages.lock().unwrap().clone();
+    source.push(Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Inspect")),
+    ]));
+    for _ in 0..3 {
+        let mut response = Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::string("Short visible answer")),
+        ]);
+        crate::conversation::stamp(&mut response, &origin);
+        crate::conversation::record_output_tokens(&mut response, Some(50_000));
+        source.push(response);
+    }
+    assert_eq!(agent.recent_boundary(&source, 80_000), source.len() - 1);
+}
+
+#[test]
 fn resume_keeps_saved_model_calibration_but_discards_direct_request_measurements() {
     let directory = Directory::new();
     let home = Directory::new();

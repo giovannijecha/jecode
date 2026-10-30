@@ -125,6 +125,7 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
                 .encode()
                 .len()
                 .saturating_add(crate::tools::encoded_size())
+                .div_ceil(4)
     );
     resumed.run_turn("Continue", &mut |_| Ok(())).unwrap();
     assert_eq!(resumed.messages.lock().unwrap()[0], original);

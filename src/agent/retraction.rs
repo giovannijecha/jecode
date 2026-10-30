@@ -29,9 +29,11 @@ impl Agent {
             return false;
         }
         drop(messages);
+        let reported = std::mem::take(&mut self.context.reported);
         self.context = input.context;
+        self.context.reported = reported;
         self.context.returned.extend(input.from..end);
-        self.context.reset_usage();
+        self.context.reset_projection();
         self.events.lock().unwrap().push(Value::object([
             ("type", Value::string("turn_returned")),
             ("from_message", Value::number(input.from)),

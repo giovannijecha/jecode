@@ -2,7 +2,7 @@ use super::*;
 use crate::context::{AUTO_COMPACT_DEFAULT, Status, threshold};
 use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 
-/// Context projections in order, with the turn events that explain them.
+/// Provider usage snapshots in order, with the turn events that explain them.
 fn trace(agent: &mut Agent, prompt: &str) -> (Result<(), String>, Vec<(&'static str, Status)>) {
     let mut trace = Vec::new();
     let mut last = None;
@@ -77,19 +77,32 @@ fn unknown_capacity_stays_unknown_and_a_model_switch_forgets_the_previous_window
     let client = OpenRouter::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     let status = agent.context_status();
-    assert!(status.tokens > 0);
+    assert_eq!(status.tokens, None);
     assert_eq!(status.capacity, None);
     assert_eq!(status.percent(), None);
     assert_eq!(status.auto_compact, AUTO_COMPACT_DEFAULT);
     agent.client.fixture_limits(24000, Some(4096));
     agent.context.ceiling = Some(12000);
-    assert_eq!(agent.context_status().capacity, Some(12000));
+    assert_eq!(agent.context_status().capacity, Some(24000));
+    assert_eq!(agent.context_status().percent(), None);
+    let origin = agent.identity();
+    agent.context.reported.observe(
+        origin,
+        &crate::backend::Usage {
+            input_tokens: Some(2400),
+            output_tokens: Some(600),
+            ..Default::default()
+        },
+    );
+    assert_eq!(agent.context_status().tokens, Some(3000));
+    assert_eq!(agent.context_status().percent(), Some(12));
     agent.set_model("fixture/other".into()).unwrap();
     assert_eq!(agent.context_status().capacity, None);
+    assert_eq!(agent.context_status().tokens, None);
 }
 
 #[test]
-fn preview_only_reduction_reports_the_reduced_projection() {
+fn preview_only_reduction_keeps_the_provider_meter_unknown() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion("Reported.", vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
@@ -134,27 +147,30 @@ fn preview_only_reduction_reports_the_reduced_projection() {
         2,
     );
     agent.context.calibrate(36000);
+    let budget = threshold(24000, AUTO_COMPACT_DEFAULT);
+    assert!(agent.locked_estimate() >= budget);
     let (result, trace) = trace(&mut agent, "Inspect once and report.");
     result.unwrap();
-    let budget = threshold(24000, AUTO_COMPACT_DEFAULT);
     let (_, before) = trace[0];
     assert_eq!(before.capacity, Some(24000));
-    assert!(before.tokens >= budget);
-    assert!(before.percent().unwrap() >= usize::from(AUTO_COMPACT_DEFAULT));
+    assert_eq!(before.tokens, None);
+    assert_eq!(before.percent(), None);
     let reduced = trace
         .iter()
         .skip_while(|(label, _)| *label != "compacted")
         .find(|(label, _)| *label == "context")
         .unwrap()
         .1;
-    assert!(reduced.tokens > 0 && reduced.tokens < budget);
+    assert_eq!(reduced.tokens, None);
+    assert_eq!(reduced.percent(), None);
+    assert!(agent.locked_estimate() < budget);
     assert!(trace.iter().all(|(label, _)| *label != "maintenance"));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
     assert_eq!(fixture.finish().len(), 1);
 }
 
 #[test]
-fn a_summary_reports_the_reduced_projection_instead_of_zero() {
+fn a_summary_keeps_the_provider_meter_unknown_without_ordinary_usage() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
@@ -178,24 +194,28 @@ fn a_summary_reports_the_reduced_projection_instead_of_zero() {
         assistant("c".repeat(12000)),
     ]);
     let original = agent.messages.lock().unwrap().clone();
+    let budget = threshold(capacity, AUTO_COMPACT_DEFAULT);
+    assert!(agent.locked_estimate() >= budget);
     let (result, trace) = trace(&mut agent, "Continue.");
     result.unwrap();
-    let budget = threshold(capacity, AUTO_COMPACT_DEFAULT);
-    assert!(trace[0].1.tokens >= budget);
+    assert_eq!(trace[0].1.tokens, None);
     let compacted = trace.iter().position(|(label, _)| *label == "compacted");
     let reduced = trace[compacted.unwrap()..]
         .iter()
         .find(|(label, _)| *label == "context")
         .unwrap()
         .1;
-    assert!(reduced.tokens > 0 && reduced.tokens < budget);
+    assert_eq!(reduced.tokens, None);
+    assert_eq!(reduced.percent(), None);
+    assert!(agent.locked_estimate() < budget);
+    assert!(!agent.context.summary.is_empty());
     assert_eq!(reduced.capacity, Some(capacity));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
     assert_eq!(fixture.finish().len(), 2);
 }
 
 #[test]
-fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
+fn provider_recovery_keeps_the_meter_unknown_when_catalog_capacity_was_unknown() {
     let directory = Directory::new();
     let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![
@@ -209,6 +229,8 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
                 ]),
             )]),
         ),
+        (200, completion("Original objective retained.", vec![])),
+        (200, completion("Original objective retained.", vec![])),
         (200, completion("Original objective retained.", vec![])),
         (200, completion("Original objective retained.", vec![])),
         (200, completion("Finished.", vec![])),
@@ -226,7 +248,9 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
         .messages
         .lock()
         .unwrap()
-        .extend(crate::test_support::prior_compactable_exchange(fixed));
+        .extend(crate::test_support::prior_compactable_exchange(
+            fixed.saturating_mul(3),
+        ));
     agent.set_auto_compact(90);
     let (result, trace) = trace(&mut agent, &prompt);
     result.unwrap();
@@ -240,14 +264,17 @@ fn provider_recovery_reports_the_learned_ceiling_when_capacity_was_unknown() {
             .all(|(_, status)| status.capacity.is_none() && status.percent().is_none())
     );
     let ceiling = agent.context.ceiling.unwrap();
+    assert!(ceiling > 0);
     let learned = trace[discarded + 1..]
         .iter()
         .find(|(label, _)| *label == "context")
         .unwrap()
         .1;
-    assert_eq!(learned.capacity, Some(ceiling));
+    assert_eq!(learned.capacity, None);
+    assert_eq!(learned.tokens, None);
+    assert_eq!(learned.percent(), None);
     assert!(trace.iter().any(|(label, _)| *label == "compacted"));
-    assert_eq!(fixture.finish().len(), 4);
+    assert_eq!(fixture.finish().len(), 6);
 }
 
 #[test]
@@ -278,7 +305,7 @@ fn an_unattainable_threshold_fails_once_and_preserves_history() {
 }
 
 #[test]
-fn accepted_input_updates_context_before_a_summary_starts() {
+fn accepted_input_changes_the_internal_budget_without_changing_provider_usage() {
     for with_tool in [false, true] {
         let directory = Directory::new();
         let workspace = directory
@@ -303,20 +330,32 @@ fn accepted_input_updates_context_before_a_summary_starts() {
         let capacity = probe.fixture_capacity(update.len() + 2_048, AUTO_COMPACT_DEFAULT);
         // A measured first request plus the accepted input crosses the budget;
         // the accepted request itself still fits beside the native catalog.
-        let measured = threshold(capacity, AUTO_COMPACT_DEFAULT) - update.len() / 2;
+        let measured = threshold(capacity, AUTO_COMPACT_DEFAULT)
+            - crate::context::Context::default().estimate_bytes(update.len())
+            + 1;
         let mut first = completion("First result.", calls);
         if let Value::Object(fields) = &mut first {
             fields.insert(
                 "usage".into(),
-                Value::object([("prompt_tokens", Value::number(measured))]),
+                Value::object([
+                    ("prompt_tokens", Value::number(measured)),
+                    ("completion_tokens", Value::number(0)),
+                ]),
+            );
+        }
+        let mut summary = completion("Continue with the updated requirement.", vec![]);
+        if let Value::Object(fields) = &mut summary {
+            fields.insert(
+                "usage".into(),
+                Value::object([
+                    ("prompt_tokens", Value::number(12345)),
+                    ("completion_tokens", Value::number(678)),
+                ]),
             );
         }
         let fixture = HttpFixture::new(vec![
             (200, first),
-            (
-                200,
-                completion("Continue with the updated requirement.", vec![]),
-            ),
+            (200, summary),
             (200, completion("Finished.", vec![])),
         ]);
         let mut agent = Agent::new(
@@ -360,10 +399,11 @@ fn accepted_input_updates_context_before_a_summary_starts() {
             .unwrap();
         let status = before_summary.expect("Accepted input should trigger a summary");
         assert_eq!(summaries_started, 1);
-        assert!(
-            status.tokens >= threshold(capacity, AUTO_COMPACT_DEFAULT),
-            "The footer must show accepted input before summarizing it (with_tool={with_tool}): {status:?}"
-        );
+        assert_eq!(status.tokens, Some(measured));
+        assert_eq!(status.capacity, Some(capacity));
+        assert_eq!(status.percent(), Some(measured * 100 / capacity));
+        assert_eq!(agent.context_status().tokens, Some(measured));
+        assert!(!agent.context.summary.is_empty());
         assert_eq!(fixture.finish().len(), 3);
     }
 }
@@ -393,14 +433,14 @@ fn retired_view_keeps_the_measurement_less_the_view() {
         ]));
         messages.len()
     };
-    agent.context.observe(
-        Some(&crate::backend::Usage {
-            input_tokens: Some(50_000),
-            output_tokens: Some(700),
-            ..Default::default()
-        }),
-        measured_end,
-    );
+    let usage = crate::backend::Usage {
+        input_tokens: Some(50_000),
+        output_tokens: Some(700),
+        ..Default::default()
+    };
+    agent.context.observe(Some(&usage), measured_end);
+    let origin = agent.identity();
+    agent.context.reported.observe(origin, &usage);
     agent.context.calibrate(1000);
     agent.messages.lock().unwrap().push(Value::object([
         ("role", Value::string("assistant")),
@@ -419,4 +459,5 @@ fn retired_view_keeps_the_measurement_less_the_view() {
         agent.context_estimate(&agent.environment(), &messages),
         50_000 - 85 + 700
     );
+    assert_eq!(agent.context_status().tokens, Some(50_700));
 }

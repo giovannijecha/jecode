@@ -202,6 +202,11 @@ impl App {
             submission.observe(&event);
         }
         match event {
+            Event::Context(mut status) => {
+                // A queued snapshot may predate a preference saved during inference.
+                status.auto_compact = self.config.settings.auto_compact;
+                self.state.event(Event::Context(status));
+            }
             Event::Accepted { prompts } => {
                 let count = prompts.len();
                 self.state

@@ -70,7 +70,9 @@ impl Agent {
         self.tools.include_credentials(self.redactor.clone());
         next.set_cancellation(self.cancellation.clone());
         next.set_delegation(!self.child);
-        if !changed {
+        if previous_identity.backend == identity.backend
+            && previous_identity.model == identity.model
+        {
             next.clone_routing_from(self.client.as_ref());
         } else {
             let preference = self.routing_preferences.as_ref().map(|preferences| {

@@ -46,9 +46,30 @@ export. After compaction, the next model request uses a smaller view built from
 system instructions, a fixed excerpt of archived user requests, a summary and
 recent original exchanges. The excerpt keeps the first request and the latest
 requests that fit its budget; `history:requests` retains the complete sequence.
-The context meter in the TUI footer estimates the next request as a share of
-the effective model window and fills toward the auto-compact threshold; `?`
-means the window has not been established. It is an estimate, so a provider context rejection can still occur.
+The TUI footer shows the latest ordinary provider usage as a share of the
+provider catalog's context window. It uses the reported total when available,
+otherwise reported input plus output, including cached input and reasoning
+output. `?` means that an ordinary response
+has not reported usage yet, or the catalog window is unknown. The reading stays
+fixed while tools run and during compaction; summary requests do not replace the
+conversation's reading. New ordinary usage updates it as soon as it arrives,
+including during streaming when the provider supplies it.
+
+Automatic compaction separately estimates the next request against its input
+budget. New text uses observed token density when available; otherwise four
+text bytes approximate one token. Media are counted separately. Known response
+counts remain attached to their model and account, including reasoning, so
+rebuilding a view after compaction or resume can reuse them. A provider context
+rejection can still correct the internal budget. The status row's `↓` is the
+turn's generated output, including reasoning, rather than occupied context.
+For example, a 500,000-token effective window at 75% has a 375,000-token input
+budget regardless of the turn's `↓` total. The selected account may expose less
+context than the public model specification.
+
+OpenRouter measurements and native response data are scoped to the API key
+through a saved SHA-256 digest; the key itself stays out of the conversation.
+Changing the key clears the previous key's measurements. Older sessions without
+a credential scope remain readable as portable history.
 
 Input returned to the composer is withdrawn from the model's history view:
 neither `history:N` nor `history:requests` exposes that attempt. Submitting it

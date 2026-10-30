@@ -26,8 +26,7 @@ impl Agent {
             self.project_instructions = instructions;
             // The measured prompt contained a different system projection.
             // Keep its conservative density and learned context ceiling.
-            self.context.input_tokens = None;
-            self.context.measured_end = 0;
+            self.context.clear_measurement();
         }
         Ok(())
     }

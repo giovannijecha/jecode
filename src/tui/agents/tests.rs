@@ -335,7 +335,7 @@ fn footer_keeps_context_and_critical_counts_in_its_existing_row() {
         ..State::default()
     };
     state.context = Some(crate::context::Status {
-        tokens: 34_000,
+        tokens: Some(34_000),
         capacity: Some(100_000),
         auto_compact: 80,
     });

@@ -33,7 +33,7 @@ impl Agent {
             self.tools
                 .configure_temporary(store.temporary_area(&document.id)?);
             self.tools.configure_attachments(store.attachments());
-            self.context.reset_usage();
+            self.context.reset_projection();
             self.persistence = Some(Handle::new(store, document, self.redactor.clone()));
             self.sync_conversation();
             self.collaboration

@@ -7,6 +7,19 @@ use std::process::Command;
 
 pub mod openai;
 
+/// A stable credential scope for saved measurements and provider-owned history.
+/// Only the OS-computed digest is retained beside conversation data.
+pub(crate) fn key_scope(
+    key: &str,
+    cancellation: &crate::cancel::Cancellation,
+) -> Result<String, String> {
+    let digest = openai::native::sha256(key.as_bytes(), cancellation)?;
+    Ok(format!(
+        "key-sha256:{}",
+        crate::attachments::base64::encode(&digest)
+    ))
+}
+
 /// Prevent backend credentials from reaching child tools and native helpers.
 pub fn isolate_environment(command: &mut Command) -> &mut Command {
     for backend in crate::backend::available() {

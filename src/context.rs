@@ -1,12 +1,10 @@
-use crate::{
-    attachments::Inputs,
-    backend::{Limits, Usage},
-    json::Value,
-};
+use crate::{attachments::Inputs, backend::Limits, json::Value};
 use std::collections::BTreeSet;
 
 pub use crate::conversation::portable;
 
+pub(crate) mod measurement;
+pub(crate) mod provider;
 pub(crate) mod source;
 mod view;
 
@@ -24,29 +22,28 @@ pub fn auto_compact_percent(value: usize) -> Result<u8, String> {
         .ok_or_else(|| "Auto-compact must be a whole percentage from 1 to 99".into())
 }
 
-/// Tokens at which `percent` of `capacity` is reached. Rounding up makes an
-/// estimate reach this budget exactly when its displayed percentage does.
+/// Tokens at which `percent` of `capacity` is reached, rounded up.
 pub fn threshold(capacity: usize, percent: u8) -> usize {
     let tokens = (capacity as u128 * u128::from(percent)).div_ceil(100);
     usize::try_from(tokens).unwrap_or(usize::MAX).max(1)
 }
 
-/// The engine's projection of the next model request, for display.
+/// The last provider-reported context count, for display.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Status {
-    /// Estimated input tokens of the next request.
-    pub tokens: usize,
-    /// Effective context window; None while the model's capacity is unknown.
+    /// Provider input plus generated output, or its reported total; never a projection.
+    pub tokens: Option<usize>,
+    /// Context window declared by the provider; None while unknown.
     pub capacity: Option<usize>,
     /// Configured automatic reduction threshold, in percent.
     pub auto_compact: u8,
 }
 
 impl Status {
-    /// Whole percentage of the effective window, rounded down.
+    /// Whole percentage of the provider-declared window, rounded down.
     pub fn percent(&self) -> Option<usize> {
         let capacity = self.capacity.filter(|capacity| *capacity > 0)?;
-        let percent = self.tokens as u128 * 100 / capacity as u128;
+        let percent = self.tokens? as u128 * 100 / capacity as u128;
         Some(usize::try_from(percent).unwrap_or(usize::MAX))
     }
 }
@@ -54,6 +51,7 @@ impl Status {
 /// A view of durable history. Compaction never deletes the source messages.
 #[derive(Clone, Debug)]
 pub struct Context {
+    pub(crate) reported: provider::Counter,
     /// Derived from turn_returned events; source history keeps its stable indices.
     pub returned: BTreeSet<usize>,
     pub from: usize,
@@ -65,7 +63,13 @@ pub struct Context {
     /// Generated tokens of the measured response, reasoning included; they
     /// stand in for the size of the assistant message appended after it.
     pub output_tokens: Option<usize>,
+    /// Position of the measured response, after any arrivals during inference.
+    pub output_message: Option<usize>,
     pub measured_end: usize,
+    /// Portable text and catalog bytes of the request behind the measurement.
+    pub measured_bytes: Option<usize>,
+    /// Its system, tool catalog and request-only continuation sizes.
+    pub measured_overhead_bytes: Option<usize>,
     pub calibration: Option<(usize, usize)>,
 
     /// Output allowance learned from summary truncation, independent of live prompt usage.
@@ -78,6 +82,7 @@ pub struct Context {
 impl Default for Context {
     fn default() -> Self {
         Self {
+            reported: provider::Counter::default(),
             returned: BTreeSet::new(),
             from: 1,
             summary: String::new(),
@@ -85,7 +90,10 @@ impl Default for Context {
             ceiling: None,
             input_tokens: None,
             output_tokens: None,
+            output_message: None,
             measured_end: 0,
+            measured_bytes: None,
+            measured_overhead_bytes: None,
             calibration: None,
 
             summary_output_tokens: 0,
@@ -98,6 +106,7 @@ impl Default for Context {
 impl Context {
     pub fn value(&self) -> Value {
         Value::object([
+            ("provider_usage", self.reported.value()),
             ("from", Value::number(self.from)),
             ("summary", Value::string(&self.summary)),
             ("skill_references", Value::string(&self.skill_references)),
@@ -112,11 +121,25 @@ impl Context {
             ),
             ("measured_end", Value::number(self.measured_end)),
             (
+                "output_message",
+                self.output_message.map_or(Value::Null, Value::number),
+            ),
+            (
+                "measured_bytes",
+                self.measured_bytes.map_or(Value::Null, Value::number),
+            ),
+            (
+                "measured_overhead_bytes",
+                self.measured_overhead_bytes
+                    .map_or(Value::Null, Value::number),
+            ),
+            (
                 "token_calibration",
                 self.calibration.map_or(Value::Null, |(tokens, bytes)| {
                     Value::object([
                         ("tokens", Value::number(tokens)),
                         ("serialized_bytes", Value::number(bytes)),
+                        ("method", Value::string("text_growth")),
                     ])
                 }),
             ),
@@ -148,6 +171,7 @@ impl Context {
             None => Err("Missing saved context measurement"),
         };
         Ok(Self {
+            reported: provider::Counter::parse(value.get("provider_usage"))?,
             returned: BTreeSet::new(),
             from: number("from")?,
             summary: value
@@ -170,20 +194,35 @@ impl Context {
                 Some(_) => optional("output_tokens")?,
             },
             measured_end: number("measured_end")?,
+            output_message: match value.get("output_message") {
+                None => None,
+                Some(_) => optional("output_message")?,
+            },
+            measured_bytes: match value.get("measured_bytes") {
+                None => None,
+                Some(_) => optional("measured_bytes")?,
+            },
+            measured_overhead_bytes: match value.get("measured_overhead_bytes") {
+                None => None,
+                Some(_) => optional("measured_overhead_bytes")?,
+            },
             calibration: match value.get("token_calibration") {
                 None | Some(Value::Null) => None,
-                Some(calibration) => Some((
-                    calibration
+                Some(calibration) => {
+                    let tokens = calibration
                         .get("tokens")
                         .and_then(Value::as_usize)
                         .filter(|value| *value > 0)
-                        .ok_or("Invalid saved token calibration")?,
-                    calibration
+                        .ok_or("Invalid saved token calibration")?;
+                    let bytes = calibration
                         .get("serialized_bytes")
                         .and_then(Value::as_usize)
                         .filter(|value| *value > 0)
-                        .ok_or("Invalid saved byte calibration")?,
-                )),
+                        .ok_or("Invalid saved byte calibration")?;
+                    // Older whole-prompt ratios can include opaque replayed reasoning.
+                    (calibration.get("method").and_then(Value::as_str) == Some("text_growth"))
+                        .then_some((tokens, bytes))
+                }
             },
 
             summary_output_tokens: value.get("summary_output_tokens").map_or(Ok(0), |value| {
@@ -212,6 +251,10 @@ impl Context {
         if self.from == 0
             || self.from > messages.len()
             || self.measured_end > messages.len()
+            || self
+                .output_message
+                .is_some_and(|index| index < self.measured_end || index >= messages.len())
+            || self.measured_bytes == Some(0)
             || (self.from > 1 && self.summary.trim().is_empty())
             || self.ceiling == Some(0)
             || self
@@ -240,71 +283,6 @@ impl Context {
                 self.returned.extend(from.min(count)..end.min(count));
             }
         }
-    }
-    pub fn reset_usage(&mut self) {
-        // Summary allowance belongs to the saved model/effort, not this live projection.
-        self.input_tokens = None;
-        self.output_tokens = None;
-        self.measured_end = 0;
-        self.ceiling = None;
-        self.calibration = None;
-    }
-    pub fn observe(&mut self, usage: Option<&Usage>, end: usize) {
-        self.input_tokens = usage
-            .and_then(|usage| usage.input_tokens)
-            .filter(|tokens| *tokens > 0);
-        self.output_tokens = usage
-            .and_then(|usage| usage.output_tokens)
-            .filter(|_| self.input_tokens.is_some());
-        self.measured_end = if self.input_tokens.is_some() { end } else { 0 };
-        if self.input_tokens.is_none() {
-            // A later request cannot reuse tokens measured for a different projection.
-            self.calibration = None;
-        }
-    }
-    pub fn calibrate(&mut self, serialized_bytes: usize) {
-        if let Some(tokens) = self.input_tokens
-            && serialized_bytes > 0
-        {
-            self.calibration = Some((tokens, serialized_bytes));
-        }
-    }
-    pub(crate) fn estimate_bytes(&self, size: usize) -> usize {
-        let Some((tokens, bytes)) = self.calibration else {
-            return size;
-        };
-        // Use one and a half times the observed token density, capped at one
-        // token per byte. The next response replaces this growth estimate
-        // with a measurement, and a rejected request still forces compaction.
-        let numerator = tokens.saturating_mul(3).div_ceil(2).min(bytes);
-        if numerator == bytes {
-            return size;
-        }
-        size.saturating_mul(numerator).saturating_add(bytes - 1) / bytes
-    }
-    /// Estimates an already projected request together with the tool catalog.
-    pub(crate) fn estimate_projected_for(
-        &self,
-        messages: &[Value],
-        inputs: Inputs,
-        delegation: bool,
-    ) -> usize {
-        self.estimate_bytes(
-            bytes_for(messages, inputs).saturating_add(crate::tools::encoded_size_for(delegation)),
-        )
-    }
-    pub(crate) fn summary_byte_budget(&self, token_budget: usize) -> usize {
-        let Some((tokens, bytes)) = self.calibration else {
-            return token_budget;
-        };
-        // Summary requests contain already observed history and no tool schema.
-        // Keep twice the measured density; live growth retains its larger margin.
-        // Overflow or an unusable measurement falls back to one byte per token.
-        let numerator = tokens.saturating_mul(2).min(bytes);
-        token_budget
-            .checked_mul(bytes)
-            .and_then(|scaled| scaled.checked_div(numerator))
-            .unwrap_or(token_budget)
     }
     pub fn project(&self, messages: &[Value], compatible_from: usize) -> Vec<Value> {
         let mut result = Vec::new();
@@ -384,56 +362,6 @@ impl Context {
                 .map(str::to_owned)
         })
         .unwrap_or_default()
-    }
-    pub(crate) fn estimate_growth(
-        &self,
-        messages: &[Value],
-        tokens: usize,
-        inputs: Inputs,
-    ) -> usize {
-        let active_start = crate::attachments::active_view_start(messages);
-        let mut generated = 0;
-        let bytes = messages
-            .iter()
-            .enumerate()
-            .skip(self.measured_end)
-            .filter(|(index, _)| !self.returned.contains(index))
-            .map(|(index, message)| {
-                // The measured response is counted by its generated tokens:
-                // its bytes omit the reasoning that later requests replay.
-                if let Some(output) = self.output_tokens
-                    && index == self.measured_end
-                    && message.get("role").and_then(Value::as_str) == Some("assistant")
-                {
-                    generated = output;
-                    return 0;
-                }
-                bytes_for_message(message, index >= active_start, inputs)
-            })
-            .fold(0usize, usize::saturating_add);
-        tokens
-            .saturating_add(generated)
-            .saturating_add(self.estimate_bytes(bytes))
-    }
-
-    /// The last measured input, less the tool views it carried that later
-    /// requests no longer send.
-    pub(crate) fn measured_input(&self, messages: &[Value], inputs: Inputs) -> Option<usize> {
-        let tokens = self.input_tokens?;
-        (self.measured_end >= self.from && self.measured_end <= messages.len())
-            .then(|| tokens.saturating_sub(self.retired_views(messages, inputs)))
-    }
-
-    fn retired_views(&self, messages: &[Value], inputs: Inputs) -> usize {
-        if crate::attachments::active_view_start(messages) <= self.measured_end {
-            return 0;
-        }
-        let measured = &messages[..self.measured_end];
-        measured[crate::attachments::active_view_start(measured)..]
-            .iter()
-            .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
-            .map(|message| crate::attachments::weight_for(message, inputs))
-            .sum()
     }
     /// The effective window: declared capacity lowered by any ceiling learned
     /// from backend rejections, or that ceiling alone without catalog metadata.

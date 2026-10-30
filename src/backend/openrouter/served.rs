@@ -8,6 +8,7 @@ pub(super) fn usage(value: Option<&Value>) -> Option<crate::backend::Usage> {
     let value = value?;
     let input_tokens = value.get("prompt_tokens").and_then(Value::as_usize);
     let output_tokens = value.get("completion_tokens").and_then(Value::as_usize);
+    let total_tokens = value.get("total_tokens").and_then(Value::as_usize);
     let cached_tokens = value
         .get("prompt_tokens_details")
         .and_then(|details| details.get("cached_tokens"))
@@ -18,11 +19,13 @@ pub(super) fn usage(value: Option<&Value>) -> Option<crate::backend::Usage> {
         .and_then(Value::as_usize);
     (input_tokens.is_some()
         || output_tokens.is_some()
+        || total_tokens.is_some()
         || cached_tokens.is_some()
         || cache_write_tokens.is_some())
     .then_some(crate::backend::Usage {
         input_tokens,
         output_tokens,
+        total_tokens,
         cached_tokens,
         cache_write_tokens,
     })
@@ -110,6 +113,46 @@ mod tests {
 
     fn usage(text: &str) -> Value {
         crate::json::parse(text).unwrap()
+    }
+
+    #[test]
+    fn provider_total_precedes_component_counts_and_zero_is_reported() {
+        let reported = super::usage(Some(&usage(
+            r#"{"prompt_tokens":10,"completion_tokens":5,"total_tokens":17}"#,
+        )))
+        .unwrap();
+        assert_eq!(reported.context_tokens(), Some(17));
+        assert_eq!(
+            super::usage(Some(&usage(r#"{"total_tokens":0}"#)))
+                .unwrap()
+                .context_tokens(),
+            Some(0)
+        );
+        assert_eq!(
+            super::usage(Some(&usage(r#"{"completion_tokens":5}"#)))
+                .unwrap()
+                .context_tokens(),
+            None
+        );
+        assert_eq!(
+            super::usage(Some(&usage(r#"{"prompt_tokens":0}"#)))
+                .unwrap()
+                .context_tokens(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn usage_updates_preserve_known_components_without_reusing_stale_totals() {
+        let mut prior = super::usage(Some(&usage(
+            r#"{"prompt_tokens":100,"completion_tokens":10,"total_tokens":110}"#,
+        )))
+        .unwrap();
+        prior.update(super::usage(Some(&usage(r#"{"completion_tokens":20}"#))).unwrap());
+        assert_eq!(prior.context_tokens(), Some(120));
+        assert_eq!(prior.total_tokens, None);
+        let unrelated = super::usage(Some(&usage(r#"{"completion_tokens":20}"#))).unwrap();
+        assert_eq!(unrelated.context_tokens(), None);
     }
 
     #[test]

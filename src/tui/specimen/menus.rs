@@ -28,7 +28,7 @@ fn state(columns: usize) -> State {
         height: 30,
         effort: "high".into(),
         context: Some(crate::context::Status {
-            tokens: 122_400,
+            tokens: Some(122_400),
             capacity: Some(200_000),
             auto_compact: 80,
         }),

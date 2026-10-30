@@ -213,6 +213,7 @@ impl Backend for Client {
             usage: Some(Usage {
                 input_tokens: Some(73),
                 output_tokens: Some(4),
+                total_tokens: None,
                 cached_tokens: None,
                 cache_write_tokens: None,
             }),

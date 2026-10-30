@@ -270,7 +270,7 @@ fn output_regression_normal_turn_uses_declared_output_and_selected_effort() {
     // Leave room for the native tool catalog so this isolates the output ceiling.
     client.set_effort(Effort::High);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
-    let capacity = agent.fixture_capacity(16_000, crate::context::AUTO_COMPACT_DEFAULT);
+    let capacity = agent.fixture_capacity(24_000, crate::context::AUTO_COMPACT_DEFAULT);
     agent.client.fixture_limits(capacity, Some(9000));
     agent.run_turn("Reply Ready", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();

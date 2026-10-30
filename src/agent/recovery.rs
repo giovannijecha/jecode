@@ -1,6 +1,6 @@
 use super::{Agent, timing::RequestTiming};
 use crate::{
-    backend::{Completion, Failure, FailureKind, Limits, Update},
+    backend::{Completion, Failure, FailureKind, Limits, Update, Usage},
     events::Event,
     json::Value,
 };
@@ -51,6 +51,7 @@ impl Agent {
             return Err("Operation cancelled".into());
         }
         let mut partial = String::new();
+        let mut reported_usage = Usage::default();
         let mut text = super::streaming::Text::new(self.redactor.clone());
         let result = self.client.sample(
             messages,
@@ -58,7 +59,7 @@ impl Agent {
             output_tokens,
             self.tools.attachments(),
             &mut |update| {
-                if !matches!(&update, Update::Waiting { .. })
+                if !matches!(&update, Update::Waiting { .. } | Update::Usage(_))
                     && !matches!(&update, Update::TextDelta(delta) if delta.trim().is_empty())
                 {
                     timing.first_update.get_or_insert_with(Instant::now);
@@ -87,6 +88,19 @@ impl Agent {
                     }
                     Update::Reasoning => emit(Event::Reasoning),
                     Update::Working => emit(Event::Working),
+                    Update::Usage(usage) => {
+                        if tools {
+                            reported_usage.update(usage);
+                            if self
+                                .context
+                                .reported
+                                .observe(self.identity(), &reported_usage)
+                            {
+                                self.emit_context(emit)?;
+                            }
+                        }
+                        Ok(())
+                    }
                 }
             },
         );
@@ -105,7 +119,20 @@ impl Agent {
             },
         );
         match &result {
-            Ok(completion) => self.record_charges(completion),
+            Ok(completion) => {
+                self.record_charges(completion);
+                // Backends without streaming usage still report their final measurement.
+                if tools && let Some(usage) = completion.usage {
+                    reported_usage.update(usage);
+                    if self
+                        .context
+                        .reported
+                        .observe(self.identity(), &reported_usage)
+                    {
+                        self.emit_context(emit)?;
+                    }
+                }
+            }
             Err(error) => {
                 if let Some(charges) = &error.charges {
                     self.charges.lock().unwrap().include(charges);

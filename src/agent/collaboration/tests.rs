@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
+    events::Event,
     test_support::{Directory, HttpFixture, completion, tool_call},
 };
 
@@ -17,6 +18,75 @@ pub(super) fn create() -> Value {
             ])]),
         ),
     ])
+}
+
+#[test]
+fn existing_collaborator_uses_updated_auto_compact_for_later_requests() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "read-1",
+                    "read",
+                    Value::object([("path", Value::string("missing.txt"))]),
+                )],
+            ),
+        ),
+        (200, completion("First report", vec![])),
+        (200, completion("Follow-up report", vec![])),
+    ]);
+    let mut parent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    parent.enable_sessions(home.path()).unwrap();
+    let mut child = parent
+        .new_child("a1", project.path(), Mode::Shared)
+        .unwrap();
+    assert_eq!(
+        child.auto_compact_percent(),
+        crate::context::AUTO_COMPACT_DEFAULT
+    );
+
+    let mut changed_during_turn = false;
+    let mut later_statuses = Vec::new();
+    child
+        .run_turn("Inspect", &mut |event| {
+            match event {
+                Event::ToolFinished { .. } => {
+                    parent.set_auto_compact(95);
+                    changed_during_turn = true;
+                }
+                Event::Context(status) if changed_during_turn => {
+                    later_statuses.push(status.auto_compact);
+                }
+                _ => {}
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(changed_during_turn);
+    assert!(!later_statuses.is_empty());
+    assert!(later_statuses.iter().all(|percent| *percent == 95));
+    assert_eq!(child.auto_compact_percent(), 95);
+
+    parent.set_auto_compact(90);
+    let mut resumed_statuses = Vec::new();
+    child
+        .run_turn("Follow up", &mut |event| {
+            if let Event::Context(status) = event {
+                resumed_statuses.push(status.auto_compact);
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(!resumed_statuses.is_empty());
+    assert!(resumed_statuses.iter().all(|percent| *percent == 90));
+    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]

@@ -35,10 +35,18 @@ impl Gate {
     }
 
     fn wait_entered(&self) {
-        let mut state = self.state.lock().unwrap();
-        while !state.1 {
-            state = self.changed.wait(state).unwrap();
-        }
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(
+                self.state.lock().unwrap(),
+                Duration::from_secs(10),
+                |state| !state.1,
+            )
+            .unwrap();
+        assert!(
+            state.1,
+            "context estimate did not reach the guarded messages lock"
+        );
     }
 
     fn release(&self) {
@@ -122,7 +130,7 @@ fn receipt_during_context_estimate_does_not_deadlock() {
     let estimate = {
         let done = done.clone();
         std::thread::spawn(move || {
-            agent.context_status();
+            agent.locked_estimate();
             let _ = done.send("estimate");
             agent
         })

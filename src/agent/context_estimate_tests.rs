@@ -53,9 +53,9 @@ fn measured_history_uses_calibrated_growth_and_falls_back_without_density() {
     let appended = message("tool", &"new output ".repeat(1000));
     let size = appended.encode().len();
     agent.messages.lock().unwrap().push(appended);
-    assert_eq!(agent.context_status().tokens, 1000 + size.div_ceil(4));
+    assert_eq!(agent.locked_estimate(), 1000 + size.div_ceil(6));
     agent.context.calibration = None;
-    assert_eq!(agent.context_status().tokens, 1000 + size);
+    assert_eq!(agent.locked_estimate(), 1000 + size.div_ceil(4));
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn tool_views_expire_from_context_budget_after_an_assistant_response() {
         .lock()
         .unwrap()
         .push(message("user", "Compare the image"));
-    assert!(agent.context_status().tokens >= 500);
+    assert!(agent.locked_estimate() >= 500);
 
     agent
         .messages
@@ -119,7 +119,7 @@ fn tool_views_expire_from_context_budget_after_an_assistant_response() {
         .sum::<usize>();
     let expected = 500 - 85 + agent.context.estimate_bytes(growth);
     drop(messages);
-    assert_eq!(agent.context_status().tokens, expected);
+    assert_eq!(agent.locked_estimate(), expected);
 }
 
 #[test]
@@ -161,7 +161,10 @@ fn measured_growth_charges_only_active_tool_views_and_keeps_user_media() {
     assert_eq!(isolated_bytes, text_bytes + 85 * 3);
     drop(messages);
     // The earlier tool view expired; the user image and latest tool view remain.
-    assert_eq!(agent.context_status().tokens, 500 + text_bytes + 85 * 2);
+    assert_eq!(
+        agent.locked_estimate(),
+        500 + text_bytes.div_ceil(4) + 85 * 2
+    );
 }
 
 #[test]
@@ -176,7 +179,7 @@ fn returned_messages_do_not_enter_the_unmeasured_agent_estimate() {
         message("user", "Continue without the image"),
     ]);
     let messages = agent.messages.lock().unwrap().clone();
-    let original = agent.context_status().tokens;
+    let original = agent.locked_estimate();
     let event = Value::object([
         ("type", Value::string("turn_returned")),
         ("from_message", Value::number(2)),
@@ -192,9 +195,9 @@ fn returned_messages_do_not_enter_the_unmeasured_agent_estimate() {
             messages[4].clone()
         ]
     );
-    let expected = context::bytes_for(&projected, agent.client.inputs())
-        + crate::tools::encoded_size()
-        + agent.request_environment().len();
-    assert_eq!(agent.context_status().tokens, expected);
+    let expected = (context::bytes_for(&agent.transport_messages(), agent.client.inputs())
+        + crate::tools::encoded_size())
+    .div_ceil(4);
+    assert_eq!(agent.locked_estimate(), expected);
     assert!(expected < original);
 }

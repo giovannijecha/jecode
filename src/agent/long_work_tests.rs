@@ -286,7 +286,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
                     ]),
                 )],
             ),
-            6000 + crate::tools::encoded_size(),
+            crate::context::Context::default().estimate_bytes(6000 + crate::tools::encoded_size()),
         )
     };
     let fixture = HttpFixture::new(vec![
@@ -390,7 +390,7 @@ fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() 
                     ]),
                 )],
             ),
-            6000 + crate::tools::encoded_size(),
+            crate::context::Context::default().estimate_bytes(6000 + crate::tools::encoded_size()),
         ),
     )]);
     let mut agent = compacting_agent(&directory, &home, &fixture.endpoint);

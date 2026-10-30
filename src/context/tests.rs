@@ -1,4 +1,5 @@
 use super::*;
+use crate::backend::Usage;
 
 fn message(role: &str, text: &str) -> Value {
     Value::object([
@@ -64,9 +65,9 @@ fn latest_request_keeps_its_middle_when_earlier_requests_fill_the_preview() {
 }
 
 #[test]
-fn calibrated_projection_uses_a_margin_and_resets_on_model_change() {
+fn calibrated_projection_uses_the_observed_rate_and_resets_on_model_change() {
     let mut context = Context::default();
-    assert_eq!(context.estimate_bytes(12000), 12000);
+    assert_eq!(context.estimate_bytes(12000), 3000);
     context.observe(
         Some(&Usage {
             input_tokens: Some(1000),
@@ -75,12 +76,12 @@ fn calibrated_projection_uses_a_margin_and_resets_on_model_change() {
         2,
     );
     context.calibrate(6000);
-    assert_eq!(context.estimate_bytes(12000), 3000);
+    assert_eq!(context.estimate_bytes(12000), 2000);
     assert_eq!(context.estimate_bytes(1), 1);
     let restored = Context::parse(Some(&context.value())).unwrap();
     assert_eq!(restored.calibration, context.calibration);
     context.reset_usage();
-    assert_eq!(context.estimate_bytes(12000), 12000);
+    assert_eq!(context.estimate_bytes(12000), 3000);
     context.observe(
         Some(&Usage {
             input_tokens: Some(4000),
@@ -89,16 +90,16 @@ fn calibrated_projection_uses_a_margin_and_resets_on_model_change() {
         2,
     );
     context.calibrate(6000);
-    assert_eq!(context.estimate_bytes(12000), 12000);
+    assert_eq!(context.estimate_bytes(12000), 8000);
 }
 
 #[test]
 fn summary_byte_budgets_keep_a_separate_margin_and_safe_fallbacks() {
     let mut context = Context::default();
-    assert_eq!(context.summary_byte_budget(6000), 6000);
+    assert_eq!(context.summary_byte_budget(6000), 12000);
     context.calibration = Some((1000, 6000));
     assert_eq!(context.summary_byte_budget(6000), 18000);
-    assert_eq!(context.estimate_bytes(18000), 4500);
+    assert_eq!(context.estimate_bytes(18000), 3000);
     context.calibration = Some((2000, 7000));
     for budget in [0, 1, 17, 6000] {
         let bytes = context.summary_byte_budget(budget);
@@ -110,7 +111,7 @@ fn summary_byte_budgets_keep_a_separate_margin_and_safe_fallbacks() {
     context.calibration = Some((1, usize::MAX));
     assert_eq!(context.summary_byte_budget(usize::MAX), usize::MAX);
     context.reset_usage();
-    assert_eq!(context.summary_byte_budget(6000), 6000);
+    assert_eq!(context.summary_byte_budget(6000), 12000);
 }
 
 #[test]
@@ -156,7 +157,7 @@ fn model_switch_keeps_stamped_history_for_return_to_original_model() {
 }
 
 #[test]
-fn missing_or_invalid_usage_cannot_recalibrate_a_larger_request_with_old_tokens() {
+fn missing_or_invalid_usage_preserves_the_measured_prefix_and_density() {
     let missing = Usage {
         output_tokens: Some(20),
         ..Usage::default()
@@ -175,12 +176,11 @@ fn missing_or_invalid_usage_cannot_recalibrate_a_larger_request_with_old_tokens(
             2,
         );
         context.calibrate(6000);
-        context.observe(usage, 4);
-        context.calibrate(20000);
-        assert_eq!(context.input_tokens, None);
-        assert_eq!(context.measured_end, 0);
-        assert_eq!(context.calibration, None);
-        assert_eq!(context.estimate_bytes(20000), 20000);
+        assert!(!context.observe(usage, 4));
+        assert_eq!(context.input_tokens, Some(1000));
+        assert_eq!(context.measured_end, 2);
+        assert_eq!(context.calibration, Some((1000, 6000)));
+        assert_eq!(context.estimate_bytes(20000), 3334);
     }
 }
 
@@ -265,7 +265,7 @@ fn the_displayed_percentage_reaches_the_threshold_exactly_with_the_budget() {
     for (capacity, percent) in [(24000, 80), (1001, 80), (128_000, 1), (7, 99)] {
         let budget = threshold(capacity, percent);
         let status = |tokens| Status {
-            tokens,
+            tokens: Some(tokens),
             capacity: Some(capacity),
             auto_compact: percent,
         };
@@ -273,7 +273,7 @@ fn the_displayed_percentage_reaches_the_threshold_exactly_with_the_budget() {
         assert!(status(budget - 1).percent() < Some(usize::from(percent)));
     }
     let unknown = Status {
-        tokens: 5000,
+        tokens: Some(5000),
         capacity: None,
         auto_compact: 80,
     };

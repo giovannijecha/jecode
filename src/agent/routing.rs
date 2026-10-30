@@ -15,6 +15,10 @@ impl Agent {
 
     /// Applies from this conversation's next request; saved defaults are unchanged.
     pub fn set_routing(&mut self, routing: Routing) {
+        if self.client.routing() != routing {
+            // A different endpoint has not rejected the current context window.
+            self.context.ceiling = None;
+        }
         self.client.set_routing(routing);
     }
 

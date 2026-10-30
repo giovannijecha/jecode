@@ -15,7 +15,7 @@ fn summary_input(agent: &mut Agent, calibrated: bool) -> (Vec<Value>, Vec<(usize
                 "content",
                 Value::string(format!(
                     "{} end-{index}-Ω-日本",
-                    "original record ".repeat(500)
+                    "original record ".repeat(800)
                 )),
             ),
         ]));
@@ -94,7 +94,7 @@ fn chronological_portions_include_every_record_and_carry_the_previous_summary() 
             if calibrated {
                 request_bytes.div_ceil(3)
             } else {
-                request_bytes
+                request_bytes.div_ceil(2)
             } <= 21000
         );
         let supplied_text = supplied(request);
@@ -173,7 +173,7 @@ fn a_rejected_summary_retries_a_smaller_portion_without_skipping_older_records()
 }
 
 fn large_read() -> Value {
-    let mut response = completion(
+    completion(
         "",
         vec![tool_call(
             "large",
@@ -183,14 +183,7 @@ fn large_read() -> Value {
                 ("limit", Value::number(2000)),
             ]),
         )],
-    );
-    if let Value::Object(fields) = &mut response {
-        fields.insert(
-            "usage".into(),
-            Value::object([("prompt_tokens", Value::number(18000))]),
-        );
-    }
-    response
+    )
 }
 
 #[test]
@@ -213,7 +206,7 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let capacity = agent.fixture_capacity(11_000, crate::context::AUTO_COMPACT_DEFAULT);
+    let capacity = agent.fixture_capacity(40_000, crate::context::AUTO_COMPACT_DEFAULT);
     agent.client.fixture_limits(capacity, Some(4096));
     agent
         .run_turn("Inspect source; preserve protected.txt", &mut |event| {
@@ -305,7 +298,11 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
             "usage".into(),
             Value::object([(
                 "prompt_tokens",
-                Value::number(10000 + crate::tools::encoded_size()),
+                Value::number(
+                    10000
+                        + crate::context::Context::default()
+                            .estimate_bytes(crate::tools::encoded_size()),
+                ),
             )]),
         );
     }
@@ -321,7 +318,8 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
     agent.prepare_turn("Continue existing work").unwrap();
     let capacity =
         agent.fixture_capacity(memory.len() + 1_024, crate::context::AUTO_COMPACT_DEFAULT);
-    assert!(memory.len() > capacity / 4 && memory.len() < capacity / 2);
+    let memory_tokens = crate::context::Context::default().estimate_bytes(memory.len());
+    assert!(memory_tokens > capacity / 4 && memory_tokens < capacity / 2);
     agent.client.fixture_limits(capacity, Some(4096));
     agent.context.from = 2;
     agent.context.summary = memory.clone();

@@ -169,7 +169,8 @@ threshold can leave less space for the reply.
 
 Change it with `/settings` → **Auto-compact at**. The selector accepts a whole
 number with an optional `%`. A successful save applies on the next model
-request, including in the current conversation. Invalid input or a failed save
+request, including in the current conversation and existing collaborators,
+even while a turn is working. Invalid input or a failed save
 keeps the previous value. If even the system instructions, original user
 requests and a useful summary cannot fit, the turn stops with a resource error;
 raise the threshold or choose a model with more context. See

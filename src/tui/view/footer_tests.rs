@@ -14,7 +14,7 @@ use crate::{
 fn with_status(tokens: usize, capacity: Option<usize>) -> State {
     State {
         context: Some(Status {
-            tokens,
+            tokens: Some(tokens),
             capacity,
             auto_compact: 80,
         }),
@@ -28,7 +28,7 @@ fn footer(state: &State) -> String {
 }
 
 #[test]
-fn the_footer_meters_the_projection_toward_auto_compaction() {
+fn the_footer_shows_the_latest_provider_usage() {
     let mut state = with_status(61_000, Some(100_000));
     let idle = frame(&state, "provider/model", r"C:\project");
     assert_eq!(idle.live.len(), 5);
@@ -70,6 +70,14 @@ fn the_meter_turns_gold_near_the_threshold_and_stays_empty_when_unknown() {
         assert!(line.contains("▱▱▱▱▱▱▱▱ ?"), "{width}: {line}");
         assert!(!line.contains('%') && text::cells(&line) <= width);
     }
+    unknown.context.as_mut().unwrap().capacity = Some(100_000);
+    unknown.context.as_mut().unwrap().tokens = None;
+    for width in [80, 30, 12] {
+        unknown.width = width;
+        let line = footer(&unknown);
+        assert!(line.contains("▱▱▱▱▱▱▱▱ ?"), "{width}: {line}");
+        assert!(!line.contains('%') && text::cells(&line) <= width);
+    }
 }
 
 #[test]
@@ -81,7 +89,7 @@ fn a_low_auto_compact_threshold_is_not_warned_at_zero_percent() {
         let line = idle.live.last().unwrap();
         assert!(line.spans.iter().all(|span| span.style != WARNING));
     }
-    state.context.as_mut().unwrap().tokens = 1_000;
+    state.context.as_mut().unwrap().tokens = Some(1_000);
     let active = frame(&state, "provider/model", r"C:\project");
     assert!(
         active

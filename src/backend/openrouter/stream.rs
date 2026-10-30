@@ -1,5 +1,5 @@
 use super::{Completion, api_error, completion::parse_completion};
-use crate::backend::Update;
+use crate::backend::{Update, Usage};
 use crate::json::{self, Value};
 use std::collections::BTreeMap;
 
@@ -18,6 +18,7 @@ pub struct Stream {
     saw_data: bool,
     pub(super) failure: Option<super::Failure>,
     usage: Option<Value>,
+    usage_tokens: Option<Usage>,
     provider: Option<String>,
 }
 
@@ -125,7 +126,9 @@ impl Stream {
                 fields.insert("provider".into(), Value::string(provider));
             }
         }
-        parse_completion(response)
+        let mut completion = parse_completion(response)?;
+        completion.usage = self.usage_tokens;
+        Ok(completion)
     }
 
     fn event(
@@ -141,15 +144,34 @@ impl Stream {
             return Err("OpenRouter sent data after [DONE]".into());
         }
         let value = json::parse(data)?;
-        if let Some(error) = api_error(&value) {
-            self.failure = Some(super::Failure::api(&value, 200));
-            return Err(format!("OpenRouter stream error: {error}"));
-        }
-        if let Some(usage @ Value::Object(_)) = value.get("usage") {
-            self.usage = Some(usage.clone());
+        if let Some(Value::Object(update)) = value.get("usage") {
+            let latest = super::served::usage(Some(&Value::Object(update.clone())));
+            let cumulative = latest.map(|latest| {
+                let current = self.usage_tokens.get_or_insert_default();
+                current.update(latest);
+                *current
+            });
+            let current = self.usage.get_or_insert_with(|| Value::object([]));
+            let Value::Object(fields) = current else {
+                unreachable!()
+            };
+            if latest.is_some_and(|usage| {
+                usage.total_tokens.is_none()
+                    && (usage.input_tokens.is_some() || usage.output_tokens.is_some())
+            }) {
+                fields.remove("total_tokens");
+            }
+            fields.extend(update.clone());
+            if let Some(cumulative) = cumulative {
+                emit(Update::Usage(cumulative))?;
+            }
         }
         if let Some(provider) = super::served::provider(&value) {
             self.provider = Some(provider);
+        }
+        if let Some(error) = api_error(&value) {
+            self.failure = Some(super::Failure::api(&value, 200));
+            return Err(format!("OpenRouter stream error: {error}"));
         }
         let choices = value
             .get("choices")

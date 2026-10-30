@@ -208,8 +208,8 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
 }
 
 /// `▰▰▰▰▱▱▱▱ 52%`: eight cells filling toward the auto-compact threshold,
-/// `warning` within three points of it. Unknown capacity leaves the track
-/// empty with `?`.
+/// `warning` within three points of it. Unknown usage or capacity leaves the
+/// track empty with `?`.
 fn gauge(status: &Status) -> Line {
     let threshold = usize::from(status.auto_compact).max(1);
     let percent = status.percent();
@@ -223,7 +223,7 @@ fn gauge(status: &Status) -> Line {
     line.push(&"▱".repeat(METER_CELLS - filled), METER_TRACK);
     let share = match percent {
         None => "?".into(),
-        Some(0) if status.tokens > 0 => "<1%".into(),
+        Some(0) if status.tokens.is_some_and(|tokens| tokens > 0) => "<1%".into(),
         Some(percent) => format!("{percent}%"),
     };
     line.push(&format!(" {share}"), if near { WARNING } else { MUTED });

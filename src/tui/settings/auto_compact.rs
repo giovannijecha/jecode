@@ -1,4 +1,4 @@
-use super::super::{App, Kind, held::Deferred};
+use super::super::{App, Kind};
 
 impl App {
     /// Saves the threshold, then applies it to the active conversation. An
@@ -30,7 +30,12 @@ impl App {
             Ok(()) => {
                 let previous = self.config.settings.auto_compact;
                 self.config.settings = settings;
-                self.defer(Deferred::AutoCompact);
+                self.facts()
+                    .auto_compact
+                    .store(percent, std::sync::atomic::Ordering::Relaxed);
+                if let Some(status) = &mut self.state.context {
+                    status.auto_compact = percent;
+                }
                 self.refresh_context();
                 self.finish_setting_change(
                     Kind::Notice,
