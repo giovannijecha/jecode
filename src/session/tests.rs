@@ -33,7 +33,6 @@ fn failed_plain_direct_write_records_only_a_safe_command_label() {
     let mut config = SessionConfig {
         store: Store::new(home.path().to_path_buf()),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut output = Vec::new();
     let mut status = Vec::new();
@@ -81,7 +80,6 @@ fn skills_command_lists_local_catalog_and_skips_malformed_entries_without_an_api
     let mut config = SessionConfig {
         store: Store::new(home.path().to_path_buf()),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut output = Vec::new();
     let mut status = Vec::new();
@@ -122,7 +120,6 @@ fn skills_command_explains_an_empty_catalog() {
     let mut config = SessionConfig {
         store: Store::new(home.path().to_path_buf()),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut output = Vec::new();
     chat(
@@ -166,7 +163,6 @@ fn interactive_session_recovers_from_api_errors_and_can_clear_history() {
     let mut config = SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     chat(
         &mut agent,
@@ -230,7 +226,6 @@ fn model_command_preserves_context_and_does_not_change_saved_defaults() {
     let mut config = SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut input =
         Cursor::new("First task\n/help\n/unknown\n/model fixture/new\nSecond task\n/exit\n");
@@ -283,7 +278,6 @@ fn routing_command_offers_the_shared_choices_and_applies_from_the_next_request()
     let mut config = SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut input = Cursor::new("/routing\n9\n3\n2\nTask\n/exit\n");
     let mut output = Vec::new();
@@ -338,7 +332,6 @@ fn plain_quit_alias_is_local_and_accepts_mixed_case() {
     let mut config = SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut output = Vec::new();
     chat(
@@ -391,7 +384,6 @@ fn init_runs_a_model_tool_turn_for_root_project_instructions() {
     let mut config = SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut output = Vec::new();
     chat(

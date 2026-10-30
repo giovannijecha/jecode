@@ -16,7 +16,6 @@ fn app(directory: &Directory) -> App {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     )

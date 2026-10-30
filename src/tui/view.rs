@@ -7,6 +7,7 @@ mod information;
 mod menus;
 pub(super) mod opening;
 mod panel;
+mod permission;
 pub(super) mod processes;
 mod quit;
 mod routing;
@@ -135,6 +136,7 @@ pub(super) fn panel_open(state: &State) -> bool {
         || state.processes.is_some()
         || state.agents_panel.is_some()
         || state.ask_panel.is_some()
+        || state.permission.is_some()
         || state.todo_panel.is_some()
         || state.selector.is_some()
         || state.information.is_some()

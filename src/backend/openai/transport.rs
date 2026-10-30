@@ -1,10 +1,9 @@
-//! HTTPS boundary: system curl 8.3+, with tokens only in the child environment.
+//! Native HTTPS boundary for OpenAI requests.
 
 use super::Api;
 use crate::backend::{Failure, FailureKind, FailureReason};
 use crate::json::{self, Value};
 use crate::redact::Redactor;
-use std::process::Command;
 use std::time::Duration;
 
 const DIAGNOSTIC_LIMIT: usize = 64 * 1024;
@@ -47,61 +46,34 @@ impl Api {
             .access_token(&self.cancellation)
             .map_err(Failure::from)?;
         let url = format!("{}{path}", self.base_url);
-        let mut command = Command::new(crate::curl::executable());
-        command.args([
-            "--disable",
-            "--silent",
-            "--show-error",
-            "--no-buffer",
-            "--variable",
-            "%JECODE_OPENAI_ACCESS_TOKEN",
-            "--expand-header",
-            "Authorization: Bearer {{JECODE_OPENAI_ACCESS_TOKEN}}",
-            "--request",
-            method,
-            "--connect-timeout",
-            "10",
-            "--suppress-connect-headers",
-            "--dump-header",
-            "-",
-            "--url",
-            &url,
-        ]);
-        crate::auth::isolate_environment(&mut command);
-        command.env("JECODE_OPENAI_ACCESS_TOKEN", &token);
+        let authorization = format!("Bearer {token}");
+        let mut headers = vec![("Authorization", authorization.as_str())];
         if body.is_some() {
-            command.args([
-                "--header",
-                "Content-Type: application/json",
-                "--header",
-                "Accept: text/event-stream",
-                "--header",
-                "Expect:",
-                "--data-binary",
-                "@-",
+            headers.extend([
+                ("Content-Type", "application/json"),
+                ("Accept", "text/event-stream"),
             ]);
         }
         // The ChatGPT route derives prompt cache affinity from this header.
         if let Some(session) = session {
-            command.args(["--header", &format!("session-id: {session}")]);
-        }
-        if self.base_url.starts_with("https://") {
-            command.args(["--proto", "=https"]);
-        } else {
-            command.args(["--noproxy", "*"]);
+            headers.push(("session-id", session));
         }
         let mut decoder = Headers {
             collect_body: body.is_none(),
             ..Headers::default()
         };
         let mut observer_failed = false;
-        let output = crate::curl::run(
-            &mut command,
-            body.map(|body| body.as_bytes().to_vec()),
-            None,
-            DIAGNOSTIC_LIMIT,
+        let output = crate::http::run(
+            crate::http::Request {
+                url: &url,
+                method,
+                headers: &headers,
+                body: body.map(str::as_bytes),
+                timeout: None,
+                idle: Some(Duration::from_secs(120)),
+                output_limit: DIAGNOSTIC_LIMIT,
+            },
             &self.cancellation,
-            Some(Duration::from_secs(120)),
             &mut |bytes| {
                 let result = decoder.feed(bytes, observer);
                 if result.is_err() {
@@ -138,7 +110,7 @@ impl Api {
                 .byte_prefix(&output.stderr, output.stderr_bytes == output.stderr.len());
             let stderr = String::from_utf8_lossy(&stderr);
             let message = format!(
-                "Could not reach OpenAI via curl (exit {}): {}",
+                "Could not reach OpenAI via native HTTP (exit {}): {}",
                 output
                     .exit_code
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
@@ -157,7 +129,7 @@ impl Api {
         }
         if let Some(error) = output.input_error {
             return Err(Failure::from(format!(
-                "Could not send OpenAI request to curl: {error}"
+                "Could not send OpenAI HTTP request: {error}"
             )));
         }
         let status = decoder

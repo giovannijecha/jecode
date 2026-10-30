@@ -342,7 +342,7 @@ fn stop_terminates_descendants() {
         "running"
     );
     let stopped = process(&tools, "stop", &id, None);
-    assert_eq!(text(&stopped, "status"), "stopped");
+    assert_eq!(text(&stopped, "status"), "stopped", "{stopped:?}");
     assert!(heartbeat_stopped(&directory));
 }
 

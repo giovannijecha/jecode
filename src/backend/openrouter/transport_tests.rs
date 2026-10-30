@@ -59,7 +59,7 @@ fn round_trip(body: &str) -> (Vec<String>, Vec<u8>) {
     let received = server.finish();
     assert_eq!(response.unwrap(), "{\"ok\":true}");
     let (headers, received) = received.unwrap();
-    assert_eq!(observed, b"{\"ok\":true}\n200");
+    assert_eq!(observed, b"{\"ok\":true}");
     assert!(
         headers
             .iter()
@@ -169,13 +169,11 @@ fn request_failures_retain_native_http_and_input_diagnostics() {
 }
 
 #[test]
-fn old_curl_reports_the_required_version() {
+fn native_http_failure_preserves_safe_diagnostic() {
     let api = Api::fixture("http://127.0.0.1:1/chat/completions");
-    let mut output = incomplete_output(b"", b"curl: option --variable: is unknown", 2);
+    let mut output = incomplete_output(b"", b"Native HTTP request failed: SocketException", 1);
     output.input_error = None;
     let error = api.response(output, None).unwrap_err();
-    assert!(error.message.contains("--variable"));
-    assert!(error.message.contains("curl (exit 2)"));
-    assert!(error.message.contains("version 8.3 or newer"));
-    assert!(error.message.contains("JECODE_CURL"));
+    assert!(error.message.contains("native HTTP (exit 1)"));
+    assert!(error.message.contains("SocketException"));
 }

@@ -1,7 +1,11 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 
@@ -14,6 +18,7 @@ public static class JecodeProcess {
     const uint ExtendedStartupInfoPresent = 0x00080000;
     const int AttributeJobList = 0x0002000d;
     const uint CreateNoWindow = 0x08000000;
+    const uint CreateUnicodeEnvironment = 0x00000400;
     const uint StartfUseStdHandles = 0x00000100;
     const uint JobLimitKillOnClose = 0x00002000;
     const uint DuplicateSameAccess = 0x00000002;
@@ -97,6 +102,12 @@ public static class JecodeProcess {
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    struct JobCompletionPort {
+        public IntPtr CompletionKey;
+        public IntPtr CompletionPort;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     struct BasicAccountingInformation {
         public long TotalUserTime;
         public long TotalKernelTime;
@@ -113,6 +124,15 @@ public static class JecodeProcess {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimitInformation info, int length);
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "SetInformationJobObject")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool AssociateJobPort(IntPtr job, int infoClass, ref JobCompletionPort info, int length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr CreateIoCompletionPort(IntPtr file, IntPtr existing, UIntPtr key, uint threads);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool GetQueuedCompletionStatus(IntPtr port, out uint message, out UIntPtr key,
+        out IntPtr overlapped, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool QueryInformationJobObject(IntPtr job, int infoClass, out BasicAccountingInformation info, int length, IntPtr returned);
@@ -140,6 +160,9 @@ public static class JecodeProcess {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool TerminateProcess(IntPtr process, uint exitCode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool TerminateJobObject(IntPtr job, uint exitCode);
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool CloseHandle(IntPtr handle);
@@ -192,6 +215,36 @@ public static class JecodeProcess {
         output.Flush();
     }
 
+    static void SendStage(byte stage) {
+        Stream output = Console.OpenStandardOutput();
+        output.WriteByte(2);
+        output.WriteByte(stage);
+        output.Flush();
+    }
+
+    // Job notifications wake the active-process check as soon as a process in
+    // the job exits. Without them the check falls back to a short poll.
+    static IntPtr JobEvents(IntPtr job) {
+        IntPtr port = CreateIoCompletionPort(new IntPtr(-1), IntPtr.Zero, UIntPtr.Zero, 1);
+        if (port == IntPtr.Zero) return IntPtr.Zero;
+        var association = new JobCompletionPort();
+        association.CompletionKey = job;
+        association.CompletionPort = port;
+        if (AssociateJobPort(job, 7, ref association, Marshal.SizeOf(typeof(JobCompletionPort))))
+            return port;
+        CloseHandle(port);
+        return IntPtr.Zero;
+    }
+
+    static void WaitForJobEvent(IntPtr port) {
+        if (port == IntPtr.Zero) { Thread.Sleep(10); return; }
+        uint message;
+        UIntPtr key;
+        IntPtr overlapped;
+        // Any job message, or the bounded wait, leads to a fresh accounting query.
+        GetQueuedCompletionStatus(port, out message, out key, out overlapped, 100);
+    }
+
     static void SendCompletion(NamedPipeServerStream pipe, byte kind, byte[] payload) {
         pipe.WriteByte(kind);
         byte[] header = kind == 1 ? payload : BitConverter.GetBytes(payload.Length);
@@ -219,15 +272,20 @@ public static class JecodeProcess {
     }
 
     public static int Run() {
-        IntPtr job = IntPtr.Zero, inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
+        IntPtr job = IntPtr.Zero, jobEvents = IntPtr.Zero;
+        IntPtr inputRead = IntPtr.Zero, inputWrite = IntPtr.Zero;
         IntPtr output = IntPtr.Zero, error = IntPtr.Zero;
         IntPtr attributeList = IntPtr.Zero, jobValue = IntPtr.Zero;
+        JecodeWindowsSandbox sandbox = null;
         bool attributesInitialized = false;
         NamedPipeServerStream completion = null;
+        NamedPipeServerStream stopPipe = null;
         IAsyncResult pendingConnection = null;
+        IAsyncResult pendingStop = null;
         ProcessInformation process = new ProcessInformation();
         bool ready = false;
         try {
+            SendStage(1); // Managed entry reached.
             Stream source = Console.OpenStandardInput();
             var protocol = new BinaryReader(source, Encoding.Unicode);
             int ownerId = protocol.ReadInt32();
@@ -242,12 +300,20 @@ public static class JecodeProcess {
             completion = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1,
                 PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             pendingConnection = completion.BeginWaitForConnection(null, null);
+            // The input buffer lets the owner's stop request complete without
+            // waiting for the stop watcher to read it.
+            stopPipe = new NamedPipeServerStream(pipeName + "-stop", PipeDirection.In, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16, 0);
+            pendingStop = stopPipe.BeginWaitForConnection(null, null);
+            SendStage(2); // Command protocol and channels are available.
             string program = ReadString(protocol);
             string executable = JecodeWindowsCommand.ResolveProgram(program);
             int count = protocol.ReadInt32();
             if (count < 0 || count > 100000) throw new InvalidDataException("Invalid argument count");
             var commandLine = new StringBuilder(JecodeWindowsCommand.Quote(program));
             for (int i = 0; i < count; i++) commandLine.Append(' ').Append(JecodeWindowsCommand.Quote(ReadString(protocol)));
+            sandbox = JecodeWindowsSandbox.Prepare(ReadString(protocol));
+            SendStage(3); // Requested sandbox is prepared.
 
             job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw Failure("CreateJobObject");
@@ -255,6 +321,7 @@ public static class JecodeProcess {
             limits.Basic.LimitFlags = JobLimitKillOnClose;
             if (!SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(ExtendedLimitInformation))))
                 throw Failure("SetInformationJobObject");
+            jobEvents = JobEvents(job);
 
             var security = new SecurityAttributes();
             security.Length = Marshal.SizeOf(typeof(SecurityAttributes));
@@ -264,10 +331,11 @@ public static class JecodeProcess {
             output = InheritedStdHandle(-11);
             error = InheritedStdHandle(-12);
             IntPtr attributeSize = IntPtr.Zero;
-            InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeSize);
+            int attributeCount = sandbox == null ? 1 : 2;
+            InitializeProcThreadAttributeList(IntPtr.Zero, attributeCount, 0, ref attributeSize);
             if (attributeSize == IntPtr.Zero) throw Failure("InitializeProcThreadAttributeList size");
             attributeList = Marshal.AllocHGlobal(attributeSize);
-            if (!InitializeProcThreadAttributeList(attributeList, 1, 0, ref attributeSize))
+            if (!InitializeProcThreadAttributeList(attributeList, attributeCount, 0, ref attributeSize))
                 throw Failure("InitializeProcThreadAttributeList");
             attributesInitialized = true;
             jobValue = Marshal.AllocHGlobal(IntPtr.Size);
@@ -275,6 +343,8 @@ public static class JecodeProcess {
             if (!UpdateProcThreadAttribute(attributeList, 0, new IntPtr(AttributeJobList),
                 jobValue, new IntPtr(IntPtr.Size), IntPtr.Zero, IntPtr.Zero))
                 throw Failure("UpdateProcThreadAttribute job list");
+            if (sandbox != null) sandbox.AddAttribute(attributeList);
+            SendStage(4); // Job, handles and process attributes are ready.
             var startup = new StartupInfoEx();
             startup.Startup.Size = Marshal.SizeOf(typeof(StartupInfoEx));
             startup.Startup.Flags = StartfUseStdHandles;
@@ -282,10 +352,16 @@ public static class JecodeProcess {
             startup.Startup.StdOutput = output;
             startup.Startup.StdError = error;
             startup.AttributeList = attributeList;
-            if (!CreateProcess(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
-                CreateSuspended | CreateNoWindow | ExtendedStartupInfoPresent, IntPtr.Zero, null,
-                ref startup, out process))
-                throw Failure("CreateProcess");
+            IntPtr environment = sandbox == null ? IntPtr.Zero : JecodeWindowsSandbox.InheritedEnvironment();
+            try {
+                uint flags = CreateSuspended | CreateNoWindow | ExtendedStartupInfoPresent;
+                if (sandbox != null) flags |= CreateUnicodeEnvironment;
+                SendStage(5); // Entering native child creation.
+                if (!CreateProcess(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
+                    flags, environment, null, ref startup, out process))
+                    throw Failure("CreateProcess");
+            } finally { JecodeWindowsSandbox.FreeInheritedEnvironment(environment); }
+            SendStage(6); // Native child was created suspended.
             Stream readyStream = Console.OpenStandardOutput();
             readyStream.WriteByte(1);
             byte[] childId = BitConverter.GetBytes(process.ProcessId);
@@ -293,7 +369,16 @@ public static class JecodeProcess {
             readyStream.Flush();
             ready = true;
             completion.EndWaitForConnection(pendingConnection);
+            stopPipe.EndWaitForConnection(pendingStop);
             if (ResumeThread(process.Thread) == Infinite) throw Failure("ResumeThread");
+            var stopWatcher = new Thread(() => {
+                try {
+                    if (stopPipe.ReadByte() == 1) TerminateJobObject(job, 1);
+                } catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            });
+            stopWatcher.IsBackground = true;
+            stopWatcher.Start();
             CloseHandle(inputRead); inputRead = IntPtr.Zero;
             CloseHandle(output); output = IntPtr.Zero;
             CloseHandle(error); error = IntPtr.Zero;
@@ -312,7 +397,7 @@ public static class JecodeProcess {
                 if (!QueryInformationJobObject(job, 1, out accounting,
                     Marshal.SizeOf(typeof(BasicAccountingInformation)), IntPtr.Zero))
                     throw Failure("QueryInformationJobObject");
-                if (accounting.ActiveProcesses > 0) Thread.Sleep(10);
+                if (accounting.ActiveProcesses > 0) WaitForJobEvent(jobEvents);
             } while (accounting.ActiveProcesses > 0);
             SendCompletion(completion, 1, BitConverter.GetBytes(exitCode));
             return unchecked((int)exitCode);
@@ -337,7 +422,10 @@ public static class JecodeProcess {
             if (attributeList != IntPtr.Zero) Marshal.FreeHGlobal(attributeList);
             if (jobValue != IntPtr.Zero) Marshal.FreeHGlobal(jobValue);
             if (job != IntPtr.Zero) CloseHandle(job);
+            if (jobEvents != IntPtr.Zero) CloseHandle(jobEvents);
+            if (sandbox != null) sandbox.Dispose();
             if (completion != null) completion.Dispose();
+            if (stopPipe != null) stopPipe.Dispose();
         }
     }
 }

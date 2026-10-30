@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 mod protocol;
+#[cfg(windows)]
+pub mod sandbox;
 pub mod server;
 pub use protocol::{completion, tool_call};
 

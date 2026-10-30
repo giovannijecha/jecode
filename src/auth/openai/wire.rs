@@ -1,6 +1,5 @@
 use crate::cancel::Cancellation;
 use crate::json::{self, Value};
-use std::process::Command;
 use std::time::Duration;
 
 pub(super) const AUTHORITY: &str = "https://auth.openai.com";
@@ -115,73 +114,45 @@ fn request(url: &str, body: Option<&str>, cancel: &Cancellation) -> Result<Value
     );
     #[cfg(not(test))]
     let endpoint = url.to_string();
-    let mut command = Command::new(crate::curl::executable());
-    command.args([
-        "--disable",
-        "--silent",
-        "--show-error",
-        "--proto",
-        if endpoint.starts_with("https://") {
-            "=https"
-        } else {
-            "=http"
-        },
-        "--max-time",
-        "30",
-        "--connect-timeout",
-        "10",
-        "--request",
-        if body.is_some() { "POST" } else { "GET" },
-        "--header",
-        "Accept: application/json",
-        "--write-out",
-        "\n%{http_code}",
-        "--url",
-        &endpoint,
-    ]);
-    #[cfg(test)]
-    if fixture.is_some() {
-        command.args(["--noproxy", "*"]);
-    }
+    let mut headers = vec![("Accept", "application/json")];
     if body.is_some() {
-        command.args([
-            "--header",
-            "Content-Type: application/x-www-form-urlencoded",
-            "--data-binary",
-            "@-",
-        ]);
+        headers.push(("Content-Type", "application/x-www-form-urlencoded"));
     }
-    crate::auth::isolate_environment(&mut command);
-    let output = crate::curl::run(
-        &mut command,
-        body.map(|s| s.as_bytes().to_vec()),
-        Some(Duration::from_secs(35)),
-        1024 * 1024,
+    let mut decoder = crate::http::Decoder::default();
+    let mut response = Vec::new();
+    let output = crate::http::run(
+        crate::http::Request {
+            url: &endpoint,
+            method: if body.is_some() { "POST" } else { "GET" },
+            headers: &headers,
+            body: body.map(str::as_bytes),
+            timeout: Some(Duration::from_secs(30)),
+            idle: None,
+            output_limit: 0,
+        },
         cancel,
-        None,
-        &mut |_| Ok(()),
+        &mut |bytes| {
+            decoder.feed(bytes, &mut |part| {
+                if response.len().saturating_add(part.len()) > 1024 * 1024 {
+                    return Err("OpenAI identity response was too large".into());
+                }
+                response.extend_from_slice(part);
+                Ok(())
+            })
+        },
     )?;
     if output.cancelled || cancel.requested() {
         return Err("Operation cancelled".into());
     }
-    if output.timed_out
-        || output.exit_code != Some(0)
-        || output.stdout_truncated
-        || output.input_error.is_some()
-    {
+    if output.timed_out || output.exit_code != Some(0) || output.input_error.is_some() {
         return Err("Could not complete OpenAI identity request".into());
     }
-    let text =
-        String::from_utf8(output.stdout).map_err(|_| "OpenAI identity response was not UTF-8")?;
-    let (body, code) = text
-        .rsplit_once('\n')
+    let body = String::from_utf8(response).map_err(|_| "OpenAI identity response was not UTF-8")?;
+    let status = decoder
+        .status
         .ok_or("OpenAI identity response had no status")?;
-    let status: u16 = code
-        .trim()
-        .parse()
-        .map_err(|_| "OpenAI identity response had an invalid status")?;
     if !(200..300).contains(&status) {
-        let error = json::parse(body)
+        let error = json::parse(&body)
             .ok()
             .and_then(|v| match v.get("error") {
                 Some(Value::String(code)) => Some(code.clone()),
@@ -215,7 +186,7 @@ fn request(url: &str, body: Option<&str>, cancel: &Cancellation) -> Result<Value
     if body.trim().is_empty() {
         return Ok(Value::Null);
     }
-    json::parse(body).map_err(|_| "OpenAI identity response was invalid JSON".into())
+    json::parse(&body).map_err(|_| "OpenAI identity response was invalid JSON".into())
 }
 
 pub(super) fn machine_code(error: &str) -> Option<&str> {

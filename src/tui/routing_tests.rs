@@ -33,15 +33,7 @@ fn app(home: &Directory, directory: &Directory, fixture: &HttpFixture, routing: 
     agent.set_routing_preferences(BTreeMap::new());
     agent.set_routing(routing);
     agent.enable_sessions(home.path()).unwrap();
-    App::new(
-        agent,
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
-        None,
-    )
+    App::new(agent, SessionConfig { store, settings }, None)
 }
 
 fn enter(app: &mut App) {

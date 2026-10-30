@@ -1,8 +1,8 @@
 use super::*;
 use crate::tui::motion;
 use crate::tui::theme::{
-    BAD, BADGE_BAD, BADGE_EDIT, BADGE_IDLE, BADGE_READ, BADGE_SHELL, BADGE_TEXT, BADGE_WARN, BODY,
-    LIT, Surface,
+    BAD, BADGE_BAD, BADGE_COORD, BADGE_EDIT, BADGE_IDLE, BADGE_READ, BADGE_SHELL, BADGE_TEXT,
+    BADGE_WARN, BODY, LIT, Surface,
 };
 use std::time::Duration;
 
@@ -74,6 +74,18 @@ fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
             if name == "bash" { BODY } else { MUTED }
         );
     }
+}
+
+#[test]
+fn coordination_badges_are_distinct_from_read_badges() {
+    for label in ["AGENT 1", "Agents", "Todo", "Ask user"] {
+        let row = super::badge::badge(label, Status::Done);
+        assert_eq!(row.spans[0].background, Some(BADGE_COORD), "{label}");
+    }
+    assert_eq!(
+        super::badge::badge("Read", Status::Done).spans[0].background,
+        Some(BADGE_READ)
+    );
 }
 
 #[test]

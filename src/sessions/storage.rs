@@ -150,7 +150,7 @@ impl Store {
                 Ok((document, _)) => {
                     if let Some(stamp) = &stamp {
                         // The cache is optional; opening still validates the journal itself.
-                        let _ = super::summary::save(self, &document, stamp);
+                        let _ = super::summary::save(self, &document, &document.title(), stamp);
                     }
                     listing.sessions.push(Summary {
                         title: document.title(),
@@ -225,20 +225,37 @@ impl Store {
 }
 
 impl Lease {
+    /// Saves a whole document, as fixtures and measurements do.
+    #[cfg(test)]
     pub fn save(&self, document: &Document) -> Result<(), String> {
+        self.save_tail(&super::journal::Tail::whole(document), &document.title())
+    }
+
+    /// Appends a checkpoint; `title` is the whole document's.
+    pub fn save_tail(&self, tail: &super::journal::Tail<'_>, title: &str) -> Result<(), String> {
+        let document = tail.document;
         if document.id != self.id || !same_directory(&document.directory, &self.store.directory) {
             return Err("Session identity or working directory changed".into());
         }
         super::journal::append(
             &self.store.journal_path(&self.id),
-            document,
+            tail,
             &mut self.journal.lock().unwrap(),
         )?;
         if let Some(stamp) = super::summary::stamp(&self.store, &self.id) {
             // A cache failure cannot turn a committed checkpoint into a failed save.
-            let _ = super::summary::save(&self.store, document, &stamp);
+            let _ = super::summary::save(&self.store, document, title, &stamp);
         }
         Ok(())
+    }
+
+    /// Messages and events already journaled, once the journal was read.
+    pub fn history(&self) -> Option<(usize, usize)> {
+        self.journal
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(super::journal::Position::history)
     }
 }
 

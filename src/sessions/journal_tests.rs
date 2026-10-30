@@ -360,3 +360,47 @@ fn invalid_delta_boundaries_and_future_journals_are_left_unchanged() {
         assert_eq!(fs::read_to_string(&path).unwrap(), damaged);
     }
 }
+
+#[test]
+fn a_saved_tail_appends_like_the_whole_history_and_a_gap_is_refused() {
+    let (_directory, _home, store, mut doc) = fixture();
+    let lease = store.create(&doc.id).unwrap();
+    lease.save(&doc).unwrap();
+    doc.messages.push(message("assistant", "First answer"));
+    doc.events.push(Value::object([
+        ("type", Value::string("note")),
+        ("after_message", Value::number(3)),
+    ]));
+    let (messages, events) = lease.history().unwrap();
+    assert_eq!((messages, events), (2, 0));
+    let path = store.bucket().join(format!("{}.jsonl", doc.id));
+    let before = fs::read(&path).unwrap();
+    let state = doc.without_history();
+    let gap = journal::Tail {
+        document: &state,
+        messages_from: 3,
+        messages: &[],
+        events_from: 1,
+        events: &[],
+    };
+    assert!(lease.save_tail(&gap, &doc.title()).is_err());
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        before,
+        "a refused tail writes nothing"
+    );
+    let tail = journal::Tail {
+        document: &state,
+        messages_from: messages,
+        messages: &doc.messages[messages..],
+        events_from: events,
+        events: &doc.events[events..],
+    };
+    lease.save_tail(&tail, &doc.title()).unwrap();
+    assert_eq!(lease.history(), Some((3, 1)));
+    drop(lease);
+    let (handle, _) = Handle::open(store, &doc.id, Redactor::empty()).unwrap();
+    let restored = handle.snapshot();
+    assert_eq!(restored.messages, doc.messages);
+    assert_eq!(restored.events, doc.events);
+}

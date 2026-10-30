@@ -23,19 +23,29 @@ mod card_tests;
 #[path = "native_direct_input.rs"]
 mod native_direct_input;
 
+#[path = "native_permissions.rs"]
+mod native_permissions;
+
+#[path = "native_background.rs"]
+mod native_background;
+
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
 fn native_pty_source() -> String {
-    include_str!("native_pty.cs")
-        .replace(
-            "JECODE_WARNING_FOREGROUND",
-            &format!("\\x1b[{}m", crate::tui::theme::WARNING),
-        )
-        .replace(
-            "JECODE_WARNING_SURFACE",
-            &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
-        )
+    format!(
+        "{}\n{}",
+        include_str!("native_pty.cs"),
+        include_str!("native_permissions.cs")
+    )
+    .replace(
+        "JECODE_WARNING_FOREGROUND",
+        &format!("\\x1b[{}m", crate::tui::theme::WARNING),
+    )
+    .replace(
+        "JECODE_WARNING_SURFACE",
+        &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
+    )
 }
 
 #[test]
@@ -190,8 +200,8 @@ fn restored(path: &std::path::Path) {
     );
 }
 
-fn full_width_console(bash: &std::path::Path) {
-    let terminal = Terminal::open(bash).unwrap();
+fn full_width_console() {
+    let terminal = Terminal::open().unwrap();
     let (width, height) = terminal.size;
     let rows: Vec<_> = (0..height)
         .map(|row| {
@@ -238,27 +248,37 @@ fn native_console_fixture() {
     }
     println!("NATIVE_SHELL_SENTINEL");
     std::fs::write(path.join("modes.txt"), probe().lines().next().unwrap()).unwrap();
-    let bash = crate::tools::find_bash().unwrap();
     if scenario == "direct-input" {
-        native_direct_input::fixture(&path, &bash);
+        native_direct_input::fixture(&path);
+        restored(&path);
+        return;
+    }
+    if scenario == "permissions" {
+        native_permissions::fixture(&path);
+        restored(&path);
+        println!("NATIVE_PERMISSIONS_RESTORED");
+        return;
+    }
+    if matches!(scenario.as_str(), "background-light" | "background-native") {
+        native_background::fixture(&path, &scenario);
         restored(&path);
         return;
     }
     if scenario == "latency-idle" || scenario == "latency-active" {
-        super::measurement_tests::fixture(&path, &bash, scenario == "latency-active");
+        super::measurement_tests::fixture(&path, scenario == "latency-active");
         restored(&path);
         println!("NATIVE_LATENCY_RESTORED");
         return;
     }
     if scenario == "owner-death" {
-        let _terminal = Terminal::open(&bash).unwrap();
+        let _terminal = Terminal::open().unwrap();
         println!("NATIVE_OWNER_READY");
         loop {
             thread::sleep(Duration::from_secs(1));
         }
     }
     if scenario == "guardian-loss" {
-        let mut terminal = Terminal::open(&bash).unwrap();
+        let mut terminal = Terminal::open().unwrap();
         terminal.close_for_fixture();
         assert!(terminal.check().is_err());
         drop(terminal);
@@ -273,7 +293,6 @@ fn native_console_fixture() {
         let config = SessionConfig {
             store: Store::new(path.join("home")),
             settings,
-            bash,
         };
         config.store.save(&config.settings).unwrap();
         let agent = Agent::new(
@@ -287,24 +306,24 @@ fn native_console_fixture() {
         return;
     }
     if scenario == "input-recovery" {
-        super::recovery_tests::fixture(&path, &bash);
+        super::recovery_tests::fixture(&path);
         restored(&path);
         println!("NATIVE_INPUT_RECOVERY_RESTORED");
         return;
     }
-    full_width_console(&bash);
+    full_width_console();
     restored(&path);
     println!("NATIVE_FULL_WIDTH_VERIFIED");
-    card_tests::console(&bash);
+    card_tests::console();
     restored(&path);
     println!("NATIVE_CARDS_VERIFIED");
-    activity_tests::console(&bash);
+    activity_tests::console();
     restored(&path);
     println!("NATIVE_ACTIVITY_VERIFIED");
-    agents_tests::console(&bash);
+    agents_tests::console();
     restored(&path);
     println!("NATIVE_AGENTS_VERIFIED");
-    work_tests::console(&bash);
+    work_tests::console();
     restored(&path);
     println!("NATIVE_WORK_TOOLS_VERIFIED");
     std::fs::write(path.join("drop me.txt"), "dropped through ConPTY").unwrap();
@@ -356,7 +375,6 @@ fn native_console_fixture() {
     let config = SessionConfig {
         store: Store::new(path.join("home")),
         settings,
-        bash,
     };
     config.store.save(&config.settings).unwrap();
     let agent = Agent::new(

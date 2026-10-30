@@ -109,6 +109,10 @@ pub struct State {
     pub question: Option<crate::ask::Request>,
     pub ask_panel: Option<super::ask::Panel>,
     pub ask_draft: Option<crate::ask::Draft>,
+    /// This conversation's level, beside the draft (B12.3).
+    pub permission_level: crate::permissions::Level,
+    /// The request in the composer's place (B12.4).
+    pub permission: Option<super::permission::Pending>,
     pub todo_plan: Option<crate::todo::Plan>,
     pub todo_panel: Option<super::todo::Panel>,
     /// Decides which todo_list calls create a plan; only those have a row.
@@ -153,6 +157,8 @@ impl Default for State {
             question: None,
             ask_panel: None,
             ask_draft: None,
+            permission_level: Default::default(),
+            permission: None,
             todo_plan: None,
             todo_panel: None,
             todo_calls: Default::default(),

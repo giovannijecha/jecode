@@ -221,7 +221,6 @@ fn panel_list_inside_and_nested_escape_keep_the_exact_main_draft() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );

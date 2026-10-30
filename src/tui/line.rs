@@ -238,7 +238,11 @@ impl Line {
     }
     // Every cell gets an explicit colour: the span's surface, else the
     // line's, else the terminal's own, padded to the right edge.
+    #[cfg(test)]
     pub fn paint(&self, columns: usize) -> String {
+        self.paint_on(columns, BASE)
+    }
+    pub(in crate::tui) fn paint_on(&self, columns: usize, base: Surface) -> String {
         let mut output = String::from("\x1b[0m");
         let mut cells = 0;
         let mut painted = Self::default();
@@ -250,12 +254,16 @@ impl Line {
             cells += glyph.cells;
             painted.push_glyph(&styled.characters, glyph, None);
         }
-        let surface = self.background.unwrap_or(BASE);
+        let surface = self.background.filter(|fill| *fill != BASE).unwrap_or(base);
         for span in &painted.spans {
             output.push_str(&format!("\x1b[0m\x1b[{}m", span.style));
             // The software caret carries its own background, even inside a panel.
             if !span.style.has_fill() {
-                let background = span.background.unwrap_or(surface);
+                let background = match span.background {
+                    Some(fill) if fill == BASE => base,
+                    Some(fill) => fill,
+                    None => surface,
+                };
                 output.push_str(&format!("\x1b[{background}m"));
             }
             output.push_str(&span.text);

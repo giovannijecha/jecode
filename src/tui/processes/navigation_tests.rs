@@ -23,7 +23,7 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     );
     app.state.width = 80;
     app.state.height = 30;
-    app
+    tests::full_app(app)
 }
 
 fn open_output(app: &mut App, output: &str) {

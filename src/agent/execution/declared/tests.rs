@@ -130,6 +130,10 @@ fn independent_commands_overlap_and_a_dependent_read_waits_for_both() {
         Tools::new(project.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     agent.use_checkpoints(crate::checkpoints::session::Session::offline(
         home.path(),
         project.path(),

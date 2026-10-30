@@ -36,16 +36,10 @@ pub(super) fn spawn(
     cancellation: &Cancellation,
 ) -> Result<Spawned, RunError> {
     let pipe = bytes.as_ref().map(|_| input::Pipe::open()).transpose()?;
-    let bash = crate::tools::find_bash().map_err(before_start)?;
-    let mut helper = Command::new(bash);
+    let executable = crate::native::helper("process_unix").map_err(before_start)?;
+    let mut helper = Command::new(executable);
     helper
-        .args([
-            "--noprofile",
-            "--norc",
-            "-c",
-            include_str!("unix.sh"),
-            "jecode-process",
-        ])
+        .arg("guard")
         .arg(
             pipe.as_ref()
                 .map_or(std::path::Path::new("/dev/null"), |pipe| pipe.path()),
@@ -128,14 +122,16 @@ fn before_start(message: String) -> RunError {
 }
 
 pub(super) fn terminate(child: &mut Child) -> Result<(), String> {
-    let mut cleanup = Command::new("kill");
-    cleanup
-        .args(["-KILL", "--", &format!("-{}", child.id())])
-        .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    let group = child.id().to_string();
+    // The root is killed below even when the group cleanup cannot start.
     let result = (|| {
+        let mut cleanup = Command::new(crate::native::helper("process_unix")?);
+        cleanup
+            .args(["kill-group", &group])
+            .env("LC_ALL", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
         let mut cleanup = cleanup
             .spawn()
             .map_err(|error| format!("Could not start process-group cleanup: {error}"))?;

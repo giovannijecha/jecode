@@ -32,7 +32,6 @@ fn fixture() -> (Directory, Agent, SessionConfig) {
     let config = SessionConfig {
         store: Store::new(directory.path().join("home")),
         settings: Settings::new("isolated-key".into(), "fixture/default".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     (directory, agent, config)
 }

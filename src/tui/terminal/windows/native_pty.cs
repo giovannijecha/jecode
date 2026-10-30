@@ -6,7 +6,7 @@ using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 // Owned, headless verification host for the documented Windows ConPTY ABI.
-public sealed class JecodeTestPty : IDisposable {
+public sealed partial class JecodeTestPty : IDisposable {
     [StructLayout(LayoutKind.Sequential)]
     struct Coord { public short X, Y; public Coord(short x, short y) { X = x; Y = y; } }
     [StructLayout(LayoutKind.Sequential)]
@@ -72,14 +72,27 @@ public sealed class JecodeTestPty : IDisposable {
             input = new FileStream(new SafeFileHandle(inputWrite, true), FileAccess.Write);
             output = new FileStream(new SafeFileHandle(outputRead, true), FileAccess.Read);
         } finally { CloseHandle(inputRead); CloseHandle(outputWrite); }
+        // Read available pipe bytes directly. StreamReader.Read(char[]) may
+        // hold a short final repaint until its character buffer fills or EOF.
         reader = new Thread(() => {
-            using (var text = new StreamReader(output, Encoding.UTF8)) {
-                char[] buffer = new char[8192];
+            using (output) {
+                byte[] bytes = new byte[8192];
+                char[] characters = new char[Encoding.UTF8.GetMaxCharCount(bytes.Length)];
+                Decoder decoder = Encoding.UTF8.GetDecoder();
                 try {
                     int count;
-                    while ((count = text.Read(buffer, 0, buffer.Length)) > 0) {
+                    while ((count = output.Read(bytes, 0, bytes.Length)) > 0) {
+                        int length = decoder.GetChars(bytes, 0, count, characters, 0, false);
                         lock (gate) {
-                            received.Append(buffer, 0, count);
+                            received.Append(characters, 0, length);
+                            if (received.Length > 4 * 1024 * 1024) throw new IOException("ConPTY output exceeded fixture limit");
+                            Monitor.PulseAll(gate);
+                        }
+                    }
+                    int tail = decoder.GetChars(new byte[0], 0, 0, characters, 0, true);
+                    if (tail > 0) {
+                        lock (gate) {
+                            received.Append(characters, 0, tail);
                             if (received.Length > 4 * 1024 * 1024) throw new IOException("ConPTY output exceeded fixture limit");
                             Monitor.PulseAll(gate);
                         }
@@ -169,6 +182,26 @@ public sealed class JecodeTestPty : IDisposable {
             }
             int length = Math.Min(received.Length, 2000);
             throw new IOException("ConPTY did not show " + text + ": " + received.ToString(received.Length - length, length));
+        }
+    }
+
+    public void WaitRaw(string text, int after = 0) {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        lock (gate) {
+            while (clock.ElapsedMilliseconds < 20000) {
+                if (received.ToString(after, received.Length - after).Contains(text)) return;
+                Monitor.Wait(gate, 20);
+            }
+            int length = Math.Min(received.Length, 2000);
+            throw new IOException("ConPTY did not emit " + text + ": " +
+                received.ToString(received.Length - length, length).Replace("\x1b", "[ESC]"));
+        }
+    }
+
+    public void EnsureNoRaw(string text, int after) {
+        lock (gate) {
+            if (received.ToString(after, received.Length - after).Contains(text))
+                throw new IOException("ConPTY unexpectedly emitted " + text);
         }
     }
 
@@ -328,7 +361,9 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.EnsureNoText("[ESC]", started);
                 int detached = pty.Mark(); pty.Send("\x1d");
                 pty.Wait("i  input", detached);
-                pty.Send("i"); pty.Wait("Ctrl+]  back", detached);
+                // Match the new input-mode frame, not an earlier queued repaint.
+                int reattached = pty.Mark(); pty.Send("i");
+                pty.Wait("Ctrl+]  back", reattached);
                 pty.Wait("NATIVE_SECOND_READY");
                 pty.Send("finish\r");
                 pty.Wait("NATIVE_PTY_END", detached);
@@ -339,6 +374,21 @@ public sealed class JecodeTestPty : IDisposable {
                 pty.Send("\x11");
                 pty.Wait("NATIVE_DIRECT_INPUT_RESTORED");
                 pty.Finish(true);
+            } else if (scenario == "background-light") {
+                pty.WaitRaw("48;2;12;12;12m");
+                pty.Wait("NATIVE_LIGHT_FRAME");
+                pty.EnsureNoRaw("\x1b[49m", 0);
+                pty.Wait("NATIVE_BACKGROUND_RESTORED");
+                pty.Finish(true);
+            } else if (scenario == "background-native") {
+                pty.WaitFast("Ask anything");
+                int reported = pty.Mark();
+                pty.WaitRaw("48;2;12;12;12m", reported);
+                pty.Send("\x11");
+                pty.Wait("NATIVE_BACKGROUND_DETECTED_RESTORED");
+                pty.Finish(true);
+            } else if (scenario == "permissions") {
+                pty.Permissions();
             } else if (scenario == "interactive") {
                 // Each renderer phase completes before the TUI startup wait begins.
                 pty.Wait("NATIVE_FULL_WIDTH_VERIFIED");

@@ -18,7 +18,12 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
     if let Item::Tool { presentation, .. } = &mut state.items[0] {
         presentation.started = Some(Instant::now() - Duration::from_secs(12));
     }
+    // Within one motion frame the running card keeps its rows.
     step(&mut display, &mut screen, &state, now);
+    assert!(!screen.visible().contains("Running · 12"));
+    crate::tui::motion::set_frame(1);
+    step(&mut display, &mut screen, &state, now);
+    crate::tui::motion::set_frame(0);
     let visible = screen.visible();
     let header = visible
         .lines()

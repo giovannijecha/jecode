@@ -68,7 +68,9 @@ fn windows_command_does_not_contain_user_text() {
         .get_args()
         .map(|argument| argument.to_string_lossy().into_owned())
         .collect();
-    assert_eq!(command.get_program(), "powershell.exe");
+    let program = std::path::Path::new(command.get_program());
+    assert!(program.is_absolute());
+    assert_eq!(program.file_name().unwrap(), "powershell.exe");
     assert!(args.iter().any(|arg| arg == "-NoProfile"));
     assert!(args.iter().any(|arg| arg.contains("Set-Clipboard")));
 }

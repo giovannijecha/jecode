@@ -37,7 +37,7 @@ fn context_capacity_comes_from_the_exact_model_and_is_cached() {
 }
 
 #[test]
-fn native_curl_sends_json_and_bearer_auth() {
+fn native_http_sends_json_and_bearer_auth() {
     let fixture = HttpFixture::new(vec![(200, json::parse(r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Hello"}}]}"#).unwrap())]);
     let client = OpenRouter::fixture(fixture.endpoint.clone());
     let messages = vec![Value::object([

@@ -99,9 +99,10 @@ requests. The historical account timings above were not repeated.
 - Optional PNG/JPEG view generation skips originals above 16 MiB to avoid
   loading and duplicating large files during import. PDF annotation assets
   retain exact provider bytes without generating unused views.
-- Windows system curl retains direct launch. Configured executables and PATH
-  fallbacks retain descendant supervision; a wrapper fixture verifies that
-  cancellation prevents its child from finishing work.
+- At the time, Windows system curl kept direct launch while configured
+  executables and PATH fallbacks kept descendant supervision. Embedded native
+  HTTP adapters have since replaced curl; `JECODE_CURL` and PATH lookups no
+  longer apply.
 - OpenAI preserves `Retry-After` on HTTP and SSE failures, sharing the existing
   seconds/date parser with OpenRouter. Fixtures cover both error paths.
 - Periodic partial response saves use background autosave; the first visible
@@ -211,6 +212,29 @@ cargo test --locked --offline --release tui::measurement_tests::composer_stream_
 It prints individual samples and summaries in microseconds. Keep other builds
 and timing probes out of the run; capture output under ignored `.tmp/` if needed.
 
+### Tool detail rebuilds after long answers
+
+Measured **2026-10-30** on Windows with Rust 1.95.0 in release mode, at 80
+columns. One finished Read call precedes a 750,000-byte assistant answer of
+30,000 Markdown paragraphs. Each variant used three warmups and five measured
+Ctrl+O toggles; the baseline used the layout code from `4c9444e`.
+
+| Operation | Baseline | Bounded rebuild |
+| --- | ---: | ---: |
+| Longest layout pass in each toggle | 84.63–147.90 ms | 4.40–6.08 ms |
+| Total layout work for each toggle | 84.63–147.90 ms | 82.44–87.15 ms |
+
+The rebuild now yields across 235 passes where the baseline used one. New and
+invalidated prose use the same 256-row budget, with the previous reading page
+retained until the replacement is complete. Regression tests compare the final
+rows with a fresh layout, including a tool change during a partial rebuild.
+These synthetic timings measure layout work; terminal writes and
+keyboard-to-pixel latency are outside the measurement.
+
+```text
+cargo test --locked --offline --release tui::transcript::rebuild_tests::long_answer_tool_toggle_measurement -- --exact --ignored --nocapture --test-threads=1
+```
+
 ## Session history
 
 Recorded **2026-10-01**, Windows `x86_64-pc-windows-gnullvm`, three samples per
@@ -271,6 +295,16 @@ It writes `target/measurements/windows-process.csv`, measuring one initial
 supervised launch and then three alternating direct/supervised pairs. A cached
 supervisor may already exist, so the initial launch is not necessarily a fresh
 compile. Recorded historical results above came from separate comparison runs.
+
+### Embedded adapter lookup
+
+Measured **2026-10-30** on Windows in a debug test build, 50 warm lookups each
+after one initial extraction. Before, every lookup discovered storage, hashed the
+embedded bytes and read back the cached file; the 1.8 MB shell adapter cost
+116 ms and the HTTP adapter 0.70 ms per lookup. Each process now verifies an
+adapter fully once and later rechecks only the cached entry's type and length:
+both lookups cost about 32 µs. Release builds hash faster, so their absolute
+saving is smaller; it was not measured.
 
 ## Per-call recovery
 

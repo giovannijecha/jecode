@@ -54,14 +54,18 @@ impl Agent {
         })
     }
 
+    /// Whether a collaborator return still needs a main-agent response.
+    pub fn can_continue_collaboration(&self) -> bool {
+        !self.child
+            && !self.has_pending_question()
+            && !self.cancellation.requested()
+            && self.collaboration.latest_return_sequence() > self.collaboration_seen
+    }
+
     /// Continue the main conversation after a live collaborator return.
     /// No synthetic user request is added to the transcript.
     pub fn continue_collaboration(&mut self, events: &mut impl EventSink) -> Result<bool, String> {
-        if self.child
-            || self.has_pending_question()
-            || self.cancellation.requested()
-            || self.collaboration.latest_return_sequence() <= self.collaboration_seen
-        {
+        if !self.can_continue_collaboration() {
             return Ok(false);
         }
         if self.prepared.is_some() {

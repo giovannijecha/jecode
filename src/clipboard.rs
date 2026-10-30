@@ -186,7 +186,7 @@ fn windows_command() -> Command {
     // Windows PowerShell is an OS-provided boundary. The fixed script reads
     // exact UTF-8 bytes from stdin and writes a string with Set-Clipboard.
     // User content never appears in command arguments or process output.
-    let mut command = Command::new("powershell.exe");
+    let mut command = crate::native::powershell();
     command.args([
         "-NoLogo",
         "-NoProfile",

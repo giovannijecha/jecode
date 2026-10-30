@@ -68,6 +68,10 @@ fn temporary_failures_have_no_attempt_cap_and_completed_tools_are_not_replayed()
     replies.push((200, completion("Recovered and finished.", vec![])));
     let fixture = HttpFixture::new(replies);
     let mut agent = fixture_agent(&directory, &home, &fixture.endpoint, usize::MAX);
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     let mut retries = vec![];
     agent
         .run_turn("Run once and finish", &mut |event| {

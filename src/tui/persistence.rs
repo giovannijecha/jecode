@@ -381,12 +381,20 @@ impl App {
                 self.refresh_question();
                 self.refresh_todo();
                 self.local_start(&format!("/resume {id}"));
-                self.local_finish(Kind::Notice, &format!("Resumed {title} · {status}"), vec![]);
+                // The level and grants come back with the conversation (B12.6 T7).
+                self.refresh_permission();
+                let permissions = self.permission_summary();
+                self.local_finish(
+                    Kind::Notice,
+                    &format!("Resumed {title} · {status} · {permissions}"),
+                    vec![],
+                );
                 self.refresh_context();
                 if pending_question {
                     self.state.begin_tool_turn();
                     self.state.activity = Some(super::activity::Activity::new());
-                    self.worker = Some(super::Worker::continue_question(self.hold()));
+                    let worker = super::Worker::continue_question(self.hold());
+                    self.run_worker(worker);
                 }
                 self.state.changed();
             }

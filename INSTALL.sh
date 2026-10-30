@@ -11,66 +11,6 @@ case $(uname -s) in
     *) printf 'INSTALL.sh supports Linux and macOS. Use INSTALL.ps1 on Windows.\n' >&2; exit 1 ;;
 esac
 
-if ! command -v cargo >/dev/null 2>&1; then
-    printf 'Cargo was not found. Install Rust 1.95.0 and retry.\n' >&2
-    exit 1
-fi
-for program in bash kill stty mkfifo rm rmdir; do
-    if ! command -v "$program" >/dev/null 2>&1; then
-        printf '%s was not found on PATH. Install it and retry.\n' "$program" >&2
-        exit 1
-    fi
-done
-
-curl_executable=${JECODE_CURL:-curl}
-if ! command -v "$curl_executable" >/dev/null 2>&1; then
-    printf 'Selected curl was not found: %s. Check JECODE_CURL or PATH and retry.\n' "$curl_executable" >&2
-    exit 1
-fi
-curl_details=$("$curl_executable" --version) || {
-    printf 'Could not inspect curl. Install an HTTPS-enabled curl 8.3 or newer and retry.\n' >&2
-    exit 1
-}
-curl_banner=${curl_details%%'
-'*}
-case $curl_banner in
-    'curl '*) curl_version=${curl_banner#curl } ;;
-    *) curl_version= ;;
-esac
-curl_version=${curl_version%% *}
-curl_major=${curl_version%%.*}
-curl_remaining=${curl_version#*.}
-curl_minor=${curl_remaining%%.*}
-curl_patch=${curl_remaining#*.}
-if [ "$curl_remaining" = "$curl_version" ] || [ "$curl_patch" = "$curl_remaining" ]; then
-    printf 'Could not parse curl version: %s. Install curl 8.3 or newer and retry.\n' "$curl_banner" >&2
-    exit 1
-fi
-for number in "$curl_major" "$curl_minor" "$curl_patch"; do
-    case $number in
-        '' | *[!0-9]*)
-            printf 'Could not parse curl version: %s. Install curl 8.3 or newer and retry.\n' "$curl_banner" >&2
-            exit 1
-            ;;
-    esac
-done
-if [ "$curl_major" -lt 8 ] || { [ "$curl_major" -eq 8 ] && [ "$curl_minor" -lt 3 ]; }; then
-    printf 'curl %s is too old. Install an HTTPS-enabled curl 8.3 or newer and retry.\n' "$curl_version" >&2
-    exit 1
-fi
-curl_protocols=${curl_details#*'
-Protocols:'}
-if [ "$curl_protocols" = "$curl_details" ]; then
-    curl_protocols=
-else
-    curl_protocols=${curl_protocols%%'
-'*}
-fi
-case " $curl_protocols " in
-    *' https '*) ;;
-    *) printf 'curl lacks HTTPS support. Install an HTTPS-enabled curl 8.3 or newer and retry.\n' >&2; exit 1 ;;
-esac
-
 if [ "$#" -eq 1 ]; then
     install_root=$1
 else
@@ -104,12 +44,27 @@ elif [ -e "$binary" ] || [ -L "$binary" ]; then
     exit 1
 fi
 
-printf 'Building and installing Jecode locally (offline)...\n'
-(
-    cd "$script_dir"
-    cargo install --path "$script_dir" --locked --offline --root "$install_root" --force
-)
+source_binary=$script_dir/jecode
+if [ ! -f "$source_binary" ] || [ ! -x "$source_binary" ]; then
+    printf 'This installer needs the prebuilt jecode supplied in the platform package. Building source is a separate developer operation.\n' >&2
+    exit 1
+fi
+"$source_binary" --version
+mkdir -p "$install_root/bin"
+staged=$(mktemp "$install_root/bin/.jecode-install.XXXXXXXXXX")
+marker_stage=
+trap 'rm -f -- "$staged"; if [ -n "$marker_stage" ]; then rm -f -- "$marker_stage"; fi' EXIT HUP INT TERM
+if [ ! -e "$marker" ]; then
+    marker_stage=$(mktemp "$install_root/.jecode-marker.XXXXXXXXXX")
+    printf '%s\n' "$owner" > "$marker_stage"
+    ln "$marker_stage" "$marker"
+    rm -f -- "$marker_stage"
+    marker_stage=
+fi
+cp "$source_binary" "$staged"
+chmod 755 "$staged"
+"$staged" --version
+mv -f "$staged" "$binary"
 "$binary" --version
-printf '%s\n' "$owner" > "$marker"
 printf 'Installed: %s\n' "$binary"
 printf 'Add %s/bin to PATH, or run the executable by its full path.\n' "$install_root"

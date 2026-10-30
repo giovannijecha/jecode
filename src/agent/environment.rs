@@ -22,12 +22,19 @@ impl Agent {
                 Value::string(self.tools.root().to_string_lossy()),
             ),
             ("host_operating_system", Value::string(std::env::consts::OS)),
-            ("command_shell", Value::string("Bash")),
+            ("command_shell", Value::string("Jecode shell")),
             (
                 "file_tool_access",
                 Value::string("project_directory_and_session_and_skill_references"),
             ),
-            ("bash_access", Value::string("normal_system_access")),
+            (
+                "bash_access",
+                Value::string(if cfg!(windows) {
+                    "Workspace or Full permission level"
+                } else {
+                    "Full permission level"
+                }),
+            ),
             ("tool_execution", Value::string("direct")),
         ]);
         Value::object([
@@ -79,6 +86,7 @@ impl Agent {
     /// collaboration state, then messages.
     pub(super) fn environment(&self) -> Environment {
         Environment(join([
+            self.permission_instructions(),
             self.temporary_instructions(),
             self.checkpoint_instructions(),
             self.collaboration_instructions(),

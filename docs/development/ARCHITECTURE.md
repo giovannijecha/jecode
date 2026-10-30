@@ -71,17 +71,16 @@ Live Claude tool requests enable automatic prefix caching; summary requests do
 not opt in. Reported cache reads and writes remain distinct from charged cost.
 Provider inference latency and cache-hit rates need live measurements; loopback
 and parsing tests establish local behavior only.
-The `web` tool uses system curl for HTTP(S) requests and keeps responses and
-crawl state in the session temporary area. `curl.rs` selects the executable for
-both web retrieval and model transport. Web redirects are followed one hop at a
+The `web` tool uses the build-embedded native HTTP adapter and keeps responses
+and crawl state in the session temporary area. Web redirects are followed one hop at a
 time under one request deadline, applying HTTP method changes and origin-scoped
 headers. Crawls save GET request options with their queue for consistent resume.
 The `browser` tool launches an installed Chromium-based executable and communicates
 with its local DevTools
 endpoint. Isolated profiles and browser artifacts use the session area; named
 profiles use dedicated storage under the Jecode home. Both tools run locally,
-independent of the selected model backend. Browser and curl availability are
-native host boundaries.
+independent of the selected model backend. Browser availability is a native host
+boundary.
 
 File writes and exact edits capture contextual changes at execution time.
 `file_change.rs` owns their text alignment and serializable hunks, independently
@@ -291,14 +290,20 @@ workspace preserves its historical record; missing or
 invalid workspace ownership becomes a record diagnostic rather than breaking
 the parent session.
 
-Shared work uses current project files. Isolated work uses a detached native Git
-worktree, overlaid with the current tracked and non-ignored untracked files,
-including local instruction files. Owned baseline bytes and fingerprints make
-review independent of Git's committed state. Comparison produces bounded evidence
-and a token over baseline, child and current states; integration rechecks selected
-paths and reports partial outcomes. File isolation does not restrict commands or
-external effects. See [collaboration](../usage/COLLABORATION.md) for the user
-contract and limitations.
+Shared work uses current project files. Isolated work copies the project into
+owned storage without Git (`collaboration/workspace/copy.rs`): one walk reads
+each file once and writes the same bytes to the copy and the saved baseline
+while fingerprinting them, so the baseline is what was copied. Entries the copy
+cannot hold are omitted and reported rather than failing preparation; links
+into the project resolve inside the copy. Copied files keep their modification
+times, while comparison hashes file content regardless of those timestamps.
+Comparison produces bounded evidence and a token
+over baseline, child and current states; integration rechecks selected paths
+and reports partial outcomes. Closing a copy made by the earlier Git worktree
+version also removes its `.git/worktrees` entry when that entry names the copy.
+File isolation does not restrict commands or external effects. See
+[collaboration](../usage/COLLABORATION.md) for the user contract and
+limitations.
 
 ## Session storage
 
@@ -398,18 +403,17 @@ not subject to the 24-hour deadline.
 
 ## Native boundaries
 
-Rust launches installed executables through `std::process::Command`. Owned Bash,
-PowerShell and C# helpers provide native functionality without Rust crates or
-unsafe Rust FFI.
+Rust launches owned, build-embedded native adapters through
+`std::process::Command`. They use OS APIs without Rust crates or unsafe Rust FFI.
 
 | Boundary | Implementation and requirements |
 | --- | --- |
-| Windows processes | PowerShell compiles the owned C# supervisor once per source version into `~/.jecode/cache/process/`. It creates commands atomically inside Win32 Job Objects and reports completion through a named pipe. The original PowerShell path is the fallback. Short helpers that never spawn children (the Windows system `curl.exe` and account crypto helpers) bypass the supervisor through `process::run_leaf`; cancellation and timeouts still kill them directly. `JECODE_CURL` overrides and PATH fallbacks retain Job Object supervision, including their descendants. |
-| Checkpoint disk space | Windows uses an owned cached C# helper and `GetDiskFreeSpaceExW` at the archive path; requires Windows PowerShell and `Add-Type`. Unix uses the installed `df -Pk` command. Failed queries prevent payload admission and can retry after five seconds. |
-| Unix processes | A Bash guardian owns a process group and watches a private owner pipe. `kill` handles timeout/cleanup; `mkfifo`, `rm` and `rmdir` support cancellation-aware binary stdin through a private FIFO. |
-| Windows terminal | An owned PowerShell/C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and `Add-Type`. |
-| Unix terminal | Bash and `stty` save terminal modes, read `/dev/tty` and restore the terminal through a guardian. Requires a VT-compatible terminal. |
-| Isolated collaborator workspaces | Installed `git` provides local inventory and detached worktree creation/removal. Requires launch at a repository root with an existing `HEAD`. Jecode owns copying the dirty baseline, comparison and selective file integration; no remote, branch or commit is created. |
+| Windows processes | The build-embedded C# supervisor creates commands atomically inside Win32 Job Objects and reports completion through a private named pipe. A separate stop channel keeps cancellation independent of blocking completion reads; the supervisor acknowledges termination after the job has no active processes. Childless native HTTP and account crypto adapters use `process::run_leaf`; cancellation and timeouts kill them directly. |
+| Checkpoint disk space | Build-embedded adapters query `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix. Failed queries prevent payload admission and can retry after five seconds. |
+| Unix processes | An embedded C guardian owns a process group and watches a private owner pipe. It uses libc process, signal and FIFO APIs for cancellation-aware binary stdin and cleanup. |
+| Windows terminal | A build-embedded C# adapter reads `CONIN$`, waits on the console input handle and sends key, wheel and geometry events through a named pipe. Requires Windows 10+ and the system .NET Framework. |
+| Unix terminal | An embedded C adapter uses `termios` and `/dev/tty`, with a native guardian for terminal restoration. Requires a VT-compatible terminal. |
+| Isolated collaborator workspaces | Owned Rust code copies project files, compares the snapshot with the current project and integrates selected paths. Git and `HEAD` are unnecessary; no remote, branch or commit is created. |
 
 Process guardians stop owned descendants on cancellation, timeout or owner loss.
 Unix children that create another process group or session leave that cleanup
@@ -448,14 +452,13 @@ before returning executable calls. `auth/openai/` owns browser authorization,
 PKCE, ID-token validation, protected records, serialized refresh and logout.
 See [OpenAI](OPENAI.md) for the route contract and native crypto boundary.
 
-`backend/openrouter/` uses the fixed HTTPS OpenRouter API through curl 8.3+,
-with curl's default configuration disabled and TLS certificate validation enabled.
-The JSON body travels as raw stdin. The selected key reaches only the curl
-child's environment and expands into its authorization header; arguments and
-files contain neither the key nor the body. Test builds can use loopback endpoints.
+`backend/openrouter/` uses the fixed HTTPS OpenRouter API through the native
+HTTP adapter with TLS certificate and hostname validation. The JSON body and
+selected key travel on child stdin; arguments and files contain neither. Test
+builds can use loopback endpoints.
 The request has no harness-imposed byte limit. Model context and service limits
 remain separate. Process input delivery errors retain the child's exit status
-and captured diagnostics, so a closed pipe cannot hide curl's failure reason.
+and captured diagnostics, so a closed pipe cannot hide the native failure reason.
 Native helpers and tool subprocesses remove credential environment variables
 registered by the available backends before launch.
 

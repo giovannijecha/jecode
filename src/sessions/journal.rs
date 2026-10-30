@@ -112,11 +112,42 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
     })))
 }
 
+impl Position {
+    /// Messages and events already in the journal.
+    pub(super) fn history(&self) -> (usize, usize) {
+        (self.messages, self.events)
+    }
+}
+
+/// One checkpoint: the document's state, whose own history is ignored, and
+/// its history from the given counts on.
+pub(super) struct Tail<'a> {
+    pub document: &'a Document,
+    pub messages_from: usize,
+    pub messages: &'a [Value],
+    pub events_from: usize,
+    pub events: &'a [Value],
+}
+
+impl<'a> Tail<'a> {
+    #[cfg(test)]
+    pub fn whole(document: &'a Document) -> Self {
+        Self {
+            document,
+            messages_from: 0,
+            messages: &document.messages,
+            events_from: 0,
+            events: &document.events,
+        }
+    }
+}
+
 pub(super) fn append(
     path: &Path,
-    document: &Document,
+    tail: &Tail<'_>,
     position: &mut Option<Position>,
 ) -> Result<(), String> {
+    let document = tail.document;
     reject_special(path)?;
     if path.exists()
         && fs::metadata(path)
@@ -148,8 +179,13 @@ pub(super) fn append(
         }
     }
     let current = position.as_ref().unwrap();
-    if document.messages.len() < current.messages || document.events.len() < current.events {
+    let messages = tail.messages_from + tail.messages.len();
+    let events = tail.events_from + tail.events.len();
+    if messages < current.messages || events < current.events {
         return Err("Session history cannot be removed from its journal".into());
+    }
+    if tail.messages_from > current.messages || tail.events_from > current.events {
+        return Err("Session checkpoint lacks history its journal does not have".into());
     }
     let next_state = state::without_partial(document.state_value());
     let record = Value::object([
@@ -160,11 +196,11 @@ pub(super) fn append(
         ("events_from", Value::number(current.events)),
         (
             "messages",
-            Value::Array(document.messages[current.messages..].to_vec()),
+            Value::Array(tail.messages[current.messages - tail.messages_from..].to_vec()),
         ),
         (
             "events",
-            Value::Array(document.events[current.events..].to_vec()),
+            Value::Array(tail.events[current.events - tail.events_from..].to_vec()),
         ),
         ("state", state::delta(current.state.as_ref(), &next_state)),
         (
@@ -200,8 +236,8 @@ pub(super) fn append(
     let current = position.as_mut().unwrap();
     current.bytes += bytes.len() as u64;
     current.sequence += 1;
-    current.messages = document.messages.len();
-    current.events = document.events.len();
+    current.messages = messages;
+    current.events = events;
     current.state = Some(next_state);
     current.partial.clone_from(&document.pending.partial);
     Ok(())

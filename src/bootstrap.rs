@@ -13,13 +13,12 @@ pub fn configure() -> Result<(), String> {
     require_terminal()?;
     let store = Store::discover()?;
     let settings = store.load()?;
-    let bash = crate::tools::find_bash()?;
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     setup::configure(
         &store,
         settings.as_ref(),
-        &mut setup::Terminal::new(&mut input, &mut output, &bash),
+        &mut setup::Terminal::new(&mut input, &mut output),
     )?;
     Ok(())
 }
@@ -96,7 +95,6 @@ fn launch(
     }
     let directory = std::env::current_dir().map_err(|error| error.to_string())?;
     let tools = Tools::new(&directory)?;
-    let bash = tools.bash().to_path_buf();
     let mut output = io::stdout().lock();
     let mut status = io::stderr().lock();
     let mut input = io::stdin().lock();
@@ -107,7 +105,7 @@ fn launch(
         let Some(settings) = setup::configure(
             &store,
             settings.as_ref(),
-            &mut setup::Terminal::new(&mut input, &mut output, &bash),
+            &mut setup::Terminal::new(&mut input, &mut output),
         )?
         else {
             return Ok(());
@@ -127,6 +125,9 @@ fn launch(
         agent.register_backend(services);
     }
     agent.set_auto_compact(settings.auto_compact);
+    agent
+        .permissions()
+        .set_default(settings.default_permissions);
     agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
     if agent.backend_id() == settings.backend_id {
         agent.set_routing(settings.routing_for(agent.model()));
@@ -169,11 +170,7 @@ fn launch(
             &mut Console::new(&mut output, &mut status),
         );
     }
-    let mut session_config = SessionConfig {
-        store,
-        settings,
-        bash,
-    };
+    let mut session_config = SessionConfig { store, settings };
     if !plain && io::stdout().is_terminal() {
         drop(input);
         drop(output);

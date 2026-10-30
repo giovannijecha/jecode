@@ -1,7 +1,7 @@
 use super::{
     agents, ask, footer, information, menus,
     panel::{self, Part, Sheet},
-    processes, status, todo,
+    permission, processes, status, todo,
 };
 mod editor;
 use crate::tui::{
@@ -26,6 +26,17 @@ pub(super) fn render(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let contextual = state.queue.is_editing() || state.history.is_browsing();
+    // A permission request holds the keys until a choice; only the quit
+    // question goes above it.
+    if let Some(pending) = state
+        .permission
+        .as_ref()
+        .filter(|_| state.quitting.is_none())
+    {
+        let status = status::row(state, columns, false);
+        let level = state.permission_level.name();
+        return permission::block(pending, level, status, columns, height);
+    }
     // A question takes the composer's place unless a panel opened over it.
     let question = state
         .question
@@ -427,7 +438,9 @@ fn draft(
     let position = Line::new(&input.position, MUTED);
     let mut lines = vec![rule(columns, style, &draft_label(state), &position)];
     lines.extend(input.lines);
-    lines.push(Line::new(&"─".repeat(columns), style));
+    // The level stays beside the draft, a plain word (B12.3).
+    let level = Line::new(state.permission_level.name(), MUTED);
+    lines.push(rule(columns, style, &[], &level));
     if columns >= 7 {
         lines.push(match hints(state) {
             Some(keys) => {

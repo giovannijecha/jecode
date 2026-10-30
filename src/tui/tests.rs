@@ -8,6 +8,7 @@ use std::fs;
 use std::thread;
 use std::time::Instant;
 
+mod arrival_tests;
 mod flow_tests;
 mod native_smoke;
 mod project_instruction_tests;
@@ -19,15 +20,25 @@ pub(super) fn config(directory: &Directory) -> SessionConfig {
     SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     }
+}
+// These process fixtures exercise unrestricted Bash; permissions have dedicated tests.
+pub(super) fn full_app(mut app: App) -> App {
+    app.config.settings.default_permissions = crate::permissions::Level::Full;
+    app.permission_observer
+        .set_default(crate::permissions::Level::Full);
+    app.permission_observer
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
+    app.refresh_permission();
+    app
 }
 fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     let agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    App::new(agent, config(directory), None)
+    full_app(App::new(agent, config(directory), None))
 }
 fn submit(app: &mut App, text: &str) {
     app.state.editor.insert(text);

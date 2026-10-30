@@ -96,7 +96,8 @@ Settings. Connect the ChatGPT account separately.
       "provider/model-id": { "mode": "auto" }
     }
   },
-  "context": { "auto_compact_percent": 80 }
+  "context": { "auto_compact_percent": 80 },
+  "permissions": { "default": "workspace" }
 }
 ```
 
@@ -120,7 +121,9 @@ or unreadable file blocks setup and launch with an error; Jecode leaves it
 unchanged so you can correct it. Saves replace the file atomically. New Unix
 configuration directories and files use permissions `0700` and `0600`; Windows
 inherits permissions from the user's directory.
-Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
+`permissions.default` is the level new conversations start at: `read`,
+`workspace` or `full`, with `workspace` when absent; see
+[Permissions](PERMISSIONS.md). Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
 storage and resume. Per-call checkpoints have a fixed 24-hour lifetime and no
 policy file; see [Checkpoints](CHECKPOINTS.md).
 
@@ -236,8 +239,15 @@ always manages the personal file.
 
 `JECODE_HOME` selects an absolute configuration directory, including sessions,
 temporary storage, checkpoint archives and the personal [skill library](SKILLS.md).
-`JECODE_BASH` selects the Bash executable. These are useful for isolated
-development.
+This is useful for isolated development. The command interpreter and HTTP
+adapters are embedded in Jecode; `JECODE_BASH` and `JECODE_CURL` are not used.
+
+HTTP proxies follow the platform. Windows uses the system proxy configuration
+through WinHTTP's automatic proxy mode, and macOS uses the system proxy settings;
+neither reads `HTTP_PROXY` or `HTTPS_PROXY`. Linux reads `HTTPS_PROXY`,
+`HTTP_PROXY` (or their lowercase forms) and `NO_PROXY`, supports only `http://`
+proxies without credentials, and fails a request rather than bypassing a proxy
+with another scheme. Loopback requests never use a proxy.
 
 `/model`, `/effort` and `/routing` change the conversation without
 changing saved defaults. Changing the OpenRouter key in `/settings` refreshes

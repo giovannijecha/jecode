@@ -38,6 +38,8 @@ pub struct Document {
     pub input: Input,
     pub context: crate::context::Context,
     pub routing: Routing,
+    /// The level the conversation started at; later changes are events.
+    pub permissions: Option<crate::permissions::Level>,
 }
 
 impl Document {
@@ -60,7 +62,31 @@ impl Document {
             input: Input::default(),
             context: crate::context::Context::default(),
             routing: Routing::Auto,
+            permissions: None,
         })
+    }
+
+    /// A copy without messages or events, for a checkpoint that appends only
+    /// the history its journal lacks.
+    pub(super) fn without_history(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            created: self.created,
+            updated: self.updated,
+            directory: self.directory.clone(),
+            model: self.model.clone(),
+            backend: self.backend.clone(),
+            legacy_origin: self.legacy_origin.clone(),
+            effort: self.effort,
+            compatible_from: self.compatible_from,
+            messages: Vec::new(),
+            events: Vec::new(),
+            pending: self.pending.clone(),
+            input: self.input.clone(),
+            context: self.context.clone(),
+            routing: self.routing.clone(),
+            permissions: self.permissions,
+        }
     }
 
     pub fn meaningful(&self) -> bool {
@@ -161,6 +187,11 @@ impl Document {
             ("input", self.input.value()),
             ("context", self.context.value()),
             ("routing", self.routing.value()),
+            (
+                "permissions",
+                self.permissions
+                    .map_or(Value::Null, |level| Value::string(level.id())),
+            ),
         ])
     }
 
@@ -251,6 +282,11 @@ impl Document {
                 .get("routing")
                 .and_then(Routing::parse)
                 .unwrap_or(Routing::Default),
+            // Sessions saved before permissions start at the current default.
+            permissions: value
+                .get("permissions")
+                .and_then(Value::as_str)
+                .and_then(crate::permissions::Level::parse),
         };
         Ok(document)
     }

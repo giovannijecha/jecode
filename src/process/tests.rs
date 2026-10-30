@@ -236,7 +236,7 @@ fn timeout_stops_descendant_after_root_exits() {
 }
 
 fn command(directory: &Directory, text: &str) -> Command {
-    let mut command = Command::new(crate::tools::find_bash().unwrap());
+    let mut command = Command::new(crate::shell::executable().unwrap());
     command
         .args(["--noprofile", "--norc", "-c", text])
         .current_dir(directory.path())
@@ -345,7 +345,7 @@ fn cleanup_accepts_an_already_finished_process_group() {
         .spawn()
         .unwrap();
     child.wait().unwrap();
-    terminate(&mut child).unwrap();
+    super::unix::terminate(&mut child).unwrap();
 }
 
 #[cfg(unix)]

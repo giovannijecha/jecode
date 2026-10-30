@@ -11,10 +11,24 @@ isolated files.
 | --- | --- | --- |
 | Windows, `x86_64-pc-windows-gnullvm` | Offline build, formatting, Clippy, ordinary tests and the ConPTY fixture. | Physical input, fonts and clipboard behavior in the chosen terminal. |
 | Linux under WSL, native tmpfs or ext4 | Offline build, formatting, Clippy, ordinary tests and the Linux PTY fixture. | Physical terminal integration; Windows-backed `/mnt/c` has an unresolved fixture issue below. |
-| macOS, Intel and Apple Silicon | All-target cross compilation and Clippy. | Native linking, test execution and terminal interaction on a Mac. |
+| macOS, Intel and Apple Silicon | Native adapter sources implemented; this runtime change has no executed Mac build. | Native compilation, linking, tests and terminal interaction on a Mac. |
 
 These are local verification boundaries. CI jobs and ignored/manual fixtures
 provide separate evidence; inspect the checks executed for the revision under review.
+
+The October 29 native-runtime pass completed the ordinary suite on Windows
+(1,721 passed, 57 ignored) and an Ubuntu/WSL native-filesystem copy (1,725 passed,
+49 ignored). Windows build, formatting and all-target Clippy passed; Linux
+all-target Clippy passed. The fullscreen ConPTY, permissions and light-background
+fixtures passed separately. The light check runs the real TUI against an
+isolated white console palette and verifies the native fallback after an
+unanswered OSC 11 query; it does not establish OSC replies through ConPTY.
+The Linux PTY fixture also passed, including interruption, session recovery,
+owner death and terminal-mode restoration.
+Both platforms built release packages and exercised install/update plus the
+owned interpreter with an empty PATH. Controlled X11 clipboard transfer and
+Linux image conversion were checked separately; Wayland data-control remains
+protocol-checked but not exercised with an isolated compositor. No Mac was run.
 
 The backend separation was checked locally on October 23, 2026: formatting,
 offline build and Clippy passed with 943 ordinary tests on Windows and 938 on
@@ -34,12 +48,14 @@ by `avanti`, incomplete stdin diagnostics and Windows child environment override
 
 ## Collaborator workspace boundary
 
-Shared collaborators use the current project and need no Git installation.
-Isolated assignments require installed `git`, a repository root and an existing
-`HEAD`. Git creates and removes local detached worktrees; Jecode copies the
-current tracked and non-ignored untracked contents and owns review/integration.
-The copy is not an operating-system sandbox. Native Windows verification covers
-dirty baselines, concurrent-edit conflicts, missing and foreign ownership markers,
+Shared collaborators use the current project. Isolated assignments copy the
+current project files to Jecode-owned storage without requiring Git or `HEAD`.
+The snapshot excludes `.git` and `.jecode` entries at every level, plus root
+directories named `target` or `.tmp`. Other files and empty directories are
+included, even when Git ignores them. Review and
+selected-path integration compare the copy, starting state and current project.
+The October 28 Windows implementation pass covered dirty baselines,
+concurrent-edit conflicts, missing and foreign ownership markers,
 and interrupted setup recovery. New collaborator behavior has no native Linux
 or macOS execution evidence from the October 28, 2026 implementation pass.
 
@@ -48,6 +64,10 @@ That Windows pass completed offline build, formatting, all-target Clippy and
 fixture. Its collaboration checks paint receipts, `/agents`, footer badge and
 gauge through the native renderer. A real configured-model run also completed
 two assignments, an in-flight revision, selected-path integration and review.
+
+On October 29, 2026, the owned-copy implementation passed 16 focused workspace
+tests and 11 collaboration tests on Windows, including preparation, integration
+and cleanup in a folder without `.git` and with Git absent from `PATH`.
 
 ## Interactive command boundary
 
@@ -71,11 +91,14 @@ controlling terminal, an interrupt is consumed as a no-op without flushing input
 Only a temporarily full master keeps the request queued. Raw ETX intentionally
 has priority over data still buffered in the bridge.
 
-Windows requires its existing PowerShell/.NET compiler and Windows 10+ ConPTY.
-Unix first use compiles the owned bridge with system `cc`, caches it under the
-Jecode home. Linux enumerates `/proc` to clean up interactive job-control groups;
-macOS uses its system `/bin/ps`. Runtime compilation accepts compiler warnings;
-development checks also compile the bridge with warnings denied.
+Windows builds the owned adapters with its system .NET compiler and uses Windows
+10+ ConPTY at runtime. Unix builds the owned bridges with system `cc` during the
+Cargo build; runtime uses the embedded binaries without a compiler. `CC`
+overrides it. Cross builds need `CC_<target>` or `TARGET_CC`, except between
+macOS architectures, where `cc -arch` is used. Linux
+enumerates `/proc` to clean up interactive job-control groups;
+macOS uses its system `/bin/ps`. Debug builds deny C compiler warnings;
+release builds report them without failing.
 Control sockets need a native Unix temporary filesystem; WSL's Windows-backed
 mounts do not support them. Local input bypasses model messages and tool-call
 history, while output that the target echoes remains visible and retained.
@@ -103,7 +126,7 @@ the Web and Browser cards. Native browser execution on macOS remains unverified.
 
 ## Windows
 
-Requires Windows 10+, Git Bash, Windows PowerShell/.NET and ConPTY:
+Requires Windows 10+, Windows PowerShell/.NET and ConPTY:
 
 ```text
 cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
@@ -114,7 +137,8 @@ wheel/page navigation, prompt history, endpoint selection and resize. It then
 checks saved drafts and restoration of the shell screen, console modes and output
 code page. Separate scenarios terminate the owner and terminal guardian.
 
-Checkpoint preimages use standard-library file I/O and operating-system file locks. The advisory disk-space probe uses the owned cached PowerShell/.NET helper.
+Checkpoint preimages use standard-library file I/O and operating-system file
+locks. The advisory disk-space probe uses the embedded .NET API adapter.
 
 ## Linux and WSL
 
@@ -128,13 +152,24 @@ The fixture drives Unicode paste, queued messages, selectors, scrolling,
 cancellation, resize, resume and deletion through a PTY. It checks terminal modes
 after normal exit, owner SIGKILL and guardian loss.
 
+On October 29, 2026, the embedded Linux clipboard and image adapter compiled
+under WSL with `cc -Wall -Wextra -Werror`. Synthetic BMP images converted to
+bounded PNG and smaller JPEG output. An isolated Xvfb server and owned test
+selection source transferred PNG bytes through X11 without reading the real
+clipboard. No-display and invalid-image failures were checked. This does not
+establish Wayland compositor behavior or a full native Linux Rust test run;
+Wayland data-control access depends on the compositor advertising the protocol.
+
 Use a repository copy on a native Linux filesystem for the full suite. Parallel
 tests under WSL's Windows-backed `/mnt/c` have intermittently failed to open files
 that remained present. Native tmpfs runs passed; standalone save/read probes did
 not isolate the cause. Treat a `/mnt/c` failure as unresolved evidence and retain
 its fixture rather than masking it with retries.
 
-Checkpoint capture has no notification helper or background command scan on any platform. Unix admission uses the system df command. Platform CI runs the ordinary suite and its native terminal fixture for the checked-out revision.
+Checkpoint capture has no notification helper or background command scan on any
+platform. Unix admission reads filesystem capacity through the embedded native
+adapter's `statvfs` call. Platform CI runs the ordinary suite and its native
+terminal fixture for the checked-out revision.
 
 ## macOS
 

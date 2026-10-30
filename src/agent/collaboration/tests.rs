@@ -236,6 +236,10 @@ fn update_during_child_command_is_received_before_its_next_request() {
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
+    parent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     parent.agent_tool(&create()).unwrap();
     let observer = parent.collaboration();
     let started = std::time::Instant::now();
@@ -394,6 +398,10 @@ fn group_creation_starts_concurrent_children_and_preserves_one_group_receipt() {
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
+    parent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     let mut args = create();
     let task = args.get("tasks").and_then(Value::as_array).unwrap()[0].clone();
     if let Value::Object(fields) = &mut args {

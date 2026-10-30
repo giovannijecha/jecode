@@ -10,7 +10,7 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{ACCENT, BAD, BODY, DIM, FAINT, GOOD, MUTED, STRONG, Style, WARNING},
+        theme::{ACCENT, BAD, BODY, DIM, FAINT, GOOD, MUTED, STRONG, Style},
         todo::Panel,
     },
 };
@@ -37,12 +37,9 @@ fn look(phase: Phase) -> Look {
             ACCENT,
             Some(("▰", ACCENT)),
         ),
-        Phase::Waiting | Phase::AwaitingReview => (
-            ("☐ ", WARNING.bold()),
-            STRONG,
-            WARNING,
-            Some(("▰", WARNING)),
-        ),
+        Phase::Waiting | Phase::AwaitingReview => {
+            (("☐ ", MUTED), STRONG, MUTED, Some(("▰", MUTED)))
+        }
         Phase::Failed => (("☐ ", BAD.bold()), STRONG, BAD, Some(("▰", BAD))),
         Phase::NotStarted => (("☐ ", MUTED), BODY, MUTED, Some(("▱", FAINT))),
         Phase::Cancelled => (("☐ ", FAINT), DIM.strike(), DIM, None),

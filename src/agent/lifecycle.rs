@@ -56,6 +56,7 @@ impl Agent {
         let next = if let Some(old) = &self.persistence {
             let input = old.snapshot().input;
             let mut document = Document::new(self.tools.root().to_path_buf(), model, effort)?;
+            document.permissions = Some(self.permissions.default_level());
             document.backend = backend.into();
             document.routing = routing;
             document.input = input.clone();
@@ -93,6 +94,7 @@ impl Agent {
             .bind(self.archive(), self.persistence.clone())?;
         self.questions
             .bind(self.archive(), self.persistence.clone());
+        self.bind_permissions();
         self.collaboration_seen = 0;
         self.begin_checkpoints();
         if let Some(handle) = &self.persistence {
@@ -183,6 +185,7 @@ impl Agent {
             .bind(self.archive(), self.persistence.clone())?;
         self.questions
             .bind(self.archive(), self.persistence.clone());
+        self.bind_permissions();
         self.collaboration_seen = if self.has_open_collaboration_report() {
             0
         } else {
@@ -233,6 +236,7 @@ impl Agent {
         let client = self.connection(backend, model.clone(), effort, routing.clone())?;
         let store = current.store();
         let mut document = Document::new(self.tools.root().to_path_buf(), model, effort)?;
+        document.permissions = Some(self.permissions.default_level());
         document.backend = backend.into();
         document.routing = routing;
         document.input = current.snapshot().input;
@@ -264,6 +268,7 @@ impl Agent {
         self.tools.configure_output_store(outputs);
         self.questions
             .bind(self.archive(), self.persistence.clone());
+        self.bind_permissions();
         self.tools.configure_temporary(temporary);
         Ok((report, true))
     }

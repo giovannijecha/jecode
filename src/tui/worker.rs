@@ -1,3 +1,4 @@
+use super::terminal::Waker;
 use crate::agent::Agent;
 use crate::cancel::Cancellation;
 use crate::events::Event;
@@ -18,6 +19,14 @@ struct EventQueue {
     streaming: Option<String>,
     sender_alive: bool,
     receiver_alive: bool,
+    /// Wakes the loop when the queue stops being empty, once per drain.
+    waker: Option<Waker>,
+}
+
+impl EventQueue {
+    fn empty(&self) -> bool {
+        self.events.is_empty() && self.streaming.is_none()
+    }
 }
 
 struct EventChannel {
@@ -36,6 +45,7 @@ fn event_channel() -> (EventSender, EventReceiver) {
             streaming: None,
             sender_alive: true,
             receiver_alive: true,
+            waker: None,
         }),
         ready: Condvar::new(),
     });
@@ -43,8 +53,24 @@ fn event_channel() -> (EventSender, EventReceiver) {
 }
 
 impl EventSender {
+    /// Queues the event; the loop is woken only when the queue was empty, so
+    /// a burst of tokens costs one wake until the loop drains it.
     fn send(&self, event: Event, cancellation: &Cancellation) -> Result<(), String> {
-        let mut queue = self.0.queue.lock().unwrap();
+        let queue = self.0.queue.lock().unwrap();
+        let waker = queue.empty().then(|| queue.waker.clone()).flatten();
+        let result = self.queue(queue, event, cancellation);
+        if let Some(waker) = waker {
+            waker.wake();
+        }
+        result
+    }
+
+    fn queue(
+        &self,
+        mut queue: std::sync::MutexGuard<'_, EventQueue>,
+        event: Event,
+        cancellation: &Cancellation,
+    ) -> Result<(), String> {
         if !queue.receiver_alive {
             return Err("Terminal output closed".into());
         }
@@ -109,12 +135,35 @@ impl EventSender {
 
 impl Drop for EventSender {
     fn drop(&mut self) {
-        self.0.queue.lock().unwrap().sender_alive = false;
+        let mut queue = self.0.queue.lock().unwrap();
+        queue.sender_alive = false;
+        let waker = queue.waker.clone();
+        drop(queue);
         self.0.ready.notify_all();
+        // The finished turn is collected without waiting for a timer.
+        if let Some(waker) = waker {
+            waker.wake();
+        }
     }
 }
 
 impl EventReceiver {
+    /// Wakes the loop for events from now on, and at once for any queued.
+    pub fn wake_with(&self, waker: Waker) {
+        let mut queue = self.0.queue.lock().unwrap();
+        let pending = !queue.empty() || !queue.sender_alive;
+        queue.waker = Some(waker.clone());
+        drop(queue);
+        if pending {
+            waker.wake();
+        }
+    }
+
+    /// The worker has sent its last event and is about to finish.
+    pub fn closed(&self) -> bool {
+        !self.0.queue.lock().unwrap().sender_alive
+    }
+
     pub fn try_recv(&self) -> Result<Event, TryRecvError> {
         let mut queue = self.0.queue.lock().unwrap();
         if let Some(event) = Self::take(&mut queue) {

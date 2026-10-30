@@ -42,15 +42,7 @@ fn two_configured_providers_choose_provider_then_model_and_effort_for_this_conve
         services.create("fixture/original".into()).unwrap(),
         Tools::new(directory.path()).unwrap(),
     );
-    let mut app = App::new(
-        agent,
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
-        None,
-    );
+    let mut app = App::new(agent, SessionConfig { store, settings }, None);
     app.dispatch("/model".into()).unwrap();
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(

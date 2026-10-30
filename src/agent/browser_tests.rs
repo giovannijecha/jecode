@@ -169,6 +169,10 @@ fn native_browser_tool_delivers_images_and_preserves_only_named_profile_state() 
     let mut agent = Agent::new(client, Tools::new(project.path()).unwrap());
     agent.enable_sessions(home.path()).unwrap();
     agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
+    agent
         .run_turn(
             "Verify the local page and retain this dedicated login profile",
             &mut |_| Ok(()),

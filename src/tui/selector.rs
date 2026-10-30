@@ -4,15 +4,17 @@ use crate::{
     effort::Effort,
     session::commands::match_text,
 };
-use std::path::Path;
 
+mod permissions;
 mod providers;
+mod settings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Setting {
     Model,
     Effort,
     Routing,
+    Permissions,
     AutoCompact,
     Providers,
 }
@@ -33,6 +35,9 @@ pub enum Choice {
     SignOut,
     ManageUsage,
     OpenRouterKey,
+    Level(crate::permissions::Level),
+    Remembered,
+    Grant(usize),
 }
 /// The right-aligned status of an option.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +102,17 @@ pub enum Purpose {
     Copy,
     Drafts {
         delete: Option<usize>,
+    },
+    /// This conversation's level; `default` is for new conversations.
+    Permissions {
+        default: crate::permissions::Level,
+    },
+    DefaultPermissions,
+    /// Grants extend Workspace only; `paused` names another level.
+    Remembered {
+        grants: Vec<crate::permissions::Grant>,
+        display: Vec<crate::permissions::Grant>,
+        paused: Option<crate::permissions::Level>,
     },
 }
 
@@ -292,51 +308,6 @@ impl Selector {
             .position(|option| matches!(option.choice, Choice::Effort(effort) if effort == current))
             .unwrap_or(0);
         menu
-    }
-    /// `routing` is the default model's saved routing.
-    pub fn settings(
-        model: &str,
-        effort: Effort,
-        auto_compact: u8,
-        routing: &Routing,
-        _config_path: &Path,
-    ) -> Self {
-        let setting =
-            |name: &str, value: String, setting| row(name, value, Choice::Setting(setting));
-        let mut menu = Self::new(
-            SETTINGS,
-            Purpose::Settings,
-            vec![
-                setting(
-                    "Default model",
-                    if model.is_empty() {
-                        "Not selected".into()
-                    } else {
-                        model.into()
-                    },
-                    Setting::Model,
-                ),
-                setting("Default effort", effort.name().into(), Setting::Effort),
-                setting("Default routing", routing.label(), Setting::Routing),
-                setting(
-                    "Auto-compact at",
-                    format!("{auto_compact}%"),
-                    Setting::AutoCompact,
-                ),
-                setting("Providers", String::new(), Setting::Providers),
-            ],
-        );
-        "saved defaults".clone_into(&mut menu.context);
-        menu
-    }
-    /// The settings row of `setting`, to restore focus on return.
-    pub fn setting_index(&self, setting: Setting) -> usize {
-        self.options
-            .iter()
-            .position(
-                |option| matches!(option.choice, Choice::Setting(choice) if choice == setting),
-            )
-            .unwrap_or(0)
     }
     /// Focus starts on `current`, which the entries mark.
     pub fn routing(

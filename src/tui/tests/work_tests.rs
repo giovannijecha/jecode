@@ -74,6 +74,62 @@ fn dock(state: &State) -> String {
 }
 
 #[test]
+fn ask_arriving_over_a_draft_requires_an_explicit_choice() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let mut app = App::new(agent, config(&directory), None);
+    app.state.editor.insert("send this later");
+    let draft = app.state.editor.clone();
+    assert!(app.question_observer.begin(request("waiting")).unwrap());
+    app.refresh_question();
+    assert_eq!(
+        app.state.ask_panel.as_ref().unwrap().entry().row,
+        usize::MAX
+    );
+    assert!(dock(&app.state).contains("1–3  choose"));
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert!(app.state.question.is_some());
+    assert_eq!(app.state.editor, draft);
+    app.input(Decoded::Paste("1".into())).unwrap();
+    assert!(
+        app.state.question.is_some(),
+        "pasted digits must not choose"
+    );
+    app.input(Decoded::Key(key(38, 0))).unwrap();
+    assert_eq!(app.state.ask_panel.as_ref().unwrap().entry().row, 1);
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert!(app.state.question.is_none());
+    assert_eq!(app.state.editor, draft);
+    app.question_observer.complete("waiting");
+    assert!(app.question_observer.begin(request("second")).unwrap());
+    app.refresh_question();
+    app.input(Decoded::Text("2".into())).unwrap();
+    assert!(
+        app.state.question.is_none(),
+        "a typed number is an explicit choice"
+    );
+    assert_eq!(app.state.editor, draft);
+    app.question_observer.complete("second");
+    assert!(app.question_observer.begin(request("third")).unwrap());
+    app.refresh_question();
+    app.input(Decoded::Text("3".into())).unwrap();
+    assert_eq!(app.state.ask_panel.as_ref().unwrap().entry().row, 2);
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert!(app.state.question.is_some(), "Other needs typed words");
+    app.input(Decoded::Text("custom rows".into())).unwrap();
+    app.input(Decoded::Key(key(13, 0))).unwrap();
+    assert!(app.state.question.is_none());
+    assert_eq!(app.state.editor, draft);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn ask_waits_for_explicit_input_and_keeps_chat_draft_through_escape() {
     let directory = Directory::new();
     let home = Directory::new();
@@ -209,7 +265,7 @@ fn several_questions_are_answered_one_at_a_time_and_sent_together() {
     );
     assert!(block.contains("2 of 3"), "{block}");
     assert!(
-        block.contains(" Space  select    Enter  next    ←→  questions    Esc  back to chat"),
+        block.contains(" Space  toggle    Enter  next    ←→  questions    Esc  back to chat"),
         "{block}"
     );
     app.input(Decoded::Text(" ".into())).unwrap();

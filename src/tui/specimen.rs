@@ -51,6 +51,7 @@ const BACKGROUNDS: &[(&str, Surface)] = &[
     ("DIFF_ADDED_STRONG", DIFF_ADDED_STRONG),
     ("DIFF_REMOVED_STRONG", DIFF_REMOVED_STRONG),
     ("BADGE_READ", BADGE_READ),
+    ("BADGE_COORD", BADGE_COORD),
     ("BADGE_EDIT", BADGE_EDIT),
     ("BADGE_SHELL", BADGE_SHELL),
     ("BADGE_IDLE", BADGE_IDLE),
@@ -277,6 +278,7 @@ fn specimen() {
     print!("{painted}");
 }
 
+mod alignment;
 mod chapter_live;
 mod composer;
 mod diffs;
@@ -286,6 +288,7 @@ mod menus;
 mod messages;
 mod notices;
 mod panels;
+mod permissions;
 mod rhythm;
 mod tinted;
 mod tools;

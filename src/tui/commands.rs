@@ -1,11 +1,7 @@
-use super::{
-    App, Feedback, Kind, Worker,
-    activity::Activity,
-    jobs::{CatalogPurpose, Job},
-    selector::Selector,
-    state::Item,
-};
-use crate::{attachments::Prompt, backend, effort::Effort, session::commands};
+use super::{App, Feedback, Kind, Worker, activity::Activity, jobs::CatalogPurpose, state::Item};
+use crate::{attachments::Prompt, effort::Effort, session::commands};
+
+mod catalog;
 
 impl App {
     pub(super) fn help(&mut self) {
@@ -123,7 +119,8 @@ impl App {
             self.process_observer = self.agent.as_ref().unwrap().processes();
             self.collaboration_auto_resume = true;
             self.collaboration_return_pending = false;
-            self.worker = Some(Worker::start(self.hold(), execution));
+            let worker = Worker::start(self.hold(), execution);
+            self.run_worker(worker);
             self.state.status = "Starting...".into();
             return Ok(false);
         }
@@ -395,64 +392,6 @@ impl App {
         }
     }
 
-    pub(super) fn load_catalog(&mut self, purpose: CatalogPurpose) {
-        let home = self
-            .config
-            .store
-            .path()
-            .parent()
-            .expect("configuration directory");
-        let facts = self.facts();
-        let id = match &purpose {
-            CatalogPurpose::Models { defaults: true, .. }
-            | CatalogPurpose::Effort { defaults: true, .. } => {
-                self.config.settings.backend_id.as_str()
-            }
-            _ => facts.backend_id,
-        };
-        let services = if id == facts.backend_id {
-            Ok(facts.services.clone())
-        } else {
-            self.config.settings.services(home, id)
-        };
-        drop(facts);
-        match services {
-            Ok(services) => self.load_catalog_for(purpose, services),
-            Err(error) => self.finish_setting(Kind::Error, &error, vec![]),
-        }
-    }
-
-    pub(super) fn load_catalog_for(
-        &mut self,
-        purpose: CatalogPurpose,
-        services: backend::Services,
-    ) {
-        let (title, context, defaults) = match &purpose {
-            CatalogPurpose::Models { defaults: true, .. } => ("Default model", "", true),
-            CatalogPurpose::Models { .. } => ("Model", "this conversation", false),
-            CatalogPurpose::Effort {
-                defaults, model, ..
-            } => (
-                if *defaults {
-                    "Default effort"
-                } else {
-                    "Effort"
-                },
-                model.as_str(),
-                *defaults,
-            ),
-        };
-        let mut menu = Selector::loading(title, "Loading model catalog…", defaults);
-        if self.provider_parent.is_some() {
-            menu.parent = Some("Provider");
-        }
-        context.clone_into(&mut menu.context);
-        self.state.selector = Some(menu);
-        self.state.clear_notice();
-        self.catalog_services = Some(services.clone());
-        self.job = Some(Job::catalog(services, purpose));
-    }
-
     /// Runs `/copy`, `/drafts` or `/terminal`; returns false for other text.
     fn run_immediate(&mut self, text: &str) -> bool {
         let text = text.trim();
@@ -479,6 +418,8 @@ impl App {
             } else {
                 self.warn("Usage: /ask");
             }
+        } else if name.eq_ignore_ascii_case("/permissions") {
+            self.open_permissions(arguments);
         } else if name.eq_ignore_ascii_case("/todo") {
             if arguments.is_empty() {
                 self.open_todo();
@@ -494,9 +435,17 @@ impl App {
 
 /// Commands that run at once, even while a turn is busy.
 pub(super) fn immediate(name: &str) -> bool {
-    ["/copy", "/drafts", "/terminal", "/agents", "/ask", "/todo"]
-        .iter()
-        .any(|command| name.eq_ignore_ascii_case(command))
+    [
+        "/copy",
+        "/drafts",
+        "/terminal",
+        "/agents",
+        "/ask",
+        "/todo",
+        "/permissions",
+    ]
+    .iter()
+    .any(|command| name.eq_ignore_ascii_case(command))
 }
 
 /// Commands that open a menu over a running turn instead of waiting for it.

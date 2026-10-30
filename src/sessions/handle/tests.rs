@@ -188,3 +188,72 @@ fn failed_background_save_reports_error_and_keeps_the_latest_edit_for_retry() {
         "retry me"
     );
 }
+
+#[test]
+fn background_saves_reuse_one_thread_that_never_keeps_the_session_open() {
+    let (_home, _directory, handle) = fixture();
+    for text in ["first", "second", "third"] {
+        handle.capture_input(Input {
+            draft: super::super::Draft {
+                text: text.into(),
+                cursor: text.len(),
+                ..Default::default()
+            },
+            ..Input::default()
+        });
+        handle.0.live.lock().unwrap().dirty = Some(Instant::now() - SAVE_INTERVAL);
+        assert!(!handle.flush_due_background().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !handle.flush_due_background().unwrap() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+    assert_eq!(handle.0.autosave.threads(), 1);
+    let recovered = handle.store().fixture_load(&handle.id()).unwrap();
+    assert_eq!(recovered.input.draft.text, "third");
+    let autosave = Arc::clone(&handle.0.autosave);
+    let shared = Arc::downgrade(&handle.0);
+    drop(handle);
+    assert!(shared.upgrade().is_none(), "the thread holds no session");
+    // The stopped thread drops its own reference to the autosave state.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Arc::strong_count(&autosave) > 1 {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn a_checkpoint_waiting_for_disk_access_leaves_the_history_free() {
+    let (_home, _directory, handle) = fixture();
+    let document = handle.snapshot();
+    let archive = crate::export::Archive {
+        backend: "openrouter".into(),
+        legacy_origin: None,
+        model: "fixture/model".into(),
+        directory: document.directory.clone(),
+        messages: Arc::new(Mutex::new(document.messages.clone())),
+        redactor: Redactor::new("fixture-key".into()),
+        effort: "high".into(),
+        events: Arc::new(Mutex::new(vec![])),
+    };
+    let io = handle.0.io.lock().unwrap();
+    let (writer, history) = (handle.clone(), archive.clone());
+    let checkpoint = std::thread::spawn(move || {
+        writer.checkpoint(
+            &history,
+            0,
+            &crate::context::Context::default(),
+            &crate::backend::Routing::Default,
+            true,
+            Stage::Begin,
+        )
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    let free = archive.messages.try_lock().is_ok() && archive.events.try_lock().is_ok();
+    drop(io);
+    checkpoint.join().unwrap().unwrap();
+    assert!(free, "the history stays free while the save waits");
+    assert!(handle.snapshot().pending.active);
+}

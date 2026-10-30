@@ -12,7 +12,7 @@ fn owner_exit_fixture() {
     };
     let directory =
         std::path::PathBuf::from(std::env::var_os("JECODE_UNIX_OWNER_DIRECTORY").unwrap());
-    let mut command = Command::new(crate::tools::find_bash().unwrap());
+    let mut command = Command::new(crate::shell::executable().unwrap());
     command
         .args(["--noprofile", "--norc", "-c", "printf '%s' \"$$\" > group; sleep 20 & printf '%s' \"$!\" > descendant; printf 'started\\n'; wait"])
         .current_dir(&directory);
@@ -175,7 +175,7 @@ fn delayed_owner_exit_still_stops_commands() {
 #[test]
 fn binary_input_arguments_environment_and_exit_status_survive_the_boundary() {
     let directory = Directory::new();
-    let mut command = Command::new(crate::tools::find_bash().unwrap());
+    let mut command = Command::new(crate::shell::executable().unwrap());
     command
         .args([
             "--noprofile",
@@ -210,7 +210,7 @@ fn binary_input_arguments_environment_and_exit_status_survive_the_boundary() {
 #[test]
 fn blocked_input_does_not_delay_cancellation() {
     let directory = Directory::new();
-    let mut command = Command::new(crate::tools::find_bash().unwrap());
+    let mut command = Command::new(crate::shell::executable().unwrap());
     command
         .args(["--noprofile", "--norc", "-c", "printf ready; sleep 20"])
         .current_dir(directory.path());

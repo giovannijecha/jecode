@@ -6,12 +6,10 @@ use crate::{
     setup::{self, Prompter, Terminal},
 };
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
 
 pub struct SessionConfig {
     pub store: Store,
     pub settings: Settings,
-    pub bash: PathBuf,
 }
 
 impl SessionConfig {
@@ -21,7 +19,7 @@ impl SessionConfig {
         input: &mut impl BufRead,
         output: &mut impl Write,
     ) -> Result<(), String> {
-        let mut ui = Terminal::new(input, output, &self.bash);
+        let mut ui = Terminal::new(input, output);
         if let Some(settings) = setup::configure(&self.store, Some(&self.settings), &mut ui)? {
             let home = self.store.path().parent().expect("configuration directory");
             for services in settings.configured_services(home) {
@@ -35,6 +33,9 @@ impl SessionConfig {
                 agent.replace_backend(client)?;
             }
             agent.set_auto_compact(settings.auto_compact);
+            agent
+                .permissions()
+                .set_default(settings.default_permissions);
             agent.set_backend_routing_preferences(&settings.backend_id, settings.routing.clone());
             self.settings = settings;
             writeln!(
@@ -54,7 +55,7 @@ impl SessionConfig {
         output: &mut impl Write,
     ) -> Result<(), String> {
         let mut services = agent.services();
-        let mut ui = Terminal::new(input, output, &self.bash);
+        let mut ui = Terminal::new(input, output);
         let manual = id.is_some();
         if !manual {
             let home = self.store.path().parent().expect("configuration directory");
@@ -167,7 +168,7 @@ impl SessionConfig {
                 agent.effort().reasons(),
             )
             .ok_or("Endpoint routing is unavailable for this backend")?;
-        let mut ui = Terminal::new(input, output, &self.bash);
+        let mut ui = Terminal::new(input, output);
         ui.message(&format!("Routing for {model}"))?;
         for (index, entry) in entries.iter().enumerate() {
             ui.message(&format!(
@@ -245,9 +246,7 @@ impl SessionConfig {
                 }
                 effort
             } else {
-                let Some(effort) =
-                    choose_effort(model, &mut Terminal::new(input, output, &self.bash))?
-                else {
+                let Some(effort) = choose_effort(model, &mut Terminal::new(input, output))? else {
                     return Ok(());
                 };
                 effort

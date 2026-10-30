@@ -4,7 +4,7 @@
 //! answer: only Enter, Space or typing selects.
 
 use crate::ask::{Answer, AnswerDraft, Draft, Question, Request, TEXT_LIMIT};
-use crate::tui::{editor::Editor, terminal::Key};
+use crate::tui::{arrival::Guard, editor::Editor, terminal::Key};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Entry {
@@ -25,6 +25,9 @@ pub struct Panel {
     /// The block's first visible row once the user scrolls it; otherwise
     /// the block follows the cursor.
     pub top: Option<usize>,
+    /// Arrived while the draft was typed in: until the keys pause or an
+    /// arrow or Tab moves, typing continues the draft and answers nothing.
+    pub guard: Option<Guard>,
 }
 
 impl Entry {
@@ -123,6 +126,17 @@ impl Panel {
             }),
             entries,
             top: None,
+            guard: None,
+        }
+    }
+
+    /// A waiting question must not turn an Enter meant for a hidden chat draft
+    /// into a choice. No option has the cursor until an arrow or number acts.
+    pub fn protect_arrival(&mut self, request: &Request) {
+        let question = &request.questions[self.step];
+        let entry = &mut self.entries[self.step];
+        if !question.options.is_empty() && entry.picked.is_empty() && !entry.other {
+            entry.row = usize::MAX;
         }
     }
 
@@ -143,7 +157,7 @@ impl Panel {
                     other: entry.other,
                     text: entry.editor.text.clone(),
                     caret: entry.editor.cursor,
-                    row: entry.row,
+                    row: entry.row.min(question.options.len()),
                 })
                 .collect(),
         }
@@ -180,7 +194,9 @@ impl Panel {
     /// Moves the cursor between answer rows; nothing is selected.
     pub fn move_row(&mut self, question: &Question, up: bool) -> bool {
         let entry = &mut self.entries[self.step];
-        let row = if up {
+        let row = if entry.row == usize::MAX {
+            0
+        } else if up {
             entry.row.saturating_sub(1)
         } else {
             (entry.row + 1).min(question.options.len())
@@ -198,6 +214,9 @@ impl Panel {
     /// toggles it. Elsewhere Space is typed.
     pub fn select(&mut self, question: &Question) -> bool {
         let entry = &mut self.entries[self.step];
+        if entry.row == usize::MAX {
+            return false;
+        }
         if entry.in_text(question) {
             return false;
         }
@@ -220,6 +239,9 @@ impl Panel {
     /// when the cursor is on empty own words.
     pub fn choose(&mut self, question: &Question) -> bool {
         let entry = &mut self.entries[self.step];
+        if entry.row == usize::MAX {
+            return false;
+        }
         if entry.in_text(question) {
             entry.typed(question);
             return entry.other;

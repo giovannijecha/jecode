@@ -26,15 +26,7 @@ fn with_settings(directory: &Directory, settings: Settings, services: Option<Ser
         ),
         Tools::new(directory.path()).unwrap(),
     );
-    App::new(
-        agent,
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
-        None,
-    )
+    App::new(agent, SessionConfig { store, settings }, None)
 }
 
 #[test]

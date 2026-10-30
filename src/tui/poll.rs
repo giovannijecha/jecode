@@ -1,8 +1,69 @@
-use super::{App, Feedback, Kind, activity, feedback::Ending};
+#[cfg(any(windows, test))]
+use super::keys::Decoded;
+use super::{App, Feedback, Kind, activity, feedback::Ending, keys::Decoder, terminal::Input};
 use crate::{attachments::Prompt, backend::FailureReason, events::Event};
 use std::time::Instant;
 
 impl App {
+    /// Applies one terminal input; `true` asks to quit.
+    pub(super) fn terminal_event(
+        &mut self,
+        event: Input,
+        decoder: &mut Decoder,
+    ) -> Result<bool, String> {
+        match event {
+            #[cfg(unix)]
+            Input::Bytes(bytes) => {
+                for decoded in decoder.bytes(&bytes) {
+                    if self.input(decoded)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            #[cfg(any(windows, test))]
+            Input::Key(key) => {
+                for decoded in decoder.key(key) {
+                    if self.input(decoded)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            #[cfg(any(windows, test))]
+            Input::Scroll(amount) => {
+                self.input(Decoded::Scroll(amount))?;
+            }
+            #[cfg(windows)]
+            Input::Modes(..) => {}
+            #[cfg(windows)]
+            Input::NativeBackground(..) => {}
+            Input::Size(size) => {
+                self.state.width = size.width;
+                self.state.height = size.height;
+                self.renderer
+                    .resized((size.width, size.height), Instant::now());
+            }
+            #[cfg(any(windows, test))]
+            Input::PasteOverflow => {
+                *decoder = Decoder::default();
+                self.input(Decoded::Error)?;
+            }
+            #[cfg(any(windows, test))]
+            Input::Paste(text) => match decoder.paste(&text) {
+                Ok(text) if !text.is_empty() => {
+                    self.input(Decoded::Paste(text))?;
+                }
+                Err(()) => {
+                    self.input(Decoded::Error)?;
+                }
+                _ => {}
+            },
+            Input::Error(error) => return Err(error),
+            // Worker events are polled with the loop; a wake carries no input.
+            Input::Wake => {}
+        }
+        Ok(false)
+    }
+
     pub(super) fn poll(&mut self) -> Result<bool, String> {
         let mut dirty = self.state.expire_feedback(Instant::now());
         dirty |= self.poll_auth_updates();
@@ -131,6 +192,7 @@ impl App {
         dirty |= self.refresh_processes(false);
         dirty |= self.refresh_agents();
         dirty |= self.refresh_question();
+        dirty |= self.refresh_permission();
         dirty |= self.refresh_todo();
         dirty |= self.start_collaboration_continuation();
         Ok(dirty)
@@ -167,13 +229,24 @@ impl App {
                 if self.state.question.is_none() {
                     self.make_room_for_ask();
                 }
+                let arriving = self
+                    .state
+                    .question
+                    .as_ref()
+                    .is_none_or(|current| current.id != request.id);
                 self.state.event(Event::UserQuestion { request });
+                if arriving {
+                    self.guard_ask_arrival();
+                }
             }
             Event::ToolStarted {
                 id,
                 name,
                 arguments,
             } if name == "agent" && super::agents::receipt_replaces_tool(&arguments) => {
+                if let Some(activity) = &mut self.state.activity {
+                    activity.tools += 1;
+                }
                 self.collaboration_receipt_calls.insert(id);
             }
             Event::ToolFinished {

@@ -16,7 +16,6 @@ fn app(home: &Directory, project: &Directory, endpoint: String) -> App {
         SessionConfig {
             store: Store::new(home.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );

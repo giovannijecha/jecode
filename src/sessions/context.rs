@@ -340,23 +340,38 @@ impl Document {
                     }
                     continue;
                 }
-                let unknown = self.pending.tool.as_deref() == Some(id)
-                    || self.pending.reads.iter().any(|read| read == id)
-                    || self.pending.batch.iter().any(|started| started == id);
-                let result = Value::object([
-                    (
-                        "error",
-                        Value::string(if unknown {
-                            "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
-                        } else {
-                            "Tool was not executed: Jecode closed before execution started."
-                        }),
-                    ),
-                    (
-                        "outcome",
-                        Value::string(if unknown { "unknown" } else { "not_executed" }),
-                    ),
-                ]);
+                // A call still waiting for a permission decision never ran.
+                let undecided = crate::permissions::pending_request(&self.events, id);
+                let unknown = !undecided
+                    && (self.pending.tool.as_deref() == Some(id)
+                        || self.pending.reads.iter().any(|read| read == id)
+                        || self.pending.batch.iter().any(|started| started == id));
+                let result = if undecided {
+                    Value::object([
+                        (
+                            "error",
+                            Value::string(
+                                "Tool was not executed: Jecode quit before a permission decision.",
+                            ),
+                        ),
+                        ("outcome", Value::string("not_executed")),
+                    ])
+                } else {
+                    Value::object([
+                        (
+                            "error",
+                            Value::string(if unknown {
+                                "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
+                            } else {
+                                "Tool was not executed: Jecode closed before execution started."
+                            }),
+                        ),
+                        (
+                            "outcome",
+                            Value::string(if unknown { "unknown" } else { "not_executed" }),
+                        ),
+                    ])
+                };
                 self.messages.push(Value::object([
                     ("role", Value::string("tool")),
                     ("tool_call_id", Value::string(id)),

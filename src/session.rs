@@ -5,6 +5,7 @@ mod checkpoints;
 pub mod commands;
 mod copy;
 pub(crate) mod delete;
+mod permission;
 mod persistence;
 mod processes;
 mod settings;
@@ -186,6 +187,7 @@ fn chat_inner(
                 agent.record_local(line, "Settings closed · current conversation kept");
             }),
             ("/routing", "") => config.change_routing(agent, input, output),
+            ("/permissions", _) => permission::command(agent, arguments, output),
             ("/effort", "") => config.change_effort(agent, None, input, output),
             ("/effort", _) => config.change_effort(agent, Some(arguments), input, output),
             ("/model", "") => config.change_model(agent, None, input, output),
@@ -263,8 +265,11 @@ fn run_plain(
     status: &mut impl Write,
 ) -> Result<(), String> {
     let questions = agent.questions();
+    let permissions = agent.permissions();
     let session = agent.sessions();
+    let redactor = agent.redactor();
     questions.set_available(true);
+    permissions.set_surface(crate::permissions::Surface::Inline);
     let mut console = Console::new(output, status);
     let mut sink = |event: Event| -> Result<(), String> {
         if let Event::UserQuestion { request } = &event {
@@ -272,6 +277,16 @@ fn run_plain(
                 &questions,
                 request,
                 session.as_ref().ok_or("Question session is unavailable")?,
+                input,
+                console.output(),
+            );
+        }
+        if let Event::PermissionRequest { request, waiting } = &event {
+            return permission::decide(
+                &permissions,
+                &redactor,
+                request,
+                *waiting,
                 input,
                 console.output(),
             );
@@ -284,6 +299,7 @@ fn run_plain(
         Work::Collaboration => agent.continue_collaboration(&mut sink).map(|_| ()),
     };
     questions.set_available(false);
+    permissions.set_surface(crate::permissions::Surface::None);
     result
 }
 
@@ -291,6 +307,8 @@ fn run_plain(
 mod ask_tests;
 #[cfg(test)]
 mod checkpoint_tests;
+#[cfg(test)]
+mod permission_tests;
 #[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]

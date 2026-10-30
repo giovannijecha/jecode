@@ -15,8 +15,11 @@ There is no guaranteed response time.
 
 ## Boundaries
 
-Jecode runs local tools with the invoking user's permissions. It is not a
-sandbox for untrusted projects or commands. The OpenRouter API key is stored in
+Jecode's permission levels govern tool access. On supported Windows hosts,
+Workspace commands and their descendants run within an OS-enforced filesystem
+policy. Full commands use the invoking user's ordinary permissions. This does
+not isolate the entire Jecode process, remote services or all browser behavior;
+see [permissions and platform limits](docs/usage/PERMISSIONS.md). The OpenRouter API key is stored in
 plaintext in the user-scoped configuration, while ChatGPT tokens are stored in
 separate protected account records; sessions, attachment copies
 and workspace checkpoint archives are also local data. Checkpoint archives hold
@@ -30,8 +33,8 @@ in the local account record; it is not sent for inference, refresh or returning
 sign-in. Credential records use
 owner-only Unix permissions or a Windows ACL restricted to the current user.
 Refreshed tokens are masked by existing output and persistence consumers.
-The `web` tool makes direct HTTP(S) requests from the user's machine using local
-curl. The `browser` tool controls a locally installed Chromium-based browser
+The `web` tool makes HTTP(S) requests through Jecode's embedded native adapters
+and OS TLS and certificate APIs. The `browser` tool controls an installed browser
 through a loopback DevTools connection. Fetched content, browser snapshots,
 screenshots and logs may enter the conversation and provider request when the
 agent uses them. Temporary browser profiles and downloaded content live in the

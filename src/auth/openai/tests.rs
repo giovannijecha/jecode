@@ -1,5 +1,29 @@
 use super::*;
 use crate::test_support::Directory;
+use std::io::{BufRead, BufReader, Read};
+use std::net::TcpStream;
+
+fn request_body(stream: &TcpStream) -> Vec<u8> {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut length = None;
+    loop {
+        let mut line = String::new();
+        assert!(reader.read_line(&mut line).unwrap() > 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            length = Some(value.trim().parse::<usize>().unwrap());
+        }
+    }
+    let length = length.expect("fixture request must have Content-Length");
+    assert!(length <= 4096);
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).unwrap();
+    body
+}
 
 #[test]
 fn cancelling_remote_revocation_still_removes_local_tokens_and_retains_registration() {
@@ -302,7 +326,7 @@ fn url_encoding_and_duplicate_callback_fields_are_strict() {
 #[test]
 fn concurrent_refresh_reloads_rotated_tokens_under_one_lock() {
     use crate::test_support::server::{Server, accept};
-    use std::io::{Read, Write};
+    use std::io::Write;
     let _fixture_lock = FIXTURE_SERIAL.lock().unwrap();
     let session = Session::fixture("old-access");
     let files = session.store.files();
@@ -323,35 +347,8 @@ fn concurrent_refresh_reloads_rotated_tokens_under_one_lock() {
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .unwrap();
-        let mut request = Vec::new();
-        let mut chunk = [0u8; 2048];
-        loop {
-            let size = stream.read(&mut chunk).unwrap();
-            request.extend_from_slice(&chunk[..size]);
-            if request.windows(4).any(|part| part == b"\r\n\r\n") {
-                break;
-            }
-        }
-        let header_end = request
-            .windows(4)
-            .position(|part| part == b"\r\n\r\n")
-            .unwrap()
-            + 4;
-        let headers = String::from_utf8_lossy(&request[..header_end]);
-        let length: usize = headers
-            .lines()
-            .find_map(|line| {
-                line.to_ascii_lowercase()
-                    .strip_prefix("content-length:")
-                    .and_then(|n| n.trim().parse().ok())
-            })
-            .unwrap();
-        while request.len() < header_end + length {
-            let size = stream.read(&mut chunk).unwrap();
-            request.extend_from_slice(&chunk[..size]);
-        }
-        let body = String::from_utf8_lossy(&request[header_end..header_end + length]);
-        assert!(body.contains("refresh_token=fixture-refresh"));
+        let body = request_body(&stream);
+        assert!(String::from_utf8_lossy(&body).contains("refresh_token=fixture-refresh"));
         let response = r#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","scope":"chatgpt.tokens.use.direct","expires_in":3600,"earliest_refresh_at":0}"#;
         write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
         1usize
@@ -390,7 +387,7 @@ fn concurrent_refresh_reloads_rotated_tokens_under_one_lock() {
 #[test]
 fn refresh_errors_clear_only_confirmed_unusable_tokens() {
     use crate::test_support::server::{Server, accept};
-    use std::io::{Read, Write};
+    use std::io::Write;
     let _fixture_lock = FIXTURE_SERIAL.lock().unwrap();
     for (code, status, clears) in [
         ("refresh_token_reused", 400, true),
@@ -416,8 +413,8 @@ fn refresh_errors_clear_only_confirmed_unusable_tokens() {
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                 .unwrap();
-            let mut request = [0u8; 4096];
-            let _ = stream.read(&mut request).unwrap();
+            let body = request_body(&stream);
+            assert!(String::from_utf8_lossy(&body).contains("refresh_token=fixture-refresh"));
             write!(stream, "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
         });
         wire::set_fixture(Some(server.endpoint.clone()));
@@ -432,7 +429,7 @@ fn refresh_errors_clear_only_confirmed_unusable_tokens() {
                 &Cancellation::default(),
             )
             .unwrap();
-        assert_eq!(!stored.enabled(), clears, "{code}");
+        assert_eq!(!stored.enabled(), clears, "{code}: {result:?}");
     }
     assert!(!unusable_refresh(
         "OpenAI identity request failed: invalid_client"

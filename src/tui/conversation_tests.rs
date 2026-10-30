@@ -37,15 +37,7 @@ fn app(directory: &Directory, configured: bool, selected: bool) -> App {
     agent
         .enable_sessions(store.path().parent().unwrap())
         .unwrap();
-    App::new(
-        agent,
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
-        None,
-    )
+    App::new(agent, SessionConfig { store, settings }, None)
 }
 
 fn seed(app: &mut App) -> String {

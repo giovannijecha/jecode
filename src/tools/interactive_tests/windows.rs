@@ -1,6 +1,141 @@
 use super::*;
 
 #[test]
+fn workspace_sandbox_runs_rust_probe_and_rejects_interactive_terminal() {
+    use crate::permissions::Level;
+    use crate::test_support::sandbox as probe;
+    use crate::tools::Begun;
+
+    let root = Directory::new();
+    let fixture = probe::executable(root.path());
+    let tools = tools(&root);
+    let execute_scoped = |arguments: Value| {
+        tools
+            .execute_begun(
+                Begun::default().with_permission(Level::Workspace, None),
+                "exec",
+                &arguments.encode(),
+                &crate::cancel::Cancellation::default(),
+            )
+            .result
+    };
+    let command = execute_scoped(Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        ("args", probe::args()),
+        (
+            "env",
+            Value::object([
+                (probe::ROLE, Value::string("write")),
+                (probe::ALLOWED, Value::string(root.path().to_string_lossy())),
+            ]),
+        ),
+        ("timeout_ms", Value::number(5000)),
+    ]));
+    assert_eq!(
+        command.get("exit_code"),
+        Some(&Value::number(0)),
+        "{command:?}"
+    );
+    assert!(
+        text(&command, "stdout").contains("CREATED:written"),
+        "{command:?}"
+    );
+    assert!(!root.path().join("nested").exists());
+    let terminal = execute_scoped(Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        ("tty", Value::Bool(true)),
+        ("timeout_ms", Value::number(5000)),
+    ]));
+    assert!(
+        text(&terminal, "error").contains("Workspace interactive terminals"),
+        "{terminal:?}"
+    );
+}
+
+#[test]
+#[ignore = "PSEC cannot initialize .NET workloads in a Windows service session; run interactively"]
+fn workspace_sandbox_runs_native_exec_and_rejects_interactive_terminal() {
+    use crate::permissions::Level;
+    use crate::tools::Begun;
+
+    let root = Directory::new();
+    let tools = tools(&root);
+    let execute_scoped = |name: &str, arguments: Value| {
+        tools
+            .execute_begun(
+                Begun::default().with_permission(Level::Workspace, None),
+                name,
+                &arguments.encode(),
+                &crate::cancel::Cancellation::default(),
+            )
+            .result
+    };
+    let command = execute_scoped(
+        "exec",
+        Value::object([
+            ("executable", Value::string("hostname.exe")),
+            ("timeout_ms", Value::number(5000)),
+        ]),
+    );
+    assert_eq!(
+        command.get("exit_code"),
+        Some(&Value::number(0)),
+        "{command:?}"
+    );
+    assert!(!text(&command, "stdout").trim().is_empty(), "{command:?}");
+    let terminal = execute_scoped(
+        "exec",
+        Value::object([
+            ("executable", Value::string("hostname.exe")),
+            ("tty", Value::Bool(true)),
+            ("timeout_ms", Value::number(5000)),
+        ]),
+    );
+    assert!(
+        text(&terminal, "error").contains("Workspace interactive terminals"),
+        "{terminal:?}"
+    );
+    let source = root.path().join("sandbox_write.cs");
+    let fixture = root.path().join("sandbox_write.exe");
+    std::fs::write(
+        &source,
+        "using System; using System.IO; class Probe { public static void Main(string[] args) { string directory = Path.Combine(args[0], \"nested\"); Directory.CreateDirectory(directory); string file = Path.Combine(directory, \"item.txt\"); File.WriteAllText(file, \"written\"); Console.WriteLine(File.ReadAllText(file)); File.Delete(file); Directory.Delete(directory); } }",
+    )
+    .unwrap();
+    let quote = |path: &Path| path.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "Add-Type -LiteralPath '{}' -OutputAssembly '{}' -OutputType ConsoleApplication",
+        quote(&source),
+        quote(&fixture)
+    );
+    assert!(
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let nested = execute_scoped(
+        "exec",
+        Value::object([
+            ("executable", Value::string(fixture.to_string_lossy())),
+            (
+                "args",
+                Value::Array(vec![Value::string(root.path().to_string_lossy())]),
+            ),
+            ("timeout_ms", Value::number(5000)),
+        ]),
+    );
+    assert_eq!(
+        nested.get("exit_code"),
+        Some(&Value::number(0)),
+        "{nested:?}"
+    );
+    assert!(text(&nested, "stdout").contains("written"), "{nested:?}");
+    assert!(!root.path().join("nested").exists());
+}
+
+#[test]
 fn terminal_bare_program_uses_path_order_and_dotted_fallback() {
     let root = Directory::new();
     let cwd = root.path().join("cwd");

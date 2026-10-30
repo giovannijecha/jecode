@@ -5,6 +5,27 @@ use crate::tui::{
 };
 use crate::{events::Event, json::Value};
 mod screen;
+
+#[test]
+fn light_background_fills_every_cell_and_dark_background_uses_terminal_default() {
+    let frame = view::Frame {
+        header: vec![],
+        history: vec![],
+        live: vec![Line::new("A", crate::tui::theme::BODY), Line::default()],
+        cursor: None,
+        composer: 1,
+    };
+    let mut renderer = Renderer::new();
+    renderer.set_light_background(true);
+    let light = renderer.paint(&frame, 4, 3);
+    assert!(light.contains("48;2;12;12;12"));
+    assert!(light.matches("48;2;12;12;12").count() >= 8);
+    assert!(!light.contains("\x1b[49m"));
+    renderer.set_light_background(false);
+    let dark = renderer.paint(&frame, 4, 3);
+    assert!(dark.contains("\x1b[49m"));
+    assert!(!dark.contains("48;2;12;12;12"));
+}
 use screen::Screen;
 
 fn update(renderer: &mut Renderer, screen: &mut Screen, state: &mut State) -> String {

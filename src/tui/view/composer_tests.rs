@@ -237,7 +237,7 @@ fn slash_commands_open_one_panel_below_the_draft_with_a_distinct_selection() {
             .find(|line| line.plain().contains(text))
             .unwrap()
     };
-    assert!(row("─ Commands").plain().ends_with(" 1 match ─"));
+    assert!(row("─ Commands").plain().ends_with(" 2 matches ─"));
     // The draft stays in the composer as the search field and keeps the caret.
     let (caret, column) = frame.cursor.unwrap();
     let field = &frame.live[caret];
@@ -311,6 +311,7 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
         Effort::High,
         80,
         &crate::backend::openrouter::Routing::Auto,
+        Default::default(),
         std::path::Path::new("fixture/config.json"),
     ));
     let selection = frame(&state, "model", "directory");

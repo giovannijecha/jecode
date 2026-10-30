@@ -1,7 +1,7 @@
 use crate::disk::{self, hash};
 use crate::json::Value;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,7 +16,9 @@ pub(super) enum Fingerprint {
         target: String,
         directory: bool,
     },
-    Directory,
+    Directory {
+        mode: u32,
+    },
 }
 
 impl Fingerprint {
@@ -28,7 +30,7 @@ impl Fingerprint {
             Self::Absent => "absent",
             Self::File { .. } => "file",
             Self::Link { .. } => "link",
-            Self::Directory => "directory",
+            Self::Directory { .. } => "directory",
         }
     }
     pub(super) fn value(&self) -> Value {
@@ -45,13 +47,20 @@ impl Fingerprint {
                 ("target", Value::string(target)),
                 ("directory", Value::Bool(*directory)),
             ]),
-            Self::Directory => Value::object([("kind", Value::string("directory"))]),
+            Self::Directory { mode } => Value::object([
+                ("kind", Value::string("directory")),
+                ("mode", Value::number(mode)),
+            ]),
         }
     }
     pub(super) fn from_value(value: &Value) -> Result<Self, String> {
         match value.get("kind").and_then(Value::as_str) {
             Some("absent") => Ok(Self::Absent),
-            Some("directory") => Ok(Self::Directory),
+            Some("directory") => Ok(Self::Directory {
+                // Older saved baselines had no directory mode. Recovery fills
+                // this from the owned copy in Workspace::from_value.
+                mode: value.get("mode").and_then(Value::as_usize).unwrap_or(0) as u32,
+            }),
             Some("file") => Ok(Self::File {
                 size: value
                     .get("size")
@@ -109,7 +118,7 @@ pub(super) fn path(root: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(result)
 }
 
-fn parent(root: &Path, name: &str, create: bool) -> Result<PathBuf, String> {
+fn parent(root: &Path, name: &str) -> Result<(), String> {
     let mut result = root.to_path_buf();
     let mut parts = name.split('/').peekable();
     while let Some(part) = parts.next() {
@@ -120,16 +129,14 @@ fn parent(root: &Path, name: &str, create: bool) -> Result<PathBuf, String> {
         match disk::metadata_if_present(&result).map_err(|error| error.to_string())? {
             Some(metadata) if disk::ordinary_directory(&metadata) => {}
             Some(_) => return Err(format!("{name} has a linked or non-directory parent")),
-            None if create => fs::create_dir(&result)
-                .map_err(|error| format!("Could not create parent of {name}: {error}"))?,
-            None => return Ok(result),
+            None => return Ok(()),
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 pub(super) fn observe(root: &Path, name: &str) -> Result<Fingerprint, String> {
-    parent(root, name, false)?;
+    parent(root, name)?;
     let path = path(root, name)?;
     let Some(metadata) = disk::metadata_if_present(&path)
         .map_err(|error| format!("Could not inspect {name}: {error}"))?
@@ -155,44 +162,57 @@ pub(super) fn observe(root: &Path, name: &str) -> Result<Fingerprint, String> {
             directory,
         });
     }
-    if disk::linked(&metadata) {
-        return Err(format!("Unsupported reparse point {name}"));
-    }
     if kind.is_dir() {
-        return Ok(Fingerprint::Directory);
+        if disk::linked(&metadata) {
+            return Err(format!("Unsupported reparse point {name}"));
+        }
+        return Ok(Fingerprint::Directory {
+            mode: mode(&metadata),
+        });
     }
+    // Other Windows reparse points, such as cloud-file placeholders, are
+    // file content, as when the copy was made.
     if !kind.is_file() {
         return Err(format!("Unsupported filesystem entry {name}"));
     }
-    let mut file = File::open(&path).map_err(|error| format!("Could not open {name}: {error}"))?;
-    let size = metadata.len();
-    let mut hasher = hash::Hasher::new(size);
-    let mut remaining = size;
-    let mut buffer = [0u8; 64 * 1024];
-    while remaining > 0 {
-        let wanted = remaining.min(buffer.len() as u64) as usize;
-        let count = file
-            .read(&mut buffer[..wanted])
-            .map_err(|error| format!("Could not read {name}: {error}"))?;
-        if count == 0 {
-            return Err(format!("{name} changed while reading"));
-        }
-        hasher.update(&buffer[..count]);
-        remaining -= count as u64;
-    }
+    let (size, digest) = observe_file(&path).map_err(|error| format!("{name}: {error}"))?;
     let later = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
     if !later.is_file() || later.len() != size || mode(&later) != mode(&metadata) {
         return Err(format!("{name} changed while reading"));
     }
-    let digest = hasher.finish();
     Ok(Fingerprint::File {
         size,
-        digest: format!("{:016x}{:016x}", digest.0[0], digest.0[1]),
+        digest,
         mode: mode(&metadata),
     })
 }
 
-fn mode(metadata: &fs::Metadata) -> u32 {
+/// Hash a regular file's content: its length and digest.
+pub(super) fn observe_file(path: &Path) -> Result<(u64, String), String> {
+    let mut file = File::open(path).map_err(|error| format!("Could not open: {error}"))?;
+    let size = file.metadata().map_err(|error| error.to_string())?.len();
+    let mut hasher = hash::Hasher::new(size);
+    let mut remaining = size;
+    let mut buffer = vec![0u8; 64 * 1024];
+    while remaining > 0 {
+        let wanted = remaining.min(buffer.len() as u64) as usize;
+        let count = file
+            .read(&mut buffer[..wanted])
+            .map_err(|error| format!("Could not read: {error}"))?;
+        if count == 0 {
+            return Err("changed while reading".into());
+        }
+        hasher.update(&buffer[..count]);
+        remaining -= count as u64;
+    }
+    Ok((size, hex(hasher.finish())))
+}
+
+pub(super) fn hex(digest: hash::Digest) -> String {
+    format!("{:016x}{:016x}", digest.0[0], digest.0[1])
+}
+
+pub(super) fn mode(metadata: &fs::Metadata) -> u32 {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -204,10 +224,7 @@ fn mode(metadata: &fs::Metadata) -> u32 {
     }
 }
 
-fn apply_mode(path: &Path, mode: u32) -> Result<(), String> {
-    let mut permissions = fs::symlink_metadata(path)
-        .map_err(|error| error.to_string())?
-        .permissions();
+pub(super) fn set_mode(permissions: &mut fs::Permissions, mode: u32) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -215,118 +232,38 @@ fn apply_mode(path: &Path, mode: u32) -> Result<(), String> {
     }
     #[cfg(not(unix))]
     permissions.set_readonly(mode != 0);
+}
+
+pub(super) fn apply_mode(path: &Path, mode: u32) -> Result<(), String> {
+    let mut permissions = fs::symlink_metadata(path)
+        .map_err(|error| error.to_string())?
+        .permissions();
+    set_mode(&mut permissions, mode);
     fs::set_permissions(path, permissions).map_err(|error| error.to_string())
 }
 
-fn remove(path: &Path) -> Result<(), String> {
-    let Some(metadata) = disk::metadata_if_present(path).map_err(|error| error.to_string())? else {
-        return Ok(());
-    };
-    if disk::ordinary_directory(&metadata) {
-        fs::remove_dir(path).map_err(|error| error.to_string())
-    } else if metadata.file_type().is_symlink() && metadata.is_dir() {
-        fs::remove_dir(path).map_err(|error| error.to_string())
-    } else {
-        #[cfg(windows)]
-        if metadata.is_file() && metadata.permissions().readonly() {
-            apply_mode(path, 0)?;
+/// Give the owner the access needed to list and delete a directory's
+/// entries, or to delete a read-only Windows file.
+fn writable(path: &Path, metadata: &fs::Metadata) -> Result<(), String> {
+    let mut permissions = metadata.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = permissions.mode();
+        if !metadata.is_dir() || mode & 0o700 == 0o700 {
+            return Ok(());
         }
-        fs::remove_file(path).map_err(|error| error.to_string())
+        permissions.set_mode(mode | 0o700);
     }
-}
-
-pub(super) fn copy_entry(
-    source: &Path,
-    target: &Path,
-    name: &str,
-    expected: &Fingerprint,
-) -> Result<(), String> {
-    parent(source, name, false)?;
-    parent(target, name, true)?;
-    let from = path(source, name)?;
-    let to = path(target, name)?;
-    if observe(source, name)? != *expected {
-        return Err(format!("{name} changed before copy"));
-    }
-    match expected {
-        Fingerprint::Absent => remove(&to)?,
-        // Submodules and nested repositories are separate repositories: the
-        // copy keeps their directory, not their contents.
-        Fingerprint::Directory => {
-            if observe(target, name)? != Fingerprint::Directory {
-                remove(&to)?;
-                fs::create_dir(&to).map_err(|error| error.to_string())?;
-            }
+    #[cfg(not(unix))]
+    {
+        if !permissions.readonly() {
+            return Ok(());
         }
-        Fingerprint::File { mode, .. } => {
-            remove(&to)?;
-            let staged = disk::temporary_beside(&to);
-            let result = (|| {
-                let mut input = File::open(&from).map_err(|error| error.to_string())?;
-                let mut output = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&staged)
-                    .map_err(|error| error.to_string())?;
-                std::io::copy(&mut input, &mut output).map_err(|error| error.to_string())?;
-                output.flush().map_err(|error| error.to_string())?;
-                apply_mode(&staged, *mode)?;
-                fs::rename(&staged, &to).map_err(|error| error.to_string())
-            })();
-            if result.is_err() {
-                let _ = fs::remove_file(&staged);
-            }
-            result?;
-        }
-        Fingerprint::Link { target, directory } => {
-            remove(&to)?;
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(target, &to).map_err(|error| error.to_string())?;
-            #[cfg(windows)]
-            {
-                if *directory {
-                    std::os::windows::fs::symlink_dir(target, &to)
-                } else {
-                    std::os::windows::fs::symlink_file(target, &to)
-                }
-                .map_err(|error| error.to_string())?;
-            }
-            #[cfg(not(windows))]
-            let _ = directory;
-        }
+        set_mode(&mut permissions, 0);
     }
-    if observe(source, name)? != *expected || observe(target, name)? != *expected {
-        return Err(format!("{name} changed while copying"));
-    }
-    Ok(())
-}
-
-pub(super) fn save_baseline(
-    source: &Path,
-    base: &Path,
-    name: &str,
-    expected: &Fingerprint,
-) -> Result<(), String> {
-    if !matches!(expected, Fingerprint::File { .. }) {
-        return Ok(());
-    }
-    let from = path(source, name)?;
-    let to = path(base, name)?;
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let mut input = File::open(&from).map_err(|error| error.to_string())?;
-    let mut output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&to)
-        .map_err(|error| error.to_string())?;
-    std::io::copy(&mut input, &mut output).map_err(|error| error.to_string())?;
-    output.sync_all().map_err(|error| error.to_string())?;
-    if observe(source, name)? != *expected {
-        return Err(format!("{name} changed while saving baseline"));
-    }
-    Ok(())
+    fs::set_permissions(path, permissions)
+        .map_err(|error| format!("Could not make {} writable: {error}", path.display()))
 }
 
 pub(super) fn remove_baseline(base: &Path) -> Result<(), String> {
@@ -363,31 +300,65 @@ pub(super) fn remove_baseline(base: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Removes the links a collaborator left in its copy without following them,
-/// so deleting the copy never depends on how Git treats links on this platform.
-pub(super) fn remove_links(root: &Path) -> Result<(), String> {
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let kind = entry.file_type().map_err(|error| error.to_string())?;
-            let path = entry.path();
-            if kind.is_symlink() {
-                #[cfg(windows)]
-                let removed = if std::os::windows::fs::FileTypeExt::is_symlink_dir(&kind) {
-                    fs::remove_dir(&path)
-                } else {
-                    fs::remove_file(&path)
-                };
-                #[cfg(not(windows))]
-                let removed = fs::remove_file(&path);
-                removed.map_err(|error| {
-                    format!("Could not remove link {}: {error}", path.display())
-                })?;
-            } else if kind.is_dir() {
-                pending.push(path);
+/// Delete only entries inside an owned copy. Inspect the entire tree before
+/// removing anything, and never follow directory links or reparse points.
+/// Restrictive directory modes are lifted first so their entries can go.
+pub(super) fn remove_tree(root: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(root).map_err(|error| error.to_string())?;
+    if !disk::ordinary_directory(&metadata) {
+        return Err("Workspace copy is not an ordinary directory".into());
+    }
+    enum Removal {
+        Directory,
+        DirectoryLink,
+        Entry,
+    }
+    let mut entries = Vec::new();
+    let mut pending = vec![(root.to_path_buf(), false)];
+    while let Some((path, visited)) = pending.pop() {
+        let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        let kind = metadata.file_type();
+        if disk::ordinary_directory(&metadata) {
+            if visited {
+                entries.push((path, Removal::Directory));
+            } else {
+                writable(&path, &metadata)?;
+                pending.push((path.clone(), true));
+                for child in fs::read_dir(&path).map_err(|error| error.to_string())? {
+                    pending.push((child.map_err(|error| error.to_string())?.path(), false));
+                }
             }
+        } else if kind.is_symlink() {
+            #[cfg(windows)]
+            let directory = std::os::windows::fs::FileTypeExt::is_symlink_dir(&kind);
+            #[cfg(not(windows))]
+            let directory = false;
+            entries.push((
+                path,
+                if directory {
+                    Removal::DirectoryLink
+                } else {
+                    Removal::Entry
+                },
+            ));
+        } else if !metadata.is_dir() {
+            // Files, including sockets or pipes a command left in the copy.
+            #[cfg(windows)]
+            writable(&path, &metadata)?;
+            entries.push((path, Removal::Entry));
+        } else {
+            return Err(format!(
+                "Workspace copy has an unsupported entry: {}",
+                path.display()
+            ));
         }
+    }
+    for (path, removal) in entries {
+        match removal {
+            Removal::Directory | Removal::DirectoryLink => fs::remove_dir(&path),
+            Removal::Entry => fs::remove_file(&path),
+        }
+        .map_err(|error| format!("Could not remove {}: {error}", path.display()))?;
     }
     Ok(())
 }
@@ -397,7 +368,10 @@ pub(super) fn verify_content(
     name: &str,
     expected: &Fingerprint,
 ) -> Result<(), String> {
-    if matches!(expected, Fingerprint::Link { .. } | Fingerprint::Directory) {
+    if matches!(
+        expected,
+        Fingerprint::Link { .. } | Fingerprint::Directory { .. }
+    ) {
         return Ok(());
     }
     let observed = observe(root, name)?;

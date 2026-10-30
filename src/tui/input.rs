@@ -12,6 +12,18 @@ impl App {
             }
         }
         let decoded = match decoded {
+            // Only an explicitly typed shortcut can decide a request.
+            Decoded::Text(text) if self.state.permission.is_some() => {
+                self.permission_text(&text);
+                return Ok(false);
+            }
+            Decoded::Paste(text) if self.permission_guarded() => {
+                self.continue_draft(&text);
+                return Ok(false);
+            }
+            Decoded::Paste(_) | Decoded::Error if self.state.permission.is_some() => {
+                return Ok(false);
+            }
             // Terminals deliver a file drop as a paste of its paths.
             // The process panel keeps typed and pasted text out of the hidden
             // draft.
@@ -31,8 +43,12 @@ impl App {
                 self.agents_text(&text);
                 return Ok(false);
             }
-            Decoded::Text(text) | Decoded::Paste(text) if self.state.ask_panel.is_some() => {
-                self.ask_text(&text);
+            Decoded::Text(text) if self.state.ask_panel.is_some() => {
+                self.ask_text(&text, false);
+                return Ok(false);
+            }
+            Decoded::Paste(text) if self.state.ask_panel.is_some() => {
+                self.ask_text(&text, true);
                 return Ok(false);
             }
             // The Todo menu has nothing to type into.
@@ -100,12 +116,7 @@ impl App {
                         }
                     }
                 } else {
-                    if !self.state.editor.insert(&text) {
-                        self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
-                    } else {
-                        self.edited();
-                        self.state.history.edited();
-                    }
+                    self.continue_draft(&text);
                 }
                 return Ok(false);
             }
@@ -134,6 +145,10 @@ impl App {
             return Ok(false);
         }
         if self.inspect_key(key) {
+            return Ok(false);
+        }
+        if self.state.permission.is_some() {
+            self.permission_key(key);
             return Ok(false);
         }
         if self.state.processes.is_some() {
@@ -252,7 +267,10 @@ impl App {
             }
         }
         match key.code {
-            13 if !key.shift() && !key.alt() && !key.ctrl() => return self.submit(),
+            13 if !key.shift() && !key.alt() && !key.ctrl() => {
+                self.typed = None;
+                return self.submit();
+            }
             112 if self.checkpoint_job.is_none() && self.deletion_job.is_none() => self.help(),
             80 | 78 if key.ctrl() => {
                 if self.state.queue.is_editing() {
@@ -273,19 +291,35 @@ impl App {
                     .vertical(key.code == 38, super::view::input_width(self.state.width));
                 self.edited();
             }
-            _ => {
-                let before = self.state.editor.text.clone();
-                if !self.state.editor.key(key) {
-                    self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
-                }
-                if self.state.editor.text != before {
-                    self.state.feedback_input(true);
-                    self.edited();
-                    self.state.history.edited();
-                }
-            }
+            _ => self.edit_draft(key),
         }
         Ok(false)
+    }
+
+    /// Text typed into the chat draft, also while a request that arrived
+    /// during the typing guards its answer.
+    pub(super) fn continue_draft(&mut self, text: &str) {
+        if !self.state.editor.insert(text) {
+            self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
+        } else {
+            self.typed = Some(std::time::Instant::now());
+            self.edited();
+            self.state.history.edited();
+        }
+    }
+
+    /// An editing key on the chat draft.
+    pub(super) fn edit_draft(&mut self, key: Key) {
+        let before = self.state.editor.text.clone();
+        if !self.state.editor.key(key) {
+            self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
+        }
+        if self.state.editor.text != before {
+            self.typed = Some(std::time::Instant::now());
+            self.state.feedback_input(true);
+            self.edited();
+            self.state.history.edited();
+        }
     }
 
     fn scroll(&mut self, amount: i16) {
@@ -318,11 +352,13 @@ impl App {
         if self.deletion_job.is_some() {
             return Ok(false);
         }
-        let menu = self.state.selector.as_mut().unwrap();
         if key.code == 68 && key.ctrl() && !key.alt() && !key.shift() {
-            menu.toggle_delete();
+            if !self.revoke_grant() {
+                self.state.selector.as_mut().unwrap().toggle_delete();
+            }
             return Ok(false);
         }
+        let menu = self.state.selector.as_mut().unwrap();
         match key.code {
             38 | 40 => menu.move_selection(key.code == 38),
             13 if !key.shift() && !key.alt() && !key.ctrl() => {
@@ -390,7 +426,7 @@ impl App {
             self.state.selector = None;
             return;
         }
-        if self.close_provider_panel() {
+        if self.close_provider_panel() || self.close_permissions_menu() {
             return;
         }
         drop(self.job.take());

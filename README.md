@@ -16,68 +16,82 @@ The main agent can ask for an explicit answer and maintain a saved conversation
 plan. See [questions and plans](docs/usage/WORK_TOOLS.md).
 It has a fullscreen TUI, saved conversations and a CLI for single prompts and pipes.
 
-One Cargo package, the Rust standard library, no external crates. Installed system
-tools provide HTTPS, Bash execution and native terminal support. `exec` runs a
-program with separate arguments and can open a controllable terminal session.
-`web` uses local curl for HTTP retrieval and crawling. `browser` controls an
-already installed Chromium-based browser through its local DevTools interface;
-set `JECODE_BROWSER` to its executable path if auto-discovery does not find it.
-Isolated collaborator workspaces additionally require installed Git and a project
-opened at a repository root with an existing commit. Shared workspaces do not.
+One Cargo package, the Rust standard library, no external crates. Jecode owns
+its command interpreter and uses operating-system APIs for HTTPS, cryptography,
+processes and terminal support. Its native adapters are compiled when the
+package is built and embedded in the executable: runtime never invokes a
+compiler, Git, Git Bash, curl or the OpenSSL command-line application.
+
+`exec` runs a program with separate arguments and can open a controllable
+terminal session. `bash` runs [Jecode's own command language](docs/usage/SHELL.md) on every platform;
+it does not select an installed shell. Isolated collaborators use owned file
+snapshots and work in folders without a Git repository.
+
+`browser` controls an installed Chromium-based browser through its local
+DevTools interface. This is the application prerequisite: set `JECODE_BROWSER`
+to its executable path if discovery does not find it. Programs explicitly run
+for a user's project remain that project's requirements.
 
 ## Install
 
-Build from this repository with Rust 1.95.0 and a native linker.
+Use the prebuilt package for your OS and architecture. The package contains
+`jecode` (`jecode.exe` on Windows), its installer and the license. It can also
+run directly without installation. No Rust toolchain is required to use it.
 
-| Platform | System requirements |
+| Platform | Native OS boundary |
 | --- | --- |
-| Windows 10+ | Git Bash, HTTPS-enabled curl 8.3+, Windows PowerShell with `Add-Type`. |
-| Linux / macOS | `bash`, HTTPS-enabled `curl` 8.3+, `kill`, `mkfifo`, `rm`, `rmdir`; `stty`, `/dev/tty` and a VT-compatible terminal for the TUI. Interactive `exec` needs system `cc` on first use, plus `/proc` on Linux or `/bin/ps` on macOS for descendant cleanup. |
+| Windows | Windows console/process APIs and .NET Framework; PowerShell for system clipboard/image APIs. ConPTY is needed for interactive terminals. |
+| Linux | libc/POSIX and the OS OpenSSL 3 or 1.1 ABI for TLS/cryptography. Desktop clipboard/image APIs use X11 or Wayland data control and GdkPixbuf. |
+| macOS | POSIX, Foundation, Security/CommonCrypto and system clipboard/image APIs. |
 
-ChatGPT sign-in additionally uses .NET cryptography through Windows PowerShell,
-or the installed `openssl` executable on Linux and macOS. Browser sign-in uses
-the system browser; the callback listens only on `127.0.0.1`.
+Workspace command confinement additionally requires native Windows Process
+Security Environment 1.1. Interactive terminals and browser control currently
+require Full. Unsupported hosts reject confined command launch, and local
+servers must currently start in Full. See [permissions](docs/usage/PERMISSIONS.md)
+for scope, approvals and platform limits.
 
-Both installers verify the selected curl version and HTTPS support before
-installation. Set `JECODE_CURL` to an installed curl executable to override the
-default selection. Windows otherwise prefers `System32\curl.exe`; Linux and
-macOS use `curl` from PATH. Web tools and model requests use the same selection.
-Older Windows or Linux installations may need a newer curl even when the OS
-already provides one.
-
-The TUI always uses 24-bit color, ignores `NO_COLOR`, and keeps the terminal's
-own background on the alternate screen; its palette assumes a dark terminal
-theme. On macOS, install Apple's Command Line Tools for the native linker. See [platform verification](docs/development/PLATFORMS.md) for
-executed coverage and checks that still need a native host.
+ChatGPT browser sign-in opens the system browser; its callback listens only on
+`127.0.0.1`. HTTPS uses OS certificate verification. Jecode does not install or
+download additional applications to enable its tools.
 
 ### Windows
 
-From the repository root in PowerShell:
+From the extracted package in PowerShell:
 
 ```powershell
 .\INSTALL.ps1
 ```
 
-This builds offline, installs to `%LOCALAPPDATA%\Jecode\bin` and adds that directory
-first in your user PATH. The current terminal is ready immediately; reopen other
-terminals to refresh their PATH. Run the script again after source updates.
-
-The installer prefers the installed `1.95.0-x86_64-pc-windows-gnullvm` toolchain
-and its bundled linker; it needs Rust's `rust-mingw` component. Other toolchains
-use their configured native linker; MSVC needs the Visual C++ Build Tools.
+This copies the supplied executable to `%LOCALAPPDATA%\Jecode\bin` and adds
+that directory first in the user PATH. Reopen other terminals to refresh their
+PATH. Run the installer from a newer package to update. `-NoPath` keeps PATH
+unchanged; `-InstallRoot` chooses an absolute destination.
 
 ### Linux / macOS
 
-From the repository root in a shell:
+From the extracted package:
 
 ```sh
 sh INSTALL.sh
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/jecode/bin:$PATH"
 ```
 
-Add the PATH line to your shell configuration for future terminals. Run the same
-script to update. An absolute install root is also accepted:
+Add the PATH line to your shell configuration. The installer copies the supplied
+executable; it does not build source. An absolute install root is also accepted:
 `sh INSTALL.sh /absolute/path`.
+
+### Building from source
+
+Development needs Rust 1.95.0, a linker and the platform compiler for the owned
+native adapters (.NET C# on Windows; system C/Objective-C on Unix). These are
+build requirements, not application prerequisites. Build offline with
+`cargo build --release --locked --offline`; `PACKAGE.ps1` or `PACKAGE.sh` prepares
+a local distribution with its installer. Nothing is uploaded or published.
+
+The TUI uses 24-bit color, ignores `NO_COLOR`, and keeps dark terminal
+backgrounds. On a detected light background it paints a local dark surface;
+the terminal's palette stays unchanged. See
+[platform verification](docs/development/PLATFORMS.md) for executed coverage.
 
 ## First launch
 
@@ -131,6 +145,7 @@ complete tool cards inline for the latest finished turn; see
 | `/resume [ID]` | Choose a saved conversation from this project. |
 | `/model [ID]`, `/effort [NAME]` | Change this conversation's model or reasoning effort. |
 | `/routing` | Choose Auto routing or a specific OpenRouter endpoint. |
+| `/permissions [LEVEL]` | Choose Read, Workspace or Full for this conversation, and review remembered grants. |
 | `/settings` | Edit saved defaults and manage provider accounts or API keys. |
 | `/init` | Inspect this project and create or update its `AGENTS.md`. |
 | `/skills` | List personal skills available to the model. |
@@ -162,8 +177,11 @@ Conversations autosave under `~/.jecode/sessions/`. To resume, run
 `jecode resume` from the original project directory. See [saved sessions](docs/usage/SESSIONS.md)
 for unsent input, interruption and deletion.
 
-Jecode runs tools with your system permissions. Its working directory is not a
-sandbox. Provider requests send conversation content and supported attachments to
+Each conversation has a [permission level](docs/usage/PERMISSIONS.md): Read,
+Workspace (the default) or Full. In Workspace, file access outside the working
+folder, or a command run from outside it, asks first. Levels govern Jecode's tool
+calls, not what a command does once it runs: commands run with your system
+permissions, and the working directory is not a sandbox. Provider requests send conversation content and supported attachments to
 the selected backend: OpenAI directly or OpenRouter and its selected provider;
 see [security](SECURITY.md).
 
@@ -198,6 +216,7 @@ for every command.
 The [documentation index](docs/README.md) links the usage guides and technical references.
 
 - [Configuration](docs/usage/CONFIGURATION.md): models, effort, routing and environment overrides.
+- [Permissions](docs/usage/PERMISSIONS.md): levels, requests, remembered grants and their boundary.
 - [Tools](docs/usage/TOOLS.md): files, commands, processes, local web retrieval and browser control.
 - [Checkpoints](docs/usage/CHECKPOINTS.md): on-demand recovery, restores, scope and storage.
 - [Attachments](docs/usage/ATTACHMENTS.md), [copy](docs/usage/COPY.md) and [export](docs/usage/EXPORT.md).

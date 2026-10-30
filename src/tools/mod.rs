@@ -1,3 +1,4 @@
+mod access;
 mod attachment;
 pub(crate) mod discovery;
 pub(crate) mod edit;
@@ -14,7 +15,6 @@ pub(crate) use files::read_text_page;
 #[cfg(test)]
 pub use schema::encoded_size;
 pub use schema::{definitions, definitions_for, encoded_size_for};
-pub use shell::find_bash;
 
 use crate::cancel::Cancellation;
 use crate::checkpoints::actions;
@@ -36,9 +36,30 @@ pub struct Execution {
 #[derive(Default)]
 pub struct Begun {
     command: Option<CommandGuard>,
+    /// An approved file access outside the working folder uses this
+    /// directory as its root; see `Tools::access`.
+    base: Option<PathBuf>,
+    permission: Option<(
+        crate::permissions::Level,
+        Option<crate::permissions::Access>,
+    )>,
 }
 
 impl Begun {
+    pub fn with_base(mut self, base: Option<PathBuf>) -> Self {
+        self.base = base;
+        self
+    }
+
+    pub fn with_permission(
+        mut self,
+        level: crate::permissions::Level,
+        access: Option<crate::permissions::Access>,
+    ) -> Self {
+        self.permission = Some((level, access));
+        self
+    }
+
     /// The checkpoint before a shell command and how current it is.
     pub fn note(&self) -> Option<String> {
         self.command.as_ref().map(CommandGuard::note)
@@ -47,7 +68,6 @@ impl Begun {
 
 pub struct Tools {
     root: PathBuf,
-    bash: PathBuf,
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
     attachments: Option<crate::attachments::Pool>,
@@ -55,6 +75,7 @@ pub struct Tools {
     checkpoints: Option<Arc<Session>>,
     browsers: crate::browser::Registry,
     browser_profiles: Option<PathBuf>,
+    session_home: Option<PathBuf>,
     project_map: crate::project_map::Map,
 }
 
@@ -72,22 +93,18 @@ impl Tools {
                 crate::redact::Redactor::empty(),
             ),
             root,
-            bash: shell::find_bash()?,
             temporary: None,
             attachments: None,
             processes: processes::Registry::default(),
             checkpoints: None,
             browsers: crate::browser::Registry::default(),
             browser_profiles: None,
+            session_home: None,
         })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    pub fn bash(&self) -> &Path {
-        &self.bash
     }
 
     #[cfg(test)]
@@ -139,6 +156,10 @@ impl Tools {
 
     pub fn configure_browser_profiles(&mut self, home: &Path) {
         self.browser_profiles = Some(home.join("browser/profiles"));
+    }
+
+    pub fn configure_session_home(&mut self, home: &Path) {
+        self.session_home = Some(home.to_path_buf());
     }
 
     /// Local inspection and stop control for the current conversation's processes.
@@ -239,7 +260,11 @@ impl Tools {
                 let paths = shell::protect_paths(&arguments).ok()?;
                 Some(session.command_scoped_named_cancellable(name, &paths, cancellation))
             });
-        Begun { command }
+        Begun {
+            command,
+            base: None,
+            permission: None,
+        }
     }
 
     pub fn execute_begun(
@@ -249,6 +274,9 @@ impl Tools {
         arguments: &str,
         cancellation: &Cancellation,
     ) -> Execution {
+        let base = begun.base.clone();
+        let base = base.as_deref();
+        let permission = begun.permission.as_ref();
         let result: Result<(Value, Option<crate::file_change::Change>), String> =
             json::parse(arguments).and_then(|arguments| {
                 if !matches!(arguments, Value::Object(_)) {
@@ -256,10 +284,16 @@ impl Tools {
                 }
                 parallel(&arguments)?;
                 match name {
-                    "list" | "search" => {
-                        discovery::execute(&self.root, name, &arguments, cancellation)
-                            .map(|value| (value, None))
-                    }
+                    "list" | "search" => discovery::execute(
+                        base.unwrap_or(&self.root),
+                        name,
+                        &base.map_or_else(
+                            || arguments.clone(),
+                            |base| self.rebase(base, &arguments),
+                        ),
+                        cancellation,
+                    )
+                    .map(|value| (value, None)),
                     "map" => self
                         .project_map
                         .execute(&arguments, cancellation)
@@ -282,6 +316,10 @@ impl Tools {
                                 .map(|value| (value, None))
                         } else {
                             let (root, arguments) = self.file_arguments(&arguments, false)?;
+                            let (root, arguments) = match base {
+                                Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
+                                None => (root, arguments),
+                            };
                             attachment::read_file(
                                 self.attachments.as_ref(),
                                 &root,
@@ -293,6 +331,10 @@ impl Tools {
                     }
                     "write" | "edit" => {
                         let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
+                        let (root, arguments) = match base {
+                            Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
+                            None => (root, arguments),
+                        };
                         // Session temporary files are outside the workspace scope.
                         let checkpoints = self.checkpoints.as_deref().filter(|_| root == self.root);
                         let result = if name == "write" {
@@ -307,18 +349,20 @@ impl Tools {
                                 && let Value::Object(fields) = &mut value
                             {
                                 fields.insert(
-                                "checkpoint".into(),
-                                Value::object([
-                                    ("status", Value::string("none")),
-                                    ("saved_paths", Value::number(0)),
-                                    (
-                                        "reason",
-                                        Value::string(
-                                            "session temporary storage is outside the workspace",
+                                    "checkpoint".into(),
+                                    Value::object([
+                                        ("status", Value::string("none")),
+                                        ("saved_paths", Value::number(0)),
+                                        (
+                                            "reason",
+                                            Value::string(if base.is_some() {
+                                                "the file is outside the working folder"
+                                            } else {
+                                                "session temporary storage is outside the workspace"
+                                            }),
                                         ),
-                                    ),
-                                ]),
-                            );
+                                    ]),
+                                );
                             }
                             (value, change)
                         })
@@ -330,12 +374,31 @@ impl Tools {
                             .filter(|_| name != "process")
                             .map(|area| area.ensure())
                             .transpose()?;
+                        let mut sandbox = if name == "process" {
+                            None
+                        } else if let Some((level, access)) = permission {
+                            crate::sandbox::Policy::for_command(
+                                *level,
+                                &self.root,
+                                temporary.as_deref(),
+                                access.as_ref(),
+                            )?
+                        } else {
+                            None
+                        };
+                        if let Some(policy) = &mut sandbox {
+                            policy.protect_session_home(self.session_home.as_deref())?;
+                            policy.allow_installed_rust_tools(self.session_home.as_deref())?;
+                            if name == "bash" {
+                                policy.allow_owned_shell()?;
+                            }
+                        }
                         let context = shell::Context {
-                            bash: &self.bash,
                             root: &self.root,
                             outputs: &self.outputs,
                             temporary: temporary.as_deref(),
                             processes: &self.processes,
+                            sandbox: sandbox.as_ref(),
                         };
                         let mut result = match name {
                             "bash" => shell::execute(context, &arguments, cancellation),

@@ -111,12 +111,9 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
 pub fn print_help() {
     let interaction = "Without PROMPT, open the fullscreen TUI or read one task from piped stdin.\n--plain uses a line-based chat. TUI: Ctrl+Q quits; Ctrl+C stops work.\nWheel and PgUp/PgDn scroll the conversation; Ctrl+P/N browse prompt history.";
     #[cfg(windows)]
-    let requirements = "Requires Windows 10+, HTTPS-enabled curl 8.3+, Git Bash and installed Windows PowerShell/.NET.\nThe Windows TUI uses console APIs; interactive exec uses ConPTY.";
+    let requirements = "Requires Windows 10+ native console and process APIs.\nExternal project commands still need their own executables on PATH.";
     #[cfg(not(windows))]
-    let requirements = "Requires HTTPS-enabled curl 8.3+, Bash and kill on PATH.\nInteractive exec also needs system cc on first use and a native Unix temporary filesystem.\nChatGPT sign-in additionally requires openssl on PATH.\nThe Unix TUI also requires stty and a VT terminal with /dev/tty.";
-    #[cfg(target_os = "macos")]
-    let requirements =
-        format!("{requirements}\nInteractive exec cleanup also uses /bin/ps on macOS.");
+    let requirements = "Requires native Unix terminal and process APIs.\nExternal project commands still need their own executables on PATH.";
     let tools = crate::tools::definitions()
         .as_array()
         .unwrap()
@@ -125,7 +122,7 @@ pub fn print_help() {
         .collect::<Vec<_>>()
         .join(", ");
     println!(
-        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode checkpoints [COMMAND]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nAPI keys, default model and effort live in ~/.jecode/config.json.\nProtected ChatGPT credentials live separately in ~/.jecode/accounts/openai/.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\nPer-call checkpoints expire after 24 hours in ~/.jecode/checkpoints/; jecode checkpoints help lists\ncommands that work offline, without a key or backend.\n\nTools: {tools} (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory; JECODE_BASH selects Bash.",
+        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode checkpoints [COMMAND]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nAPI keys, default model and effort live in ~/.jecode/config.json.\nProtected ChatGPT credentials live separately in ~/.jecode/accounts/openai/.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\nPer-call checkpoints expire after 24 hours in ~/.jecode/checkpoints/; jecode checkpoints help lists\ncommands that work offline, without a key or backend.\n\nTools: {tools} (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory.",
         crate::session::commands::help(true),
     );
 }

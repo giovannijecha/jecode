@@ -77,6 +77,10 @@ fn resumed_and_new_sessions_keep_their_own_working_files_and_complete_outputs() 
     ]);
     let mut first = agent(&home, &project, &fixture.endpoint);
     first
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
+    first
         .run_turn("Make a temporary working file", &mut |_| Ok(()))
         .unwrap();
     let id = first.sessions().unwrap().id();

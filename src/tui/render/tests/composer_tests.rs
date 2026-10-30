@@ -52,6 +52,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
             crate::effort::Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            Default::default(),
             std::path::Path::new("fixture/config.json"),
         ));
         update(&mut renderer, &mut screen, &mut state);
@@ -127,6 +128,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
         crate::effort::Effort::Default,
         80,
         &crate::backend::openrouter::Routing::Auto,
+        Default::default(),
         std::path::Path::new("fixture/config.json"),
     ));
     update(&mut renderer, &mut screen, &mut state);

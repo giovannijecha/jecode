@@ -128,7 +128,14 @@ fn listing_uses_a_valid_cache_but_resume_always_validates_the_journal() {
     fs::write(&journal, vec![b'x'; bytes.len()]).unwrap();
     // An artificial matching cache proves listing does not parse the journal.
     // Build its fingerprint from the file rather than relying on mtime round-trips.
-    save(&store, &document, &stamp(&store, &document.id).unwrap()).unwrap();
+    let title = document.title();
+    save(
+        &store,
+        &document,
+        &title,
+        &stamp(&store, &document.id).unwrap(),
+    )
+    .unwrap();
     assert_eq!(store.list().unwrap().sessions[0].title, document.title());
     assert!(Handle::open(store.clone(), &document.id, Redactor::empty()).is_err());
     fs::write(journal, bytes).unwrap();

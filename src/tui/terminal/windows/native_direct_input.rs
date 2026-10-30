@@ -45,7 +45,7 @@ fn native_windows_direct_input() {
     assert!(!result.timed_out);
 }
 
-pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
+pub(super) fn fixture(path: &std::path::Path) {
     let script = "$first = Read-Host -Prompt ('NATIVE_' + 'PASSWORD_READY') -AsSecureString; $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($first); try { $line = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr); if (!$line.EndsWith([char]::ConvertFromUtf32(0x1F642))) { throw 'Unicode input lost' } } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }; Write-Output ('NATIVE_' + 'PTY_DONE'); $second = Read-Host -Prompt ('NATIVE_' + 'SECOND_READY') -AsSecureString; Write-Output ('NATIVE_' + 'PTY_END')";
     let fixture = HttpFixture::new(vec![
         (
@@ -74,17 +74,22 @@ pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
         ),
         (200, completion("Native terminal started.", vec![])),
     ]);
-    let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    let mut settings =
+        Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    // Interactive terminals require explicit Full authority on this host.
+    settings.default_permissions = crate::permissions::Level::Full;
     let config = SessionConfig {
         store: Store::new(path.join("home")),
         settings,
-        bash: bash.to_path_buf(),
     };
     config.store.save(&config.settings).unwrap();
     let agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(path).unwrap(),
     );
+    agent
+        .permissions()
+        .set_default(config.settings.default_permissions);
     crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
     let sessions = crate::sessions::Store::new(path.join("home"), path)
         .unwrap()

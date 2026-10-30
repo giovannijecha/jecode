@@ -37,11 +37,15 @@ fn nonzero_child_command_marks_failed_check() {
                 context: String::new(),
                 mode: crate::collaboration::workspace::Mode::Shared,
             },
-            |root| {
-                Ok(Agent::new(
+            |_, root| {
+                let child = Agent::new(
                     OpenRouter::fixture(fixture.endpoint.clone()),
                     Tools::new(root)?,
-                ))
+                );
+                child
+                    .permissions()
+                    .set_level(crate::permissions::Level::Full)?;
+                Ok(child)
             },
             gate,
         )
@@ -105,13 +109,16 @@ fn delayed_child_return_restarts_idle_main_without_a_user_message() {
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
+    parent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let mut app = App::new(
         parent,
         SessionConfig {
             store: Store::new(home.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );
@@ -137,7 +144,7 @@ fn delayed_child_return_restarts_idle_main_without_a_user_message() {
                 context: String::new(),
                 mode: crate::collaboration::workspace::Mode::Shared,
             },
-            |root| {
+            |_, root| {
                 Ok(Agent::new(
                     OpenRouter::fixture(child_fixture.endpoint.clone()),
                     Tools::new(root)?,
@@ -215,7 +222,6 @@ fn explicit_main_stop_disables_automatic_collaborator_continuation() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );
@@ -329,7 +335,6 @@ fn failed_workspace_action_is_visible_without_a_generic_agent_card() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );
@@ -373,7 +378,6 @@ fn inspection_and_integration_actions_keep_their_tool_cards() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );

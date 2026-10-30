@@ -16,7 +16,7 @@ impl Observer {
         &self,
         project: &Path,
         spec: Spec,
-        make_child: impl FnOnce(&Path) -> Result<Agent, String>,
+        make_child: impl FnOnce(&str, &Path) -> Result<Agent, String>,
         start_gate: Arc<(Mutex<bool>, Condvar)>,
     ) -> Result<Value, String> {
         let Spec {
@@ -46,7 +46,8 @@ impl Observer {
             (format!("a{}", state.last_number), store)
         };
         let workspace = Workspace::prepare(project, &store, &id, mode)?;
-        let child = match make_child(workspace.root()) {
+        let omitted = workspace.omitted();
+        let child = match make_child(&id, workspace.root()) {
             Ok(child) => child,
             Err(error) => {
                 let _ = workspace.close();
@@ -145,10 +146,12 @@ impl Observer {
             wake,
             task: Some(task),
         });
-        Ok(Value::object([
-            ("id", Value::string(id)),
-            ("number", Value::number(number)),
-        ]))
+        let mut created =
+            Value::object([("id", Value::string(id)), ("number", Value::number(number))]);
+        if let (Value::Object(fields), Some(omitted)) = (&mut created, omitted) {
+            fields.insert("omitted_from_copy".into(), omitted);
+        }
+        Ok(created)
     }
 
     fn run_child(&self, id: String, mut child: Agent, receive: mpsc::Receiver<()>) {

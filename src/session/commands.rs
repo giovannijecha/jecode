@@ -13,7 +13,7 @@ impl Command {
         match self.name {
             "/new" | "/resume" | "/copy" | "/export" | "/drafts" | "/agents" | "/ask" | "/todo"
             | "/exit" => GROUPS[0],
-            "/model" | "/effort" | "/routing" => GROUPS[1],
+            "/model" | "/effort" | "/routing" | "/permissions" => GROUPS[1],
             "/settings" | "/help" => GROUPS[3],
             _ => GROUPS[2],
         }
@@ -28,7 +28,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 19] = [
+pub const COMMANDS: [Command; 20] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -58,6 +58,12 @@ pub const COMMANDS: [Command; 19] = [
         description: "Choose endpoint routing when the backend supports it",
         tui_usage: "/routing",
         plain_usage: Some("/routing"),
+    },
+    Command {
+        name: "/permissions",
+        description: "Choose what agents may do in this conversation",
+        tui_usage: "/permissions [LEVEL]",
+        plain_usage: Some("/permissions [LEVEL]"),
     },
     Command {
         name: "/settings",

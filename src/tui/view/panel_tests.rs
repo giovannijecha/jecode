@@ -33,6 +33,7 @@ fn sessions() -> Vec<Summary> {
         .collect()
 }
 
+mod controls_tests;
 mod field_tests;
 
 #[test]
@@ -46,6 +47,7 @@ fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            Default::default(),
             std::path::Path::new("fixture/config.json"),
         ),
         Selector::models(&models, false, "fixture/model-1"),
@@ -213,6 +215,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
             Effort::High,
             80,
             &crate::backend::openrouter::Routing::Auto,
+            Default::default(),
             std::path::Path::new("fixture/config.json"),
         )),
         notice: Some(crate::tui::Feedback::result(
@@ -302,85 +305,6 @@ fn narrow_routing_tables_drop_latency_then_speed_then_price_within_the_width() {
         // The figures never repeat outside the table.
         assert!(rows.iter().filter(|row| row.contains("$0.216")).count() <= 1);
     }
-}
-
-#[test]
-fn active_command_controls_describe_execution_queueing_and_closing() {
-    let mut state = State {
-        activity: Some(crate::tui::activity::Activity::new()),
-        ..State::default()
-    };
-    for (command, action) in [
-        ("/", "queue"),
-        ("/copy", "run"),
-        ("/COPY latest", "run"),
-        ("/drafts", "run"),
-        ("/DRAFTS", "run"),
-        ("/tmp clean", "queue"),
-    ] {
-        state.editor.replace(command.into());
-        state.suggestions.refresh(command);
-        let frame = frame(&state, "fixture/model", "directory");
-        assert!(
-            frame
-                .live
-                .iter()
-                .any(|line| line.plain().contains(&format!(" Enter  {action}")))
-        );
-        assert!(
-            frame
-                .live
-                .iter()
-                .any(|line| line.plain().contains(" Esc  close"))
-        );
-        assert!(
-            !frame
-                .live
-                .iter()
-                .any(|line| line.plain().contains("Esc stops"))
-        );
-    }
-}
-
-#[test]
-fn narrow_panels_keep_the_keyboard_controls_readable_instead_of_cutting_the_footer() {
-    let mut state = State {
-        width: 40,
-        selector: Some(Selector::sessions(&sessions(), "1234-56-0")),
-        ..State::default()
-    };
-    let resume = frame(&state, "fixture/model", "directory");
-    // Keys that do not fit wrap onto another row instead of being cut.
-    let controls: String = resume
-        .live
-        .iter()
-        .map(Line::plain)
-        .filter(|line| line.contains("Ctrl+D") || line.contains(" Esc "))
-        .collect();
-    assert!(controls.contains(" Enter  resume"), "{controls}");
-    assert!(controls.contains(" Ctrl+D  delete"), "{controls}");
-    assert!(controls.contains(" Esc  close"), "{controls}");
-    assert!(!controls.contains('…'));
-    // The key form's keys end the dock whole, wrapping when they must.
-    state.selector = Some(Selector::key());
-    for width in [30, 40, 60] {
-        state.width = width;
-        let key = frame(&state, "fixture/model", "directory");
-        let rows: Vec<_> = key.live.iter().map(Line::plain).collect();
-        let title = key.cursor.unwrap().0 + 1;
-        assert!(rows[title].starts_with("─ Providers"), "{rows:#?}");
-        let controls = rows[title + 1..].concat();
-        assert!(controls.contains(" Enter  validate and save"), "{rows:#?}");
-        assert!(controls.contains(" Esc  back"), "{rows:#?}");
-        assert!(!controls.contains('…'), "{rows:#?}");
-    }
-    // With room, the bottom rule names where the key is stored.
-    assert!(
-        frame(&state, "fixture/model", "directory")
-            .live
-            .iter()
-            .any(|line| line.plain().ends_with(" ~/.jecode/config.json ─"))
-    );
 }
 
 #[test]

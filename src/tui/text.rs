@@ -153,6 +153,23 @@ pub fn ellipsize(value: &str, columns: usize) -> String {
     }
     format!("{prefix}…")
 }
+/// `…srcsession.rs`: the end kept, so a path keeps its file name.
+pub fn ellipsize_start(value: &str, columns: usize) -> String {
+    if cells(value) <= columns {
+        return value.into();
+    }
+    if columns == 0 {
+        return String::new();
+    }
+    let all: Vec<_> = glyphs(value).collect();
+    let (mut start, mut used) = (all.len(), 0);
+    while start > 0 && used + all[start - 1].cells < columns {
+        start -= 1;
+        used += all[start].cells;
+    }
+    let tail: String = all[start..].iter().map(|glyph| glyph.text).collect();
+    format!("…{tail}")
+}
 
 #[cfg(test)]
 mod tests {

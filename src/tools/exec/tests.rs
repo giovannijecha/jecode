@@ -71,15 +71,56 @@ fn run(root: &Path, arguments: &Value) -> Result<Value, String> {
     let processes = Registry::default();
     execute(
         shell::Context {
-            bash: Path::new("unused"),
             root,
             outputs: &outputs,
             temporary: None,
             processes: &processes,
+            sandbox: None,
         },
         arguments,
         &Cancellation::default(),
     )
+}
+
+#[test]
+fn user_exec_env_cannot_replace_the_trusted_sandbox_policy() {
+    let directory = Directory::new();
+    let arguments = Value::object([
+        ("executable", Value::string("example")),
+        (
+            "env",
+            Value::object([(crate::sandbox::MARKER, Value::string("forged user policy"))]),
+        ),
+    ]);
+    let (mut command, _, _) = command(directory.path(), None, &arguments).unwrap();
+    let policy = crate::sandbox::Policy::for_command(
+        crate::permissions::Level::Workspace,
+        directory.path(),
+        None,
+        None,
+    )
+    .unwrap()
+    .unwrap();
+    let result = crate::sandbox::apply(&mut command, Some(&policy));
+    if cfg!(windows) {
+        result.unwrap();
+        let marker = command
+            .get_envs()
+            .find(|(key, _)| *key == crate::sandbox::MARKER)
+            .unwrap()
+            .1
+            .unwrap();
+        assert!(marker.to_string_lossy().contains("\"network\":true"));
+        assert_ne!(marker.to_string_lossy(), "forged user policy");
+    } else {
+        assert!(result.is_err());
+    }
+    crate::sandbox::apply(&mut command, None).unwrap();
+    assert!(
+        command
+            .get_envs()
+            .all(|(key, value)| key != crate::sandbox::MARKER || value.is_none())
+    );
 }
 
 #[test]
@@ -266,7 +307,7 @@ fn rejects_invalid_shapes_and_strips_only_inherited_credentials() {
 }
 
 #[test]
-fn session_temporary_environment_matches_bash_without_replacing_windows_temp() {
+fn session_temporary_environment_is_consistent_on_every_platform() {
     let directory = Directory::new();
     let (built, _, _) = command(
         directory.path(),
@@ -275,15 +316,11 @@ fn session_temporary_environment_matches_bash_without_replacing_windows_temp() {
     )
     .unwrap();
     let env: Vec<_> = built.get_envs().collect();
-    for key in ["JECODE_TMP", "TMPDIR"] {
+    for key in ["JECODE_TMP", "TMPDIR", "TEMP", "TMP"] {
         assert!(
             env.iter()
                 .any(|(name, value)| *name == key && value.is_some())
         );
-    }
-    #[cfg(windows)]
-    for key in ["TEMP", "TMP"] {
-        assert!(!env.iter().any(|(name, _)| *name == key));
     }
 }
 
@@ -295,11 +332,11 @@ fn persistent_exec_receives_stdin_until_eof_and_preserves_saved_output() {
     let input = "line one\nline two";
     let result = execute(
         shell::Context {
-            bash: Path::new("unused"),
             root: directory.path(),
             outputs: &outputs,
             temporary: None,
             processes: &processes,
+            sandbox: None,
         },
         &Value::object([
             ("executable", Value::string(fixture().to_string_lossy())),

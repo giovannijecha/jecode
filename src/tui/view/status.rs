@@ -12,7 +12,7 @@ use crate::{
         motion,
         state::{Item, Kind, State},
         text,
-        theme::{BAD, BODY, DIM, GOOD, MUTED, PILL_SURFACE, STRONG, WARNING},
+        theme::{ACCENT, BAD, BODY, DIM, GOOD, MUTED, PILL_SURFACE, STRONG, WARNING},
     },
 };
 use std::time::Instant;
@@ -31,13 +31,20 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     if let Some(notice) = shown_notice(state) {
         return notice_row(notice, columns);
     }
-    if state.question.is_some()
-        && !state
-            .activity
-            .as_ref()
-            .is_some_and(|activity| activity.stopping)
-    {
-        return super::ask::status(columns, state.ask_panel.is_none());
+    let stopping = state
+        .activity
+        .as_ref()
+        .is_some_and(|activity| activity.stopping);
+    if state.permission.is_some() && !stopping {
+        return waiting("Waiting for permission", columns, None);
+    }
+    if state.question.is_some() && !stopping {
+        let hint = state.ask_panel.is_none().then(|| {
+            let mut hint = Line::new("/ask", ACCENT);
+            hint.push(" answer", MUTED);
+            hint
+        });
+        return waiting("Waiting for you", columns, hint);
     }
     let running = state
         .activity
@@ -163,6 +170,18 @@ fn pill(glyph: Line, label: Line) -> Line {
     }
     panel::push(&mut line, " ", BODY, Some(PILL_SURFACE));
     line
+}
+
+/// A static waiting state uses the same two-cell glyph and pill geometry as
+/// the turn states. The optional command is an action hint, not a status fact.
+fn waiting(label: &str, columns: usize, hint: Option<Line>) -> Line {
+    fitted(
+        Line::new("? ", ACCENT.bold()),
+        Line::new(label, STRONG),
+        Vec::new(),
+        hint,
+        columns,
+    )
 }
 
 /// The pill, then as many facts as fit with the keycap; then without it.

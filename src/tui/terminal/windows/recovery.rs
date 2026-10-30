@@ -5,21 +5,16 @@ impl Terminal {
         let Some((input, output, code_page)) = self.modes else {
             return;
         };
-        let script = format!(
-            "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeConsole]::Restore({}, {}, {})",
-            include_str!("../../terminal.cs"),
-            input,
-            output,
-            code_page
-        );
-        let mut command = Command::new("powershell.exe");
+        let Ok(executable) = crate::native::helper("terminal") else {
+            return;
+        };
+        let mut command = Command::new(executable);
         command
             .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
+                "restore".into(),
+                input.to_string(),
+                output.to_string(),
+                code_page.to_string(),
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())

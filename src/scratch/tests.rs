@@ -94,7 +94,7 @@ fn all_four_tools_share_the_session_area_without_changing_the_project_cwd() {
                 "set -e; cat project.txt; bash \"$JECODE_TMP/probes/check.sh\"; ",
                 "test -n \"$TMPDIR\"; test -n \"$TEMP\"; test -n \"$TMP\"; ",
                 "created=$(mktemp \"$TMPDIR/check.XXXXXXXXXX\"); printf 'temp' > \"$created\"; ",
-                "if command -v cygpath >/dev/null; then cygpath -m \"$created\"; else printf '%s\\n' \"$created\"; fi"
+                "printf '%s\\n' \"$created\""
             ),
         )],
     );

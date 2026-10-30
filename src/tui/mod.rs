@@ -1,12 +1,16 @@
 mod activity;
 mod agents;
+mod arrival;
 mod ask;
 mod attach;
+mod background;
 mod cards;
 #[cfg(test)]
 mod checkpoint_tests;
 mod checkpoints;
 mod commands;
+#[cfg(test)]
+mod completion_tests;
 mod conversations;
 mod copy;
 mod delete;
@@ -25,6 +29,7 @@ mod keys;
 mod line;
 mod markdown;
 mod motion;
+mod permission;
 mod persistence;
 mod poll;
 mod processes;
@@ -106,7 +111,11 @@ struct App {
     process_observer: crate::tools::processes::Observer,
     collaboration_observer: crate::collaboration::Observer,
     question_observer: crate::ask::Observer,
+    /// The conversation's permissions, shared with the agent and its collaborators.
+    permission_observer: crate::permissions::Permissions,
     todo_message_len: usize,
+    /// When the chat draft was last typed in, until it is sent.
+    typed: Option<Instant>,
     collaboration_cursor: usize,
     /// The record revisions `state.collaboration` shows.
     collaboration_records: Vec<crate::collaboration::Seen>,
@@ -141,7 +150,9 @@ impl App {
             process_observer: agent.processes(),
             collaboration_observer: agent.collaboration(),
             question_observer: agent.questions(),
+            permission_observer: agent.permissions(),
             todo_message_len: usize::MAX,
+            typed: None,
             collaboration_cursor: 0,
             collaboration_records: Vec::new(),
             collaboration_seen: HashSet::new(),
@@ -187,7 +198,10 @@ impl App {
         app.recent_sessions();
         app.refresh_agents();
         app.question_observer.set_available(true);
+        app.permission_observer
+            .set_surface(crate::permissions::Surface::Panel);
         app.refresh_question();
+        app.refresh_permission();
         app.refresh_todo();
         app.refresh_context();
         app
@@ -199,6 +213,14 @@ impl App {
         if let Some(agent) = &self.agent {
             self.state.context = Some(agent.context_status());
         }
+    }
+
+    /// Runs a turn whose events wake the loop as soon as they are queued.
+    fn run_worker(&mut self, worker: Worker) {
+        if let Some(terminal) = &self.terminal {
+            worker.events.wake_with(terminal.waker());
+        }
+        self.worker = Some(worker);
     }
 
     /// A turn, deletion or restore is running; new prompts wait in the queue.
@@ -227,8 +249,9 @@ pub(crate) fn launch(
             .parent()
             .expect("configuration directory"),
     )?;
-    let terminal = Terminal::open(&config.bash)?;
+    let terminal = Terminal::open()?;
     let mut app = App::new(agent, config, Some(terminal));
+    let mut background = background::Probe::start()?;
     if !draft.is_empty() {
         app.state.editor.set(draft);
     }
@@ -246,6 +269,7 @@ pub(crate) fn launch(
     let mut decoder = Decoder::default();
     let mut dirty = true;
     let mut pending = None;
+    let mut drawn_clock = None;
     loop {
         app.terminal.as_mut().unwrap().check()?;
         dirty |= app.poll()?;
@@ -260,6 +284,27 @@ pub(crate) fn launch(
             .chain(app.terminal.as_ref().unwrap().input.try_iter().take(64))
             .collect();
         for event in events {
+            // Worker events were polled above; a wake carries no input.
+            if matches!(event, Input::Wake) {
+                continue;
+            }
+            let (forwarded, light) = background.feed(event);
+            if let Some(light) = light {
+                app.renderer.set_light_background(light);
+            }
+            for event in forwarded {
+                if app.terminal_event(event, &mut decoder)? {
+                    return Ok(());
+                }
+            }
+            dirty = true;
+        }
+        let (replayed, fallback) = background.expire();
+        if let Some(light) = fallback {
+            app.renderer.set_light_background(light);
+            dirty = true;
+        }
+        for event in replayed {
             if app.terminal_event(event, &mut decoder)? {
                 return Ok(());
             }
@@ -276,6 +321,7 @@ pub(crate) fn launch(
                 .redactor
                 .text(&app.archive.directory.to_string_lossy());
             app.renderer.draw(&app.state, &model, &directory)?;
+            drawn_clock = Some(motion::clock(&app.state));
             dirty = false;
         }
         match app.terminal.as_ref().unwrap().input.recv_timeout({
@@ -283,14 +329,23 @@ pub(crate) fn launch(
             let delay = app
                 .state
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
-            let delay = if app.worker.is_some() || app.checkpoint_job.is_some() {
+            // Worker events wake the loop; only a finishing turn and a
+            // restore are polled.
+            let delay = if app
+                .worker
+                .as_ref()
+                .is_some_and(|worker| worker.events.closed())
+            {
+                delay.min(Duration::from_millis(1))
+            } else if app.checkpoint_job.is_some() {
                 delay.min(Duration::from_millis(16))
             } else {
                 delay
             };
+            let delay = delay.min(background.wait().unwrap_or(Duration::MAX));
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
-            } else if loading(&app.state) {
+            } else if motion::loading(&app.state) {
                 delay.min(motion::FRAME)
             } else if app.state.processes.is_some() {
                 delay.min(processes::REFRESH)
@@ -309,75 +364,19 @@ pub(crate) fn launch(
                     }
                     dirty = true;
                 }
-                dirty |= app.state.activity.is_some() || loading(&app.state);
+                // Animation draws once per motion frame or clock second.
+                dirty |= (app.state.activity.is_some() || motion::loading(&app.state))
+                    && drawn_clock != Some(motion::clock(&app.state));
             }
         }
-    }
-}
-
-/// A scanner runs outside a turn: a waiting panel or idle progress.
-fn loading(state: &state::State) -> bool {
-    state.current_progress().is_some()
-        || state
-            .selector
-            .as_ref()
-            .is_some_and(|menu| matches!(menu.purpose, selector::Purpose::Loading))
-}
-
-impl App {
-    fn terminal_event(&mut self, event: Input, decoder: &mut Decoder) -> Result<bool, String> {
-        match event {
-            #[cfg(unix)]
-            Input::Bytes(bytes) => {
-                for decoded in decoder.bytes(&bytes) {
-                    if self.input(decoded)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            #[cfg(any(windows, test))]
-            Input::Key(key) => {
-                for decoded in decoder.key(key) {
-                    if self.input(decoded)? {
-                        return Ok(true);
-                    }
-                }
-            }
-            #[cfg(any(windows, test))]
-            Input::Scroll(amount) => {
-                self.input(Decoded::Scroll(amount))?;
-            }
-            #[cfg(windows)]
-            Input::Modes(..) => {}
-            Input::Size(size) => {
-                self.state.width = size.width;
-                self.state.height = size.height;
-                self.renderer
-                    .resized((size.width, size.height), Instant::now());
-            }
-            #[cfg(any(windows, test))]
-            Input::PasteOverflow => {
-                *decoder = Decoder::default();
-                self.input(Decoded::Error)?;
-            }
-            #[cfg(any(windows, test))]
-            Input::Paste(text) => match decoder.paste(&text) {
-                Ok(text) if !text.is_empty() => {
-                    self.input(Decoded::Paste(text))?;
-                }
-                Err(()) => {
-                    self.input(Decoded::Error)?;
-                }
-                _ => {}
-            },
-            Input::Error(error) => return Err(error),
-        }
-        Ok(false)
     }
 }
 
 impl Drop for App {
     fn drop(&mut self) {
+        // Waiting calls end unrun; resume records them as not run.
+        self.permission_observer
+            .set_surface(crate::permissions::Surface::None);
         if self
             .state
             .activity

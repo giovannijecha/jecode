@@ -54,8 +54,14 @@ impl Calls {
 }
 
 impl App {
+    /// Reads the latest plan when the history grew. A checkpoint copying the
+    /// history holds it briefly; the next loop pass reads it then.
     pub(super) fn refresh_todo(&mut self) -> bool {
-        let messages = self.archive.messages.lock().unwrap();
+        let messages = match self.archive.messages.try_lock() {
+            Ok(messages) => messages,
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+            Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
+        };
         if messages.len() == self.todo_message_len {
             return false;
         }

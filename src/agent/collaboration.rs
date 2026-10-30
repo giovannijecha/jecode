@@ -61,7 +61,7 @@ impl Agent {
                             context,
                             mode,
                         },
-                        |root| self.new_child(root, mode),
+                        |id, root| self.new_child(id, root, mode),
                         gate.clone(),
                     ) {
                         Ok(value) => created.push(value),
@@ -210,13 +210,15 @@ impl Agent {
         }
     }
 
-    fn new_child(&self, root: &Path, mode: Mode) -> Result<Agent, String> {
+    fn new_child(&self, id: &str, root: &Path, mode: Mode) -> Result<Agent, String> {
         let mut backend = self.services().create(self.model().to_owned())?;
         backend.set_effort(self.effort());
         backend.set_routing(self.routing());
         backend.set_delegation(false);
         let mut child = Agent::with_backend(backend, Tools::new(root)?);
         child.child = true;
+        // Every agent works at the conversation's level and shares its grants.
+        child.permissions = self.permissions.for_agent(id);
         child.accounts = self.accounts.clone();
         child.auto_compact = self.auto_compact;
         child.routing_preferences = self.routing_preferences.clone();

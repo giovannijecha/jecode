@@ -1,10 +1,12 @@
-use super::{Mode, Workspace, files, git};
+use super::{Mode, Workspace, files, tree};
 use crate::disk::hash;
 use crate::json::Value;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+
+mod evidence;
+pub(super) use evidence::inspect_file;
 
 struct Entry {
     path: String,
@@ -43,6 +45,8 @@ impl Entry {
 pub(super) struct Review {
     entries: Vec<Entry>,
     token: String,
+    /// Copy entries this comparison cannot represent, such as sockets.
+    unsupported: tree::Omitted,
 }
 
 impl Review {
@@ -51,18 +55,29 @@ impl Review {
         for entry in &self.entries {
             let mut value = entry.value();
             if let Value::Object(fields) = &mut value {
-                fields.insert("evidence".into(), evidence(workspace, entry)?);
+                fields.insert("evidence".into(), evidence::evidence(workspace, entry)?);
             }
             changed.push(value);
         }
-        Ok(Value::object([
+        let mut value = Value::object([
             ("changed", Value::Array(changed)),
             ("review_token", Value::string(self.token)),
             (
                 "scope",
-                Value::string("Git tracked and non-ignored untracked paths"),
+                Value::string(
+                    "Project entries excluding .git/.jecode metadata and root target/.tmp entries",
+                ),
             ),
-        ]))
+        ]);
+        if let Value::Object(fields) = &mut value {
+            if let Some(omitted) = workspace.omitted() {
+                fields.insert("omitted_from_copy".into(), omitted);
+            }
+            if self.unsupported.count > 0 {
+                fields.insert("unsupported_in_copy".into(), self.unsupported.value());
+            }
+        }
+        Ok(value)
     }
 }
 
@@ -71,14 +86,19 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
         return Ok(Review {
             entries: Vec::new(),
             token: "shared".into(),
+            unsupported: tree::Omitted::default(),
         });
     }
     workspace.verify_owner()?;
+    let (child_names, unsupported) = tree::inventory(&workspace.root)?;
     let mut names: BTreeSet<_> = workspace.baseline.keys().cloned().collect();
-    names.extend(git::inventory(&workspace.root)?);
+    names.extend(child_names);
     let mut entries = Vec::new();
     for name in names {
         files::validate_name(&name)?;
+        if unsupported.names.contains(&name) {
+            continue;
+        }
         let baseline = workspace
             .baseline
             .get(&name)
@@ -99,7 +119,11 @@ pub(super) fn inspect(workspace: &Workspace) -> Result<Review, String> {
     let encoded = Value::Array(entries.iter().map(Entry::value).collect()).encode();
     let digest = hash::digest(encoded.as_bytes());
     let token = format!("{:016x}{:016x}", digest.0[0], digest.0[1]);
-    Ok(Review { entries, token })
+    Ok(Review {
+        entries,
+        token,
+        unsupported,
+    })
 }
 
 pub(super) fn integrate(
@@ -131,11 +155,34 @@ pub(super) fn integrate(
     let mut already = Vec::new();
     let mut conflicts = Vec::new();
     let mut failed = Vec::new();
-    for entry in review
+    let mut directory_modes = Vec::new();
+    let mut selected_entries: Vec<_> = review
         .entries
         .iter()
         .filter(|entry| selected.contains(&entry.path))
-    {
+        .collect();
+    selected_entries.sort_by(|left, right| {
+        let deletion = |entry: &Entry| {
+            matches!(entry.baseline, files::Fingerprint::Directory { .. })
+                && matches!(entry.child, files::Fingerprint::Absent)
+        };
+        match (deletion(left), deletion(right)) {
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (true, true) => right
+                .path
+                .matches('/')
+                .count()
+                .cmp(&left.path.matches('/').count()),
+            (false, false) => left
+                .path
+                .matches('/')
+                .count()
+                .cmp(&right.path.matches('/').count()),
+        }
+        .then_with(|| left.path.cmp(&right.path))
+    });
+    for entry in selected_entries {
         // Once a path is installed, report it with the failure.
         let observed = files::verify_content(
             &workspace.storage.join("base"),
@@ -173,6 +220,32 @@ pub(super) fn integrate(
             break;
         }
         applied.push(Value::string(&entry.path));
+        // The path is installed: from here a failure is reported with it.
+        if let files::Fingerprint::Directory { mode } = entry.child {
+            match files::observe(&workspace.project, &entry.path) {
+                Ok(prepared) => directory_modes.push((entry.path.clone(), prepared, mode)),
+                Err(error) => {
+                    failed.push(issue(&entry.path, &error));
+                    break;
+                }
+            }
+        }
+    }
+    for (name, prepared, mode) in directory_modes.into_iter().rev() {
+        match files::observe(&workspace.project, &name) {
+            Ok(current) if current == prepared => {}
+            Ok(_) => {
+                failed.push(issue(&name, "Directory changed before applying its mode"));
+                continue;
+            }
+            Err(error) => {
+                failed.push(issue(&name, &error));
+                continue;
+            }
+        }
+        if let Err(error) = files::apply_mode(&files::path(&workspace.project, &name)?, mode) {
+            failed.push(issue(&name, &error));
+        }
     }
     Ok(Value::object([
         ("applied", Value::Array(applied)),
@@ -193,21 +266,53 @@ fn issue(path: &str, reason: &str) -> Value {
 fn install(workspace: &Workspace, entry: &Entry) -> Result<(), String> {
     let name = &entry.path;
     match &entry.child {
-        files::Fingerprint::Directory | files::Fingerprint::Link { .. } => {
-            Err("Directory and link integration requires coordinator handling".into())
+        files::Fingerprint::Link { .. } => {
+            Err("Link integration requires coordinator handling".into())
         }
-        files::Fingerprint::Absent => {
+        files::Fingerprint::Directory { mode } => {
             if !matches!(
                 entry.current,
-                files::Fingerprint::File { .. } | files::Fingerprint::Absent
+                files::Fingerprint::Absent | files::Fingerprint::Directory { .. }
             ) {
-                return Err("Deletion of a non-file requires coordinator handling".into());
+                return Err("Replacement of a non-directory requires coordinator handling".into());
             }
+            let destination = files::path(&workspace.project, name)?;
+            create_parents(&workspace.project, name)?;
+            if files::observe(&workspace.project, name)? != entry.current
+                || files::observe(&workspace.root, name)? != entry.child
+            {
+                return Err("Directory changed before installation".into());
+            }
+            if matches!(entry.current, files::Fingerprint::Absent) {
+                fs::create_dir(&destination).map_err(|error| error.to_string())?;
+            } else if let files::Fingerprint::Directory { mode: current_mode } = entry.current {
+                #[cfg(unix)]
+                let unblocks_children = current_mode & 0o200 == 0 && mode & 0o200 != 0;
+                #[cfg(not(unix))]
+                let unblocks_children = current_mode != 0 && *mode == 0;
+                if unblocks_children {
+                    files::apply_mode(&destination, *mode)?;
+                }
+            }
+            Ok(())
+        }
+        files::Fingerprint::Absent => {
             let destination = files::path(&workspace.project, name)?;
             if files::observe(&workspace.project, name)? != entry.current {
                 return Err("Project changed before deletion".into());
             }
-            crate::checkpoints::files::remove(&destination).map_err(|error| error.to_string())?;
+            match entry.current {
+                files::Fingerprint::Directory { .. } => {
+                    fs::remove_dir(&destination).map_err(|error| error.to_string())?;
+                }
+                files::Fingerprint::File { .. } | files::Fingerprint::Absent => {
+                    crate::checkpoints::files::remove(&destination)
+                        .map_err(|error| error.to_string())?;
+                }
+                files::Fingerprint::Link { .. } => {
+                    return Err("Deletion of a link requires coordinator handling".into());
+                }
+            }
             Ok(())
         }
         files::Fingerprint::File { mode, .. } => {
@@ -257,200 +362,4 @@ fn create_parents(root: &Path, name: &str) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn evidence(workspace: &Workspace, entry: &Entry) -> Result<Value, String> {
-    let regular = |state: &files::Fingerprint| {
-        matches!(
-            state,
-            files::Fingerprint::File { .. } | files::Fingerprint::Absent
-        )
-    };
-    if !regular(&entry.baseline) || !regular(&entry.child) {
-        return Ok(Value::object([
-            ("kind", Value::string("metadata")),
-            (
-                "detail",
-                Value::string(
-                    "Inspect link or directory state; integration requires coordinator handling",
-                ),
-            ),
-        ]));
-    }
-    let max = crate::file_change::MAX_DIFF_BYTES as u64;
-    if [&entry.baseline, &entry.child]
-        .iter()
-        .any(|state| matches!(state, files::Fingerprint::File { size, .. } if *size > max))
-    {
-        return Ok(Value::object([
-            ("kind", Value::string("large_file")),
-            (
-                "detail",
-                Value::string("Use diff with path and byte offset to inspect content"),
-            ),
-        ]));
-    }
-    let before = read_small(
-        &workspace.storage.join("base"),
-        &entry.path,
-        &entry.baseline,
-    )?;
-    let after = read_small(&workspace.root, &entry.path, &entry.child)?;
-    let (before, after) = match (before, after) {
-        (Some(before), Some(after)) => (before, after),
-        _ => {
-            return Ok(Value::object([
-                ("kind", Value::string("binary")),
-                (
-                    "detail",
-                    Value::string(
-                        "Binary content or invalid UTF-8; fingerprints give exact sizes and content identity",
-                    ),
-                ),
-            ]));
-        }
-    };
-    if let Some(change) = crate::file_change::Change::between(
-        entry.baseline.exists().then_some(before.as_str()),
-        &after,
-    ) {
-        let value = change.value();
-        if value.encode().len() <= 16_384 {
-            return Ok(Value::object([
-                ("kind", Value::string("text_diff")),
-                ("diff", value),
-            ]));
-        }
-    }
-    Ok(Value::object([
-        ("kind", Value::string("text_preview")),
-        (
-            "before",
-            Value::string(&before[..before.floor_char_boundary(2048)]),
-        ),
-        (
-            "after",
-            Value::string(&after[..after.floor_char_boundary(2048)]),
-        ),
-        (
-            "detail",
-            Value::string(
-                "Diff is larger than the inline limit; use diff with path and byte offset",
-            ),
-        ),
-    ]))
-}
-
-fn read_small(
-    root: &Path,
-    name: &str,
-    state: &files::Fingerprint,
-) -> Result<Option<String>, String> {
-    if matches!(state, files::Fingerprint::Absent) {
-        return Ok(Some(String::new()));
-    }
-    files::verify_content(root, name, state)?;
-    let bytes = fs::read(files::path(root, name)?).map_err(|error| error.to_string())?;
-    files::verify_content(root, name, state)?;
-    Ok(String::from_utf8(bytes)
-        .ok()
-        .filter(|text| !text.contains('\0')))
-}
-
-pub(super) fn inspect_file(
-    workspace: &Workspace,
-    path: &str,
-    offset: usize,
-    limit: usize,
-) -> Result<Value, String> {
-    if workspace.mode != Mode::Isolated {
-        return Err("Shared work has no separate baseline".into());
-    }
-    if limit == 0 || limit > 65_536 {
-        return Err("limit must be 1-65536 bytes".into());
-    }
-    files::validate_name(path)?;
-    let review = inspect(workspace)?;
-    let entry = review
-        .entries
-        .iter()
-        .find(|entry| entry.path == path)
-        .ok_or("Path is not changed in this workspace")?;
-    let before = page(
-        &workspace.storage.join("base"),
-        path,
-        &entry.baseline,
-        offset,
-        limit,
-    )?;
-    let after = page(&workspace.root, path, &entry.child, offset, limit)?;
-    Ok(Value::object([
-        ("path", Value::string(path)),
-        ("offset", Value::number(offset)),
-        ("before", before),
-        ("after", after),
-        ("review_token", Value::string(review.token)),
-    ]))
-}
-
-fn page(
-    root: &Path,
-    name: &str,
-    state: &files::Fingerprint,
-    offset: usize,
-    limit: usize,
-) -> Result<Value, String> {
-    let size = match state {
-        files::Fingerprint::File { size, .. } => *size,
-        files::Fingerprint::Absent => {
-            return Ok(Value::object([
-                ("content", Value::string("")),
-                ("size", Value::number(0)),
-                ("next_offset", Value::Null),
-            ]));
-        }
-        _ => return Err(format!("{name} is not a regular text file")),
-    };
-    if offset as u64 > size {
-        return Err(format!("Offset exceeds {name} length"));
-    }
-    files::verify_content(root, name, state)?;
-    let mut file = fs::File::open(files::path(root, name)?).map_err(|error| error.to_string())?;
-    file.seek(SeekFrom::Start(offset as u64))
-        .map_err(|error| error.to_string())?;
-    let mut bytes = vec![0u8; (size - offset as u64).min(limit as u64 + 3) as usize];
-    file.read_exact(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    files::verify_content(root, name, state)?;
-    let valid = match std::str::from_utf8(&bytes) {
-        Ok(_) => bytes.len(),
-        Err(error)
-            if error.error_len().is_none() && offset as u64 + (bytes.len() as u64) < size =>
-        {
-            error.valid_up_to()
-        }
-        Err(_) => {
-            return Err(format!(
-                "{name} page is not UTF-8 text or offset splits a character"
-            ));
-        }
-    };
-    let text = std::str::from_utf8(&bytes[..valid]).map_err(|error| error.to_string())?;
-    if text.contains('\0') {
-        return Err(format!("{name} contains binary data"));
-    }
-    let keep = text.floor_char_boundary(limit);
-    let next = offset + keep;
-    Ok(Value::object([
-        ("content", Value::string(&text[..keep])),
-        ("size", Value::number(size)),
-        (
-            "next_offset",
-            if (next as u64) < size {
-                Value::number(next)
-            } else {
-                Value::Null
-            },
-        ),
-    ]))
 }

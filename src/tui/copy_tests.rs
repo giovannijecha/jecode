@@ -18,7 +18,6 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings: Settings::new("fixture-key".into(), "fixture/model".into()).unwrap(),
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     )

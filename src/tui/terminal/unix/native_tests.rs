@@ -30,7 +30,7 @@ fn without_pendin(snapshot: &str) -> String {
             }
         })
         .collect::<Vec<_>>();
-    assert!(found, "stty -g omitted lflag: {snapshot}");
+    assert!(found, "native terminal snapshot omitted lflag: {snapshot}");
     fields.join(":")
 }
 
@@ -56,19 +56,10 @@ fn assert_mode_restored(tty: &File, saved: &str) {
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_mode_comparison_preserves_all_other_settings() {
-    let saved = "gfmt1:cflag=4b00:iflag=2b02:lflag=5cb:oflag=3";
-    assert!(mode_matches(
-        "gfmt1:cflag=4b00:iflag=2b02:lflag=200005cb:oflag=3",
-        saved
-    ));
-    assert!(!mode_matches(
-        "gfmt1:cflag=4b00:iflag=2b02:lflag=200005ca:oflag=3",
-        saved
-    ));
-    assert!(!mode_matches(
-        "gfmt1:cflag=4b00:iflag=2b03:lflag=200005cb:oflag=3",
-        saved
-    ));
+    let saved = "v2:lflag=5cb:0011aabb";
+    assert!(mode_matches("v2:lflag=200005cb:0011aabb", saved));
+    assert!(!mode_matches("v2:lflag=200005ca:0011aabb", saved));
+    assert!(!mode_matches("v2:lflag=200005cb:0011aabc", saved));
 }
 
 #[test]
@@ -94,7 +85,7 @@ fn controls_and_terminal_lifetime() {
     terminal.send(b"/settings\r");
     let settings = terminal.wait("Settings · saved defaults");
     terminal.wait_after("Providers", settings);
-    terminal.send(b"5");
+    terminal.send(b"6");
     let providers = terminal.wait_after("Credentials", settings);
     terminal.send(b"2");
     let api_keys = terminal.wait_after("Providers › API keys", providers);
@@ -202,9 +193,8 @@ fn native_pty_fixture() {
             "raw-mode control did not set PENDIN"
         );
     }
-    let bash = crate::tools::find_bash().unwrap();
     if std::env::var("JECODE_TUI_CASE").unwrap() == "guardian-loss" {
-        let mut terminal = Terminal::open(&bash).unwrap();
+        let mut terminal = Terminal::open().unwrap();
         terminal.mode.close_for_fixture();
         assert!(terminal.check().is_err());
         let at = Instant::now();
@@ -215,7 +205,7 @@ fn native_pty_fixture() {
         return;
     }
     if std::env::var("JECODE_TUI_CASE").unwrap() == "owner-death" {
-        let _mode = mode::Mode::open(tty, &bash).unwrap();
+        let _mode = mode::Mode::open(tty).unwrap();
         eprintln!("PTY_OWNER_READY");
         loop {
             thread::sleep(Duration::from_secs(1));
@@ -252,18 +242,25 @@ fn native_pty_fixture() {
         ],
         Duration::from_secs(20),
     );
-    let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    let mut settings =
+        Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    // Unix has no Workspace command confinement. The fixture explicitly opts
+    // into Full for its private sleep/interruption command.
+    settings.default_permissions = crate::permissions::Level::Full;
     let config = || SessionConfig {
         store: Store::new(path.join("home")),
         settings: settings.clone(),
-        bash: bash.clone(),
     };
     config().store.save(&settings).unwrap();
     let agent = || {
-        Agent::new(
+        let agent = Agent::new(
             OpenRouter::fixture(fixture.endpoint.clone()),
             Tools::new(&path).unwrap(),
-        )
+        );
+        agent
+            .permissions()
+            .set_default(settings.default_permissions);
+        agent
     };
     crate::tui::launch(agent(), config(), None, Default::default(), None).unwrap();
     assert_mode_restored(&tty, &original);

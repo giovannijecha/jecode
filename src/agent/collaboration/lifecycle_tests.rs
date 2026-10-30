@@ -1,4 +1,4 @@
-﻿use super::tests::create;
+use super::tests::create;
 use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
@@ -25,6 +25,10 @@ fn stop_active_child_and_cancel_parent_wait_promptly() {
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
+    parent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     parent.agent_tool(&create()).unwrap();
     let observer = parent.collaboration();
     let started = std::time::Instant::now();
@@ -131,6 +135,10 @@ fn failed_parent_receipt_never_claims_a_confirmed_child_return() {
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
+    parent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     parent.agent_tool(&create()).unwrap();
     let observer = parent.collaboration();
     let started = std::time::Instant::now();

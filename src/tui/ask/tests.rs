@@ -295,8 +295,8 @@ fn switching_questions_with_different_key_rows_keeps_the_dock_height() {
                     "{width}x{height}: {rows:#?}"
                 );
             }
-            assert!(choices.join("\n").contains("Space  select"));
-            assert!(!words.join("\n").contains("Space  select"));
+            assert!(choices.join("\n").contains("Space  toggle"));
+            assert!(!words.join("\n").contains("Space  toggle"));
         }
     }
 }

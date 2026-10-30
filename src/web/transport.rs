@@ -3,8 +3,8 @@ use crate::cancel::Cancellation;
 use crate::json::Value;
 use crate::scratch::Area;
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -165,7 +165,7 @@ fn run(
         let remaining = timeout
             .checked_sub(started.elapsed())
             .filter(|remaining| !remaining.is_zero())
-            .ok_or("HTTP transfer timed out")?;
+            .ok_or("HTTP transfer failed: timed out")?;
         let send_headers = header_origins
             .iter()
             .any(|origin| origin.same_origin(&current));
@@ -215,114 +215,65 @@ fn run_once(
     timeout: Duration,
     cancellation: &Cancellation,
 ) -> Result<Hop, String> {
-    let mut command = Command::new(crate::curl::executable());
-    command
-        .args([
-            "--disable",
-            "--globoff",
-            "--silent",
-            "--show-error",
-            "--proto",
-            "=http,https",
-            "--proto-redir",
-            "=http,https",
-            "--max-time",
-        ])
-        .arg(timeout.as_secs_f64().to_string())
-        .arg("--output")
-        .arg(path)
-        .args([
-            "--write-out",
-            "%{http_code}\n%{url_effective}\n%{content_type}\n%{redirect_url}\n",
-        ]);
-    crate::auth::isolate_environment(&mut command);
-    match options.method.as_str() {
-        "HEAD" => {
-            command.arg("--head");
-        }
-        "GET" if options.body.is_none() => {}
-        "POST" => {
-            if options.body.is_none() {
-                command.args(["--data-binary", ""]);
-            }
-        }
-        method => {
-            command.args(["--request", method]);
-        }
-    }
-    if let Some(limit) = options.max_bytes {
-        command.args(["--max-filesize", &limit.to_string()]);
-    }
-    if send_headers {
-        for (name, value) in &options.headers {
-            command.args(["--header", &format!("{name}: {value}")]);
-        }
-    }
-    if options.body.is_some() {
-        command.args(["--data-binary", "@-"]);
-    }
-    command.arg("--url").arg(&url.value);
-    let output = crate::curl::run(
-        &mut command,
-        options.body.as_ref().map(|body| body.as_bytes().to_vec()),
-        Some(timeout.saturating_add(Duration::from_secs(1))),
-        4096,
+    let mut file =
+        fs::File::create(path).map_err(|error| format!("Could not open download: {error}"))?;
+    let mut decoder = crate::http::Decoder::default();
+    let mut size = 0usize;
+    let headers = if send_headers {
+        options
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let output = crate::http::run(
+        crate::http::Request {
+            url: &url.value,
+            method: &options.method,
+            headers: &headers,
+            body: options.body.as_ref().map(|body| body.as_bytes()),
+            timeout: Some(timeout),
+            idle: None,
+            output_limit: 0,
+        },
         cancellation,
-        None,
-        &mut |_| Ok(()),
+        &mut |bytes| {
+            decoder.feed(bytes, &mut |part| {
+                size = size.saturating_add(part.len());
+                if options.max_bytes.is_some_and(|limit| size > limit) {
+                    return Err("Response exceeds max_bytes".into());
+                }
+                file.write_all(part)
+                    .map_err(|error| format!("Could not write download: {error}"))
+            })
+        },
     )?;
     if output.cancelled {
         return Err("Operation cancelled".into());
     }
     if output.timed_out {
-        return Err("HTTP transfer timed out".into());
+        return Err("HTTP transfer failed: timed out".into());
     }
     if output.exit_code != Some(0) {
         let detail = String::from_utf8_lossy(&output.stderr);
-        let detail = detail
-            .lines()
-            .next()
-            .unwrap_or("")
-            .replace(&url.value, "[URL]");
-        let detail = detail
-            .split_whitespace()
-            .map(|word| {
-                if word.contains("http://") || word.contains("https://") {
-                    "[URL]"
-                } else {
-                    word
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let detail = detail.chars().take(300).collect::<String>();
-        return Err(format!(
-            "HTTP transfer failed (curl exit {}): {detail}",
-            output.exit_code.unwrap_or(-1)
-        ));
+        return Err(format!("HTTP transfer failed: {}", detail.trim()));
     }
     if let Some(error) = output.input_error {
         return Err(error);
     }
-    if output.stdout_truncated {
-        return Err("HTTP response metadata was too long".into());
-    }
-    let output = String::from_utf8(output.stdout).map_err(|_| "Invalid HTTP response metadata")?;
-    let mut lines = output.lines();
-    let status = lines
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
-        .ok_or("Could not read HTTP status")?;
-    let final_url = Url::parse(lines.next().ok_or("Could not read final URL")?)?;
-    let mime = lines
-        .next()
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let redirect = lines
-        .next()
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    Ok((status, final_url, mime, redirect))
+    let status = decoder.status.ok_or("Could not read HTTP status")?;
+    let mime = decoder.header("content-type").map(str::to_string);
+    let redirect = decoder
+        .header("location")
+        .map(|value| {
+            url.resolve(value)
+                .map(|target| target.value)
+                .ok_or("Invalid HTTP redirect location".to_string())
+        })
+        .transpose()?;
+    Ok((status, url.clone(), mime, redirect))
 }
 
 pub(super) fn unique_id() -> String {

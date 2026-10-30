@@ -22,6 +22,8 @@ pub struct Settings {
     pub auto_compact: u8,
     /// Optional routing for the selected backend, scoped by backend in the file.
     pub routing: BTreeMap<String, Routing>,
+    /// `permissions.default`: the level new conversations start at.
+    pub default_permissions: crate::permissions::Level,
 }
 
 pub struct ServiceError {
@@ -58,6 +60,7 @@ impl Settings {
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             routing: BTreeMap::new(),
+            default_permissions: crate::permissions::Level::default(),
         }
     }
 
@@ -133,6 +136,7 @@ impl Settings {
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             routing: BTreeMap::new(),
+            default_permissions: crate::permissions::Level::default(),
         })
     }
 
@@ -267,6 +271,7 @@ impl Settings {
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             routing: BTreeMap::new(),
+            default_permissions: crate::permissions::Level::default(),
         };
         if !api_key.is_empty() {
             settings
@@ -324,6 +329,19 @@ impl Settings {
                     .ok_or_else(|| "Auto-compact must be a whole percentage from 1 to 99".into())
                     .and_then(crate::context::auto_compact_percent)
                     .map_err(|error| format!("Invalid context.auto_compact_percent: {error}"))?;
+            }
+        }
+        // Configurations written before permissions start new conversations
+        // at Workspace.
+        if let Some(permissions) = document.get("permissions") {
+            if !matches!(permissions, Value::Object(_)) {
+                return Err("permissions must be an object".into());
+            }
+            if let Some(value) = permissions.get("default") {
+                settings.default_permissions = value
+                    .as_str()
+                    .and_then(crate::permissions::Level::parse)
+                    .ok_or("Invalid permissions.default: use read, workspace or full")?;
             }
         }
         Ok(settings)

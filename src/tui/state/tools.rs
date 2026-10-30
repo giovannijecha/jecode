@@ -9,21 +9,24 @@ pub struct ToolDetails {
     pub active: bool,
     pub expanded: bool,
     pub(super) turn_id: u64,
-    /// Equal consecutive starts share a record, even across a large read batch.
-    changes: VecDeque<(usize, u64)>,
+    /// Changed item ranges; equal consecutive ranges share a record, even
+    /// across a large read batch.
+    changes: VecDeque<(Range<usize>, u64)>,
 }
 
 impl ToolDetails {
-    /// Returns the earliest item affected by every unseen revision. When a
-    /// layout is older than the bounded history, its caller rebuilds all rows.
-    pub(in crate::tui) fn changed_since(&self, revisions: u64) -> Option<usize> {
+    /// Returns the items affected by every unseen revision. When a layout is
+    /// older than the bounded history, its caller rebuilds all rows.
+    pub(in crate::tui) fn changed_since(&self, revisions: u64) -> Option<Range<usize>> {
         let mut remaining = revisions;
-        let mut first = None;
-        for &(index, count) in self.changes.iter().rev() {
-            first = Some(first.map_or(index, |earlier: usize| earlier.min(index)));
-            remaining = remaining.saturating_sub(count);
+        let mut changed: Option<Range<usize>> = None;
+        for (range, count) in self.changes.iter().rev() {
+            changed = Some(changed.map_or(range.clone(), |earlier| {
+                earlier.start.min(range.start)..earlier.end.max(range.end)
+            }));
+            remaining = remaining.saturating_sub(*count);
             if remaining == 0 {
-                return first;
+                return changed;
             }
         }
         None
@@ -51,10 +54,16 @@ impl State {
         }
     }
 
+    /// Everything from `first` on may draw differently.
     pub(super) fn tool_changed_from(&mut self, first: usize) {
+        self.tool_changed(first..usize::MAX);
+    }
+
+    /// Only `items` draw differently; later rows keep their layout.
+    pub(super) fn tool_changed(&mut self, items: Range<usize>) {
         self.tool_revision = self.tool_revision.wrapping_add(1);
-        if let Some((index, count)) = self.tool_details.changes.back_mut()
-            && *index == first
+        if let Some((range, count)) = self.tool_details.changes.back_mut()
+            && *range == items
         {
             *count = count.saturating_add(1);
             return;
@@ -62,7 +71,7 @@ impl State {
         if self.tool_details.changes.len() == RECENT_TOOL_CHANGES {
             self.tool_details.changes.pop_front();
         }
-        self.tool_details.changes.push_back((first, 1));
+        self.tool_details.changes.push_back((items, 1));
     }
 
     pub fn begin_tool_turn(&mut self) {
@@ -113,6 +122,7 @@ impl State {
         })?;
         let expanded = !self.tool_details.expanded;
         let mut count = 0;
+        let end = turn.end;
         for item in &mut self.items[turn] {
             if let Item::Tool {
                 presentation,
@@ -125,7 +135,8 @@ impl State {
             }
         }
         self.tool_details.expanded = expanded;
-        self.tool_changed_from(first);
+        // Cards after the finished turn keep their layout.
+        self.tool_changed(first..end);
         self.changed();
         Some((expanded, count))
     }

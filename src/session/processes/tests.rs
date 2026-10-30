@@ -66,6 +66,10 @@ fn plain_direct_write_sends_a_line_without_adding_text_to_model_archive() {
         OpenRouter::fixture(launch.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     turn(&mut agent, &launch, "Start an interactive command");
     let observer = agent.processes();
     let id = observer.processes().unwrap()[0].id.clone();
@@ -115,6 +119,10 @@ fn plain_terminal_prints_locally_without_consuming_model_output() {
         OpenRouter::fixture(launch.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     assert_eq!(
         printed(&agent, ""),
         "No active background processes in this conversation.\n"
@@ -223,6 +231,10 @@ fn plain_terminal_requests_stop_without_touching_history_or_poll_cursor() {
         OpenRouter::fixture(launch.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
+    agent
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     turn(&mut agent, &launch, "Start");
     let first = agent
         .archive()

@@ -1,10 +1,18 @@
 # TUI theme
 
-The interactive TUI runs on the terminal's alternate screen. Cells without a
-surface keep the terminal's own background (`BASE` is SGR 49); text, marks and
-surfaces use the palette below, which assumes a dark terminal theme. Colour is
-always 24-bit; `NO_COLOR` is ignored. The terminal still chooses the font and how bold, italic, underline
-and strikethrough look. Tokens live in [`theme.rs`](../../src/tui/theme.rs).
+The interactive TUI runs on the terminal's alternate screen. It queries OSC 11
+once after setup. A complete `rgb:R/G/B` reply with relative luminance above
+0.5 selects a local `#0C0C0C` background for unsurfaced cells, gutters and
+erasures. The query accepts BEL or ST termination and one to four hex digits
+per channel. If no valid reply arrives within 800 ms on Windows, the native
+console adapter uses `GetConsoleScreenBufferInfoEx` to read the main screen's
+background palette entry, captured before entering the alternate screen. On
+other terminals without a reply, cells use the terminal's own background
+(SGR 49). A dark result also uses SGR 49. The terminal palette is never
+changed, and exit restores its original background. Text and surfaces use the
+Violet palette below. Colour is 24-bit; `NO_COLOR` is ignored. The terminal
+still chooses the font and how bold, italic, underline and strikethrough look. Tokens live in
+[`theme.rs`](../../src/tui/theme.rs).
 
 ## Tokens
 
@@ -15,16 +23,16 @@ bring `DIM` and `FAINT` below those floors.
 
 | Role | Value | Contrast | Use |
 | --- | --- | --- | --- |
-| `STRONG` | `#E2E8F0` | 14.5 | Requests, drafts, the product name, titles, labels, option names, keycap keys. |
+| `STRONG` | `#E8E6F2` | 14.5 | Requests, drafts, the product name, titles, labels, option names, keycap keys. |
 | `LIT` | `#E2D9FC` | 13.3 | The caret's blinking `_`, chips, background badge names, command names in Work chapters, `new output`. |
-| `BODY` | `#D4D4D4` | 12.1 | Assistant prose, tool targets, diagnostics. |
+| `BODY` | `#D4D3DB` | 12.1 | Assistant prose, tool targets, diagnostics. |
 | `CODE_TEXT` | `#C9D1D9` | 11.6 | Default code, inline code, command output, diff context. |
 | `GOOD` | `#9ECE6A` | 9.8 | The `Done` and `✓` marks, added lines, `☑`, code strings. |
 | `ACCENT` | `#C3B1FA` | 9.4 | The `>_` mark, `›` and `●` markers, composer rules, matches, level 1 headings, links. |
 | `KEYWORD` | `#E0A6F2` | 9.3 | Code keywords. |
 | `WARNING` | `#E0AF68` | 9.0 | Retry, stopped and warning glyphs, `paused`, code numbers, the gauge near the limit. |
 | `BAD` | `#EF8B8B` | 7.5 | Failures, removed lines, destructive questions. |
-| `MUTED` | `#9AA4B2` | 7.1 | Secondary facts, key labels, link hosts, quotes, list markers, the footer chip. |
+| `MUTED` | `#A4A1BB` | 7.2 | Secondary facts, key labels, link hosts, quotes, list markers, the footer chip. |
 | `DIM` | `#8E8AAE` | 5.5 | Status-row facts, the footer path, tree gutters, group headings, line numbers, struck text. |
 | `FAINT` | `#6B6796` | 3.4 | Marks only, never text: rules while working, table borders, tracks. |
 
@@ -36,7 +44,7 @@ Surfaces, 1.2–1.6 contrast steps above a dark terminal background:
 
 | Surface | Value | Use |
 | --- | --- | --- |
-| `BASE` | terminal default | Every cell without its own surface; never painted. |
+| `BASE` | terminal default | Unsurfaced cells on a dark or undetected terminal; local `#0C0C0C` fallback on detected light terminals. |
 | `USER_SURFACE` | `#29283F` | Sent requests. |
 | `PILL_SURFACE` | `#27263B` | The status-row pill and the footer model chip. |
 | `SELECTED_SURFACE` | `#383656` | The focused option row and keycaps. |
@@ -48,10 +56,10 @@ Tool badges carry the family colour when done and the state otherwise:
 
 | Badge surface | Value | Use |
 | --- | --- | --- |
-| `BADGE_READ` | `#4C4AB2` | Read, List, Search, Map, Skill, Web, Browser. |
+| `BADGE_READ` | `#4C4AB2` | Read, List, Search, Map, Skill, Web, Browser, Checkpoint and other tools without a family. |
+| `BADGE_COORD` | `#2D6363` | Agent, Todo and Ask user receipts. |
 | `BADGE_EDIT` | `#7A3F9E` | Update, Write. |
 | `BADGE_SHELL` | `#3D58A3` | Bash, Exec, Process. |
-| `BADGE_OTHER` | `#4C4AB2` | Checkpoint and any other tool. |
 | `BADGE_IDLE` | `#34324F` | Running and background badges, `WORK`, attachment and ` current ` chips. |
 | `BADGE_BAD` | `#7A2E3A` | Failed calls. |
 | `BADGE_WARN` | `#6B5222` | Stopped or timed-out calls. |
@@ -104,6 +112,7 @@ from the edge, which drops after the facts.
 | Result | `✓` in `GOOD` | subject, such as `Copied` | detail; a setting reads `old → new` with the new value `STRONG` |
 | Warning | `▲` in `WARNING` | subject | detail and a fixing keycap |
 | Error | `✕` in `BAD` | subject | detail and a fixing keycap |
+| Waiting | static `?` in `ACCENT` | `Waiting for you` or `Waiting for permission` | none |
 
 `Esc interrupt` appears only while Esc would stop the turn. The Working label
 is the running call's `description` when given, else a verb and a short

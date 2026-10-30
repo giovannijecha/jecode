@@ -76,6 +76,7 @@ impl App {
             settings.effort,
             settings.auto_compact,
             &settings.routing_for(&settings.model),
+            settings.default_permissions,
             self.config.store.path(),
         )
     }

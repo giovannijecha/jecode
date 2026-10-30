@@ -11,10 +11,7 @@ use crate::{
         view::Frame,
     },
 };
-use std::{
-    io::{self, Write},
-    path::Path,
-};
+use std::io::{self, Write};
 
 fn record() -> Value {
     Value::object([
@@ -72,8 +69,8 @@ fn paint(rows: Vec<Line>, width: usize, height: usize) {
     assert_eq!(probe().lines().nth(1).unwrap(), expected);
 }
 
-pub(super) fn console(bash: &Path) {
-    let terminal = Terminal::open(bash).unwrap();
+pub(super) fn console() {
+    let terminal = Terminal::open().unwrap();
     let (width, height) = terminal.size;
     let mut state = State {
         width,

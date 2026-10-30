@@ -5,6 +5,11 @@ pub enum Event {
     UserQuestion {
         request: crate::ask::Request,
     },
+    /// Shown inline by the line-based CLI; the TUI reads the queue itself.
+    PermissionRequest {
+        request: crate::permissions::Request,
+        waiting: usize,
+    },
     Collaboration {
         event: Value,
     },

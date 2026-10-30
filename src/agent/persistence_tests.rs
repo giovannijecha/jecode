@@ -36,6 +36,10 @@ fn resuming_retains_model_boundaries_raw_evidence_and_never_reexecutes_saved_too
         (200, completion("After restart", vec![])),
     ]);
     let mut first = agent(&home, &directory, &fixture.endpoint);
+    first
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
     first.run_turn("First task", &mut |_| Ok(())).unwrap();
     first.set_model("fixture/other".into()).unwrap();
     first.set_effort(Effort::Low);

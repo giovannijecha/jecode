@@ -3,7 +3,6 @@ use super::{Geometry, Input};
 use std::{
     fs::File,
     io::{self, Read},
-    path::Path,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -15,6 +14,7 @@ use std::{
 
 pub struct Terminal {
     pub input: Receiver<Input>,
+    wake: SyncSender<Input>,
     pub size: (usize, usize),
     stopped: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
@@ -22,18 +22,19 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    pub fn open(bash: &Path) -> Result<Self, String> {
+    pub fn open() -> Result<Self, String> {
         if std::env::var("TERM").is_ok_and(|term| term == "dumb") {
             return Err("The TUI needs a VT terminal. Use jecode --plain.".into());
         }
         let mut tty = File::open("/dev/tty").map_err(|error| {
             format!("Could not open terminal input: {error}. Use jecode --plain.")
         })?;
-        let mode = mode::Mode::open(tty.try_clone().map_err(|e| e.to_string())?, bash)?;
+        let mode = mode::Mode::open(tty.try_clone().map_err(|e| e.to_string())?)?;
         let size = size(&tty)?;
         let stopped = Arc::new(AtomicBool::new(false));
         let token = stopped.clone();
         let (sender, input) = mpsc::sync_channel(16);
+        let wake = sender.clone();
         let reader = thread::spawn(move || {
             let mut buffer = [0u8; 16 * 1024];
             let mut measured = size;
@@ -76,10 +77,19 @@ impl Terminal {
         });
         Ok(Self {
             input,
+            wake,
             size,
             stopped,
             reader: Some(reader),
             mode,
+        })
+    }
+
+    /// Posts `Input::Wake` unless input is already waiting to be read.
+    pub fn waker(&self) -> super::Waker {
+        let wake = self.wake.clone();
+        super::Waker::new(move || {
+            let _ = wake.try_send(Input::Wake);
         })
     }
 
