@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 mod copy;
 mod files;
+mod legacy;
 mod review;
 mod tree;
 
@@ -164,6 +165,12 @@ impl Workspace {
             .map_err(|error| error.to_string())?
             .is_some()
         {
+            // Removed first: once the copy is gone, nothing names it.
+            if let Some(registration) = legacy::registration(&self.project, &self.root) {
+                files::remove_tree(&registration).map_err(|error| {
+                    format!("Could not remove the copy's legacy Git worktree registration: {error}")
+                })?;
+            }
             files::remove_tree(&self.root)?;
         }
         let base = self.storage.join("base");
