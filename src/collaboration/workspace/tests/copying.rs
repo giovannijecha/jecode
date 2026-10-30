@@ -55,23 +55,23 @@ fn entries_the_copy_cannot_hold_are_omitted_and_reported() {
     let _socket =
         std::os::unix::net::UnixListener::bind(project.join("tmp/sockets/puma.sock")).unwrap();
     #[cfg(unix)]
-    {
+    let expected = {
         use std::os::unix::ffi::OsStrExt;
         fs::write(project.join("tmp/a:b.txt"), "colon").unwrap();
-        fs::write(
+        // APFS refuses non-UTF-8 names; only filesystems that hold one test it.
+        let invalid = fs::write(
             project
                 .join("tmp")
                 .join(std::ffi::OsStr::from_bytes(b"bad\xffname")),
             "x",
         )
-        .unwrap();
-    }
-    #[cfg(unix)]
-    let expected = [
-        "tmp/a:b.txt",
-        "tmp/bad\u{fffd}name",
-        "tmp/sockets/puma.sock",
-    ];
+        .is_ok();
+        let mut expected = vec!["tmp/a:b.txt", "tmp/sockets/puma.sock"];
+        if invalid {
+            expected.insert(1, "tmp/bad\u{fffd}name");
+        }
+        expected
+    };
     let workspace = Workspace::prepare(&project, &storage, "a1", Mode::Isolated).unwrap();
     #[cfg(windows)]
     drop(blocker);
