@@ -21,7 +21,6 @@ fn app(directory: &Directory) -> App {
         SessionConfig {
             store,
             settings: Settings::unconfigured(),
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     )
@@ -113,15 +112,7 @@ fn resume_attachment_draft(configured: bool) {
         .unwrap();
     let mut resumed = if configured {
         store.save(&settings).unwrap();
-        App::new(
-            agent,
-            SessionConfig {
-                store,
-                settings,
-                bash: crate::tools::find_bash().unwrap(),
-            },
-            None,
-        )
+        App::new(agent, SessionConfig { store, settings }, None)
     } else {
         app(&directory)
     };

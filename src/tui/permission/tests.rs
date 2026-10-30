@@ -18,21 +18,9 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    let SessionConfig {
-        store,
-        settings,
-        bash,
-    } = config(directory);
+    let SessionConfig { store, settings } = config(directory);
     store.save(&settings).unwrap();
-    App::new(
-        agent,
-        SessionConfig {
-            store,
-            settings,
-            bash,
-        },
-        None,
-    )
+    App::new(agent, SessionConfig { store, settings }, None)
 }
 
 fn key(app: &mut App, code: u16, modifiers: u8) {

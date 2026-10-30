@@ -119,7 +119,6 @@ fn delayed_child_return_restarts_idle_main_without_a_user_message() {
         SessionConfig {
             store: Store::new(home.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );
@@ -223,7 +222,6 @@ fn explicit_main_stop_disables_automatic_collaborator_continuation() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );
@@ -337,7 +335,6 @@ fn failed_workspace_action_is_visible_without_a_generic_agent_card() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );
@@ -381,7 +378,6 @@ fn inspection_and_integration_actions_keep_their_tool_cards() {
         SessionConfig {
             store: Store::new(directory.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     );

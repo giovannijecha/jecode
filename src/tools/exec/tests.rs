@@ -71,7 +71,6 @@ fn run(root: &Path, arguments: &Value) -> Result<Value, String> {
     let processes = Registry::default();
     execute(
         shell::Context {
-            bash: Path::new("unused"),
             root,
             outputs: &outputs,
             temporary: None,
@@ -333,7 +332,6 @@ fn persistent_exec_receives_stdin_until_eof_and_preserves_saved_output() {
     let input = "line one\nline two";
     let result = execute(
         shell::Context {
-            bash: Path::new("unused"),
             root: directory.path(),
             outputs: &outputs,
             temporary: None,

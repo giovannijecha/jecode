@@ -19,11 +19,7 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
             OpenRouter::fixture(fixture.endpoint.clone()),
             Tools::new(directory.path()).unwrap(),
         ),
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
+        SessionConfig { store, settings },
         None,
     )
 }

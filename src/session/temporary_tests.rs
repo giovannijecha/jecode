@@ -36,7 +36,6 @@ fn plain_chat_reports_and_cleans_temporary_files_without_a_provider_request_for_
     let mut config = SessionConfig {
         store: Store::new(home.path().join("config.json")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     let mut input = Cursor::new(
         "/tmp\nMake a scratch probe\n/tmp\n/tmp clean\n/tmp\n/new\n/tmp\n/tmp nonsense\n/exit\n",

@@ -139,7 +139,6 @@ mod tests {
         let mut config = SessionConfig {
             store: Store::new(directory.path().join(".jecode")),
             settings: Settings::new("fixture-key".into(), "fixture/model".into()).unwrap(),
-            bash: crate::tools::find_bash().unwrap(),
         };
         let mut output = Vec::new();
         chat(

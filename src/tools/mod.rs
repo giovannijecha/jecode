@@ -15,7 +15,6 @@ pub(crate) use files::read_text_page;
 #[cfg(test)]
 pub use schema::encoded_size;
 pub use schema::{definitions, definitions_for, encoded_size_for};
-pub use shell::find_bash;
 
 use crate::cancel::Cancellation;
 use crate::checkpoints::actions;
@@ -69,7 +68,6 @@ impl Begun {
 
 pub struct Tools {
     root: PathBuf,
-    bash: PathBuf,
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
     attachments: Option<crate::attachments::Pool>,
@@ -95,7 +93,6 @@ impl Tools {
                 crate::redact::Redactor::empty(),
             ),
             root,
-            bash: shell::find_bash()?,
             temporary: None,
             attachments: None,
             processes: processes::Registry::default(),
@@ -108,10 +105,6 @@ impl Tools {
 
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    pub fn bash(&self) -> &Path {
-        &self.bash
     }
 
     #[cfg(test)]
@@ -401,7 +394,6 @@ impl Tools {
                             }
                         }
                         let context = shell::Context {
-                            bash: &self.bash,
                             root: &self.root,
                             outputs: &self.outputs,
                             temporary: temporary.as_deref(),

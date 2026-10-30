@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
-    path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc,
     thread::{self, JoinHandle},
@@ -36,7 +35,7 @@ pub(super) fn stty(tty: &File, arguments: &[&str]) -> Result<String, String> {
 }
 
 impl Mode {
-    pub(super) fn open(tty: File, _bash: &Path) -> Result<Self, String> {
+    pub(super) fn open(tty: File) -> Result<Self, String> {
         let saved = stty(&tty, &["-g"])?;
         let mut command = Command::new(crate::native::helper("terminal_unix")?);
         command

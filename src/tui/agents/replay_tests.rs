@@ -12,7 +12,6 @@ pub(super) fn replay_app(home: &Directory, directory: &Directory) -> App {
         SessionConfig {
             store: Store::new(home.path().join("config")),
             settings,
-            bash: crate::tools::find_bash().unwrap(),
         },
         None,
     )

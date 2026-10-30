@@ -249,7 +249,7 @@ pub(crate) fn launch(
             .parent()
             .expect("configuration directory"),
     )?;
-    let terminal = Terminal::open(&config.bash)?;
+    let terminal = Terminal::open()?;
     let mut app = App::new(agent, config, Some(terminal));
     let mut background = background::Probe::start()?;
     if !draft.is_empty() {

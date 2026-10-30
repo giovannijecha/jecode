@@ -45,7 +45,7 @@ fn native_windows_direct_input() {
     assert!(!result.timed_out);
 }
 
-pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
+pub(super) fn fixture(path: &std::path::Path) {
     let script = "$first = Read-Host -Prompt ('NATIVE_' + 'PASSWORD_READY') -AsSecureString; $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($first); try { $line = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr); if (!$line.EndsWith([char]::ConvertFromUtf32(0x1F642))) { throw 'Unicode input lost' } } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }; Write-Output ('NATIVE_' + 'PTY_DONE'); $second = Read-Host -Prompt ('NATIVE_' + 'SECOND_READY') -AsSecureString; Write-Output ('NATIVE_' + 'PTY_END')";
     let fixture = HttpFixture::new(vec![
         (
@@ -81,7 +81,6 @@ pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
     let config = SessionConfig {
         store: Store::new(path.join("home")),
         settings,
-        bash: bash.to_path_buf(),
     };
     config.store.save(&config.settings).unwrap();
     let agent = Agent::new(

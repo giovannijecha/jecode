@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn fixture(path: &Path, bash: &Path) {
+pub(super) fn fixture(path: &Path) {
     let fixture = HttpFixture::new(vec![(
         404,
         Value::object([(
@@ -24,14 +24,13 @@ pub(super) fn fixture(path: &Path, bash: &Path) {
     let config = SessionConfig {
         store: Store::new(path.join("home")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: bash.to_path_buf(),
     };
     let mut agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(path).unwrap(),
     );
     agent.enable_sessions(&path.join("home")).unwrap();
-    let terminal = Terminal::open(bash).unwrap();
+    let terminal = Terminal::open().unwrap();
     let mut app = App::new(agent, config, Some(terminal));
     app.state.editor.insert("NATIVE_RECOVERED_REQUEST");
     app.submit().unwrap();

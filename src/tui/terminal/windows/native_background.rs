@@ -58,9 +58,9 @@ fn native_windows_background_detection() {
     run_host("background-native");
 }
 
-pub(super) fn fixture(path: &Path, bash: &Path, scenario: &str) {
+pub(super) fn fixture(path: &Path, scenario: &str) {
     if scenario == "background-light" {
-        let terminal = Terminal::open(bash).unwrap();
+        let terminal = Terminal::open().unwrap();
         let (width, height) = terminal.size;
         let frame = crate::tui::view::Frame {
             header: vec![],
@@ -88,7 +88,6 @@ pub(super) fn fixture(path: &Path, bash: &Path, scenario: &str) {
         let config = SessionConfig {
             store: Store::new(path.join("home")),
             settings,
-            bash: bash.to_path_buf(),
         };
         config.store.save(&config.settings).unwrap();
         let fixture = HttpFixture::new(vec![]);

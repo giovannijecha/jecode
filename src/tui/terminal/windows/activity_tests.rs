@@ -14,12 +14,11 @@ use crate::{
 };
 use std::{
     io::{self, Write},
-    path::Path,
     time::Duration,
 };
 
-pub(super) fn console(bash: &Path) {
-    let terminal = Terminal::open(bash).unwrap();
+pub(super) fn console() {
+    let terminal = Terminal::open().unwrap();
     let (width, height) = terminal.size;
     let activity = Activity::with_elapsed(Duration::from_secs(70 * 60));
     let started = activity.started;

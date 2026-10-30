@@ -1,9 +1,9 @@
 use super::{Terminal, probe};
 use std::io::{self, Write};
 
-pub(super) fn console(bash: &std::path::Path) {
+pub(super) fn console() {
     use crate::{events::Event, json::Value, tui::state::State};
-    let terminal = Terminal::open(bash).unwrap();
+    let terminal = Terminal::open().unwrap();
     let (width, height) = terminal.size;
     let mut state = State {
         width,

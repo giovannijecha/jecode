@@ -12,7 +12,6 @@ fn config(home: &Directory) -> SessionConfig {
     SessionConfig {
         store: Store::new(home.path().to_path_buf()),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     }
 }
 

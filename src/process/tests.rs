@@ -236,7 +236,7 @@ fn timeout_stops_descendant_after_root_exits() {
 }
 
 fn command(directory: &Directory, text: &str) -> Command {
-    let mut command = Command::new(crate::tools::find_bash().unwrap());
+    let mut command = Command::new(crate::shell::executable().unwrap());
     command
         .args(["--noprofile", "--norc", "-c", text])
         .current_dir(directory.path())

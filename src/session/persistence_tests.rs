@@ -23,7 +23,6 @@ fn config(directory: &Directory) -> SessionConfig {
     SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/default".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     }
 }
 

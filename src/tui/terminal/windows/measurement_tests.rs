@@ -12,13 +12,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-pub(super) fn fixture(path: &Path, bash: &Path, active: bool) {
+pub(super) fn fixture(path: &Path, active: bool) {
     let home = path.join("home");
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let config = SessionConfig {
         store: Store::new(home.clone()),
         settings,
-        bash: bash.to_path_buf(),
     };
     config.store.save(&config.settings).unwrap();
     let work = active.then(|| {

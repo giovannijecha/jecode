@@ -3,7 +3,6 @@ use super::{Geometry, Input};
 use std::{
     fs::File,
     io::{self, Read},
-    path::Path,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -23,14 +22,14 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    pub fn open(bash: &Path) -> Result<Self, String> {
+    pub fn open() -> Result<Self, String> {
         if std::env::var("TERM").is_ok_and(|term| term == "dumb") {
             return Err("The TUI needs a VT terminal. Use jecode --plain.".into());
         }
         let mut tty = File::open("/dev/tty").map_err(|error| {
             format!("Could not open terminal input: {error}. Use jecode --plain.")
         })?;
-        let mode = mode::Mode::open(tty.try_clone().map_err(|e| e.to_string())?, bash)?;
+        let mode = mode::Mode::open(tty.try_clone().map_err(|e| e.to_string())?)?;
         let size = size(&tty)?;
         let stopped = Arc::new(AtomicBool::new(false));
         let token = stopped.clone();

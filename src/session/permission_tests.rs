@@ -16,7 +16,6 @@ fn setup(project: &Directory, home: &Directory) -> (Agent, SessionConfig) {
     let config = SessionConfig {
         store: Store::new(home.path().join("config.json")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     (agent, config)
 }

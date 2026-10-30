@@ -23,7 +23,7 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    pub fn open(_bash: &std::path::Path) -> Result<Self, String> {
+    pub fn open() -> Result<Self, String> {
         let name = format!(
             "jecode-terminal-{}-{}",
             std::process::id(),

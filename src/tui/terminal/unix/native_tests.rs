@@ -193,9 +193,8 @@ fn native_pty_fixture() {
             "raw-mode control did not set PENDIN"
         );
     }
-    let bash = crate::tools::find_bash().unwrap();
     if std::env::var("JECODE_TUI_CASE").unwrap() == "guardian-loss" {
-        let mut terminal = Terminal::open(&bash).unwrap();
+        let mut terminal = Terminal::open().unwrap();
         terminal.mode.close_for_fixture();
         assert!(terminal.check().is_err());
         let at = Instant::now();
@@ -206,7 +205,7 @@ fn native_pty_fixture() {
         return;
     }
     if std::env::var("JECODE_TUI_CASE").unwrap() == "owner-death" {
-        let _mode = mode::Mode::open(tty, &bash).unwrap();
+        let _mode = mode::Mode::open(tty).unwrap();
         eprintln!("PTY_OWNER_READY");
         loop {
             thread::sleep(Duration::from_secs(1));
@@ -251,7 +250,6 @@ fn native_pty_fixture() {
     let config = || SessionConfig {
         store: Store::new(path.join("home")),
         settings: settings.clone(),
-        bash: bash.clone(),
     };
     config().store.save(&settings).unwrap();
     let agent = || {

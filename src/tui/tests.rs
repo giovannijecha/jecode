@@ -20,7 +20,6 @@ pub(super) fn config(directory: &Directory) -> SessionConfig {
     SessionConfig {
         store: Store::new(directory.path().join(".jecode")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     }
 }
 // These process fixtures exercise unrestricted Bash; permissions have dedicated tests.

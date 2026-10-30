@@ -44,11 +44,7 @@ fn composer_windows_smoke() {
     );
     launch(
         agent,
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
+        SessionConfig { store, settings },
         None,
         Default::default(),
         None,

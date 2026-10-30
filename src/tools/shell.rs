@@ -4,7 +4,7 @@ use crate::json::Value;
 use crate::process;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -14,7 +14,6 @@ mod budget_tests;
 mod windows_tests;
 
 pub(super) struct Context<'a> {
-    pub bash: &'a Path,
     pub root: &'a Path,
     pub outputs: &'a crate::output::Store,
     pub temporary: Option<&'a Path>,
@@ -35,7 +34,7 @@ pub(super) fn execute(
     if text.contains('\0') {
         return Err("command must not contain NUL characters".into());
     }
-    let command = command(context.bash, context.root, text, context.temporary)?;
+    let command = command(context.root, text, context.temporary)?;
     execute_command(context, arguments, cancellation, command, None, text)
 }
 
@@ -240,12 +239,7 @@ fn unknown_outcome(message: &str, [stdout_ref, stderr_ref]: [String; 2]) -> Valu
     ])
 }
 
-fn command(
-    _bash: &Path,
-    root: &Path,
-    text: &str,
-    temporary: Option<&Path>,
-) -> Result<Command, String> {
+fn command(root: &Path, text: &str, temporary: Option<&Path>) -> Result<Command, String> {
     let mut command = crate::shell::command(text)?;
     command
         .current_dir(root)
@@ -265,10 +259,6 @@ fn command(
     Ok(command)
 }
 
-pub fn find_bash() -> Result<PathBuf, String> {
-    crate::shell::executable()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,7 +266,6 @@ mod tests {
     use std::time::Instant;
 
     fn execute(
-        bash: &Path,
         root: &Path,
         arguments: &Value,
         cancellation: &Cancellation,
@@ -286,7 +275,6 @@ mod tests {
         let processes = crate::tools::processes::Registry::default();
         super::execute(
             Context {
-                bash,
                 root,
                 outputs: &outputs,
                 temporary: None,
@@ -300,7 +288,6 @@ mod tests {
 
     fn run(root: &Path, text: &str, timeout: usize) -> Value {
         execute(
-            &find_bash().unwrap(),
             root,
             &Value::object([
                 ("command", Value::string(text)),
@@ -380,8 +367,7 @@ mod tests {
     #[test]
     fn shell_does_not_inherit_the_api_key_or_startup_script() {
         let directory = Directory::new();
-        let bash = find_bash().unwrap();
-        let command = command(&bash, directory.path(), "true", None).unwrap();
+        let command = command(directory.path(), "true", None).unwrap();
         for variable in ["OPENROUTER_API_KEY", "BASH_ENV", "ENV"] {
             assert!(
                 command
@@ -425,7 +411,6 @@ mod tests {
         });
         let started = Instant::now();
         let result = execute(
-            &find_bash().unwrap(),
             directory.path(),
             &Value::object([(
                 "command",

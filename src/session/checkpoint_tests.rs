@@ -37,7 +37,6 @@ fn plain_checkpoint_commands_restore_without_a_provider_request() {
     let mut config = SessionConfig {
         store: Store::new(home.path().join("config.json")),
         settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
-        bash: crate::tools::find_bash().unwrap(),
     };
     fs::write(project.path().join("a.txt"), "two\n").unwrap();
 

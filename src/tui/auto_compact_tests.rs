@@ -14,11 +14,7 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     client.fixture_limits(24000, Some(4096));
     App::new(
         Agent::new(client, Tools::new(directory.path()).unwrap()),
-        SessionConfig {
-            store,
-            settings,
-            bash: crate::tools::find_bash().unwrap(),
-        },
+        SessionConfig { store, settings },
         None,
     )
 }

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn explicit_backend_environment_reaches_the_supervised_child() {
-    let mut command = Command::new(crate::tools::find_bash().unwrap());
+    let mut command = Command::new(crate::shell::executable().unwrap());
     command
         .args([
             "--noprofile",

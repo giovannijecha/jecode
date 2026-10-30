@@ -2,7 +2,6 @@ use super::{Prompter, SignIn};
 use crate::cancel::Cancellation;
 use crate::input::read_line;
 use std::io::{BufRead, Write};
-use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
@@ -11,16 +10,11 @@ use std::time::Duration;
 pub struct Terminal<'a, R, W> {
     input: &'a mut R,
     output: &'a mut W,
-    bash: &'a Path,
 }
 
 impl<'a, R: BufRead, W: Write> Terminal<'a, R, W> {
-    pub fn new(input: &'a mut R, output: &'a mut W, bash: &'a Path) -> Self {
-        Self {
-            input,
-            output,
-            bash,
-        }
+    pub fn new(input: &'a mut R, output: &'a mut W) -> Self {
+        Self { input, output }
     }
 }
 
@@ -74,7 +68,7 @@ impl<R: BufRead, W: Write> Prompter for Terminal<'_, R, W> {
     ) -> Result<SignIn<T>, String> {
         self.message("Press Enter during ChatGPT sign-in to return to provider selection.")?;
         let cancellation = Cancellation::default();
-        let monitor = SignInMonitor::start(self.bash, cancellation.clone())?;
+        let monitor = SignInMonitor::start(cancellation.clone())?;
         let result = operation(self, cancellation.clone());
         monitor.stop()?;
         match result {
@@ -93,10 +87,9 @@ struct SignInMonitor {
 }
 
 impl SignInMonitor {
-    fn start(bash: &Path, cancellation: Cancellation) -> Result<Self, String> {
+    fn start(cancellation: Cancellation) -> Result<Self, String> {
         // A separate process owns the pending console read. It can be killed and
         // reaped before the next prompt, unlike a blocked Rust stdin thread.
-        let _ = bash;
         let helper = crate::native::helper(if cfg!(windows) {
             "terminal"
         } else {
@@ -171,10 +164,9 @@ impl Drop for SignInMonitor {
 pub(crate) fn native_sign_in_fixture(case: &str) {
     use std::io;
 
-    let bash = crate::tools::find_bash().unwrap();
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
-    let mut terminal = Terminal::new(&mut input, &mut output, &bash);
+    let mut terminal = Terminal::new(&mut input, &mut output);
     let result = terminal.with_sign_in_cancel(|ui, cancellation| {
         ui.message("SETUP_SIGN_IN_WAITING")?;
         match case {

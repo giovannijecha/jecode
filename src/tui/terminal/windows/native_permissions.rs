@@ -45,7 +45,7 @@ fn native_windows_permissions() {
     assert!(!result.timed_out);
 }
 
-pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
+pub(super) fn fixture(path: &std::path::Path) {
     let outside = Directory::new();
     let file = outside.path().join("outside-note.txt");
     std::fs::write(&file, "native outside fixture\n").unwrap();
@@ -66,7 +66,6 @@ pub(super) fn fixture(path: &std::path::Path, bash: &std::path::Path) {
     let config = SessionConfig {
         store: Store::new(path.join("home")),
         settings,
-        bash: bash.to_path_buf(),
     };
     config.store.save(&config.settings).unwrap();
     let agent = Agent::new(
