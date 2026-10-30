@@ -307,3 +307,34 @@ fn an_approved_outside_base_lets_file_tools_work_there() {
         .result;
     assert!(allowed.encode().contains("outside"), "{allowed:?}");
 }
+
+#[test]
+fn an_approved_relative_outside_path_reaches_the_approved_file() {
+    let parent = Directory::new();
+    let project = parent.path().join("project");
+    let deep = parent.path().join("other").join("deep");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&deep).unwrap();
+    fs::write(deep.join("f.txt"), "relative outside\n").unwrap();
+    let tools = Tools::new(&project).unwrap();
+    let cancellation = crate::cancel::Cancellation::default();
+    let run = |name: &str, arguments: &str| {
+        let access = tools.access(name, arguments).unwrap();
+        assert!(access.outside);
+        let begun = Begun::default().with_base(access.base);
+        tools
+            .execute_begun(begun, name, arguments, &cancellation)
+            .result
+    };
+
+    let read = run("read", &arguments(&[("path", "../other/deep/f.txt")]));
+    assert!(read.encode().contains("relative outside"), "{read:?}");
+    let written = run(
+        "write",
+        &arguments(&[("path", "../other/deep/new.txt"), ("content", "made\n")]),
+    );
+    assert!(written.get("error").is_none(), "{written:?}");
+    assert_eq!(fs::read_to_string(deep.join("new.txt")).unwrap(), "made\n");
+    let listed = run("list", &arguments(&[("path", "../other/deep")]));
+    assert!(listed.encode().contains("f.txt"), "{listed:?}");
+}

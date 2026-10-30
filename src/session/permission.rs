@@ -104,6 +104,7 @@ pub(super) fn command(
 
 pub(super) fn decide(
     permissions: &Permissions,
+    redactor: &crate::redact::Redactor,
     request: &Request,
     waiting: usize,
     input: &mut impl BufRead,
@@ -123,7 +124,7 @@ pub(super) fn decide(
         output,
         "Permission · main agent{step}\n{} {}{place}\n{}\n  1 Approve · {}\n  2 Approve and remember · {}, this conversation\n  3 Deny · {}\n",
         request.tool.to_uppercase(),
-        access.target,
+        redactor.text(&access.target),
         wording::access(access),
         wording::once(access),
         wording::covers(access, &request.tool),

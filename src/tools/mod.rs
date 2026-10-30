@@ -294,7 +294,10 @@ impl Tools {
                     "list" | "search" => discovery::execute(
                         base.unwrap_or(&self.root),
                         name,
-                        &base.map_or_else(|| arguments.clone(), |base| self.rebase(base, &arguments)),
+                        &base.map_or_else(
+                            || arguments.clone(),
+                            |base| self.rebase(base, &arguments),
+                        ),
                         cancellation,
                     )
                     .map(|value| (value, None)),

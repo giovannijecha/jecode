@@ -43,12 +43,12 @@ impl Agent {
     /// parallel batches hold only calls the level allows inside the folder.
     pub(super) fn gated(&self, call: &ToolCall) -> bool {
         self.browser_refused(call, self.permissions.level())
-            || self
-                .tools
-                .access(&call.name, &call.arguments)
-                .map_or(call.name == "exec", |access| {
+            || self.tools.access(&call.name, &call.arguments).map_or(
+                call.name == "exec",
+                |access| {
                     access.outside || !matches!(self.permissions.check(&access), Verdict::Allow)
-                })
+                },
+            )
     }
 
     /// Browser control needs Full; closing or stopping a browser never does.

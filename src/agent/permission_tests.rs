@@ -155,6 +155,12 @@ fn browser_control_requires_full_while_read_only_web_is_available() {
             .unwrap_or("unknown")
             .to_string(),
     };
+    // Parallel batches skip `permit`, so refused browser calls must run alone.
+    agent.permissions().set_level(Level::Workspace).unwrap();
+    assert!(agent.gated(&inspect) && agent.gated(&raw));
+    assert!(!agent.gated(&close) && !agent.gated(&get));
+    agent.permissions().set_level(Level::Full).unwrap();
+    assert!(!agent.gated(&inspect));
     agent.permissions().set_level(Level::Read).unwrap();
     assert_eq!(verdict(&get), "run");
     assert_eq!(verdict(&close), "run");

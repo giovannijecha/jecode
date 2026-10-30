@@ -267,6 +267,7 @@ fn run_plain(
     let questions = agent.questions();
     let permissions = agent.permissions();
     let session = agent.sessions();
+    let redactor = agent.redactor();
     questions.set_available(true);
     permissions.set_surface(crate::permissions::Surface::Inline);
     let mut console = Console::new(output, status);
@@ -281,7 +282,14 @@ fn run_plain(
             );
         }
         if let Event::PermissionRequest { request, waiting } = &event {
-            return permission::decide(&permissions, request, *waiting, input, console.output());
+            return permission::decide(
+                &permissions,
+                &redactor,
+                request,
+                *waiting,
+                input,
+                console.output(),
+            );
         }
         console.emit(event)
     };

@@ -116,6 +116,10 @@ impl Agent {
         self.redactor.text(text)
     }
 
+    pub fn redactor(&self) -> crate::redact::Redactor {
+        self.redactor.clone()
+    }
+
     #[cfg(test)]
     pub fn replace_client<B: Backend + 'static>(&mut self, client: B) {
         self.replace_backend(Box::new(client)).unwrap();
