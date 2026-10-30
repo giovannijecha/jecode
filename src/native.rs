@@ -1,8 +1,10 @@
 //! Owned adapters embedded at build time. Runtime needs OS APIs, not compilers.
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 include!(concat!(env!("OUT_DIR"), "/native_assets.rs"));
 
@@ -21,9 +23,41 @@ pub(crate) fn powershell() -> std::process::Command {
     std::process::Command::new("powershell.exe")
 }
 
+/// Fully verified once per process and adapter; later calls recheck only the
+/// cached entry's type and length, and fully reinstall if those changed.
 pub(crate) fn helper(name: &str) -> Result<PathBuf, String> {
+    static VERIFIED: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
     let bytes = asset(name).ok_or_else(|| format!("No {name} adapter for this platform"))?;
-    materialize(&root()?, name, bytes)
+    let verified = VERIFIED.get_or_init(Mutex::default);
+    let cached = verified
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(name)
+        .cloned();
+    if let Some(path) = cached
+        && plausible(&path, bytes.len())
+    {
+        return Ok(path);
+    }
+    let path = materialize(&root()?, name, bytes)?;
+    verified
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(name.to_string(), path.clone());
+    Ok(path)
+}
+
+fn plausible(path: &Path, length: usize) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        #[cfg(windows)]
+        let redirected = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(not(windows))]
+        let redirected = false;
+        metadata.is_file() && !redirected && metadata.len() == length as u64
+    })
 }
 
 fn root() -> Result<PathBuf, String> {
