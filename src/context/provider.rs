@@ -20,8 +20,10 @@ impl Clone for Counter {
 }
 
 impl Counter {
+    /// A request always carries instructions, so a zero count means the
+    /// provider did not meter it and the previous reading stays.
     pub fn observe(&self, origin: Origin, usage: &Usage) -> bool {
-        let Some(tokens) = usage.context_tokens() else {
+        let Some(tokens) = usage.context_tokens().filter(|tokens| *tokens > 0) else {
             return false;
         };
         let observation = Some(Observation { origin, tokens });
@@ -106,6 +108,16 @@ mod tests {
             }
         ));
         assert_eq!(counter.tokens_for(&origin), Some(1050));
+        assert!(!counter.observe(
+            origin.clone(),
+            &Usage {
+                input_tokens: Some(0),
+                output_tokens: Some(0),
+                total_tokens: Some(0),
+                ..Usage::default()
+            }
+        ));
+        assert_eq!(counter.tokens_for(&origin), Some(1050));
     }
 
     #[test]
@@ -142,12 +154,12 @@ mod tests {
         counter.observe(
             origin.clone(),
             &Usage {
-                total_tokens: Some(0),
+                total_tokens: Some(2500),
                 ..Usage::default()
             },
         );
         let restored = Counter::parse(Some(&counter.value())).unwrap();
-        assert_eq!(restored.tokens_for(&origin), Some(0));
+        assert_eq!(restored.tokens_for(&origin), Some(2500));
         assert_eq!(
             restored.tokens_for(&Origin::with_account(
                 "openai",
