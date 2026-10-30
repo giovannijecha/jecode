@@ -30,3 +30,13 @@ fn resumed_ids_continue_after_the_highest_sequence_not_the_shown_number() {
     assert_eq!(sequence(&record("a2", 2, false)), 2);
     assert_eq!(sequence(&Value::object([("number", Value::number(3))])), 3);
 }
+
+#[test]
+fn display_number_resolves_stable_id_without_reusing_the_id_sequence() {
+    let observer = Observer::default();
+    observer.0.state.lock().unwrap().records.push(Tracked::new(
+        Record::from_value(&record("a3", 1, false)).unwrap(),
+    ));
+    assert_eq!(observer.display_number("a3"), Some(1));
+    assert_eq!(observer.display_number("a1"), None);
+}

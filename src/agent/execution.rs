@@ -221,8 +221,21 @@ impl Agent {
     }
 
     fn started_event(&self, call: &ToolCall) -> Event {
-        let arguments =
+        let mut arguments =
             json::parse(&call.arguments).unwrap_or_else(|_| Value::string(&call.arguments));
+        if call.name == "agent"
+            && let Value::Object(fields) = &mut arguments
+        {
+            fields.remove("display_number");
+        }
+        if call.name == "agent"
+            && let Some(id) = arguments.get("id").and_then(Value::as_str)
+            && let Some(number) = self.collaboration.display_number(id)
+            && let Value::Object(fields) = &mut arguments
+        {
+            // This copy is only for presentation; the model's call keeps its ID.
+            fields.insert("display_number".into(), Value::number(number));
+        }
         Event::ToolStarted {
             id: self.redact(&call.id),
             name: self.redact(&call.name),

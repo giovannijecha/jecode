@@ -138,6 +138,61 @@ fn records_keep_event_order_at_each_boundary_and_match_reused_tool_ids() {
 }
 
 #[test]
+fn resumed_agent_calls_keep_the_number_saved_with_their_collaborator() {
+    let directory = Directory::new();
+    let mut doc = Document::new(
+        directory.path().to_path_buf(),
+        "fixture/model".into(),
+        Effort::Default,
+    )
+    .unwrap();
+    doc.messages = vec![message("system", "Fixture"), message("user", "Review")];
+    for (call_id, id) in [("wait", "a3"), ("unknown", "a5")] {
+        doc.messages.push(Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "tool_calls",
+                Value::Array(vec![tool_call(
+                    call_id,
+                    "agent",
+                    Value::object([("action", Value::string("wait")), ("id", Value::string(id))]),
+                )]),
+            ),
+        ]));
+        doc.messages.push(Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string(call_id)),
+            ("content", Value::string("{}")),
+        ]));
+    }
+    let receipt = |after, id: &str| {
+        Value::object([
+            ("type", Value::string("collaboration")),
+            ("after_message", Value::number(after)),
+            (
+                "records",
+                Value::Array(vec![Value::object([
+                    ("id", Value::string(id)),
+                    ("number", Value::number(1)),
+                ])]),
+            ),
+        ])
+    };
+    doc.events = vec![receipt(2, "a3"), receipt(4, "a4")];
+    let calls = doc
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Tool { arguments, .. } => Some(arguments),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(crate::events::target("agent", &calls[0]), "wait AGENT 1");
+    assert_eq!(crate::events::target("agent", &calls[1]), "wait a5");
+    assert_eq!(calls[0].get("id").and_then(Value::as_str), Some("a3"));
+}
+
+#[test]
 fn large_histories_restore_all_messages_and_events_in_conversation_order() {
     let directory = Directory::new();
     let mut doc = Document::new(

@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    backend::openrouter::OpenRouter,
     cancel::Cancellation,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
@@ -13,6 +14,63 @@ use std::{
     time::Duration,
 };
 
+#[test]
+fn started_agent_call_captures_reused_number_without_changing_model_arguments() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, completion("First report", vec![])),
+        (200, completion("Second report", vec![])),
+        (200, completion("Third report", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let create = Value::object([
+        ("action", Value::string("create")),
+        (
+            "tasks",
+            Value::Array(vec![Value::object([
+                ("title", Value::string("Inspect")),
+                ("instructions", Value::string("Return a report")),
+                ("workspace", Value::string("shared")),
+            ])]),
+        ),
+    ]);
+    for id in ["a1", "a2"] {
+        agent.agent_tool(&create).unwrap();
+        agent
+            .collaboration()
+            .wait(Some(id), Duration::from_secs(5), &Cancellation::default())
+            .unwrap();
+        agent.collaboration().close(id).unwrap();
+    }
+    agent.agent_tool(&create).unwrap();
+    let raw = Value::object([
+        ("action", Value::string("wait")),
+        ("id", Value::string("a3")),
+        ("display_number", Value::number(99)),
+    ]);
+    let call = ToolCall {
+        id: "wait".into(),
+        name: "agent".into(),
+        arguments: raw.encode(),
+    };
+    let Event::ToolStarted { arguments, .. } = agent.started_event(&call) else {
+        panic!("Expected agent tool start");
+    };
+    assert_eq!(arguments.get("display_number"), Some(&Value::number(1)));
+    assert_eq!(arguments.get("id").and_then(Value::as_str), Some("a3"));
+    assert_eq!(call.arguments, raw.encode());
+    agent
+        .collaboration()
+        .wait(Some("a3"), Duration::from_secs(5), &Cancellation::default())
+        .unwrap();
+    agent.collaboration().stop_all();
+    assert_eq!(fixture.finish().len(), 3);
+}
 fn read_call(id: &str, path: &str) -> ToolCall {
     ToolCall {
         id: id.into(),

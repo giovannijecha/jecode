@@ -104,10 +104,15 @@ pub(super) fn definition() -> Value {
             (
                 "instructions",
                 string(
-                    "Revised assignment for update; updates a running agent or starts follow-up work in its existing context.",
+                    "Revised assignment for update; omit to keep the latest assignment when only sending context. Supply instructions, context, or both. Updates a running agent or starts follow-up work in its existing conversation.",
                 ),
             ),
-            ("context", string("Additional relevant context for update.")),
+            (
+                "context",
+                string(
+                    "Relevant context for update; omit to keep the latest context. Can be sent without instructions.",
+                ),
+            ),
             ("work", super::work()),
             (
                 "timeout_ms",

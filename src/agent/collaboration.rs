@@ -115,8 +115,8 @@ impl Agent {
             }
             "update" => observer.update(
                 id()?,
-                required(arguments, "instructions")?.into(),
-                optional_text(arguments, "context")?.unwrap_or("").into(),
+                optional_text(arguments, "instructions")?.map(str::to_owned),
+                optional_text(arguments, "context")?.map(str::to_owned),
             ),
             "list" => Ok(Value::object([(
                 "records",
@@ -308,3 +308,5 @@ mod recovery_tests;
 mod resume_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod update_tests;

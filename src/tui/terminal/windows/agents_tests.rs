@@ -15,7 +15,7 @@ use std::io::{self, Write};
 
 fn record() -> Value {
     Value::object([
-        ("id", Value::string("a1")),
+        ("id", Value::string("a3")),
         ("number", Value::number(1)),
         ("title", Value::string("Inspect the search view")),
         ("state", Value::string("returned")),
@@ -72,6 +72,25 @@ fn paint(rows: Vec<Line>, width: usize, height: usize) {
 pub(super) fn console() {
     let terminal = Terminal::open().unwrap();
     let (width, height) = terminal.size;
+    let arguments = Value::object([
+        ("action", Value::string("wait")),
+        ("id", Value::string("a3")),
+        ("display_number", Value::number(1)),
+    ]);
+    let presentation = crate::tui::cards::Presentation::default();
+    let card = crate::tui::cards::render(
+        crate::tui::cards::Tool {
+            name: "agent",
+            arguments: &arguments,
+            summary: "running",
+            result: None,
+            change: None,
+            presentation: &presentation,
+        },
+        width,
+    );
+    assert!(card[0].plain().contains("wait AGENT 1"));
+    paint(card, width, height);
     let mut state = State {
         width,
         height,
@@ -92,7 +111,7 @@ pub(super) fn console() {
         ("kind", Value::string("created")),
         ("id", Value::Null),
         ("title", Value::string("Create agents")),
-        ("details", Value::Array(vec![Value::string("a1")])),
+        ("details", Value::Array(vec![Value::string("a3")])),
         ("records", Value::Array(vec![record()])),
     ]);
     state.collaboration_event(receipt);
@@ -125,7 +144,7 @@ pub(super) fn console() {
         .join("\n");
     assert!(shown.contains("Agents · 1 open") && shown.contains("returned · main review"));
     paint(list.live, width, height);
-    state.agents_panel.as_mut().unwrap().inside = Some("a1".into());
+    state.agents_panel.as_mut().unwrap().inside = Some("a3".into());
     let inside = crate::tui::view::frame(&state, "fixture/model", "fixture");
     let shown = inside
         .live

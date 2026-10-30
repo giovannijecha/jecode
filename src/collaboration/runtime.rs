@@ -167,11 +167,11 @@ impl Observer {
                 if record.state == "stopping" {
                     None
                 } else {
-                    let assignment = record.pending.pop_back();
+                    let assignment = record.pending.back().cloned();
                     if assignment.is_some() {
-                        record.pending.clear();
                         // The selected assignment becomes the initial prompt.
                         // Updates sent after this handoff remain in the inbox.
+                        // Keep sent values available until received installs them.
                         child.inbox().with(|entries| {
                             entries.drain();
                         });
@@ -235,11 +235,7 @@ impl Observer {
                         {
                             let mut state = self.0.state.lock().unwrap();
                             if let Some(record) = state.record(&id) {
-                                for _ in prompts {
-                                    if let Some(assignment) = record.pending.pop_front() {
-                                        accepted.push(assignment);
-                                    }
-                                }
+                                accepted.extend(record.pending.iter().take(prompts.len()).cloned());
                             }
                         }
                         for assignment in accepted {
@@ -342,6 +338,9 @@ impl Observer {
             record.received_version = assignment.version;
             record.instructions = assignment.instructions.clone();
             record.context = assignment.context.clone();
+            record
+                .pending
+                .retain(|pending| pending.version > assignment.version);
             record.state = "running";
             record.activity = "Working".into();
             record.log.push(Entry::Assignment {
