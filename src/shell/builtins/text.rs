@@ -1,7 +1,8 @@
 use super::*;
-use std::io::Write;
+use std::io::Read;
 
-pub(super) fn tr(args: &[String], input: Option<&[u8]>, stream_direct: bool) -> Outcome {
+/// `tr -d`, streaming standard input to standard output.
+pub(super) fn tr(args: &[String], io: &Io) -> Outcome {
     if args.len() != 3 || args[1] != "-d" {
         return Err("tr: only -d CHARACTERS is supported".into());
     }
@@ -10,16 +11,9 @@ pub(super) fn tr(args: &[String], input: Option<&[u8]>, stream_direct: bool) -> 
         .replace("\\r", "\r")
         .replace("\\t", "\t");
     let delete = pattern.as_bytes();
-    if let Some(input) = input {
-        return ok(input
-            .iter()
-            .copied()
-            .filter(|byte| !delete.contains(byte))
-            .collect());
-    }
-    let mut reader = io::stdin();
+    let mut reader = &io.stdin;
+    let mut writer = &io.stdout;
     let mut buffer = [0u8; 8192];
-    let mut collected = Vec::new();
     loop {
         let count = reader
             .read(&mut buffer)
@@ -32,18 +26,12 @@ pub(super) fn tr(args: &[String], input: Option<&[u8]>, stream_direct: bool) -> 
             .copied()
             .filter(|byte| !delete.contains(byte))
             .collect();
-        if stream_direct {
-            io::stdout()
-                .write_all(&filtered)
-                .map_err(|error| format!("tr: {error}"))?;
-        } else {
-            collected.extend(filtered);
+        match writer.write_all(&filtered) {
+            Ok(()) => {}
+            Err(error) if closed(&error) => return Ok((1, Vec::new(), Vec::new())),
+            Err(error) => return Err(format!("tr: {error}")),
         }
     }
-    if stream_direct {
-        io::stdout()
-            .flush()
-            .map_err(|error| format!("tr: {error}"))?;
-    }
-    ok(collected)
+    writer.flush().map_err(|error| format!("tr: {error}"))?;
+    ok(Vec::new())
 }

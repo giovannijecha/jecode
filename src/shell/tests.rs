@@ -1,7 +1,7 @@
 use super::*;
 use crate::test_support::Directory;
 
-fn shell() -> (Directory, Shell) {
+pub(super) fn shell() -> (Directory, Shell) {
     let directory = Directory::new();
     let mut shell = Shell::new().unwrap();
     shell.cwd = directory.path().to_path_buf();
@@ -114,10 +114,9 @@ fn background_subshell_and_wait_complete() {
 #[test]
 fn command_substitution_creates_unique_temporary_file() {
     let (directory, mut shell) = shell();
-    shell.variables.insert(
-        "TMPDIR".into(),
-        directory.path().to_string_lossy().into_owned(),
-    );
+    shell
+        .variables
+        .set("TMPDIR", directory.path().to_string_lossy().into_owned());
     assert_eq!(
         shell
             .run("created=$(mktemp \"$TMPDIR/check.XXXXXXXXXX\"); printf '%s' \"$created\" > name"),

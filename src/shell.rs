@@ -4,23 +4,30 @@
 mod builtins;
 #[path = "shell/flow.rs"]
 mod flow;
+#[path = "shell/lexer.rs"]
+mod lexer;
 #[path = "shell/parser.rs"]
 mod parser;
 #[path = "shell/process.rs"]
 mod process;
-use parser::parse;
-#[path = "shell/lexer.rs"]
-mod lexer;
+#[path = "shell/streams.rs"]
+mod streams;
+#[path = "shell/variables.rs"]
+mod variables;
 
-use lexer::{Part, Token, Word};
-use std::collections::HashMap;
+use lexer::{Part, Word};
+use parser::{Command as Node, Compound, List, Redirect, Simple, parse};
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use streams::{Io, Sink, Source};
+use variables::Variables;
 
 const ENTRY: &str = "--internal-shell";
+const SUBSTITUTION_LIMIT: usize = 1024 * 1024;
 
 pub fn command(script: &str) -> Result<Command, String> {
     let executable = executable()?;
@@ -89,331 +96,174 @@ pub fn run_entry(args: impl Iterator<Item = OsString>) -> i32 {
 
 struct Shell {
     cwd: PathBuf,
-    variables: HashMap<String, String>,
+    variables: Variables,
     positional: Vec<String>,
     arg_zero: String,
     status: i32,
     exit: Option<i32>,
     stop_on_error: bool,
+    /// Nesting depth of `if`/`while`/`until` conditions, where `set -e` is off.
+    conditions: usize,
     jobs: Vec<std::process::Child>,
     last_background: Option<u32>,
-}
-
-#[derive(Default)]
-struct Simple {
-    words: Vec<Word>,
-    redirects: Vec<Redirect>,
-}
-
-struct Redirect {
-    stream: u8,
-    mode: &'static str,
-    target: Word,
+    /// Status of the last command substitution in the current command.
+    substitution: Cell<Option<i32>>,
 }
 
 impl Shell {
     fn new() -> Result<Self, String> {
-        Ok(Self {
-            cwd: std::env::current_dir().map_err(|error| error.to_string())?,
-            variables: std::env::vars_os()
-                .filter_map(|(name, value)| {
-                    Some((name.into_string().ok()?, value.into_string().ok()?))
-                })
-                .collect(),
+        let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+        Ok(Self::with(cwd, Variables::from_environment()))
+    }
+
+    fn with(cwd: PathBuf, variables: Variables) -> Self {
+        Self {
+            cwd,
+            variables,
             positional: Vec::new(),
             arg_zero: "jecode-shell".into(),
             status: 0,
             exit: None,
             stop_on_error: false,
+            conditions: 0,
             jobs: Vec::new(),
             last_background: None,
-        })
+            substitution: Cell::new(None),
+        }
+    }
+
+    /// A subshell: a copy of this shell's state whose changes stay local.
+    fn fork(&self) -> Self {
+        Self {
+            positional: self.positional.clone(),
+            arg_zero: self.arg_zero.clone(),
+            status: self.status,
+            stop_on_error: self.stop_on_error,
+            conditions: self.conditions,
+            last_background: self.last_background,
+            ..Self::with(self.cwd.clone(), self.variables.clone())
+        }
+    }
+
+    fn run(&mut self, script: &str) -> i32 {
+        self.run_script(script, &Io::standard())
+    }
+
+    fn run_script(&mut self, script: &str, io: &Io) -> i32 {
+        let list = match lexer::tokenize(script).and_then(|tokens| parse(script, &tokens)) {
+            Ok(list) => list,
+            Err(error) => {
+                io.report(&error);
+                return 2;
+            }
+        };
+        let status = self.run_list(&list, io);
+        self.exit.unwrap_or(status)
     }
 
     fn expand(&self, word: &Word) -> Result<String, String> {
-        let mut result = String::new();
-        for part in &word.0 {
-            match part {
-                Part::Literal(text) => result.push_str(text),
-                Part::Status => result.push_str(&self.status.to_string()),
-                Part::Positional(0) => result.push_str(&self.arg_zero),
-                Part::Positional(index) => {
-                    result.push_str(self.positional.get(index - 1).map_or("", String::as_str))
-                }
-                Part::AllArguments => result.push_str(&self.positional.join(" ")),
-                Part::Pid => result.push_str(&std::process::id().to_string()),
-                Part::LastBackground => result.push_str(
-                    &self
-                        .last_background
-                        .map_or(String::new(), |pid| pid.to_string()),
-                ),
-                Part::Command(script) => result.push_str(&self.substitute(script)?),
-                Part::Variable(name) => {
-                    if let Some((name, fallback)) = name.split_once(":-") {
-                        result.push_str(
-                            self.variables
-                                .get(name)
-                                .filter(|v| !v.is_empty())
-                                .map_or(fallback, String::as_str),
-                        );
-                    } else if let Some((name, fallback)) = name.split_once('-') {
-                        result.push_str(self.variables.get(name).map_or(fallback, String::as_str));
-                    } else {
-                        result.push_str(self.variables.get(name).map_or("", String::as_str));
-                    }
-                }
-            }
+        Ok(self.fields(word)?.join(" "))
+    }
+
+    /// Expands words into arguments; `"$@"` yields one per positional argument.
+    fn words(&self, words: &[Word]) -> Result<Vec<String>, String> {
+        let mut result = Vec::with_capacity(words.len());
+        for word in words {
+            result.extend(self.fields(word)?);
         }
         Ok(result)
     }
 
+    fn fields(&self, word: &Word) -> Result<Vec<String>, String> {
+        let mut fields = Vec::new();
+        let mut current = String::new();
+        for part in &word.0 {
+            if *part == Part::AllArguments {
+                let mut arguments = self.positional.iter();
+                if let Some(first) = arguments.next() {
+                    current.push_str(first);
+                    for argument in arguments {
+                        fields.push(std::mem::take(&mut current));
+                        current.push_str(argument);
+                    }
+                }
+            } else {
+                self.expand_part(part, &mut current)?;
+            }
+        }
+        if word.0 != [Part::AllArguments] || !self.positional.is_empty() {
+            fields.push(current);
+        }
+        Ok(fields)
+    }
+
+    fn expand_part(&self, part: &Part, result: &mut String) -> Result<(), String> {
+        match part {
+            Part::Literal(text) => result.push_str(text),
+            Part::Status => result.push_str(&self.status.to_string()),
+            Part::Positional(0) => result.push_str(&self.arg_zero),
+            Part::Positional(index) => {
+                result.push_str(self.positional.get(index - 1).map_or("", String::as_str))
+            }
+            Part::AllArguments => result.push_str(&self.positional.join(" ")),
+            Part::Pid => result.push_str(&std::process::id().to_string()),
+            Part::LastBackground => {
+                if let Some(pid) = self.last_background {
+                    result.push_str(&pid.to_string());
+                }
+            }
+            Part::Command(script) => result.push_str(&self.substitute(script)?),
+            Part::Variable(name) => {
+                let value = if let Some((name, fallback)) = name.split_once(":-") {
+                    self.variables
+                        .get(name)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or(fallback)
+                } else if let Some((name, fallback)) = name.split_once('-') {
+                    self.variables.get(name).unwrap_or(fallback)
+                } else {
+                    self.variables.get(name).unwrap_or("")
+                };
+                result.push_str(value);
+            }
+        }
+        Ok(())
+    }
+
+    /// Runs `$(script)` in a child shell. Its output is substituted whatever
+    /// its status, which becomes `$?` for an assignment-only command.
     fn substitute(&self, script: &str) -> Result<String, String> {
         let mut command = crate::shell::command(script)?;
-        command.current_dir(&self.cwd).stdin(Stdio::null());
-        for (name, value) in &self.variables {
+        command
+            .current_dir(&self.cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped());
+        for (name, value) in self.variables.iter() {
             command.env(name, value);
         }
-        let output = command
-            .output()
+        let mut child = command
+            .spawn()
             .map_err(|error| format!("command substitution: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "command substitution exited {}",
-                output.status.code().unwrap_or(1)
-            ));
-        }
-        if output.stdout.len() > 1024 * 1024 {
+        let mut output = Vec::new();
+        let read = child.stdout.take().map(|stdout| {
+            stdout
+                .take(SUBSTITUTION_LIMIT as u64 + 1)
+                .read_to_end(&mut output)
+        });
+        if output.len() > SUBSTITUTION_LIMIT {
+            let _ = child.kill();
+            let _ = child.wait();
             return Err("command substitution exceeds 1 MiB".into());
         }
-        String::from_utf8(output.stdout)
+        let status = child
+            .wait()
+            .map_err(|error| format!("command substitution: {error}"))?;
+        read.transpose()
+            .map_err(|error| format!("command substitution: {error}"))?;
+        self.substitution.set(Some(status.code().unwrap_or(1)));
+        String::from_utf8(output)
             .map(|text| text.trim_end_matches('\n').to_owned())
             .map_err(|_| "command substitution output must be UTF-8".into())
-    }
-
-    fn run(&mut self, script: &str) -> i32 {
-        let tokens = match lexer::tokenize(script) {
-            Ok(tokens) => tokens,
-            Err(error) => {
-                eprintln!("shell: {error}");
-                return 2;
-            }
-        };
-        self.run_tokens(&tokens)
-    }
-
-    fn run_tokens(&mut self, tokens: &[Token]) -> i32 {
-        if matches!(tokens.first(), Some(Token::Op("("))) {
-            return self.background_subshell(tokens);
-        }
-        if tokens.first().is_some_and(|token| literal(token, "for")) {
-            return self.for_loop(tokens);
-        }
-        if tokens.first().is_some_and(|token| literal(token, "if")) {
-            return self.if_command(tokens);
-        }
-        if tokens
-            .first()
-            .is_some_and(|token| literal(token, "while") || literal(token, "until"))
-        {
-            return self.loop_commands(tokens);
-        }
-        if let Some(index) = tokens.iter().enumerate().find_map(|(index, token)| {
-            (index > 0
-                && matches!(tokens[index - 1], Token::Op(";"))
-                && (literal(token, "for")
-                    || literal(token, "while")
-                    || literal(token, "until")
-                    || literal(token, "if")))
-            .then_some(index)
-        }) {
-            let status = self.run_tokens(&tokens[..index]);
-            if self.exit.is_some() || self.stop_on_error && status != 0 {
-                return status;
-            }
-            return self.run_tokens(&tokens[index..]);
-        }
-        let groups = match parse(tokens) {
-            Ok(groups) => groups,
-            Err(error) => {
-                eprintln!("shell: {error}");
-                return 2;
-            }
-        };
-        for (index, (separator, pipeline, background)) in groups.iter().enumerate() {
-            let should_run = match *separator {
-                "&&" => self.status == 0,
-                "||" => self.status != 0,
-                _ => true,
-            };
-            if !should_run {
-                continue;
-            }
-            self.status = if *background {
-                self.background(pipeline)
-            } else {
-                self.pipeline(pipeline)
-            };
-            if let Some(exit) = self.exit {
-                return exit;
-            }
-            let conditional_continuation = groups
-                .get(index + 1)
-                .is_some_and(|(next, _, _)| matches!(*next, "&&" | "||"));
-            if self.stop_on_error && self.status != 0 && !conditional_continuation {
-                return self.status;
-            }
-        }
-        self.status
-    }
-
-    fn pipeline(&mut self, stages: &[Simple]) -> i32 {
-        if stages.len() > 1 {
-            return match self.streaming_pipeline(stages) {
-                Ok(status) => status,
-                Err(error) => {
-                    eprintln!("shell: {error}");
-                    1
-                }
-            };
-        }
-        let mut input = None;
-        for (index, stage) in stages.iter().enumerate() {
-            let last = index + 1 == stages.len();
-            let (status, output) = self.simple(stage, input.take(), !last);
-            self.status = status;
-            if !last {
-                input = Some(output);
-            }
-        }
-        self.status
-    }
-
-    fn simple(
-        &mut self,
-        simple: &Simple,
-        pipeline_input: Option<Vec<u8>>,
-        capture: bool,
-    ) -> (i32, Vec<u8>) {
-        let mut args: Vec<String> =
-            match simple.words.iter().map(|word| self.expand(word)).collect() {
-                Ok(args) => args,
-                Err(error) => {
-                    eprintln!("shell: {error}");
-                    return (1, Vec::new());
-                }
-            };
-        let mut local_env = Vec::new();
-        while args.first().is_some_and(|arg| assignment(arg)) {
-            let assignment = args.remove(0);
-            let (name, value) = assignment.split_once('=').unwrap();
-            local_env.push((name.to_owned(), value.to_owned()));
-        }
-        if args.is_empty() {
-            for (name, value) in local_env {
-                self.variables.insert(name, value);
-            }
-            return (0, Vec::new());
-        }
-        let mut input = pipeline_input;
-        for redirect in &simple.redirects {
-            if redirect.mode == "<" {
-                let target = match self.expand(&redirect.target) {
-                    Ok(target) => target,
-                    Err(error) => {
-                        eprintln!("shell: {error}");
-                        return (1, Vec::new());
-                    }
-                };
-                match fs::read(self.path(&target)) {
-                    Ok(bytes) => input = Some(bytes),
-                    Err(error) => {
-                        eprintln!("shell: {error}");
-                        return (1, Vec::new());
-                    }
-                }
-            }
-        }
-        let (result, external) = if let Some(result) = builtins::run(
-            self,
-            &args,
-            input.as_deref(),
-            simple.redirects.is_empty() && !capture,
-        ) {
-            (result, false)
-        } else {
-            (
-                self.external(&args, input.as_deref(), &local_env, &simple.redirects),
-                true,
-            )
-        };
-        let (status, stdout, stderr) = match result {
-            Ok(result) => result,
-            Err(error) if external => {
-                eprintln!("shell: {error}");
-                return (127, Vec::new());
-            }
-            Err(error) => (1, Vec::new(), format!("shell: {error}\n").into_bytes()),
-        };
-        if external {
-            return (status, Vec::new());
-        }
-        let mut captured = Vec::new();
-        for (stream, data) in [(1, stdout), (2, stderr)] {
-            if stream == 1 && simple.redirects.iter().any(|r| r.mode == ">&2") {
-                if let Err(error) = io::stderr()
-                    .write_all(&data)
-                    .and_then(|()| io::stderr().flush())
-                {
-                    eprintln!("shell: {error}");
-                    return (1, Vec::new());
-                }
-                continue;
-            }
-            let redirect = simple
-                .redirects
-                .iter()
-                .rev()
-                .find(|r| r.stream == stream && r.mode != "<");
-            if let Some(redirect) = redirect {
-                let path = match self.expand(&redirect.target) {
-                    Ok(target) => self.path(&target),
-                    Err(error) => {
-                        eprintln!("shell: {error}");
-                        return (1, Vec::new());
-                    }
-                };
-                let file = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .append(redirect.mode == ">>")
-                    .truncate(redirect.mode == ">")
-                    .open(&path);
-                match file.and_then(|mut file| file.write_all(&data)) {
-                    Ok(()) => {}
-                    Err(error) => {
-                        eprintln!("shell: {}: {error}", path.display());
-                        return (1, Vec::new());
-                    }
-                }
-            } else if stream == 1 && capture {
-                captured = data;
-            } else {
-                let output = if stream == 1 {
-                    io::stdout()
-                        .write_all(&data)
-                        .and_then(|()| io::stdout().flush())
-                } else {
-                    io::stderr()
-                        .write_all(&data)
-                        .and_then(|()| io::stderr().flush())
-                };
-                if let Err(error) = output {
-                    eprintln!("shell: {error}");
-                    return (1, Vec::new());
-                }
-            }
-        }
-        (status, captured)
     }
 
     fn path(&self, argument: &str) -> PathBuf {
@@ -441,10 +291,12 @@ fn assignment(value: &str) -> bool {
         })
 }
 
-fn literal(token: &Token, expected: &str) -> bool {
-    matches!(token, Token::Word(Word(parts)) if parts.as_slice() == [Part::Literal(expected.to_owned())])
-}
-
 #[cfg(test)]
 #[path = "shell/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "shell/tests_runtime.rs"]
+mod tests_runtime;
+#[cfg(test)]
+#[path = "shell/tests_syntax.rs"]
+mod tests_syntax;

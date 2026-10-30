@@ -1,269 +1,258 @@
 use super::*;
+use parser::{AndOr, Item};
 
 impl Shell {
-    pub(super) fn if_command(&mut self, tokens: &[Token]) -> i32 {
-        let Some(condition_end) = tokens
-            .iter()
-            .position(|token| matches!(token, Token::Op(";")))
-        else {
-            eprintln!("shell: if: expected '; then'");
-            return 2;
-        };
-        if !tokens
-            .get(condition_end + 1)
-            .is_some_and(|token| literal(token, "then"))
+    pub(super) fn run_list(&mut self, list: &List, io: &Io) -> i32 {
+        for item in list {
+            if self.exit.is_some() {
+                break;
+            }
+            if let Some(source) = &item.background {
+                self.status = self.background(item, source, io);
+            } else {
+                self.and_or(&item.and_or, io);
+            }
+        }
+        self.status
+    }
+
+    fn and_or(&mut self, and_or: &AndOr, io: &Io) {
+        self.status = self.pipeline(&and_or.first, io);
+        let mut ran_last = and_or.rest.is_empty();
+        for (index, (op, pipeline)) in and_or.rest.iter().enumerate() {
+            if self.exit.is_some() {
+                return;
+            }
+            ran_last = (*op == "&&") == (self.status == 0);
+            if ran_last {
+                self.status = self.pipeline(pipeline, io);
+                ran_last = index + 1 == and_or.rest.len();
+            }
+        }
+        // `set -e` ignores failures that a later `&&`/`||` handles.
+        if self.stop_on_error
+            && self.conditions == 0
+            && ran_last
+            && self.status != 0
+            && self.exit.is_none()
         {
-            eprintln!("shell: if: expected then");
-            return 2;
-        }
-        let body_start = condition_end + 2;
-        let Some(body_end) = (body_start..tokens.len()).find(|index| {
-            literal(&tokens[*index], "fi")
-                && (*index == body_start || matches!(tokens[*index - 1], Token::Op(";")))
-        }) else {
-            eprintln!("shell: if: missing fi");
-            return 2;
-        };
-        let alternate = (body_start..body_end).find(|index| {
-            literal(&tokens[*index], "else")
-                && (*index == body_start || matches!(tokens[*index - 1], Token::Op(";")))
-        });
-        let passed = self.run_tokens(&tokens[1..condition_end]) == 0;
-        let selected = if passed {
-            &tokens[body_start..alternate.unwrap_or(body_end)]
-        } else if let Some(alternate) = alternate {
-            &tokens[alternate + 1..body_end]
-        } else {
-            &[][..]
-        };
-        let status = if selected.is_empty() {
-            0
-        } else {
-            self.run_tokens(selected)
-        };
-        if self.exit.is_some() || self.stop_on_error && status != 0 {
-            return status;
-        }
-        self.status = status;
-        let suffix = &tokens[body_end + 1..];
-        if suffix.iter().any(|token| !matches!(token, Token::Op(";"))) {
-            self.run_tokens(suffix)
-        } else {
-            status
+            self.exit = Some(self.status);
         }
     }
 
-    fn c_for_loop(&mut self, tokens: &[Token]) -> i32 {
-        let invalid = || {
-            eprintln!("shell: for: expected 'for ((NAME=START; NAME<LIMIT; NAME++)); do' ");
-            2
-        };
-        if !matches!(tokens.get(2), Some(Token::Op("("))) {
-            return invalid();
+    fn pipeline(&mut self, stages: &[Node], io: &Io) -> i32 {
+        if let [only] = stages {
+            return self.node(only, io);
         }
-        let Some(first_end) = tokens
-            .iter()
-            .position(|token| matches!(token, Token::Op(";")))
-        else {
-            return invalid();
+        self.streaming_pipeline(stages, io).unwrap_or_else(|error| {
+            io.report(&error);
+            1
+        })
+    }
+
+    /// Runs every stage concurrently in its own subshell, connected by pipes.
+    fn streaming_pipeline(&self, stages: &[Node], io: &Io) -> Result<i32, String> {
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            let mut upstream = None;
+            for (index, stage) in stages.iter().enumerate() {
+                let stdin = match upstream.take() {
+                    Some(reader) => Source::Pipe(reader),
+                    None => io.stdin.try_clone().map_err(|error| error.to_string())?,
+                };
+                let stdout = if index + 1 == stages.len() {
+                    io.stdout.try_clone().map_err(|error| error.to_string())?
+                } else {
+                    let (reader, writer) = std::io::pipe().map_err(|error| error.to_string())?;
+                    upstream = Some(reader);
+                    Sink::Pipe(writer)
+                };
+                let stage_io = Io {
+                    stdin,
+                    stdout,
+                    stderr: io.stderr.try_clone().map_err(|error| error.to_string())?,
+                };
+                let mut shell = self.fork();
+                handles.push(scope.spawn(move || {
+                    let status = shell.node(stage, &stage_io);
+                    shell.exit.unwrap_or(status)
+                }));
+            }
+            let mut last = 0;
+            for handle in handles {
+                last = handle.join().unwrap_or(1);
+            }
+            Ok(last)
+        })
+    }
+
+    pub(super) fn node(&mut self, node: &Node, io: &Io) -> i32 {
+        let (compound, redirects) = match node {
+            Node::Simple(simple) => return self.simple(simple, io),
+            Node::Compound(compound, redirects) => (compound, redirects),
         };
-        let Some(second_end) =
-            (first_end + 1..tokens.len()).find(|index| matches!(tokens[*index], Token::Op(";")))
-        else {
-            return invalid();
+        let redirected;
+        let io = if redirects.is_empty() {
+            io
+        } else {
+            match self.redirected(io, redirects) {
+                Ok(local) => {
+                    redirected = local;
+                    &redirected
+                }
+                Err(error) => {
+                    io.report(&error);
+                    return 1;
+                }
+            }
         };
-        let Some(end) = (second_end + 1..tokens.len().saturating_sub(1)).find(|index| {
-            matches!(tokens[*index], Token::Op(")")) && matches!(tokens[*index + 1], Token::Op(")"))
-        }) else {
-            return invalid();
-        };
-        let [Token::Word(init)] = &tokens[3..first_end] else {
-            return invalid();
-        };
-        let init = match self.expand(init) {
-            Ok(value) => value,
+        match compound {
+            Compound::For { name, values, body } => self.for_loop(name, values, body, io),
+            Compound::CountedFor {
+                init,
+                name,
+                limit,
+                increment,
+                body,
+            } => self.counted_for([init, name, limit, increment], body, io),
+            Compound::Loop {
+                until,
+                condition,
+                body,
+            } => {
+                let mut last = 0;
+                loop {
+                    let status = self.condition(condition, io);
+                    if self.exit.is_some() || (status == 0) == *until {
+                        break;
+                    }
+                    last = self.body(body, io);
+                    if self.exit.is_some() {
+                        break;
+                    }
+                }
+                last
+            }
+            Compound::If {
+                branches,
+                otherwise,
+            } => {
+                for (condition, body) in branches {
+                    let status = self.condition(condition, io);
+                    if self.exit.is_some() {
+                        return status;
+                    }
+                    if status == 0 {
+                        return self.body(body, io);
+                    }
+                }
+                otherwise.as_ref().map_or(0, |body| self.body(body, io))
+            }
+            Compound::Subshell(list) => {
+                let mut shell = self.fork();
+                let status = shell.run_list(list, io);
+                shell.exit.unwrap_or(status)
+            }
+        }
+    }
+
+    fn condition(&mut self, list: &List, io: &Io) -> i32 {
+        self.conditions += 1;
+        let status = self.run_list(list, io);
+        self.conditions -= 1;
+        status
+    }
+
+    fn body(&mut self, list: &List, io: &Io) -> i32 {
+        if list.is_empty() {
+            return 0;
+        }
+        self.run_list(list, io)
+    }
+
+    fn for_loop(&mut self, name: &Word, values: &[Word], body: &List, io: &Io) -> i32 {
+        let expanded = self
+            .expand(name)
+            .and_then(|name| Ok((name, self.words(values)?)));
+        let (name, values) = match expanded {
+            Ok(expanded) => expanded,
             Err(error) => {
-                eprintln!("shell: {error}");
+                io.report(&error);
                 return 1;
             }
         };
-        let Some((name, start)) = init.split_once('=') else {
-            return invalid();
-        };
-        if !assignment(&init) {
-            return invalid();
+        if !assignment(&format!("{name}=")) {
+            io.report("for: invalid variable name");
+            return 2;
         }
-        let Ok(start) = start.parse::<i64>() else {
-            return invalid();
-        };
-        let [
-            Token::Word(condition_name),
-            Token::Op("<"),
-            Token::Word(limit),
-        ] = &tokens[first_end + 1..second_end]
-        else {
-            return invalid();
-        };
-        if self.expand(condition_name).ok().as_deref() != Some(name) {
-            return invalid();
+        let mut status = 0;
+        for value in values {
+            self.variables.set(&name, value);
+            status = self.body(body, io);
+            if self.exit.is_some() {
+                break;
+            }
         }
-        let Ok(limit) = self.expand(limit).unwrap_or_default().parse::<i64>() else {
-            return invalid();
-        };
-        let [Token::Word(increment)] = &tokens[second_end + 1..end] else {
-            return invalid();
-        };
-        if self.expand(increment).ok().as_deref() != Some(&format!("{name}++")) {
-            return invalid();
-        }
-        if !matches!(tokens.get(end + 2), Some(Token::Op(";")))
-            || !tokens
-                .get(end + 3)
-                .is_some_and(|token| literal(token, "do"))
-        {
-            return invalid();
-        }
-        let body_start = end + 4;
-        let Some(body_end) = (body_start..tokens.len()).find(|index| {
-            literal(&tokens[*index], "done")
-                && (*index == body_start || matches!(tokens[*index - 1], Token::Op(";")))
-        }) else {
-            return invalid();
+        status
+    }
+
+    fn counted_for(&mut self, header: [&Word; 4], body: &List, io: &Io) -> i32 {
+        let [init, name, limit, increment] = header.map(|word| self.expand(word));
+        let parsed = (|| {
+            let init = init.ok()?;
+            let (variable, start) = init.split_once('=')?;
+            let start = start.parse::<i64>().ok()?;
+            let limit = limit.ok()?.parse::<i64>().ok()?;
+            (assignment(&init)
+                && name.ok()? == variable
+                && increment.ok()? == format!("{variable}++"))
+            .then(|| (variable.to_owned(), start, limit))
+        })();
+        let Some((name, start, limit)) = parsed else {
+            io.report(parser::COUNTED_FOR);
+            return 2;
         };
         if (limit as i128 - start as i128).abs() > 1_000_000 {
-            eprintln!("shell: for: iteration limit exceeded");
+            io.report("for: iteration limit exceeded");
             return 2;
         }
         let mut status = 0;
         for value in start..limit {
-            self.variables.insert(name.into(), value.to_string());
-            status = self.run_tokens(&tokens[body_start..body_end]);
-            if self.exit.is_some() || self.stop_on_error && status != 0 {
-                return status;
-            }
-        }
-        self.status = status;
-        let suffix = &tokens[body_end + 1..];
-        if suffix.iter().any(|token| !matches!(token, Token::Op(";"))) {
-            self.run_tokens(suffix)
-        } else {
-            status
-        }
-    }
-
-    pub(super) fn loop_commands(&mut self, tokens: &[Token]) -> i32 {
-        let until = literal(&tokens[0], "until");
-        let Some(condition_end) = tokens
-            .iter()
-            .position(|token| matches!(token, Token::Op(";")))
-        else {
-            eprintln!("shell: loop: expected '; do'");
-            return 2;
-        };
-        if !tokens
-            .get(condition_end + 1)
-            .is_some_and(|token| literal(token, "do"))
-        {
-            eprintln!("shell: loop: expected do");
-            return 2;
-        }
-        let body_start = condition_end + 2;
-        let Some(body_end) = (body_start..tokens.len()).find(|index| {
-            literal(&tokens[*index], "done")
-                && (*index == body_start || matches!(tokens[*index - 1], Token::Op(";")))
-        }) else {
-            eprintln!("shell: loop: missing done");
-            return 2;
-        };
-        let condition = &tokens[1..condition_end];
-        let body = &tokens[body_start..body_end];
-        let mut last = 0;
-        loop {
-            let status = self.run_tokens(condition);
-            if (status == 0) == until {
+            self.variables.set(&name, value.to_string());
+            status = self.body(body, io);
+            if self.exit.is_some() {
                 break;
             }
-            last = self.run_tokens(body);
-            if self.exit.is_some() || self.stop_on_error && last != 0 {
-                return last;
-            }
         }
-        self.status = last;
-        let suffix = &tokens[body_end + 1..];
-        if suffix.iter().any(|token| !matches!(token, Token::Op(";"))) {
-            self.run_tokens(suffix)
-        } else {
-            last
-        }
+        status
     }
 
-    pub(super) fn background(&mut self, stages: &[Simple]) -> i32 {
-        if stages.len() != 1 {
-            eprintln!("shell: background pipelines are unsupported");
-            return 2;
-        }
-        let args: Vec<String> = match stages[0]
-            .words
-            .iter()
-            .map(|word| self.expand(word))
-            .collect()
-        {
-            Ok(args) => args,
+    fn background(&mut self, item: &Item, source: &str, io: &Io) -> i32 {
+        let base = match io.stdout.try_clone().and_then(|stdout| {
+            Ok(Io {
+                stdin: Source::Null,
+                stdout,
+                stderr: io.stderr.try_clone()?,
+            })
+        }) {
+            Ok(base) => base,
             Err(error) => {
-                eprintln!("shell: {error}");
+                io.report(&error.to_string());
                 return 1;
             }
         };
-        if args.is_empty() {
-            eprintln!("shell: empty background command");
-            return 2;
-        }
-        let mut command = if builtins::is_builtin(&args[0]) {
-            match executable() {
-                Ok(path) => {
-                    let mut command = Command::new(path);
-                    command.args([ENTRY, "-c", &script_args(&args)]);
-                    command
-                }
-                Err(error) => {
-                    eprintln!("shell: {error}");
-                    return 1;
-                }
-            }
-        } else {
-            self.program(&args)
+        let command = match (&item.and_or.rest[..], &item.and_or.first[..]) {
+            ([], [Node::Simple(simple)]) => self.background_simple(simple, &base),
+            _ => self.background_script(source, &base).map(Some),
         };
-        let redirects = &stages[0].redirects;
-        let input = if let Some(redirect) = redirects.iter().rev().find(|r| r.mode == "<") {
-            match self.expand(&redirect.target).and_then(|target| {
-                fs::File::open(self.path(&target))
-                    .map(Stdio::from)
-                    .map_err(|e| e.to_string())
-            }) {
-                Ok(input) => input,
-                Err(error) => {
-                    eprintln!("shell: {error}");
-                    return 1;
-                }
-            }
-        } else {
-            Stdio::null()
-        };
-        let (stdout, stderr) = match (self.stream(redirects, 1), self.stream(redirects, 2)) {
-            (Ok(stdout), Ok(stderr)) => (stdout, stderr),
-            (Err(error), _) | (_, Err(error)) => {
-                eprintln!("shell: {error}");
+        let mut command = match command {
+            Ok(Some(command)) => command,
+            Ok(None) => return 0,
+            Err(error) => {
+                io.report(&error);
                 return 1;
             }
         };
-        command
-            .current_dir(&self.cwd)
-            .stdin(input)
-            .stdout(stdout)
-            .stderr(stderr);
-        for (name, value) in &self.variables {
-            command.env(name, value);
-        }
         match command.spawn() {
             Ok(child) => {
                 self.last_background = Some(child.id());
@@ -271,136 +260,43 @@ impl Shell {
                 0
             }
             Err(error) => {
-                eprintln!("shell: {}: {error}", args[0]);
+                io.report(&format!("{}: {error}", command.get_program().display()));
                 127
             }
         }
     }
 
-    pub(super) fn background_subshell(&mut self, tokens: &[Token]) -> i32 {
-        let Some(end) = tokens
-            .iter()
-            .position(|token| matches!(token, Token::Op(")")))
-        else {
-            eprintln!("shell: missing subshell ')' ");
-            return 2;
-        };
-        if !matches!(tokens.get(end + 1), Some(Token::Op("&"))) {
-            eprintln!("shell: only background subshells are supported");
-            return 2;
+    /// A lone simple command starts directly, so `$!` names the program.
+    fn background_simple(&self, simple: &Simple, io: &Io) -> Result<Option<Command>, String> {
+        let (args, local_env) = self.prepare(simple)?;
+        if args.is_empty() {
+            return Ok(None);
         }
-        let script = match tokens[1..end]
-            .iter()
-            .map(|token| match token {
-                Token::Word(word) => self.expand(word).map(|value| shell_quote(&value)),
-                Token::Op(op) => Ok(op.to_string()),
-            })
-            .collect::<Result<Vec<_>, String>>()
-        {
-            Ok(parts) => parts.join(" "),
-            Err(error) => {
-                eprintln!("shell: {error}");
-                return 1;
-            }
+        let mut command = if builtins::is_builtin(&args[0]) {
+            let mut command = Command::new(executable()?);
+            command.args([ENTRY, "-c", &script_args(&args)]);
+            command
+        } else {
+            self.program(&args)
         };
-        let mut command = match executable() {
-            Ok(path) => Command::new(path),
-            Err(error) => {
-                eprintln!("shell: {error}");
-                return 1;
-            }
-        };
-        command
-            .args([ENTRY, "-c", &script])
-            .current_dir(&self.cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-        for (name, value) in &self.variables {
-            command.env(name, value);
-        }
-        match command.spawn() {
-            Ok(child) => {
-                self.last_background = Some(child.id());
-                self.jobs.push(child);
-                self.status = 0;
-            }
-            Err(error) => {
-                eprintln!("shell: subshell: {error}");
-                return 127;
-            }
-        }
-        self.run_tokens(&tokens[end + 2..])
+        let io = self.redirected(io, &simple.redirects)?;
+        self.attach(&mut command, &io, &local_env)?;
+        Ok(Some(command))
     }
 
-    pub(super) fn for_loop(&mut self, tokens: &[Token]) -> i32 {
-        if matches!(tokens.get(1), Some(Token::Op("("))) {
-            return self.c_for_loop(tokens);
-        }
-        let header_end = tokens
-            .iter()
-            .position(|token| matches!(token, Token::Op(";")));
-        let Some(header_end) = header_end else {
-            eprintln!("shell: for: expected '; do'");
-            return 2;
-        };
-        let header = &tokens[..header_end];
-        if header.len() < 4
-            || !literal(&header[2], "in")
-            || !literal(tokens.get(header_end + 1).unwrap_or(&Token::Op(";")), "do")
-        {
-            eprintln!("shell: for: expected 'for NAME in WORDS; do'");
-            return 2;
-        }
-        let Token::Word(variable) = &header[1] else {
-            unreachable!()
-        };
-        let name = match self.expand(variable) {
-            Ok(name) => name,
-            Err(error) => {
-                eprintln!("shell: {error}");
-                return 1;
-            }
-        };
-        if !assignment(&format!("{name}=")) {
-            eprintln!("shell: for: invalid variable name");
-            return 2;
-        }
-        let body_start = header_end + 2;
-        let Some(body_end) = (body_start..tokens.len()).find(|index| {
-            literal(&tokens[*index], "done")
-                && (*index == body_start || matches!(tokens[*index - 1], Token::Op(";")))
-        }) else {
-            eprintln!("shell: for: missing done");
-            return 2;
-        };
-        let body = &tokens[body_start..body_end];
-        let mut result = 0;
-        for value in &header[3..] {
-            let Token::Word(value) = value else {
-                eprintln!("shell: for: invalid value list");
-                return 2;
-            };
-            let value = match self.expand(value) {
-                Ok(value) => value,
-                Err(error) => {
-                    eprintln!("shell: {error}");
-                    return 1;
-                }
-            };
-            self.variables.insert(name.clone(), value);
-            result = self.run_tokens(body);
-            if self.exit.is_some() || self.stop_on_error && result != 0 {
-                return result;
-            }
-        }
-        self.status = result;
-        let suffix = &tokens[body_end + 1..];
-        if suffix.iter().any(|token| !matches!(token, Token::Op(";"))) {
-            self.run_tokens(suffix)
+    /// Any other background list runs, unexpanded, in a child shell.
+    fn background_script(&self, source: &str, io: &Io) -> Result<Command, String> {
+        let script = if self.stop_on_error {
+            format!("set -e\n{source}")
         } else {
-            result
-        }
+            source.to_owned()
+        };
+        let mut command = Command::new(executable()?);
+        command
+            .args([ENTRY, "-c", &script, &self.arg_zero])
+            .args(&self.positional);
+        self.attach(&mut command, io, &[])?;
+        Ok(command)
     }
 }
 

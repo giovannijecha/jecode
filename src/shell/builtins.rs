@@ -1,17 +1,21 @@
-use super::Shell;
+use super::streams::{Io, closed};
+use super::{Shell, Variables};
+#[path = "builtins/files.rs"]
+mod files;
 #[path = "builtins/format.rs"]
 mod format;
 use format::printf;
 #[path = "builtins/text.rs"]
 mod text;
+use files::{copy_move, mktemp, remove};
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use text::tr;
 
-static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+pub(super) use files::copy_then_remove;
 
 type Outcome = Result<(i32, Vec<u8>, Vec<u8>), String>;
 
@@ -48,24 +52,14 @@ pub(super) fn is_builtin(name: &str) -> bool {
     )
 }
 
-pub(super) fn run(
-    shell: &mut Shell,
-    args: &[String],
-    input: Option<&[u8]>,
-    stream_direct: bool,
-) -> Option<Outcome> {
-    if !is_builtin(&args[0]) || args[0] == "env" && args.len() > 1 {
-        return None;
-    }
-    Some(run_builtin(shell, args, input, stream_direct))
+/// Whether `args` runs in-process; `env COMMAND` runs the external program.
+pub(super) fn handles(args: &[String]) -> bool {
+    is_builtin(&args[0]) && !(args[0] == "env" && args.len() > 1)
 }
 
-fn run_builtin(
-    shell: &mut Shell,
-    args: &[String],
-    input: Option<&[u8]>,
-    stream_direct: bool,
-) -> Outcome {
+/// Runs a built-in command. Output is either returned or, for commands that
+/// move data (`cat`, `tr`, `wc`), streamed through `io`.
+pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     match args[0].as_str() {
         ":" | "true" => ok(Vec::new()),
         "false" => Ok((1, Vec::new(), Vec::new())),
@@ -91,7 +85,7 @@ fn run_builtin(
             let path = args
                 .get(1)
                 .map(String::as_str)
-                .or_else(|| shell.variables.get("HOME").map(String::as_str));
+                .or_else(|| shell.variables.get("HOME"));
             match path {
                 Some(path) => {
                     let target = shell.path(path);
@@ -120,39 +114,13 @@ fn run_builtin(
             ok(text.into_bytes())
         }
         "printf" => printf(&args[1..]),
-        "cat" => {
-            if args.len() == 1 || args[1..].iter().any(|arg| arg == "-") {
-                if stream_direct && input.is_none() {
-                    io::copy(&mut io::stdin(), &mut io::stdout())
-                        .map_err(|e| format!("cat: {e}"))?;
-                    ok(Vec::new())
-                } else if let Some(input) = input {
-                    ok(input.to_vec())
-                } else {
-                    let mut bytes = Vec::new();
-                    io::stdin()
-                        .read_to_end(&mut bytes)
-                        .map_err(|e| format!("cat: {e}"))?;
-                    ok(bytes)
-                }
-            } else {
-                let mut bytes = Vec::new();
-                for arg in &args[1..] {
-                    bytes
-                        .extend(fs::read(shell.path(arg)).map_err(|e| format!("cat: {arg}: {e}"))?);
-                }
-                ok(bytes)
-            }
-        }
+        "cat" => cat(shell, args, io),
         "wc" => {
             if args.get(1).map(String::as_str) != Some("-c") || args.len() != 2 {
                 return Err("wc: only -c from stdin is supported".into());
             }
-            let count = if let Some(input) = input {
-                input.len() as u64
-            } else {
-                io::copy(&mut io::stdin(), &mut io::sink()).map_err(|e| format!("wc: {e}"))?
-            };
+            let count =
+                io::copy(&mut &io.stdin, &mut io::sink()).map_err(|e| format!("wc: {e}"))?;
             ok(format!("{count}\n").into_bytes())
         }
         "wait" => {
@@ -194,7 +162,7 @@ fn run_builtin(
             ok(output)
         }
         "mktemp" => mktemp(shell, args),
-        "tr" => tr(args, input, stream_direct),
+        "tr" => tr(args, io),
         "ls" => {
             let paths: Vec<&str> = args[1..]
                 .iter()
@@ -288,28 +256,61 @@ fn run_builtin(
         "export" => {
             for arg in &args[1..] {
                 if let Some((name, value)) = arg.split_once('=') {
-                    shell.variables.insert(name.into(), value.into());
-                } else if !shell.variables.contains_key(arg) {
-                    shell.variables.insert(arg.into(), String::new());
+                    shell.variables.set(name, value.into());
+                } else if !shell.variables.contains(arg) {
+                    shell.variables.set(arg, String::new());
                 }
             }
             ok(Vec::new())
         }
-        "bash" | "sh" => {
-            let Some(path) = args.get(1) else {
-                return Err("bash: expected script path".into());
-            };
-            match fs::read_to_string(shell.path(path)) {
-                Ok(script) => Ok((shell.run(&script), Vec::new(), Vec::new())),
-                Err(e) => Err(format!("bash: {path}: {e}")),
-            }
-        }
+        "bash" | "sh" => script(shell, args, io),
         _ => unreachable!(),
     }
 }
 
 fn ok(output: Vec<u8>) -> Outcome {
     Ok((0, output, Vec::new()))
+}
+
+/// Streams files or standard input to standard output.
+fn cat(shell: &Shell, args: &[String], io: &Io) -> Outcome {
+    let stdin = ["-".to_owned()];
+    let operands = if args.len() == 1 {
+        &stdin[..]
+    } else {
+        &args[1..]
+    };
+    let mut stdout = &io.stdout;
+    for operand in operands {
+        let copied = if operand == "-" {
+            io::copy(&mut &io.stdin, &mut stdout)
+        } else {
+            let file =
+                fs::File::open(shell.path(operand)).map_err(|e| format!("cat: {operand}: {e}"))?;
+            io::copy(&mut &file, &mut stdout)
+        };
+        match copied {
+            Ok(_) => {}
+            Err(error) if closed(&error) => return Ok((1, Vec::new(), Vec::new())),
+            Err(error) => return Err(format!("cat: {error}")),
+        }
+    }
+    stdout.flush().map_err(|e| format!("cat: {e}"))?;
+    ok(Vec::new())
+}
+
+/// Runs a script file in a fresh shell with its own positional arguments;
+/// its state and `exit` do not reach the caller.
+fn script(shell: &Shell, args: &[String], io: &Io) -> Outcome {
+    let Some(path) = args.get(1) else {
+        return Err(format!("{}: expected script path", args[0]));
+    };
+    let text =
+        fs::read_to_string(shell.path(path)).map_err(|e| format!("{}: {path}: {e}", args[0]))?;
+    let mut child = Shell::with(shell.cwd.clone(), Variables::clone(&shell.variables));
+    child.positional = args[2..].to_vec();
+    child.arg_zero = path.clone();
+    Ok((child.run_script(&text, io), Vec::new(), Vec::new()))
 }
 
 fn test(shell: &Shell, args: &[String]) -> Outcome {
@@ -334,126 +335,4 @@ fn test(shell: &Shell, args: &[String]) -> Outcome {
         _ => return Err("test: unsupported expression".into()),
     };
     Ok((if passed { 0 } else { 1 }, Vec::new(), Vec::new()))
-}
-
-fn remove(shell: &Shell, args: &[String]) -> Outcome {
-    let recursive = args
-        .iter()
-        .any(|arg| arg == "-r" || arg == "-R" || arg == "-rf" || arg == "-fr");
-    let force = args
-        .iter()
-        .any(|arg| arg == "-f" || arg == "-rf" || arg == "-fr");
-    let paths: Vec<_> = args[1..]
-        .iter()
-        .filter(|arg| !arg.starts_with('-'))
-        .collect();
-    if paths.is_empty() {
-        return Err("rm: missing operand".into());
-    }
-    for path in paths {
-        let full = shell.path(path);
-        let result = if full.is_dir() {
-            if recursive {
-                fs::remove_dir_all(&full)
-            } else {
-                fs::remove_dir(&full)
-            }
-        } else {
-            fs::remove_file(&full)
-        };
-        if let Err(error) = result
-            && (!force || full.exists())
-        {
-            return Err(format!("rm: {path}: {error}"));
-        }
-    }
-    ok(Vec::new())
-}
-
-fn copy_move(shell: &Shell, args: &[String]) -> Outcome {
-    let recursive = args.iter().any(|arg| arg == "-r" || arg == "-R");
-    let operands: Vec<_> = args[1..]
-        .iter()
-        .filter(|arg| !arg.starts_with('-'))
-        .collect();
-    if operands.len() != 2 {
-        return Err(format!("{}: expected source and destination", args[0]));
-    }
-    let source = shell.path(operands[0]);
-    let mut destination = shell.path(operands[1]);
-    if destination.is_dir() {
-        destination.push(source.file_name().ok_or("invalid source")?);
-    }
-    if args[0] == "mv" {
-        fs::rename(&source, &destination).map_err(|e| format!("mv: {e}"))?;
-    } else if source.is_dir() {
-        if !recursive {
-            return Err("cp: directory requires -r".into());
-        }
-        copy_tree(&source, &destination)?;
-    } else {
-        fs::copy(&source, &destination).map_err(|e| format!("cp: {e}"))?;
-    }
-    ok(Vec::new())
-}
-
-fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
-    fs::create_dir_all(destination).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(source).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let target = destination.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), target).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn mktemp(shell: &Shell, args: &[String]) -> Outcome {
-    let directory = args.iter().any(|arg| arg == "-d");
-    let templates: Vec<_> = args[1..].iter().filter(|arg| *arg != "-d").collect();
-    if templates.len() > 1 {
-        return Err("mktemp: expected one template".into());
-    }
-    let template = if let Some(template) = templates.first() {
-        (*template).clone()
-    } else {
-        let base = shell
-            .variables
-            .get("TMPDIR")
-            .map(String::as_str)
-            .unwrap_or(".");
-        format!("{base}/jecode.XXXXXXXXXX")
-    };
-    let x_count = template.chars().rev().take_while(|ch| *ch == 'X').count();
-    if !(6..=64).contains(&x_count) {
-        return Err("mktemp: template must end in 6 to 64 X characters".into());
-    }
-    let prefix = &template[..template.len() - x_count];
-    for _ in 0..100 {
-        let nonce = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-        let suffix = format!(
-            "{:0width$x}",
-            (std::process::id() as u64) << 32 | nonce,
-            width = x_count
-        );
-        let path = shell.path(&format!("{prefix}{suffix}"));
-        let result = if directory {
-            fs::create_dir(&path)
-        } else {
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .map(|_| ())
-        };
-        match result {
-            Ok(()) => return ok(format!("{}\n", path.display()).into_bytes()),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(format!("mktemp: {}: {error}", path.display())),
-        }
-    }
-    Err("mktemp: could not allocate a unique name".into())
 }
