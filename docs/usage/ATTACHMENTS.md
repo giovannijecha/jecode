@@ -114,7 +114,8 @@ their attachment references, but the referenced files are not copied. See
 | Linux | Embedded adapter using X11 `libX11` or the compositor's Wayland data-control protocol | Desktop `gdk-pixbuf` library through the embedded adapter |
 
 Wayland clipboard access requires the compositor to advertise `ext-data-control-v1`
-or `wlr-data-control-unstable-v1`. If it does not, Jecode reports that desktop
-clipboard access is unavailable; installing a clipboard utility does not change
+or `wlr-data-control-unstable-v1`. If it does not, Jecode falls back to X11
+through XWayland when `DISPLAY` is set; otherwise it reports that desktop
+clipboard access is unavailable. Installing a clipboard utility does not change
 the compositor's permission. Image bytes use standard input and output, not
 command arguments.

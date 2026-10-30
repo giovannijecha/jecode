@@ -43,7 +43,9 @@ int main(int argc, char **argv) {
     if (argc != 2) return 5;
     if (!strcmp(argv[1], "convert")) return jecode_convert_image();
     if (strcmp(argv[1], "clipboard")) return 5;
-    if (getenv("WAYLAND_DISPLAY")) return jecode_wayland_png();
-    if (getenv("DISPLAY")) return jecode_x11_png();
-    return 4;
+    /* Compositors without data-control (e.g. GNOME) report 4 before writing
+     * anything, so XWayland can still serve the clipboard. */
+    int result = getenv("WAYLAND_DISPLAY") ? jecode_wayland_png() : 4;
+    if (result == 4 && getenv("DISPLAY")) result = jecode_x11_png();
+    return result;
 }
