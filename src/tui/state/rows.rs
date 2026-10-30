@@ -19,7 +19,7 @@ impl State {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub(in crate::tui) struct Rows {
     pub previous: bool,
 }

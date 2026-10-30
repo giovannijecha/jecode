@@ -384,3 +384,34 @@ fn reads_join_one_card_as_they_finish_and_the_keycap_follows_the_latest_turn() {
     state.begin_tool_turn();
     assert!(!shown(&mut layout, &state).contains("Ctrl+O"));
 }
+
+#[test]
+fn toggling_tool_details_draws_only_the_turn_and_keeps_later_blocks() {
+    let mut state = State::default();
+    state.begin_tool_turn();
+    for (id, path) in [("a", "src/a.rs"), ("b", "src/b.rs")] {
+        read(&mut state, id, path);
+        finish_read(&mut state, id);
+    }
+    state.close_tools();
+    state.finish_tool_turn();
+    for index in 0..300 {
+        state.message(Kind::Assistant, &format!("Later message {index}"));
+    }
+    let mut layout = Layout::default();
+    shown(&mut layout, &state);
+    let tail = layout.blocks.len() - 1;
+    let kept = layout.blocks[tail].as_ptr();
+    for expanded in [true, false, true] {
+        state.toggle_tools().unwrap();
+        assert_eq!(state.tool_details.expanded, expanded);
+        // One bounded pass redraws the turn; the tail is not rebuilt.
+        layout.prepare(&state, 80, 64);
+        assert!(layout.ready(&state));
+        assert_eq!(layout.blocks[tail].as_ptr(), kept);
+        assert_eq!(
+            shown(&mut layout, &state),
+            shown(&mut Layout::default(), &state)
+        );
+    }
+}

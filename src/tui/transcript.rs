@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use super::{
     line::Line,
     prose,
@@ -78,10 +80,15 @@ pub(super) struct Layout {
     generation: Option<u64>,
     tools: u64,
     partial: Option<Partial>,
+    /// Built blocks to render again in place; later blocks stay cached
+    /// unless the separator context after the range changes.
+    stale: Option<Range<usize>>,
     pending: Vec<Vec<Line>>,
     pending_start: usize,
     pending_revision: Option<u64>,
     pending_stream: Option<PendingStream>,
+    /// The motion frame running cards were last drawn at.
+    pending_frame: Option<usize>,
     keycap: Option<usize>,
     keycap_key: Option<KeycapKey>,
 }
@@ -106,6 +113,7 @@ impl Layout {
             self.generation = Some(state.generation);
             self.tools = state.tool_revision;
             self.partial = None;
+            self.stale = None;
             self.pending.clear();
             self.pending_revision = None;
             self.pending_stream = None;
@@ -113,16 +121,12 @@ impl Layout {
         }
         if self.tools != state.tool_revision {
             // Several reads can finish in one event batch. Preserve the
-            // settled prefix while redrawing from the earliest changed card.
-            let block = state
+            // settled prefix and draw again only the changed cards.
+            let items = state
                 .tool_details
                 .changed_since(state.tool_revision.wrapping_sub(self.tools))
-                .map_or(1, |first| first + 1);
-            if block < self.blocks.len() {
-                self.context = self.contexts[block];
-                self.blocks.truncate(block);
-                self.contexts.truncate(block);
-            }
+                .unwrap_or(0..usize::MAX);
+            self.invalidate(items.start + 1..items.end.saturating_add(1));
             self.partial = None;
             self.pending_revision = None;
             self.pending_stream = None;
@@ -137,7 +141,29 @@ impl Layout {
         let end = state.settled_len() + 1;
         let mut rows_left = 256usize;
         let mut blocks_left = max_blocks;
-        while self.blocks.len() < end && blocks_left > 0 && rows_left > 0 {
+        while blocks_left > 0
+            && rows_left > 0
+            && let Some(stale) = self.stale.clone()
+        {
+            let block = stale.start;
+            let mut context = self.contexts[block];
+            let lines = render(state, block, &mut context, columns, self.keycap);
+            rows_left = rows_left.saturating_sub(lines.len().max(1));
+            blocks_left -= 1;
+            self.blocks[block] = lines;
+            let next = block + 1;
+            self.stale = if next == self.blocks.len() {
+                self.context = context;
+                None
+            } else if next < stale.end || context != self.contexts[next] {
+                // A changed separator carries on to the next block.
+                self.contexts[next] = context;
+                Some(next..stale.end.max(next + 1))
+            } else {
+                None
+            };
+        }
+        while self.stale.is_none() && self.blocks.len() < end && blocks_left > 0 && rows_left > 0 {
             let item = source(state, self.blocks.len());
             let previous = self.context;
             if self.partial.is_none()
@@ -190,6 +216,7 @@ impl Layout {
 
     pub fn ready(&self, state: &State) -> bool {
         self.blocks.len() == state.settled_len() + 1
+            && self.stale.is_none()
             && self.tools == state.tool_revision
             && self.keycap_key == Some(keycap_key(state, self.columns))
     }
@@ -211,25 +238,42 @@ impl Layout {
             .chain(keycap)
             .min()
             .map_or(0, |index| index + 1);
+        let last = self
+            .keycap
+            .into_iter()
+            .chain(keycap)
+            .max()
+            .map_or(0, |index| index + 2);
         self.keycap = keycap;
-        if block < self.blocks.len() {
-            self.context = self.contexts[block];
-            self.blocks.truncate(block);
-            self.contexts.truncate(block);
-            self.partial = None;
-        }
+        self.invalidate(block..last);
         self.pending_revision = None;
         self.pending_stream = None;
+    }
+
+    /// Marks built blocks to render again; blocks not built yet follow the
+    /// source when they are.
+    fn invalidate(&mut self, blocks: Range<usize>) {
+        if blocks.is_empty() || blocks.start >= self.blocks.len() {
+            return;
+        }
+        self.stale = Some(match self.stale.take() {
+            Some(stale) => stale.start.min(blocks.start)..stale.end.max(blocks.end),
+            None => blocks,
+        });
     }
 
     pub fn prepare_pending(&mut self, state: &State, max_rows: usize) {
         self.refresh_keycap(state);
         let start = state.settled_len();
         let changed = self.pending_revision != Some(state.revision) || self.pending_start != start;
-        let running = state.items[start..]
-            .iter()
-            .any(|item| matches!(item, Item::Tool { result: None, .. }));
+        // Running cards animate and count time; draw them again once a frame.
+        let frame = super::motion::frame();
+        let running = self.pending_frame != Some(frame)
+            && state.items[start..]
+                .iter()
+                .any(|item| matches!(item, Item::Tool { result: None, .. }));
         if changed || running {
+            self.pending_frame = Some(frame);
             let reuse =
                 self.pending_start == start && self.pending.len() == state.items.len() - start;
             if !reuse {
