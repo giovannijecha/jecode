@@ -13,7 +13,7 @@ pub(super) fn console() {
     state.begin_tool_turn();
     state.event(Event::ToolStarted {
         id: "update".into(),
-        name: "edit".into(),
+        name: "write".into(),
         arguments: Value::object([("path", Value::string("src/limit.rs"))]),
     });
     state.event(Event::ToolChanged {
@@ -26,7 +26,7 @@ pub(super) fn console() {
     });
     state.event(Event::ToolFinished {
         id: "update".into(),
-        name: "edit".into(),
+        name: "write".into(),
         summary: "wrote file".into(),
         result: Value::object([("bytes_written", Value::number(25))]),
     });
@@ -91,6 +91,10 @@ pub(super) fn console() {
         });
     }
     let rows: Vec<_> = state.rows().into_iter().flatten().collect();
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().starts_with(" UPDATE  src/limit.rs"))
+    );
     assert!(
         rows.iter()
             .any(|row| row.plain().contains("1 − let limit = 10;"))

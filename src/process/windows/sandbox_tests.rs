@@ -181,18 +181,15 @@ class Probe {
 #[test]
 fn workspace_native_rust_probe_receives_selected_environment() {
     let root = Directory::new();
-    let fixture = probe::executable(root.path());
+    let fixture = probe::environment_executable(root.path());
     let mut tools = Tools::new(root.path()).unwrap();
     tools.configure_output(root.path().join("logs"), Redactor::empty());
     let arguments = Value::object([
         ("executable", Value::string(fixture.to_string_lossy())),
-        ("args", probe::args()),
+        ("args", probe::environment_args()),
         (
             "env",
-            Value::object([
-                (probe::ROLE, Value::string("environment")),
-                ("JECODE_TEST_ENV", Value::string("sentinel")),
-            ]),
+            Value::object([("JECODE_TEST_ENV", Value::string("sentinel"))]),
         ),
         ("timeout_ms", Value::number(5000)),
     ]);

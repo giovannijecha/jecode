@@ -148,10 +148,17 @@ target one space after in `BODY`. There is no separate status dot: a finished
 call keeps its family colour, a running one shimmers on `BADGE_IDLE`, a
 background one shows a `LIT` name on `BADGE_IDLE`, a failed one turns
 `BADGE_BAD` and a stopped one `BADGE_WARN`. The names are READ, SKILL (a
-`read` of a skill's `SKILL.md`), UPDATE (the `edit` tool), WRITE, BASH, EXEC,
+`read` of a skill's `SKILL.md`), UPDATE, WRITE, BASH, EXEC,
 PROCESS, CHECKPOINT, WEB, BROWSER, LIST, SEARCH, MAP and AGENTS. List, Search and Map use the
 read-family Violet surface; an optional description keeps the concrete target
 on the following tree row.
+
+Successful writes to existing files show UPDATE when their retained change
+confirms the earlier file, including whole-file replacements. Captured new
+files show WRITE. Pending or failed writes, and writes without a retained
+change, keep WRITE. The same rule applies when expanding a card or restoring
+its saved history; the renderer does not inspect the current file to choose
+the earlier operation's label.
 
 Collaboration creation, sent/received assignments, returned reports, review and
 closure use immutable chronological receipts. Creation expands from `AGENTS` to
@@ -185,7 +192,7 @@ and `DIM` while running:
 | Read | `9 lines · from line 33 of 212`, or `9 lines · from line 33 · more from 42` when the total is unknown. Narrow rows drop the start clause; split lines keep `continues at byte N`. Skill reads `Loaded skill · …`. |
 | List, Search | Entry or matching-line counts, searched files, errors and `more from N` when paged. Expanded cards show structured paths, source context and exclusions. |
 | Map | Overview counts entries, files, notes, errors and continuation; inventory truncation reads `partial`. Expanded cards show areas, landmarks, symbols, notes, source references, freshness and source inspection errors. Remember and forget show concise note receipts. |
-| Update, existing-file Write | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
+| Update (`edit` or a captured existing-file `write`) | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
 | New Write | `New file · N lines`, then the first six numbered source rows. |
 | Checkpoint | One quiet result with the hidden row count. |
 | Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines · no checkpoint` follows in `DIM`. |

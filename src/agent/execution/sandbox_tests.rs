@@ -62,7 +62,7 @@ fn workspace_agent_launches_direct_exec_through_sandbox() {
 fn workspace_agent_launches_native_probe_through_sandbox() {
     let project = Directory::new();
     let home = Directory::new();
-    let executable = probe::executable(project.path());
+    let executable = probe::environment_executable(project.path());
     let fixture = HttpFixture::new(vec![
         (
             200,
@@ -73,13 +73,10 @@ fn workspace_agent_launches_native_probe_through_sandbox() {
                     "exec",
                     Value::object([
                         ("executable", Value::string(executable.to_string_lossy())),
-                        ("args", probe::args()),
+                        ("args", probe::environment_args()),
                         (
                             "env",
-                            Value::object([
-                                (probe::ROLE, Value::string("environment")),
-                                ("JECODE_TEST_ENV", Value::string("sentinel")),
-                            ]),
+                            Value::object([("JECODE_TEST_ENV", Value::string("sentinel"))]),
                         ),
                     ]),
                 )],

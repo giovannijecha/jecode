@@ -1,5 +1,6 @@
-//! A Rust fixture for Windows Process Security Environment tests.
-//! The test executable is copied inside the granted workspace before launch.
+//! Rust fixtures for Windows Process Security Environment tests.
+//! Copy the small owned shell for environment checks and the test harness for
+//! filesystem and grandchild checks into the granted workspace before launch.
 
 use crate::json::Value;
 use std::path::{Path, PathBuf};
@@ -13,6 +14,24 @@ pub fn executable(root: &Path) -> PathBuf {
     let fixture = root.join("jecode-sandbox-probe.exe");
     std::fs::copy(std::env::current_exe().unwrap(), &fixture).unwrap();
     fixture
+}
+
+pub fn environment_executable(root: &Path) -> PathBuf {
+    let fixture = root.join("jecode-sandbox-environment.exe");
+    std::fs::copy(crate::native::helper("shell").unwrap(), &fixture).unwrap();
+    fixture
+}
+
+pub fn environment_args() -> Value {
+    Value::Array(
+        [
+            "-c",
+            "test -z \"$GH_TOKEN\" && test -z \"$JECODE_SECRET_CANARY\" && test \"$JECODE_TEST_ENV\" = sentinel && echo WORKSPACE_NATIVE:sentinel:",
+        ]
+        .into_iter()
+        .map(Value::string)
+        .collect(),
+    )
 }
 
 pub fn args() -> Value {
@@ -36,12 +55,6 @@ fn probe() {
         return;
     };
     match role.as_str() {
-        "environment" => {
-            assert_eq!(std::env::var("JECODE_TEST_ENV").as_deref(), Ok("sentinel"));
-            assert!(std::env::var_os("JECODE_SECRET_CANARY").is_none());
-            assert!(std::env::var_os("GH_TOKEN").is_none());
-            println!("WORKSPACE_NATIVE:sentinel:");
-        }
         "write" => {
             let root = std::env::var_os(ALLOWED).unwrap();
             let nested = PathBuf::from(root).join("nested");
