@@ -19,6 +19,12 @@ map tools. Their tool catalog excludes `agent`; runtime dispatch also rejects
 delegation from a collaborator. Child processes, browser handles, scratch output
 and session histories belong to the individual worker.
 
+The main agent and its collaborators share the project's attachment pool.
+Pass an `attachment:ID` reference in the assignment or context so the worker
+can read the stored image, PDF or file. References keep the same IDs in shared
+and isolated workspaces, including attachments added after a worker starts.
+Files imported by a collaborator are also readable by the main agent.
+
 ## Assign and coordinate
 
 The main model supplies an objective, file or component scope, relevant source
@@ -56,7 +62,7 @@ main-agent tools, even with `parallel:true`. The workers continue independently.
 | Action | Required fields and behavior |
 | --- | --- |
 | `create` | `tasks`, each with `title`, `instructions`, `workspace`; optional focused `context`. |
-| `update` | `id`, `instructions`; optional `context`. Sends a new version during work or starts follow-up work on an available returned worker. |
+| `update` | `id` and at least one of `instructions` or `context`. Omitted fields retain the latest sent values, including queued revisions. Sends a new version during work or starts follow-up work on an available returned worker. |
 | `list` | Returns open assignments in the current conversation. |
 | `inspect` | `id`. Returns activity, assignment versions and report evidence; does not review it. |
 | `wait` | Optional `id` and `timeout_ms` (0–60000). Waits for selected running work, remaining cancellable. |
@@ -66,8 +72,12 @@ main-agent tools, even with `parallel:true`. The workers continue independently.
 | `integrate` | `id`, explicit `paths`, `expected_review_token` from `diff`. Applies selected changes with conflict checks. |
 | `close` | `id`. Releases the worker and its tool resources, removes its owned isolated copy and removes the assignment from the active list. A chronological `closed` receipt retains the final record. Close after preserving needed work. |
 
-Supply the complete revised assignment in `update`. An update being sent does
-not mean it has been received. Running workers consume
+To send new information while keeping the assignment, use
+`{"action":"update","id":"a1","context":"The data contract now includes an ID."}`.
+The collaborator receives a new assignment version in its existing conversation.
+
+When changing `instructions`, supply the complete revised assignment. An update
+being sent does not mean it has been received. Running workers consume
 updates at model boundaries; a tool already executing may finish first. Reports
 identify their received assignment version. Older reports remain evidence of
 older work and cannot review a newer active assignment.

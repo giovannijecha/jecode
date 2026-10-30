@@ -45,7 +45,6 @@ fn workspace_rust_child_and_grandchild_enforce_file_policy() {
     tools.configure_output(root.path().join("logs"), Redactor::empty());
     let arguments = Value::object([
         ("executable", Value::string(fixture.to_string_lossy())),
-        ("args", probe::args()),
         (
             "env",
             Value::object([
@@ -186,7 +185,6 @@ fn workspace_native_rust_probe_receives_selected_environment() {
     tools.configure_output(root.path().join("logs"), Redactor::empty());
     let arguments = Value::object([
         ("executable", Value::string(fixture.to_string_lossy())),
-        ("args", probe::args()),
         (
             "env",
             Value::object([

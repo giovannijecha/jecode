@@ -388,6 +388,7 @@ fn inspection_and_integration_actions_keep_their_tool_cards() {
             arguments: Value::object([
                 ("action", Value::string(action)),
                 ("id", Value::string("a1")),
+                ("display_number", Value::number(1)),
             ]),
         });
         app.worker_event(crate::events::Event::ToolFinished {

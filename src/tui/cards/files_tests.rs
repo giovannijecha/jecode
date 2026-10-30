@@ -248,3 +248,66 @@ fn new_file_lines_keep_two_rows_until_expanded() {
         assert!(rows.last().unwrap().ends_with("2   let done = true;"));
     }
 }
+
+#[test]
+fn write_badge_describes_the_captured_file_change() {
+    let arguments = object([
+        ("path", "src/notice.rs"),
+        ("content", "let notice = true;\n"),
+    ]);
+    let result = object([]);
+    for (before, label) in [(None, "WRITE"), (Some("let notice = false;\n"), "UPDATE")] {
+        let change = Change::between(before, "let notice = true;\n").unwrap();
+        for columns in [40, 80] {
+            for expanded in [false, true] {
+                let shown = Presentation {
+                    expanded,
+                    ..Presentation::default()
+                };
+                let mut call = tool("write", &arguments, &result, &shown);
+                call.change = Some(&change);
+                let rows = plain(&card(call, columns, false).rows);
+                assert!(
+                    rows[0].starts_with(&format!(" {label}  src/notice.rs")),
+                    "{rows:#?}"
+                );
+                assert_eq!(
+                    rows.iter().any(|row| row.contains("New file")),
+                    before.is_none()
+                );
+                assert_eq!(
+                    rows.iter().any(|row| row.contains("− let notice = false;")),
+                    before.is_some()
+                );
+                assert!(rows.iter().all(|row| text::cells(row) <= columns));
+            }
+        }
+    }
+}
+
+#[test]
+fn write_badge_keeps_the_operation_without_a_confirmed_file_change() {
+    let arguments = object([
+        ("path", "src/notice.rs"),
+        ("content", "let notice = true;\n"),
+    ]);
+    let change = Change::between(Some("let notice = false;\n"), "let notice = true;\n").unwrap();
+    let shown = Presentation::default();
+    for result in [None, Some(object([("error", "Could not write")]))] {
+        let call = Tool {
+            name: "write",
+            arguments: &arguments,
+            summary: "running",
+            result: result.as_ref(),
+            change: Some(&change),
+            presentation: &shown,
+        };
+        assert!(card(call, 80, false).rows[0].plain().starts_with(" WRITE "));
+    }
+    let result = object([]);
+    assert!(
+        card(tool("write", &arguments, &result, &shown), 80, false).rows[0]
+            .plain()
+            .starts_with(" WRITE ")
+    );
+}

@@ -13,7 +13,7 @@ pub(super) fn console() {
     state.begin_tool_turn();
     state.event(Event::ToolStarted {
         id: "update".into(),
-        name: "edit".into(),
+        name: "write".into(),
         arguments: Value::object([("path", Value::string("src/limit.rs"))]),
     });
     state.event(Event::ToolChanged {
@@ -26,7 +26,7 @@ pub(super) fn console() {
     });
     state.event(Event::ToolFinished {
         id: "update".into(),
-        name: "edit".into(),
+        name: "write".into(),
         summary: "wrote file".into(),
         result: Value::object([("bytes_written", Value::number(25))]),
     });
@@ -93,6 +93,10 @@ pub(super) fn console() {
     let rows: Vec<_> = state.rows().into_iter().flatten().collect();
     assert!(
         rows.iter()
+            .any(|row| row.plain().starts_with(" UPDATE  src/limit.rs"))
+    );
+    assert!(
+        rows.iter()
             .any(|row| row.plain().contains("1 − let limit = 10;"))
     );
     assert!(
@@ -149,7 +153,81 @@ pub(super) fn console() {
     assert_eq!(snapshot.lines().nth(1).unwrap(), expected);
     discovery_console(&terminal);
     concurrent_cards(&terminal);
+    node_failures(&terminal);
     drop(terminal);
+}
+
+/// Paint the actionable diagnostic while retaining the complete expanded log.
+fn node_failures(terminal: &Terminal) {
+    use crate::{
+        json::Value,
+        tui::cards::{self, Presentation, Tool},
+    };
+
+    let (physical_width, height) = terminal.size;
+    let arguments = Value::object([
+        ("action", Value::string("poll")),
+        ("process_id", Value::string("p1")),
+    ]);
+    let result = cards::failure_tests::node_failure();
+    for columns in [40, 80] {
+        for expanded in [false, true] {
+            let presentation = Presentation {
+                expanded,
+                ..Presentation::default()
+            };
+            let rows = cards::card(
+                Tool {
+                    name: "process",
+                    arguments: &arguments,
+                    result: Some(&result),
+                    summary: "exit 126",
+                    change: None,
+                    presentation: &presentation,
+                },
+                columns,
+                false,
+            )
+            .rows;
+            let plain: Vec<_> = rows.iter().map(crate::tui::line::Line::plain).collect();
+            let all = plain.join("\n");
+            assert!(
+                all.contains("locator.click:") && all.contains("10000ms"),
+                "{all}"
+            );
+            assert_eq!(all.contains("node:internal"), expanded, "{all}");
+            assert!(!all.contains("[ESC]"), "{all}");
+            assert!(
+                plain
+                    .iter()
+                    .all(|row| crate::tui::text::cells(row) <= columns)
+            );
+            let expected: String = (0..height)
+                .map(|index| {
+                    let line = plain.get(index).map_or("", String::as_str);
+                    format!(
+                        "{line}{}",
+                        " ".repeat(physical_width.saturating_sub(crate::tui::text::cells(line)))
+                    )
+                })
+                .collect();
+            let frame = crate::tui::view::Frame {
+                header: vec![],
+                history: vec![],
+                live: rows,
+                cursor: None,
+                composer: height - 1,
+            };
+            let output = crate::tui::render::Renderer::new().paint(&frame, columns, height);
+            write!(io::stdout(), "{output}").unwrap();
+            io::stdout().flush().unwrap();
+            assert_eq!(
+                probe().lines().nth(1).unwrap(),
+                expected,
+                "native Node failure at {columns} columns, expanded {expanded}"
+            );
+        }
+    }
 }
 
 /// Verify native cells while a later read finishes before its earlier peer.

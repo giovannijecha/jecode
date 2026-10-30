@@ -4,9 +4,12 @@ impl Observer {
     pub(crate) fn update(
         &self,
         id: &str,
-        instructions: String,
-        context: String,
+        instructions: Option<String>,
+        context: Option<String>,
     ) -> Result<Value, String> {
+        if instructions.is_none() && context.is_none() {
+            return Err("update requires instructions or context".into());
+        }
         let (version, received_version, wake) = {
             let mut state = self.0.state.lock().unwrap();
             let index = state
@@ -25,6 +28,16 @@ impl Observer {
             if matches!(record.state, "stopping" | "stopped" | "unknown") {
                 return Err("Collaborator is not available".into());
             }
+            // A partial update builds on the newest sent revision, even if
+            // the worker has not received it yet.
+            let latest = record.pending.back();
+            let instructions = instructions.unwrap_or_else(|| {
+                latest
+                    .map_or(&record.instructions, |a| &a.instructions)
+                    .clone()
+            });
+            let context =
+                context.unwrap_or_else(|| latest.map_or(&record.context, |a| &a.context).clone());
             let running = record.state == "running";
             let old_state = record.state;
             let old_reviewed = record.reviewed;

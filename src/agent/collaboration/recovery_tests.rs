@@ -65,7 +65,7 @@ fn update_before_worker_handoff_is_received_once_as_initial_assignment() {
         .receipt("created", None, 0, "Agents", vec![])
         .unwrap();
     observer
-        .update("a1", "Version two".into(), String::new())
+        .update("a1", Some("Version two".into()), None)
         .unwrap();
     let (lock, changed) = &*gate;
     *lock.lock().unwrap() = true;

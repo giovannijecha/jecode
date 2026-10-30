@@ -115,8 +115,8 @@ impl Agent {
             }
             "update" => observer.update(
                 id()?,
-                required(arguments, "instructions")?.into(),
-                optional_text(arguments, "context")?.unwrap_or("").into(),
+                optional_text(arguments, "instructions")?.map(str::to_owned),
+                optional_text(arguments, "context")?.map(str::to_owned),
             ),
             "list" => Ok(Value::object([(
                 "records",
@@ -253,7 +253,7 @@ impl Agent {
             .join("child-home");
         crate::disk::ensure_private_directory(&child_home)
             .map_err(|error| format!("Could not prepare collaborator storage: {error}"))?;
-        child.enable_sessions(&child_home)?;
+        child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
         child.enable_checkpoints(&child_home);
         child.skills.configure(&home);
         child
@@ -291,6 +291,8 @@ fn optional_number(value: &Value, name: &str) -> Result<Option<usize>, String> {
 }
 
 #[cfg(test)]
+mod attachment_tests;
+#[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
 mod integration_tests;
@@ -308,3 +310,5 @@ mod recovery_tests;
 mod resume_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod update_tests;

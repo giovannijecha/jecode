@@ -480,3 +480,30 @@ fn a_null_error_field_is_not_a_failure() {
     ));
     assert!(text.contains("Unknown collaborator"), "{text}");
 }
+
+#[test]
+fn agent_card_keeps_reused_display_number_while_running_and_finished() {
+    let arguments = Value::object([
+        ("action", Value::string("wait")),
+        ("id", Value::string("a3")),
+        ("display_number", Value::number(1)),
+    ]);
+    for result in [
+        None,
+        Some(Value::object([("records", Value::Array(vec![]))])),
+    ] {
+        let rows = draw(
+            "agent",
+            &arguments,
+            result.as_ref(),
+            None,
+            80,
+            &Presentation::default(),
+        );
+        assert!(
+            plain(&rows).contains("AGENTS  wait AGENT 1"),
+            "{}",
+            plain(&rows)
+        );
+    }
+}

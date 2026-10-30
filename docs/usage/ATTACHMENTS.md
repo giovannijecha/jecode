@@ -67,6 +67,10 @@ result includes `attached_from`. References remain available after
 compaction; see [LONG_WORK.md](LONG_WORK.md). File tools keep their normal
 scope, with these references adding access to the stored copies.
 
+Collaborators use this same project pool. A reference passed in an assignment
+or context resolves to the stored copy in both shared and isolated workspaces.
+An attachment imported by a collaborator is also readable by the main agent.
+
 User-provided attachments stay in the active conversation view. Media returned
 by tools is sent for the next assistant response, including retries and user
 messages arriving before that response. Later requests retain the original tool
@@ -92,7 +96,10 @@ that reference imported images or PDFs also retain their copies. Cleaning the
 temporary area removes its originals, not these saved copies. PDF annotation
 images are stored here too.
 
-An asset is removed only when no saved session in the bucket refers to it.
+An asset is removed only when no saved session, retained collaborator history
+or collaborator recovery record in the project refers to it. Closing a worker
+or deleting its parent conversation can retain those histories and their
+referenced attachments.
 On TUI exit, collection gives unreferenced imports a 10-minute grace period
 to protect other running instances. [Session deletion](SESSIONS.md#delete)
 immediately releases attachments of its messages when no other session needs

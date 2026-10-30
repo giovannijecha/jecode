@@ -20,6 +20,7 @@ struct RetainedCollaboration {
 
 pub(crate) struct Removal {
     bucket: PathBuf,
+    attachment_bucket: PathBuf,
     ancillary: Vec<PathBuf>,
     durable: Option<PathBuf>,
     output: output::Removal,
@@ -96,6 +97,7 @@ impl Store {
             .collect();
         Ok(Removal {
             bucket: self.bucket.clone(),
+            attachment_bucket: self.attachment_bucket().to_path_buf(),
             released,
             ancillary,
             durable,
@@ -138,8 +140,8 @@ impl Removal {
             report.files += 1;
         }
         // Collection is best effort: the conversation itself is already gone.
-        report.files += crate::attachments::Pool::new(self.bucket.join("attachments"))
-            .collect(&self.bucket, live_attachments, &self.released)
+        report.files += crate::attachments::Pool::new(self.attachment_bucket.join("attachments"))
+            .collect(&self.attachment_bucket, live_attachments, &self.released)
             .unwrap_or(0);
         Ok(report)
     }

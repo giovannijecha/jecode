@@ -21,7 +21,6 @@ fn workspace_sandbox_runs_rust_probe_and_rejects_interactive_terminal() {
     };
     let command = execute_scoped(Value::object([
         ("executable", Value::string(fixture.to_string_lossy())),
-        ("args", probe::args()),
         (
             "env",
             Value::object([

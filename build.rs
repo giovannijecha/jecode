@@ -12,6 +12,7 @@ fn main() {
     let mut assets = Vec::new();
     shell(&out, &mut assets, &target);
     if target == "windows" {
+        sandbox_probe(&out, &target);
         windows(&out, &mut assets);
     } else if target == "linux" || target == "macos" {
         unix(&out, &mut assets, &target);
@@ -38,12 +39,31 @@ fn shell(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
     } else {
         "jecode-shell"
     });
+    let mut command = rust_command("jecode_shell", target);
+    command.arg("src/shell/entry.rs").arg("-o").arg(&binary);
+    checked(&mut command, "shell");
+    assets.push(("shell".into(), binary));
+}
+
+fn sandbox_probe(out: &Path, target: &str) {
+    let source = "src/test_support/sandbox_probe.rs";
+    println!("cargo:rerun-if-changed={source}");
+    let mut command = rust_command("jecode_sandbox_probe", target);
+    command
+        .arg(source)
+        .arg("-o")
+        .arg(out.join("jecode-sandbox-probe.exe"));
+    checked(&mut command, "sandbox probe");
+}
+
+fn rust_command(name: &str, target: &str) -> Command {
     let compiler = env::var_os("RUSTC").expect("Cargo RUSTC");
     let triple = env::var("TARGET").expect("Cargo TARGET");
     let mut command = Command::new(&compiler);
     command.args([
         "--edition=2024",
-        "--crate-name=jecode_shell",
+        "--crate-name",
+        name,
         "-Dunsafe_code",
         "-Copt-level=2",
     ]);
@@ -68,9 +88,7 @@ fn shell(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
     if target == "windows" {
         command.arg("-Ctarget-feature=+crt-static");
     }
-    command.arg("src/shell/entry.rs").arg("-o").arg(&binary);
-    checked(&mut command, "shell");
-    assets.push(("shell".into(), binary));
+    command
 }
 
 fn windows(out: &Path, assets: &mut Vec<(String, PathBuf)>) {

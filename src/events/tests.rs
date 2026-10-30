@@ -147,6 +147,21 @@ fn routine_description_overrides_command_and_blank_falls_back() {
 }
 
 #[test]
+fn agent_target_uses_shown_number_and_keeps_unknown_ids_honest() {
+    let shown = Value::object([
+        ("action", Value::string("wait")),
+        ("id", Value::string("a3")),
+        ("display_number", Value::number(1)),
+    ]);
+    assert_eq!(target("agent", &shown), "wait AGENT 1");
+    let unknown = Value::object([
+        ("action", Value::string("inspect")),
+        ("id", Value::string("a3")),
+    ]);
+    assert_eq!(target("agent", &unknown), "inspect a3");
+}
+
+#[test]
 fn exec_summary_uses_command_exit_and_background_contract() {
     let done = Value::object([
         ("exit_code", Value::number(3)),

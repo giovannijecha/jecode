@@ -47,9 +47,10 @@ pub fn target(name: &str, arguments: &Value) -> String {
             );
         }
         let id = arguments.get("id").and_then(Value::as_str).unwrap_or("");
-        let label = id
-            .strip_prefix('a')
-            .filter(|suffix| !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()))
+        let label = arguments
+            .get("display_number")
+            .and_then(Value::as_usize)
+            .filter(|number| *number > 0)
             .map_or_else(|| id.to_owned(), |number| format!("AGENT {number}"));
         return format!("{action} {label}").trim_end().into();
     }

@@ -129,9 +129,15 @@ pub(crate) fn collaboration_line(event: &crate::json::Value) -> String {
             .and_then(crate::json::Value::as_str)
             .unwrap_or("")
     };
-    let label = text("id")
-        .strip_prefix('a')
-        .map_or_else(|| "AGENTS".to_owned(), |number| format!("AGENT {number}"));
+    let label = if text("id").is_empty() {
+        "AGENTS".to_owned()
+    } else {
+        event
+            .get("number")
+            .and_then(crate::json::Value::as_usize)
+            .filter(|number| *number > 0)
+            .map_or_else(|| text("id").to_owned(), |number| format!("AGENT {number}"))
+    };
     clean(&format!("[{label}: {}] {}", text("title"), text("summary")))
 }
 
@@ -151,13 +157,25 @@ mod tests {
                 arguments: Value::object([
                     ("action", Value::string("inspect")),
                     ("id", Value::string("a2")),
+                    ("display_number", Value::number(1)),
                 ]),
             })
             .unwrap();
         assert_eq!(
             String::from_utf8(status).unwrap(),
-            "[tool: agent] inspect AGENT 2\n"
+            "[tool: agent] inspect AGENT 1\n"
         );
+    }
+
+    #[test]
+    fn collaboration_receipt_uses_displayed_number() {
+        let event = Value::object([
+            ("id", Value::string("a3")),
+            ("number", Value::number(1)),
+            ("title", Value::string("Review")),
+            ("summary", Value::string("Returned")),
+        ]);
+        assert_eq!(collaboration_line(&event), "[AGENT 1: Review] Returned");
     }
 
     #[test]

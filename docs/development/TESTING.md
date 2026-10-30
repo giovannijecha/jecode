@@ -180,7 +180,9 @@ Both installers build offline and print the installed executable's version.
 ## Native and manual checks
 
 Required Windows confinement tests launch an original Rust probe inside the
-granted workspace. They verify selected environment variables, permitted file
+granted workspace. Cargo builds a small standalone probe and embeds it only in
+the test executable, keeping native startup independent of the full harness's
+size. These tests verify selected environment variables, permitted file
 operations, denied reads and writes outside the workspace, inherited confinement
 in descendants and rejection of interactive terminals. PowerShell and .NET
 compatibility checks are additional opt-in tests because of the documented

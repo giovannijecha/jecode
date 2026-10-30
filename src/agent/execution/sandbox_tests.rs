@@ -73,7 +73,6 @@ fn workspace_agent_launches_native_probe_through_sandbox() {
                     "exec",
                     Value::object([
                         ("executable", Value::string(executable.to_string_lossy())),
-                        ("args", probe::args()),
                         (
                             "env",
                             Value::object([

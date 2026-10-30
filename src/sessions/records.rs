@@ -48,11 +48,25 @@ impl Document {
             }
         }
         let mut calls = HashMap::new();
+        let mut display_numbers = HashMap::new();
         let mut latest_tool = None;
         for (index, events) in events.into_iter().enumerate() {
             for event in events {
                 if hidden(event, index, &self.context.returned) {
                     continue;
+                }
+                if event.get("type").and_then(Value::as_str) == Some("collaboration")
+                    && let Some(records) = event.get("records").and_then(Value::as_array)
+                {
+                    for record in records {
+                        if let (Some(id), Some(number)) = (
+                            record.get("id").and_then(Value::as_str),
+                            record.get("number").and_then(Value::as_usize),
+                        ) && number > 0
+                        {
+                            display_numbers.insert(id.to_owned(), number);
+                        }
+                    }
                 }
                 append_event(&mut records, event, latest_tool);
             }
@@ -83,12 +97,26 @@ impl Document {
                 let call = calls.remove(id).unwrap();
                 let name = call.name.as_str();
                 let arguments = call.arguments.as_str();
+                let mut arguments =
+                    json::parse(arguments).unwrap_or_else(|_| Value::string(arguments));
+                if name == "agent"
+                    && let Value::Object(fields) = &mut arguments
+                {
+                    fields.remove("display_number");
+                }
+                if name == "agent"
+                    && let Some(id) = arguments.get("id").and_then(Value::as_str)
+                    && let Some(number) = display_numbers.get(id)
+                    && let Value::Object(fields) = &mut arguments
+                {
+                    fields.insert("display_number".into(), Value::number(*number));
+                }
                 let result = json::parse(string(message, "content").unwrap()).unwrap();
                 latest_tool = Some(records.len());
                 records.push(Record::Tool {
                     id: id.into(),
                     name: name.into(),
-                    arguments: json::parse(arguments).unwrap_or_else(|_| Value::string(arguments)),
+                    arguments,
                     summary: tool_summary(name, &result),
                     result,
                     change: None,

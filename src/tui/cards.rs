@@ -249,6 +249,12 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         .flatten();
     let name = match tool.name {
         "read" if skill.is_some() => "Skill",
+        "write"
+            if Status::of(tool) == Status::Done
+                && tool.change.is_some_and(|change| !change.created) =>
+        {
+            "Update"
+        }
         "collaboration" => field(tool.arguments, "label"),
         other => title_name(other),
     };
@@ -385,6 +391,8 @@ mod checkpoint_tests;
 mod discovery_tests;
 #[cfg(test)]
 mod edit_fallback_tests;
+#[cfg(test)]
+pub(super) mod failure_tests;
 #[cfg(test)]
 mod files_tests;
 #[cfg(test)]

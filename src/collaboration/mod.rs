@@ -349,6 +349,18 @@ impl Record {
 }
 
 impl Observer {
+    /// The displayed number of an open collaborator, looked up by stable ID.
+    pub(crate) fn display_number(&self, id: &str) -> Option<usize> {
+        self.0
+            .state
+            .lock()
+            .unwrap()
+            .records
+            .iter()
+            .find(|record| record.id == id)
+            .map(|record| record.number)
+    }
+
     pub(crate) fn abort_created(&self, ids: &[String], gate: &Arc<(Mutex<bool>, Condvar)>) {
         let workers = {
             let mut state = self.0.state.lock().unwrap();
