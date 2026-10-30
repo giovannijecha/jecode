@@ -109,7 +109,8 @@ fn controls_and_terminal_lifetime() {
     terminal.send(b"queued follow-up\r\x1b[A edited\rkept draft\x03");
     terminal.wait("Stopped");
     terminal.send(b"\x03second prompt\r");
-    terminal.wait("Native second answer");
+    let answer = terminal.wait("Native second answer");
+    terminal.wait_after("Done", answer);
     terminal.send(b"\x1b[<64;10;5M");
     terminal.wait("back to bottom");
     terminal.send(b"\x1b[5~\x1b[6~");
