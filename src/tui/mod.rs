@@ -1,5 +1,6 @@
 mod activity;
 mod agents;
+mod arrival;
 mod ask;
 mod attach;
 mod background;
@@ -113,6 +114,8 @@ struct App {
     /// The conversation's permissions, shared with the agent and its collaborators.
     permission_observer: crate::permissions::Permissions,
     todo_message_len: usize,
+    /// When the chat draft was last typed in, until it is sent.
+    typed: Option<Instant>,
     collaboration_cursor: usize,
     /// The record revisions `state.collaboration` shows.
     collaboration_records: Vec<crate::collaboration::Seen>,
@@ -149,6 +152,7 @@ impl App {
             question_observer: agent.questions(),
             permission_observer: agent.permissions(),
             todo_message_len: usize::MAX,
+            typed: None,
             collaboration_cursor: 0,
             collaboration_records: Vec::new(),
             collaboration_seen: HashSet::new(),

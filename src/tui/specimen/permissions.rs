@@ -52,6 +52,7 @@ fn asking(columns: usize, tool: &str, access: Access, agent: &str, waiting: usiz
         waiting,
         agent: agent.into(),
         focus: None,
+        guard: None,
     });
     state
 }

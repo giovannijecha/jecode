@@ -92,7 +92,9 @@ access before anything runs:
 An exception does not switch the conversation to Full. In the TUI, typed
 1–3 choose; pasted text never approves. Up/down then Enter also chooses,
 while Enter without a focused option does nothing. Ctrl+C stops the turn.
-Requests are shown one at a time and keep the conversation draft.
+Requests are shown one at a time and keep the conversation draft. A request
+that arrives while you are typing decides nothing: further keys keep editing
+the draft until they pause briefly or an arrow or Tab moves into the request.
 
 The line-based `--plain` chat asks numbered questions for the main agent;
 closed input denies. Collaborators cannot ask there. Single prompts and pipes

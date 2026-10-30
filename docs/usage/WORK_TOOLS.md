@@ -15,10 +15,17 @@ or multiple choice. `Other` is always the last answer and takes the user's own
 words; a question without options takes words only. Nothing is preselected,
 and a recommendation is a suggestion that is never submitted automatically.
 
-Arrows move the cursor without choosing. Space selects the highlighted option
-(several, for multiple choice); typing fills `Other`, and Ctrl+J adds a line.
-Enter chooses the highlighted single-choice option, then moves to the next
-question; on the last question it sends every answer. Tab, Shift+Tab, or ←→
+Questions that arrive over a draft focus nothing, and Enter then does nothing.
+If they arrive while you are typing, further keys keep editing the draft until
+they pause briefly or an arrow or Tab moves into the questions. With nothing
+focused, a typed `1–N` chooses directly: an option's number submits a single
+choice as Enter would, selects a multiple-choice option, and the last number
+focuses `Other`.
+
+Arrows move the cursor without choosing. Space selects the highlighted option;
+for multiple choice, `Space toggle` adds or removes it. Typing fills `Other`,
+and Ctrl+J adds a line. Enter chooses the highlighted single-choice option,
+then moves to the next question; on the last question it sends every answer. Tab, Shift+Tab, or ←→
 outside typed words switch questions, and a step row shows which are answered.
 Long questions scroll with the cursor, the wheel and Page Up/Down. Ctrl+D
 explicitly dismisses the questions. Ctrl+C stops the active turn.

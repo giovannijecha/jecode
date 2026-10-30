@@ -1,8 +1,14 @@
 //! Ask user in the composer's place: keys move the cursor, Space and Enter
 //! choose, typing fills `Other`, and the last Enter sends every answer.
 
-use super::{App, terminal::Key, viewport::Scroll};
+use super::{
+    App,
+    arrival::{self, Guard},
+    terminal::Key,
+    viewport::Scroll,
+};
 use crate::ask::Request;
+use std::time::Instant;
 
 mod panel;
 pub use panel::{Entry, Panel};
@@ -27,12 +33,9 @@ impl App {
                     .as_ref()
                     .and_then(|handle| handle.snapshot().input.question);
                 self.state.ask_draft = saved.clone();
-                let mut panel = Panel::new(&request, saved.as_ref());
-                if !self.state.editor.text.is_empty() {
-                    panel.protect_arrival(&request);
-                }
-                self.state.ask_panel = Some(panel);
+                self.state.ask_panel = Some(Panel::new(&request, saved.as_ref()));
                 self.state.question = Some(request);
+                self.guard_ask_arrival();
             }
             None => {
                 self.state.ask_panel = None;
@@ -42,6 +45,35 @@ impl App {
         }
         self.state.changed();
         true
+    }
+
+    /// A question that arrives over a draft focuses no option, so Enter
+    /// alone chooses nothing; one that arrives while the draft is typed in
+    /// also leaves the rest of that typing to the draft.
+    pub(super) fn guard_ask_arrival(&mut self) {
+        let guard = Guard::arrive(self.typed, Instant::now());
+        let drafting = !self.state.editor.text.is_empty();
+        if let (Some(panel), Some(request)) = (&mut self.state.ask_panel, &self.state.question) {
+            panel.guard = guard;
+            if drafting || guard.is_some() {
+                panel.protect_arrival(request);
+            }
+        }
+    }
+
+    /// The arrival guard holds for this key; an expired guard is cleared.
+    fn ask_guarded(&mut self) -> bool {
+        let Some(panel) = self.state.ask_panel.as_mut() else {
+            return false;
+        };
+        let holds = panel
+            .guard
+            .as_mut()
+            .is_some_and(|guard| guard.holds(Instant::now()));
+        if !holds {
+            panel.guard = None;
+        }
+        holds
     }
 
     pub(super) fn open_ask(&mut self) {
@@ -85,8 +117,13 @@ impl App {
     }
 
     /// Space selects an option; any other text, or Space in the typed
-    /// words, goes to `Other`.
+    /// words, goes to `Other`. Typing the question arrived into stays the
+    /// draft's.
     pub(super) fn ask_text(&mut self, text: &str, pasted: bool) {
+        if self.ask_guarded() {
+            self.continue_draft(text);
+            return;
+        }
         let (Some(panel), Some(request)) = (&mut self.state.ask_panel, &self.state.question) else {
             return;
         };
@@ -185,6 +222,18 @@ impl App {
             }
             return;
         }
+        let plain = !key.ctrl() && !key.alt() && !key.shift();
+        if arrival::navigation(key.code) {
+            if let Some(panel) = self.state.ask_panel.as_mut() {
+                panel.guard = None;
+            }
+        } else if !matches!(key.code, 33 | 34) && self.ask_guarded() {
+            // Enter answers nothing; editing keys keep the draft.
+            if !(key.code == 13 && plain) {
+                self.edit_draft(key);
+            }
+            return;
+        }
         let window = super::view::ask_window(&self.state);
         let Some(panel) = self.state.ask_panel.as_mut() else {
             return;
@@ -193,7 +242,6 @@ impl App {
         let typing = panel.entry().in_text(question);
         // ←→ move the caret through typed words, else between questions.
         let words = typing && !panel.entry().editor.text.is_empty();
-        let plain = !key.ctrl() && !key.alt() && !key.shift();
         match key.code {
             13 if plain => return self.ask_enter(&request),
             9 if !key.ctrl() && !key.alt() => {

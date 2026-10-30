@@ -168,7 +168,15 @@ impl App {
                 if self.state.question.is_none() {
                     self.make_room_for_ask();
                 }
+                let arriving = self
+                    .state
+                    .question
+                    .as_ref()
+                    .is_none_or(|current| current.id != request.id);
                 self.state.event(Event::UserQuestion { request });
+                if arriving {
+                    self.guard_ask_arrival();
+                }
             }
             Event::ToolStarted {
                 id,

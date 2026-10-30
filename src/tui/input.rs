@@ -17,6 +17,10 @@ impl App {
                 self.permission_text(&text);
                 return Ok(false);
             }
+            Decoded::Paste(text) if self.permission_guarded() => {
+                self.continue_draft(&text);
+                return Ok(false);
+            }
             Decoded::Paste(_) | Decoded::Error if self.state.permission.is_some() => {
                 return Ok(false);
             }
@@ -112,12 +116,7 @@ impl App {
                         }
                     }
                 } else {
-                    if !self.state.editor.insert(&text) {
-                        self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
-                    } else {
-                        self.edited();
-                        self.state.history.edited();
-                    }
+                    self.continue_draft(&text);
                 }
                 return Ok(false);
             }
@@ -268,7 +267,10 @@ impl App {
             }
         }
         match key.code {
-            13 if !key.shift() && !key.alt() && !key.ctrl() => return self.submit(),
+            13 if !key.shift() && !key.alt() && !key.ctrl() => {
+                self.typed = None;
+                return self.submit();
+            }
             112 if self.checkpoint_job.is_none() && self.deletion_job.is_none() => self.help(),
             80 | 78 if key.ctrl() => {
                 if self.state.queue.is_editing() {
@@ -289,19 +291,35 @@ impl App {
                     .vertical(key.code == 38, super::view::input_width(self.state.width));
                 self.edited();
             }
-            _ => {
-                let before = self.state.editor.text.clone();
-                if !self.state.editor.key(key) {
-                    self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
-                }
-                if self.state.editor.text != before {
-                    self.state.feedback_input(true);
-                    self.edited();
-                    self.state.history.edited();
-                }
-            }
+            _ => self.edit_draft(key),
         }
         Ok(false)
+    }
+
+    /// Text typed into the chat draft, also while a request that arrived
+    /// during the typing guards its answer.
+    pub(super) fn continue_draft(&mut self, text: &str) {
+        if !self.state.editor.insert(text) {
+            self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
+        } else {
+            self.typed = Some(std::time::Instant::now());
+            self.edited();
+            self.state.history.edited();
+        }
+    }
+
+    /// An editing key on the chat draft.
+    pub(super) fn edit_draft(&mut self, key: Key) {
+        let before = self.state.editor.text.clone();
+        if !self.state.editor.key(key) {
+            self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
+        }
+        if self.state.editor.text != before {
+            self.typed = Some(std::time::Instant::now());
+            self.state.feedback_input(true);
+            self.edited();
+            self.state.history.edited();
+        }
     }
 
     fn scroll(&mut self, amount: i16) {

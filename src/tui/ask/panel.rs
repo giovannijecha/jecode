@@ -4,7 +4,7 @@
 //! answer: only Enter, Space or typing selects.
 
 use crate::ask::{Answer, AnswerDraft, Draft, Question, Request, TEXT_LIMIT};
-use crate::tui::{editor::Editor, terminal::Key};
+use crate::tui::{arrival::Guard, editor::Editor, terminal::Key};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Entry {
@@ -25,6 +25,9 @@ pub struct Panel {
     /// The block's first visible row once the user scrolls it; otherwise
     /// the block follows the cursor.
     pub top: Option<usize>,
+    /// Arrived while the draft was typed in: until the keys pause or an
+    /// arrow or Tab moves, typing continues the draft and answers nothing.
+    pub guard: Option<Guard>,
 }
 
 impl Entry {
@@ -123,6 +126,7 @@ impl Panel {
             }),
             entries,
             top: None,
+            guard: None,
         }
     }
 

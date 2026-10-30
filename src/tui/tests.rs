@@ -8,6 +8,7 @@ use std::fs;
 use std::thread;
 use std::time::Instant;
 
+mod arrival_tests;
 mod flow_tests;
 mod native_smoke;
 mod project_instruction_tests;

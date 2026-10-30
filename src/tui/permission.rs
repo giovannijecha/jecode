@@ -5,6 +5,7 @@
 
 use super::{
     App, Feedback, Kind,
+    arrival::{self, Guard},
     selector::{Choice, Purpose, Selector},
     terminal::Key,
     viewport::Scroll,
@@ -13,6 +14,7 @@ use crate::{
     json::Value,
     permissions::{Decision, Grant, Kind as Access, Level, Request, wording},
 };
+use std::time::Instant;
 
 /// The request shown, with who asks as the title badge reads.
 #[derive(Clone, PartialEq, Debug)]
@@ -23,6 +25,9 @@ pub struct Pending {
     pub agent: String,
     /// No row is focused on arrival, so Enter alone decides nothing (B12.6 T2).
     pub focus: Option<usize>,
+    /// Arrived while the draft was typed in: until the keys pause or an
+    /// arrow moves, typing continues the draft and no digit decides.
+    pub guard: Option<Guard>,
 }
 
 const DECISIONS: [Decision; 3] = [Decision::Once, Decision::Remember, Decision::Deny];
@@ -53,19 +58,25 @@ impl App {
         };
         if !same {
             dirty = true;
+            let now = Instant::now();
             self.state.permission = pending.map(|(request, waiting)| {
-                let focus = self
+                let shown = self
                     .state
                     .permission
                     .as_ref()
-                    .filter(|shown| shown.request == request)
-                    .and_then(|shown| shown.focus);
+                    .filter(|shown| shown.request == request);
+                let focus = shown.and_then(|shown| shown.focus);
+                let guard = match shown {
+                    Some(shown) => shown.guard,
+                    None => Guard::arrive(self.typed, now),
+                };
                 let agent = self.asking_agent(request.agent.as_deref());
                 Pending {
                     request,
                     waiting,
                     agent,
                     focus,
+                    guard,
                 }
             });
             // A request closes any menu over it, as a question does.
@@ -93,12 +104,32 @@ impl App {
             )
     }
 
-    /// 1–3 choose at once; letters reach neither the request nor the draft.
+    /// 1–3 choose at once; letters reach neither the request nor the draft,
+    /// except while the typing the request arrived into goes on.
     pub(super) fn permission_text(&mut self, text: &str) {
+        if self.permission_guarded() {
+            self.continue_draft(text);
+            return;
+        }
         let mut characters = text.chars();
         if let (Some(digit @ '1'..='3'), None) = (characters.next(), characters.next()) {
             self.decide_permission(digit as usize - '1' as usize);
         }
+    }
+
+    /// The arrival guard holds for this key; an expired guard is cleared.
+    pub(super) fn permission_guarded(&mut self) -> bool {
+        let Some(shown) = self.state.permission.as_mut() else {
+            return false;
+        };
+        let holds = shown
+            .guard
+            .as_mut()
+            .is_some_and(|guard| guard.holds(Instant::now()));
+        if !holds {
+            shown.guard = None;
+        }
+        holds
     }
 
     /// The request keeps the keys until a choice; Ctrl+C stops the turn.
@@ -108,6 +139,17 @@ impl App {
             return;
         }
         let plain = !key.ctrl() && !key.alt() && !key.shift();
+        if arrival::navigation(key.code) {
+            if let Some(shown) = self.state.permission.as_mut() {
+                shown.guard = None;
+            }
+        } else if !matches!(key.code, 33 | 34) && self.permission_guarded() {
+            // Enter decides nothing; editing keys keep the draft.
+            if !(key.code == 13 && plain) {
+                self.edit_draft(key);
+            }
+            return;
+        }
         let Some(shown) = self.state.permission.as_mut() else {
             return;
         };
