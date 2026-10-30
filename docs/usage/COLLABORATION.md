@@ -94,12 +94,32 @@ must assign compatible scopes and inspect the combined result.
 storage outside the project. It includes working changes, new files, empty
 directories and local `AGENTS.md` files; Git and an existing commit are
 unnecessary. The copy omits `.git` and `.jecode` metadata at every directory
-level, plus root `target` and `.tmp` directories. Files with those names and
-nested `target` or `.tmp` directories remain in scope. Other files are included
-even when Git ignores them. Starting entries are retained separately for
-comparison. No commit or branch is created.
+level, plus root `target` and `.tmp` directories or links. Regular files with
+those names and nested `target` or `.tmp` directories remain in scope. Other
+files are included even when Git ignores them. Starting entries are retained
+separately for comparison. No commit or branch is created.
 
-If a copy cannot be prepared, Jecode reports the filesystem error and any
+Each file is read once. The baseline is the content that was copied, so a file
+that a running server or build changes during the copy does not stop
+preparation; if the project later differs from that baseline, integration
+reports a conflict for that path. Entries the copy cannot hold are left out and
+listed as `omitted_from_copy` in the creation result and in `diff`, with a
+count and up to 50 named paths and reasons:
+
+- sockets, pipes and devices;
+- names that are not UTF-8, or that contain `:` or `\`;
+- files that cannot be read, such as files locked by another process;
+- directories that cannot be listed (the directory itself is copied);
+- links that cannot be created, such as symbolic links or junctions on Windows
+  without Developer Mode or administrator rights.
+
+A copied link whose target lies inside the project is rewritten relative to
+the link, so it resolves inside the copy and never into the original project.
+Other link targets are kept. Commands that rely on omitted links, such as a
+package manager's linked `node_modules`, may need the links recreated in the
+copy, for example by reinstalling there.
+
+If a copy cannot be written, Jecode reports the filesystem error and any
 incomplete cleanup without starting the worker. This is file isolation; command
 and browser access follows the active permission settings. Coordinate external
 effects separately.
@@ -107,7 +127,11 @@ effects separately.
 `diff` returns changed paths, baseline/child/current fingerprints, bounded change
 evidence and a review token. For longer files, request `diff` with `path`; byte
 pages default to 16384 and accept at most 65536 bytes. Binary or unsupported text
-is identified rather than presented as a complete text diff.
+is identified rather than presented as a complete text diff. A copied file whose
+size, mode and preserved modification time still match the copy is treated as
+unchanged without rereading it; files modified within two seconds before
+preparation are always reread. Sockets or similar entries a command created in
+the copy are listed as `unsupported_in_copy`.
 
 `integrate` rechecks the token and each selected path. Main-project changes since
 the starting state are conflicts unless they already match the child. The result

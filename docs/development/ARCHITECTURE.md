@@ -290,14 +290,20 @@ workspace preserves its historical record; missing or
 invalid workspace ownership becomes a record diagnostic rather than breaking
 the parent session.
 
-Shared work uses current project files. Isolated work uses a detached native Git
-worktree, overlaid with the current tracked and non-ignored untracked files,
-including local instruction files. Owned baseline bytes and fingerprints make
-review independent of Git's committed state. Comparison produces bounded evidence
-and a token over baseline, child and current states; integration rechecks selected
-paths and reports partial outcomes. File isolation does not restrict commands or
-external effects. See [collaboration](../usage/COLLABORATION.md) for the user
-contract and limitations.
+Shared work uses current project files. Isolated work copies the project into
+owned storage without Git (`collaboration/workspace/copy.rs`): one walk reads
+each file once and writes the same bytes to the copy and the saved baseline
+while fingerprinting them, so the baseline is what was copied. Entries the copy
+cannot hold are omitted and reported rather than failing preparation; links
+into the project are rewritten to resolve inside the copy. Copied files keep
+their modification times, and comparison hashes only files whose size, mode or
+time differ from the record. Comparison produces bounded evidence and a token
+over baseline, child and current states; integration rechecks selected paths
+and reports partial outcomes. Closing a copy made by the earlier Git worktree
+version also removes its `.git/worktrees` entry when that entry names the copy.
+File isolation does not restrict commands or external effects. See
+[collaboration](../usage/COLLABORATION.md) for the user contract and
+limitations.
 
 ## Session storage
 

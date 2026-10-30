@@ -195,9 +195,12 @@ cargo test --locked --offline tools::interactive::tests::windows::workspace_sand
 ```
 
 Collaborator fixtures use isolated session homes, synthetic model services and
-local Git repositories. They cover provider catalogs, in-flight assignment
-updates, late returns resuming the main model, review, cancellation, recovery,
-dirty worktree baselines, conflict-aware integration and owned cleanup. A
+temporary project directories without Git. They cover provider catalogs,
+in-flight assignment updates, late returns resuming the main model, review,
+cancellation, recovery, working-file baselines, omitted entries (sockets,
+unportable names, locked files, uncreatable links), link retargeting,
+read-only directory cleanup, legacy worktree registrations, conflict-aware
+integration and owned cleanup. A
 subprocess fixture stops after preparing an isolated copy and before its
 `created` receipt; resume reclaims the copy only once that session is no longer
 live. The TUI

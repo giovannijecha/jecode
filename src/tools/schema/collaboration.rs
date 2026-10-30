@@ -43,7 +43,7 @@ pub(super) fn definition() -> Value {
                         (
                             "description",
                             Value::string(
-                                "shared uses current project files; isolated creates a local Git worktree including current uncommitted files for later review and selective integration.",
+                                "shared uses current project files; isolated copies the project's current files, without Git metadata or root target/.tmp, into separate storage for later review and selective integration. Entries the copy cannot hold are reported as omitted_from_copy.",
                             ),
                         ),
                     ]),
