@@ -1,9 +1,6 @@
 # Installation
 
-Jecode can be installed through npm or as a standalone executable built from
-source. The first npm package and prebuilt downloads have **not been published
-yet**. The npm commands below describe the prepared release; use the source
-instructions until it is published.
+Install Jecode with npm, or build a standalone executable from source.
 
 ## Requirements
 
@@ -26,7 +23,7 @@ Linux and macOS are built and tested in CI. See
 macOS, and note that on those platforms commands require the Full
 [permission level](PERMISSIONS.md#platform-limits).
 
-## Install with npm (after publication)
+## Install with npm
 
 The npm package supports Windows x64, Linux x64 with glibc 2.39 or newer, and
 macOS on Apple silicon. Its macOS build is verified on macOS 15; earlier
