@@ -37,9 +37,10 @@ mod startup_tests;
 
 fn native_pty_source() -> String {
     format!(
-        "{}\n{}",
+        "{}\n{}\n{}",
         include_str!("native_pty.cs"),
-        include_str!("native_permissions.cs")
+        include_str!("native_permissions.cs"),
+        include_str!("native_splash.cs")
     )
     .replace(
         "JECODE_WARNING_FOREGROUND",
@@ -49,6 +50,57 @@ fn native_pty_source() -> String {
         "JECODE_WARNING_SURFACE",
         &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
     )
+    .replace(
+        "JECODE_SPLASH_ACCENT",
+        &format!("\\x1b[{}m", crate::tui::theme::ACCENT),
+    )
+    .replace(
+        "JECODE_SPLASH_LIT",
+        &format!("\\x1b[{}m", crate::tui::theme::LIT),
+    )
+}
+
+#[test]
+#[ignore = "requires Windows ConPTY for the real startup screen"]
+fn native_windows_startup_splash() {
+    let directory = Directory::new();
+    let script = format!(
+        "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', 'startup-splash')\n",
+        native_pty_source(),
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .replace('\'', "''"),
+        directory.path().to_string_lossy().replace('\'', "''"),
+    );
+    let result = process::run_observed(
+        Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ])
+            .env("TEMP", directory.path())
+            .env("TMP", directory.path())
+            .env_remove("OPENROUTER_API_KEY"),
+        None,
+        Duration::from_secs(60),
+        64 * 1024,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        result.exit_code,
+        Some(0),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
+    );
+    assert!(!result.timed_out);
 }
 
 #[test]
@@ -64,6 +116,7 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "setup-success",
         "setup-error",
         "startup-removed",
+        "startup-splash",
         "startup-fresh",
         "startup-unconfigured-prompt",
         "startup-fallback",

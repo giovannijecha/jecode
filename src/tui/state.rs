@@ -27,6 +27,10 @@ pub enum Kind {
 pub struct Opening {
     /// Up to three other conversations in this folder, newest first.
     pub recent: Vec<Recent>,
+    /// Available personal skills at launch.
+    pub skills: usize,
+    /// Whether the working directory has a root AGENTS.md.
+    pub agents: bool,
 }
 pub struct Recent {
     pub title: String,

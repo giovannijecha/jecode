@@ -135,12 +135,19 @@ struct App {
 }
 
 impl App {
-    fn new(agent: Agent, config: SessionConfig, terminal: Option<Terminal>) -> Self {
+    fn new(mut agent: Agent, config: SessionConfig, terminal: Option<Terminal>) -> Self {
+        let skills = agent.skills().map_or(0, |skills| skills.len());
+        let agents = agent.archive().directory.join("AGENTS.md").is_file();
         let state = State {
             width: terminal.as_ref().map_or(80, |terminal| terminal.size.0),
             height: terminal.as_ref().map_or(24, |terminal| terminal.size.1),
             effort: agent.effort().name().into(),
             queue: drafts::Queue::new(agent.inbox()),
+            opening: state::Opening {
+                skills,
+                agents,
+                ..state::Opening::default()
+            },
             ..State::default()
         };
         let persistence = agent.sessions();
@@ -346,7 +353,7 @@ pub(crate) fn launch(
             let delay = delay.min(background.wait().unwrap_or(Duration::MAX));
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
-            } else if motion::loading(&app.state) {
+            } else if motion::loading(&app.state) || view::opening::animated(&app.state) {
                 delay.min(motion::FRAME)
             } else if app.state.processes.is_some() {
                 delay.min(processes::REFRESH)
@@ -366,7 +373,9 @@ pub(crate) fn launch(
                     dirty = true;
                 }
                 // Animation draws once per motion frame or clock second.
-                dirty |= (app.state.activity.is_some() || motion::loading(&app.state))
+                dirty |= (app.state.activity.is_some()
+                    || motion::loading(&app.state)
+                    || view::opening::animated(&app.state))
                     && drawn_clock != Some(motion::clock(&app.state));
             }
         }

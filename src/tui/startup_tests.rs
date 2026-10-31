@@ -30,6 +30,35 @@ fn with_settings(directory: &Directory, settings: Settings, services: Option<Ser
 }
 
 #[test]
+fn splash_facts_come_from_the_launch_project_and_personal_skill_catalog() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    std::fs::write(directory.path().join("AGENTS.md"), "# Project\n").unwrap();
+    let skill = home.path().join("skills/review");
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: review\ndescription: Inspect a change.\n---\n\n# Review\n",
+    )
+    .unwrap();
+    let settings = Settings::unconfigured();
+    let store = Store::new(directory.path().join("config"));
+    let mut agent = Agent::with_backend(
+        unconfigured::client("openai", None, None, "No configured provider".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let app = App::new(agent, SessionConfig { store, settings }, None);
+    assert_eq!(app.state.opening.skills, 1);
+    assert!(app.state.opening.agents);
+    let rows = view::opening::rows(&app.state, 100);
+    assert!(
+        rows.iter()
+            .any(|row| row.plain().contains("✓ 1 skill   ✓ AGENTS.md"))
+    );
+}
+
+#[test]
 fn missing_credentials_keep_settings_available_and_return_unsent_work() {
     let directory = Directory::new();
     let mut app = app(&directory, "saved-model", None);

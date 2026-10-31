@@ -311,6 +311,8 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Wait("OpenRouter API key (hidden):");
                 pty.EnsureNoText("Enter keeps the saved key", 0); pty.Send("/cancel\r");
                 pty.Wait("NATIVE_STARTUP_RESTORED"); pty.Finish(true);
+            } else if (scenario == "startup-splash") {
+                pty.Splash();
             } else if (scenario.StartsWith("startup-")) {
                 pty.Wait("Ask anything");
                 pty.Wait(scenario.StartsWith("startup-fallback") ? "Default provider unavailable" : "No configured provider");
