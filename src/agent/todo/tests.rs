@@ -114,7 +114,9 @@ fn saved_plan_survives_resume_and_context_projection() {
     assert!(resumed.request_environment().contains("Build export"));
     let projected = resumed.transport_messages();
     assert!(
-        projected[0]
+        projected
+            .last()
+            .unwrap()
             .get("content")
             .and_then(Value::as_str)
             .unwrap()

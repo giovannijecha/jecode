@@ -78,10 +78,14 @@ session and export for diagnosis; withdrawal does not erase archived data.
 
 The [Auto-compact at setting](CONFIGURATION.md#automatic-compaction-threshold)
 defaults to 80% of the effective window. Before each model request, reaching
-that input budget first turns large older tool results into previews containing
+that input budget first turns large tool results, including file reads, into previews containing
 `history_reference`. If that is insufficient, Jecode asks the same selected
-model, with tools disabled, to fold the work since the previous compaction into
-a plain-text handoff. It processes the transcript in chronological portions,
+model at medium effort when supported, with tools disabled, to fold the work
+since the previous compaction into a plain-text handoff targeting at most
+16 KiB. The main task's
+model and effort selection stay unchanged. Models without advertised medium
+effort use their default; an OpenRouter endpoint pin can also require this
+fallback. It processes the transcript in chronological portions,
 including large records split across portions. It carries the prior summary
 and archived user requests into each portion. Recent original messages stay
 verbatim when they fit within a quarter of the input budget. A tool call and
@@ -89,6 +93,12 @@ all its results stay together; an oversized group may leave no verbatim tail.
 The saved originals are not replaced. Use `read(path="history:N")` or
 `history:requests` to recover omitted content; [Tools](TOOLS.md#file-paths-and-paged-reads)
 explains pagination and other references.
+
+Cache boundaries cover the stable instructions and durable conversation before
+the current session state. The state remains visible to the model but does not
+invalidate that prefix on each update. Cache eligibility, expiry and reuse are
+controlled by the provider. Context percentages count cached input too; they
+do not indicate subscription usage or remaining quota.
 
 The handoff asks the model to retain goals, constraints, decisions, completed
 work, errors and next steps. References to skills read before compaction are

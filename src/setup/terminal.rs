@@ -66,7 +66,7 @@ impl<R: BufRead, W: Write> Prompter for Terminal<'_, R, W> {
         &mut self,
         operation: impl FnOnce(&mut Self, Cancellation) -> Result<T, String>,
     ) -> Result<SignIn<T>, String> {
-        self.message("Press Enter during ChatGPT sign-in to return to provider selection.")?;
+        self.message("Press Enter during sign-in to return to provider selection.")?;
         let cancellation = Cancellation::default();
         let monitor = SignInMonitor::start(cancellation.clone())?;
         let result = operation(self, cancellation.clone());
@@ -103,7 +103,7 @@ impl SignInMonitor {
             .stderr(Stdio::null());
         let mut child = crate::auth::isolate_environment(&mut command)
             .spawn()
-            .map_err(|error| format!("Could not monitor ChatGPT sign-in input: {error}"))?;
+            .map_err(|error| format!("Could not monitor sign-in input: {error}"))?;
         let (stop, receiver) = mpsc::channel();
         let watcher = thread::spawn(move || {
             let result = loop {
@@ -118,7 +118,7 @@ impl SignInMonitor {
                     Ok(None) => thread::sleep(Duration::from_millis(20)),
                     Err(error) => {
                         cancellation.cancel();
-                        break Err(format!("Could not monitor ChatGPT sign-in input: {error}"));
+                        break Err(format!("Could not monitor sign-in input: {error}"));
                     }
                 }
             };
@@ -126,11 +126,11 @@ impl SignInMonitor {
                 && let Err(error) = child.kill()
                 && !matches!(child.try_wait(), Ok(Some(_)))
             {
-                return Err(format!("Could not stop ChatGPT sign-in input: {error}"));
+                return Err(format!("Could not stop sign-in input: {error}"));
             }
             child
                 .wait()
-                .map_err(|error| format!("Could not reap ChatGPT sign-in input: {error}"))?;
+                .map_err(|error| format!("Could not reap sign-in input: {error}"))?;
             result
         });
         Ok(Self {
@@ -148,7 +148,7 @@ impl SignInMonitor {
         if let Some(watcher) = self.watcher.take() {
             watcher
                 .join()
-                .map_err(|_| "ChatGPT sign-in input monitor stopped unexpectedly".to_string())??;
+                .map_err(|_| "Sign-in input monitor stopped unexpectedly".to_string())??;
         }
         Ok(())
     }

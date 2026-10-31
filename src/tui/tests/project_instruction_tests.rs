@@ -35,7 +35,18 @@ fn tui_submission_keeps_a_failed_draft_and_loads_rules_when_retried() {
             .contains("TUI project rules")
     );
     assert_eq!(
-        messages.last().unwrap().get("content").unwrap().as_str(),
+        messages
+            .iter()
+            .rev()
+            .find(|message| {
+                message.get("role").and_then(Value::as_str) == Some("user")
+                    && message.get("content").and_then(Value::as_str) == Some("Inspect the project")
+            })
+            .unwrap()
+            .get("content")
+            .unwrap()
+            .as_str(),
         Some("Inspect the project")
     );
+    assert!(runtime_state(&requests[0]).contains("Permissions:"));
 }

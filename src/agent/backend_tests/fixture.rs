@@ -216,6 +216,7 @@ impl Backend for Client {
                 total_tokens: None,
                 cached_tokens: None,
                 cache_write_tokens: None,
+                reasoning_tokens: None,
             }),
             charges: Some(Charges {
                 requests: 1,

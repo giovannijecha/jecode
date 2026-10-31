@@ -68,9 +68,12 @@ impl Agent {
             if output_ceiling == 0 {
                 return Err("Insufficient context to summarize the conversation; the original session is preserved".into());
             }
-            let mut output_tokens = limits
-                .output
-                .unwrap_or_else(|| (capacity / 8).max(output_floor).max(1))
+            // Reserve a modest synthesis allowance independently of the
+            // model's input capacity. A learned truncation allowance still
+            // takes precedence, subject to the actual remaining context.
+            let mut output_tokens = (capacity / 8)
+                .clamp(2_048, 8_192)
+                .max(output_floor)
                 .min(output_ceiling);
             let budget_for = |output_tokens| {
                 self.context

@@ -35,7 +35,7 @@ invocation; a normal test run does not establish their coverage.
 
 Tests use original Rust fixtures, synthetic credentials, isolated directories
 under `target` and loopback HTTP. They exercise the build-embedded native HTTP
-adapter and process boundaries without contacting OpenRouter or OpenAI or
+adapter and process boundaries without contacting inference providers or
 reading personal configuration.
 
 Unix owner-loss tests also use the system `ps` command to inspect process groups.
@@ -46,6 +46,10 @@ OpenAI fixtures also use isolated account records and loopback HTTP. They do
 not read Codex credentials or launch a real ChatGPT sign-in. Native signature
 checks exercise Windows .NET, macOS Security or Linux OS libcrypto. A successful
 fixture run does not establish account eligibility or real plan inference.
+Claude fixtures likewise use synthetic credentials and isolated account records.
+They cover callback validation, token rotation, account separation, signed
+thinking replay, fragmented tool calls, cache usage and provider errors. They
+do not read Claude Code credentials or launch a real Claude sign-in.
 The ignored `http::tests::trusted_https_uses_os_tls_policy` smoke check uses
 `https://example.com/` without credentials to verify the native TLS boundary.
 
@@ -58,6 +62,29 @@ cargo test --locked --offline backend::openai::live::inspect_live_model_and_stre
 cargo test --locked --offline backend::openai::live::live_tool_roundtrip_uses_context_and_selected_effort -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline backend::openai::live::live_image_and_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
 ```
+
+Claude's opt-in checks require an explicit absolute `JECODE_HOME` containing a
+signed-in test account. They verify extra usage is disabled before inference,
+use synthetic messages, and make one request for the minimal stream or two for
+the tool roundtrip. They bypass automatic agent retries:
+
+```text
+cargo test --locked --offline backend::anthropic::live::minimal_subscription_stream -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline backend::anthropic::live::subscription_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
+```
+
+The opt-in cache checks require an explicit absolute `JECODE_HOME` for both
+providers. They use only synthetic reference records and print token/timing
+counters, including cache writes and reads. Claude makes four bounded requests
+and ChatGPT three; the warm request grows the conversation and changes runtime
+state. No agent recovery retries are involved:
+
+```text
+cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_runtime_state_changes -- --ignored --nocapture --test-threads=1
+```
+
+See [performance](PERFORMANCE.md#subscription-context-reuse) for measured
+ratios and their limits.
 
 ## Run a focused check
 
@@ -74,6 +101,9 @@ cargo test --locked --offline session::agents::tests::
 cargo test --locked --offline backend::openrouter::calls::tests::
 cargo test --locked --offline auth::openai::
 cargo test --locked --offline backend::openai::
+cargo test --locked --offline auth::accounts::
+cargo test --locked --offline auth::anthropic::
+cargo test --locked --offline backend::anthropic::
 cargo test --locked --offline tools::processes::tests::
 cargo test --locked --offline tools::exec::tests::
 cargo test --locked --offline tools::interactive::tests::

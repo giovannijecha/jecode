@@ -187,19 +187,12 @@ fn large_read() -> Value {
 }
 
 #[test]
-fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
+fn a_large_latest_read_result_is_previewed_and_stays_readable() {
     let directory = Directory::new();
     let original = "Original evidence Ω 日本\n".repeat(1900);
     std::fs::write(directory.path().join("source"), &original).unwrap();
     let fixture = HttpFixture::new(vec![
         (200, large_read()),
-        (
-            200,
-            completion(
-                &String::from("Inspect source; preserve protected.txt."),
-                vec![],
-            ),
-        ),
         (200, completion("Verified inspection complete.", vec![])),
     ]);
     let mut agent = Agent::new(
@@ -216,15 +209,11 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
             Ok(())
         })
         .unwrap();
-    assert_eq!(agent.context.from, 4);
+    assert_eq!(agent.context.from, 1);
+    assert_eq!(agent.context.preview_until, 4);
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 3);
-    let summary_request = requests[1].body.encode();
-    assert!(requests[1].body.get("tools").is_none());
-    // The summary sees a preview of the large result and its history reference.
-    assert!(summary_request.contains("context_truncated"));
-    assert!(summary_request.contains("history:3"));
-    let messages = requests[2]
+    assert_eq!(requests.len(), 2);
+    let messages = requests[1]
         .body
         .get("messages")
         .unwrap()
@@ -236,18 +225,21 @@ fn a_large_latest_tool_result_is_summarized_and_stays_readable() {
                 && message.encode().contains("protected.txt")
         )
     );
-    assert!(
-        messages
+    assert_eq!(
+        crate::test_support::durable_messages(messages)
             .last()
             .unwrap()
-            .encode()
-            .contains("Inspect source; preserve protected.txt.")
+            .get("role")
+            .and_then(Value::as_str),
+        Some("tool")
     );
     assert!(
         messages
             .iter()
-            .all(|message| message.get("tool_calls").is_none())
+            .any(|message| message.get("tool_calls").is_some())
     );
+    assert!(requests[1].body.encode().contains("context_truncated"));
+    assert!(requests[1].body.encode().contains("history:3"));
     let result = agent.execute_tool(&ToolCall {
         id: "retrieve".into(),
         name: "read".into(),
@@ -306,11 +298,7 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
             )]),
         );
     }
-    let fixture = HttpFixture::new(vec![
-        (200, first),
-        (200, completion(&memory, vec![])),
-        (200, completion("Finished.", vec![])),
-    ]);
+    let fixture = HttpFixture::new(vec![(200, first), (200, completion("Finished.", vec![]))]);
     let mut agent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
@@ -333,12 +321,8 @@ fn carried_constraints_can_grow_beyond_a_quarter_of_the_context() {
         .unwrap();
     assert_eq!(agent.context.summary, memory);
     let requests = fixture.finish();
-    assert_eq!(requests.len(), 3);
-    assert!(requests[1].body.get("tools").is_none());
-    assert!(
-        requests[1]
-            .body
-            .encode()
-            .contains("Next chronological transcript portion")
-    );
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].body.get("tools").is_some());
+    assert!(requests[1].body.encode().contains("context_truncated"));
+    assert!(requests[1].body.encode().contains(&memory));
 }

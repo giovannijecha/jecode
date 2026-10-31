@@ -11,6 +11,29 @@ pub mod sandbox;
 pub mod server;
 pub use protocol::{completion, tool_call};
 
+/// History assertions exclude the separate runtime suffix; wire tests inspect it directly.
+pub fn durable_messages(messages: &[Value]) -> &[Value] {
+    let state = messages.last().is_some_and(|message| {
+        let content = message.get("content");
+        let text = content
+            .and_then(Value::as_str)
+            .or_else(|| content?.as_array()?.first()?.get("text")?.as_str());
+        message.get("jecode_request_state") == Some(&Value::Bool(true))
+            || text
+                .is_some_and(|text| text.starts_with("Jecode session state for the next request."))
+    });
+    &messages[..messages.len() - usize::from(state)]
+}
+
+pub fn request_messages(body: &Value) -> &[Value] {
+    durable_messages(
+        body.get("messages")
+            .or_else(|| body.get("input"))
+            .and_then(Value::as_array)
+            .expect("Fixture request has messages"),
+    )
+}
+
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 fn fixture_base() -> PathBuf {

@@ -3,7 +3,69 @@
 Recorded measurements for UI work, session storage, command startup and
 workspace checkpoints, on Windows unless stated.
 Dates identify the measured implementation; run the probes below to measure the
-current source. All probes use synthetic data and make no provider requests.
+current source. Local probes use synthetic data without provider requests;
+explicitly marked subscription checks below use live accounts.
+
+## Subscription context reuse
+
+Recorded **2026-10-31**, Windows, Rust 1.95.0, debug build. Bounded live
+requests used synthetic reference records and the same minimal `READY` reply.
+The warm request appended the previous assistant response and a new user
+message, and changed only the request-local state. Claude extra usage was
+verified disabled. No account credentials or conversation content are in the
+recorded counters.
+
+| Route and model | Warm input tokens | Cached tokens | New cache writes | Cached/input |
+| --- | ---: | ---: | ---: | ---: |
+| Claude account, Opus 5.5 medium | 31,637 | 31,589 | 26 | 99.85% |
+| ChatGPT account, GPT-6.1 Sol low | 13,280 | 13,056 | 0 reported | 98.31% |
+
+The Claude cold write was 31,589 tokens. An identical request reused it, but
+the first growing-history experiment missed the cache because adjacent user
+messages were normalized differently. Mapping request-local state to a
+mid-conversation system message on documented compatible models preserved
+that boundary. Earlier or unknown models retain the user-message fallback.
+
+ChatGPT rejected `prompt_cache_options` on the subscription route, despite
+the public API supporting it. The adapter uses implicit caching with its
+stable conversation key/header, and places request-local state in a final
+developer message. It sends no unsupported explicit-cache fields.
+
+These checks establish reuse across one growing conversation boundary. They
+do not measure whole coding-task quality, long-session hit rates, or a
+subscription quota multiplier. The ratio is `cached_tokens / input_tokens`,
+including new input in the denominator. Cold writes, new tool results, cache
+expiry and provider routing can lower it. Cache counters do not establish
+subscription billing weights. Single-request latency varied; no end-to-end
+speedup is claimed from these samples.
+
+Repeat the opt-in checks with an explicitly selected absolute `JECODE_HOME`:
+
+```text
+cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_runtime_state_changes -- --ignored --nocapture --test-threads=1
+```
+
+Ordinary offline verification never runs these provider requests. Claude uses
+four bounded requests; ChatGPT uses three. Neither test retries automatically.
+
+A separate bounded live continuity check used scattered task IDs, completed
+work, open errors and next actions in 20–40 KiB of synthetic notes. One Opus 5.5
+medium compaction took 4,992 ms and produced a 1,106-byte handoff. After saving
+and reopening the isolated session, a high-effort readback took 2,061 ms and
+contained all eleven checked terms. That original check did not verify their
+association with each task ID. The revised fixture checks each task's status,
+error and next action together and has offline coverage rejecting swapped
+associations; the revised live check has not been rerun. Original archived
+messages remained exactly equal. These measurements do not establish lossless
+semantic compression or a five-second guarantee for arbitrary histories.
+
+```text
+cargo test --locked --offline agent::compaction::live_tests::live_summary_and_resumed_readback_preserve_critical_work -- --exact --ignored --nocapture --test-threads=1
+```
+
+This check uses two bounded live Claude inference requests. Before inference it
+loads the model catalog and verifies that extra usage is disabled on the selected
+account.
 
 ## Model loop and tool payloads
 

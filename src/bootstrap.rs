@@ -208,14 +208,27 @@ fn account_redactor(
     home: &Path,
     status: &mut impl Write,
 ) -> Result<crate::redact::Redactor, String> {
-    let (redactor, invalid) =
-        crate::auth::openai::Store::new(home.to_path_buf()).redactor_report()?;
-    if invalid > 0 {
-        writeln!(
-            status,
-            "Skipped {invalid} invalid OpenAI account record(s); inspect the saved accounts."
-        )
-        .map_err(|error| format!("Could not report invalid OpenAI accounts: {error}"))?;
+    let mut redactor = crate::redact::Redactor::empty();
+    for backend in crate::backend::available()
+        .iter()
+        .filter(|backend| crate::auth::account_backend(backend.id))
+    {
+        let (account_redactor, invalid) =
+            crate::auth::AccountStore::new(home.to_path_buf(), backend.id).redactor_report()?;
+        redactor.include(account_redactor);
+        if invalid > 0 {
+            writeln!(
+                status,
+                "Skipped {invalid} invalid {} account record(s); inspect the saved accounts.",
+                backend.name
+            )
+            .map_err(|error| {
+                format!(
+                    "Could not report invalid {} accounts: {error}",
+                    backend.name
+                )
+            })?;
+        }
     }
     Ok(redactor)
 }
@@ -292,6 +305,21 @@ mod tests {
             String::from_utf8(status)
                 .unwrap()
                 .contains("Skipped 1 invalid OpenAI account")
+        );
+    }
+
+    #[test]
+    fn startup_masks_both_subscription_providers_when_openrouter_is_selected() {
+        let directory = Directory::new();
+        let home = directory.path();
+        crate::auth::openai::Store::fixture_account(home.to_path_buf(), "isolated-chatgpt-token")
+            .unwrap();
+        crate::auth::anthropic::Store::fixture_account(home.to_path_buf(), "isolated-claude-token")
+            .unwrap();
+        let redactor = account_redactor(home, &mut Vec::new()).unwrap();
+        assert_eq!(
+            redactor.text("isolated-chatgpt-token isolated-claude-token"),
+            "[redacted] [redacted]"
         );
     }
 }

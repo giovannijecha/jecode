@@ -3,6 +3,8 @@
 #[cfg(test)]
 mod agent_tests;
 #[cfg(test)]
+mod efficiency_live;
+#[cfg(test)]
 mod live;
 mod metadata;
 mod stream;
@@ -99,6 +101,22 @@ impl Api {
             .copied()
     }
 
+    fn supports_effort(&self, model: &str, effort: Effort) -> bool {
+        self.metadata
+            .lock()
+            .ok()
+            .and_then(|catalog| {
+                catalog.as_ref().and_then(|catalog| {
+                    catalog
+                        .models
+                        .iter()
+                        .find(|entry| entry.id == model)
+                        .map(|entry| entry.efforts.contains(&effort))
+                })
+            })
+            .unwrap_or(false)
+    }
+
     fn redactor(&self) -> Redactor {
         self.session.redactor()
     }
@@ -176,6 +194,13 @@ impl Backend for OpenAi {
     fn set_effort(&mut self, effort: Effort) {
         self.effort = effort;
     }
+    fn maintenance_effort(&self, requested: Effort) -> Effort {
+        if self.api.supports_effort(&self.model, requested) {
+            requested
+        } else {
+            Effort::Default
+        }
+    }
     fn set_delegation(&mut self, enabled: bool) {
         self.delegation = enabled;
     }
@@ -197,6 +222,24 @@ impl Backend for OpenAi {
         pool: Option<&Pool>,
         emit: &mut dyn FnMut(backend::Update) -> Result<(), String>,
     ) -> Result<backend::Completion, backend::Failure> {
+        self.sample_with_effort(
+            self.effort,
+            messages,
+            with_tools,
+            _output_tokens,
+            pool,
+            emit,
+        )
+    }
+    fn sample_with_effort(
+        &self,
+        effort: Effort,
+        messages: &[Value],
+        with_tools: bool,
+        _output_tokens: Option<usize>,
+        pool: Option<&Pool>,
+        emit: &mut dyn FnMut(backend::Update) -> Result<(), String>,
+    ) -> Result<backend::Completion, backend::Failure> {
         let origin = Origin::with_account(self.id(), self.model(), Some(self.api.account()));
         let projected: Vec<_> = messages
             .iter()
@@ -204,7 +247,7 @@ impl Backend for OpenAi {
             .collect();
         let mut request = wire::request_with_catalog(
             &self.model,
-            self.effort,
+            effort,
             &projected,
             with_tools.then(|| crate::tools::definitions_for(self.delegation)),
             pool,

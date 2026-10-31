@@ -1,6 +1,12 @@
 //! A short session title, generated once from the first request.
-use super::Agent;
-use crate::{attachments::Prompt, json::Value};
+use super::{Agent, timing::RequestTiming};
+use crate::{
+    attachments::Prompt,
+    backend::{Update, Usage},
+    effort::Effort,
+    json::Value,
+};
+use std::time::Instant;
 
 const PROMPT: &str = "Name this coding session from the user's first request. Reply with the title only: two to six words in the language of the request, without quotes or a final period.";
 
@@ -27,7 +33,10 @@ impl Agent {
         };
         client.clone_routing_from(self.client.as_ref());
         client.set_routing(self.client.routing());
-        let name = handle.namer();
+        let archive = self.archive();
+        let name = handle.namer(archive.messages, archive.events);
+        let backend = client.id().to_owned();
+        let model = self.redact(client.model());
         let request = prompt
             .display()
             .chars()
@@ -46,14 +55,52 @@ impl Agent {
         let _ = std::thread::Builder::new()
             .name("jecode-session-title".into())
             .spawn(move || {
-                let title = client.prepare_turn().ok().and_then(|_| {
-                    client
-                        .sample(&messages, false, None, None, &mut |_| Ok(()))
-                        .ok()
+                let mut timing = RequestTiming::start();
+                let mut usage = Usage::default();
+                let mut has_usage = false;
+                let mut effort = Effort::Low;
+                let result = client.prepare_turn().and_then(|_| {
+                    effort = client.maintenance_effort(Effort::Low);
+                    client.sample_with_effort(
+                        effort,
+                        &messages,
+                        false,
+                        Some(512),
+                        None,
+                        &mut |update| {
+                            match update {
+                                Update::Waiting { request_bytes } => {
+                                    timing.request_bytes = Some(request_bytes);
+                                    timing.dispatched = Some(Instant::now());
+                                }
+                                Update::Usage(snapshot) => {
+                                    has_usage = true;
+                                    usage.update(snapshot);
+                                }
+                                Update::TextDelta(_) | Update::Reasoning | Update::Working => {
+                                    timing.first_update.get_or_insert_with(Instant::now);
+                                }
+                            }
+                            Ok(())
+                        },
+                    )
                 });
-                if let Some(title) = title.and_then(|completion| clean(&completion.text)) {
-                    name(&title);
-                }
+                let title = result.as_ref().ok().and_then(|completion| {
+                    if let Some(snapshot) = completion.usage {
+                        has_usage = true;
+                        usage.update(snapshot);
+                    }
+                    clean(&completion.text)
+                });
+                let event = timing.event(
+                    "session_title",
+                    (&backend, &model, effort),
+                    1,
+                    if result.is_ok() { "complete" } else { "failed" },
+                    has_usage.then_some(usage),
+                    0,
+                );
+                name(title.as_deref(), event);
             });
     }
 }

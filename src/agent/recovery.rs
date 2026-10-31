@@ -1,6 +1,7 @@
 use super::{Agent, timing::RequestTiming};
 use crate::{
     backend::{Completion, Failure, FailureKind, Limits, Update, Usage},
+    effort::Effort,
     events::Event,
     json::Value,
 };
@@ -52,8 +53,15 @@ impl Agent {
         }
         let mut partial = String::new();
         let mut reported_usage = Usage::default();
+        let mut has_usage = false;
+        let effort = if tools {
+            self.effort()
+        } else {
+            self.client.maintenance_effort(Effort::Medium)
+        };
         let mut text = super::streaming::Text::new(self.redactor.clone());
-        let result = self.client.sample(
+        let result = self.client.sample_with_effort(
+            effort,
             messages,
             tools,
             output_tokens,
@@ -89,47 +97,36 @@ impl Agent {
                     Update::Reasoning => emit(Event::Reasoning),
                     Update::Working => emit(Event::Working),
                     Update::Usage(usage) => {
-                        if tools {
-                            reported_usage.update(usage);
-                            if self
+                        has_usage = true;
+                        reported_usage.update(usage);
+                        if tools
+                            && self
                                 .context
                                 .reported
                                 .observe(self.identity(), &reported_usage)
-                            {
-                                self.emit_context(emit)?;
-                            }
+                        {
+                            self.emit_context(emit)?;
                         }
                         Ok(())
                     }
                 }
             },
         );
-        self.record_request_timing(
-            if tools {
-                "completion"
-            } else {
-                "context_compaction"
-            },
-            retries.attempt.saturating_add(1),
-            timing,
-            match (&result, self.cancellation.requested()) {
-                (Ok(_), _) => "complete",
-                (Err(_), true) => "cancelled",
-                (Err(_), false) => "failed",
-            },
-        );
+        let mut final_context_error = None;
         match &result {
             Ok(completion) => {
                 self.record_charges(completion);
                 // Backends without streaming usage still report their final measurement.
-                if tools && let Some(usage) = completion.usage {
+                if let Some(usage) = completion.usage {
+                    has_usage = true;
                     reported_usage.update(usage);
-                    if self
-                        .context
-                        .reported
-                        .observe(self.identity(), &reported_usage)
+                    if tools
+                        && self
+                            .context
+                            .reported
+                            .observe(self.identity(), &reported_usage)
                     {
-                        self.emit_context(emit)?;
+                        final_context_error = self.emit_context(emit).err();
                     }
                 }
             }
@@ -138,6 +135,25 @@ impl Agent {
                     self.charges.lock().unwrap().include(charges);
                 }
             }
+        }
+        self.record_request_timing(
+            if tools {
+                "completion"
+            } else {
+                "context_compaction"
+            },
+            retries.attempt.saturating_add(1),
+            timing,
+            effort,
+            has_usage.then_some(reported_usage),
+            match (&result, self.cancellation.requested()) {
+                (Ok(_), _) => "complete",
+                (Err(_), true) => "cancelled",
+                (Err(_), false) => "failed",
+            },
+        );
+        if let Some(error) = final_context_error {
+            return Err(error.into());
         }
         if let Some(text) = text.finish() {
             emit(Event::Streaming { text })?;
@@ -275,53 +291,19 @@ impl Agent {
         operation: &str,
         attempt: usize,
         timing: RequestTiming,
+        effort: Effort,
+        usage: Option<Usage>,
         status: &str,
     ) {
-        let finished = Instant::now();
-        let milliseconds = |duration: Duration| Value::number(duration.as_millis());
-        let since = |later: Instant, earlier: Instant| {
-            milliseconds(later.saturating_duration_since(earlier))
-        };
         let after_message = self.messages.lock().unwrap().len();
-        self.events.lock().unwrap().push(Value::object([
-            ("type", Value::string("request_timing")),
-            ("operation", Value::string(operation)),
-            ("backend", Value::string(self.backend_id())),
-            ("model", Value::string(self.redact(self.model()))),
-            ("attempt", Value::number(attempt)),
-            ("started_at_unix_ms", Value::number(timing.clock.unix_ms)),
-            (
-                "request_bytes",
-                timing.request_bytes.map_or(Value::Null, Value::number),
-            ),
-            ("status", Value::string(status)),
-            (
-                "preparation_ms",
-                timing.dispatched.map_or(Value::Null, |dispatched| {
-                    milliseconds(
-                        dispatched
-                            .saturating_duration_since(timing.clock.started)
-                            .saturating_sub(timing.notification),
-                    )
-                }),
-            ),
-            ("notification_ms", milliseconds(timing.notification)),
-            (
-                "first_update_ms",
-                timing
-                    .dispatched
-                    .zip(timing.first_update)
-                    .map_or(Value::Null, |(dispatched, first)| since(first, dispatched)),
-            ),
-            (
-                "response_ms",
-                timing
-                    .dispatched
-                    .map_or(Value::Null, |dispatched| since(finished, dispatched)),
-            ),
-            ("total_ms", since(finished, timing.clock.started)),
-            ("after_message", Value::number(after_message)),
-        ]));
+        self.events.lock().unwrap().push(timing.event(
+            operation,
+            (self.backend_id(), &self.redact(self.model()), effort),
+            attempt,
+            status,
+            usage,
+            after_message,
+        ));
     }
 }
 

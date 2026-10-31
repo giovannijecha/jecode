@@ -1,6 +1,7 @@
 pub(crate) mod annotations;
 pub(crate) mod attachments;
 mod backend;
+mod cache;
 mod calls;
 mod capacity;
 mod completion;
@@ -41,6 +42,8 @@ pub struct OpenRouter {
     model: String,
     effort: Effort,
     limits: Option<Option<Limits>>,
+    /// Exact model effort capabilities from the already fetched catalog.
+    efforts: Option<Vec<Effort>>,
     /// The model's input modalities from the catalog; None when unknown.
     inputs: Option<Vec<String>>,
     router: Router,
@@ -136,6 +139,7 @@ impl OpenRouter {
             api,
             model,
             effort: Effort::Default,
+            efforts: None,
             inputs: None,
             router: Router::new(Routing::Default),
             delegation: true,
@@ -166,6 +170,11 @@ impl OpenRouter {
         self.inputs = Some(inputs.iter().map(|input| (*input).to_owned()).collect());
     }
 
+    #[cfg(test)]
+    pub fn fixture_efforts(&mut self, efforts: &[Effort]) {
+        self.efforts = Some(efforts.to_vec());
+    }
+
     pub fn api(&self) -> Api {
         self.api.clone()
     }
@@ -185,6 +194,7 @@ impl OpenRouter {
         validate_model(&model)?;
         if model != self.model {
             self.inputs = None;
+            self.efforts = None;
             let session = self.router.session.take();
             self.router = Router::new(match &self.router.routing {
                 Routing::Endpoint(_) => Routing::Auto,
@@ -279,17 +289,37 @@ impl OpenRouter {
         output_tokens: Option<usize>,
         emit: &mut impl FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
-        self.sample_owned(messages.to_vec(), with_tools, output_tokens, emit)
+        self.sample_owned(
+            messages.to_vec(),
+            self.effort,
+            with_tools,
+            false,
+            output_tokens,
+            emit,
+        )
     }
 
     fn sample_owned(
         &self,
-        messages: Vec<Value>,
+        mut messages: Vec<Value>,
+        effort: Effort,
         with_tools: bool,
+        request_state: bool,
         output_tokens: Option<usize>,
         emit: &mut impl FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
         let has_files = attachments::has_files(&messages);
+        let claude_cache = with_tools
+            && self
+                .model
+                .strip_prefix('~')
+                .unwrap_or(&self.model)
+                .starts_with("anthropic/claude-");
+        let explicit_cache = with_tools && (claude_cache || cache::supports_openai(&self.model));
+        if explicit_cache && request_state && messages.len() > 1 {
+            let durable = messages.len() - 1;
+            cache::mark_recent(&mut messages[..durable]);
+        }
         let mut body = Value::object([
             ("model", Value::string(&self.model)),
             ("messages", Value::Array(messages)),
@@ -312,12 +342,7 @@ impl OpenRouter {
                     .collect();
                 fields.insert("tools".into(), Value::Array(wrapped));
                 // OpenRouter supports automatic top-level breakpoints for Claude.
-                if self
-                    .model
-                    .strip_prefix('~')
-                    .unwrap_or(&self.model)
-                    .starts_with("anthropic/claude-")
-                {
+                if claude_cache && !request_state {
                     fields.insert(
                         "cache_control".into(),
                         Value::object([("type", Value::string("ephemeral"))]),
@@ -328,11 +353,11 @@ impl OpenRouter {
                 fields.insert("max_completion_tokens".into(), Value::number(tokens));
             }
             let now = std::time::Instant::now();
-            for (key, value) in self.router.fields(&self.model, self.reasoning(), now) {
+            for (key, value) in self.router.fields(&self.model, effort.reasons(), now) {
                 fields.insert(key.into(), value);
             }
         }
-        if let Some(reasoning) = reasoning_request(self.effort)
+        if let Some(reasoning) = reasoning_request(effort)
             && let Value::Object(fields) = &mut body
         {
             fields.insert("reasoning".into(), reasoning);

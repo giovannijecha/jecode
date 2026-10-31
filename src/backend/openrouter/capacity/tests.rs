@@ -2,6 +2,83 @@ use super::*;
 use crate::test_support::{HttpFixture, completion};
 
 #[test]
+fn maintenance_effort_respects_model_and_pinned_endpoint_capabilities() {
+    let catalog = crate::json::parse(
+        r#"{"data":[{"id":"fixture/model","context_length":32000,"reasoning":{"supported_efforts":["low","medium"]}}]}"#,
+    )
+    .unwrap();
+    let fixture = HttpFixture::new(vec![(200, catalog), (200, completion("ok", vec![]))]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.limits = None;
+    client.limits().unwrap();
+    assert_eq!(
+        crate::backend::Backend::maintenance_effort(&client, crate::effort::Effort::Medium),
+        crate::effort::Effort::Medium
+    );
+    let listing = crate::json::parse(
+        r#"{"data":{"endpoints":[{"tag":"provider/p","supported_parameters":["tools"]}]}}"#,
+    )
+    .unwrap();
+    client.offer_endpoints(
+        super::super::endpoints::parse("fixture/model", &listing, std::time::Instant::now())
+            .unwrap(),
+    );
+    client.set_routing(crate::backend::Routing::Endpoint("provider/p".into()));
+    assert!(crate::backend::Backend::prepare_turn(&mut client).is_ok());
+    assert_eq!(
+        crate::backend::Backend::maintenance_effort(&client, crate::effort::Effort::Medium),
+        crate::effort::Effort::Default
+    );
+    let resolved =
+        crate::backend::Backend::maintenance_effort(&client, crate::effort::Effort::Medium);
+    crate::backend::Backend::sample_with_effort(
+        &client,
+        resolved,
+        &[],
+        false,
+        None,
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(client.effort(), crate::effort::Effort::Default);
+    assert_eq!(
+        client.routing(),
+        &crate::backend::Routing::Endpoint("provider/p".into())
+    );
+    client.set_model("fixture/other".into()).unwrap();
+    assert_eq!(
+        crate::backend::Backend::maintenance_effort(&client, crate::effort::Effort::Low),
+        crate::effort::Effort::Default
+    );
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].body.get("reasoning").is_none());
+    assert_eq!(
+        requests[1]
+            .body
+            .get("provider")
+            .and_then(|provider| provider.get("order")),
+        Some(&Value::Array(vec![Value::string("provider/p")]))
+    );
+}
+
+#[test]
+fn maintenance_effort_defaults_when_catalog_does_not_advertise_reasoning() {
+    let catalog =
+        crate::json::parse(r#"{"data":[{"id":"fixture/model","context_length":32000}]}"#).unwrap();
+    let fixture = HttpFixture::new(vec![(200, catalog)]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.limits = None;
+    client.limits().unwrap();
+    assert_eq!(
+        crate::backend::Backend::maintenance_effort(&client, crate::effort::Effort::Low),
+        crate::effort::Effort::Default
+    );
+    assert_eq!(fixture.finish().len(), 1);
+}
+
+#[test]
 fn turn_metadata_requests_overlap_and_pin_narrows_the_fresh_model_limit() {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;

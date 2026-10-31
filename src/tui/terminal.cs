@@ -60,8 +60,13 @@ public static class JecodeConsole {
         if (!success) throw new IOException("Windows console " + operation + " error " + Marshal.GetLastWin32Error());
     }
     static int Modifiers(Record key) {
+        // ConPTY may omit Ctrl for a C0 letter key while retaining its control
+        // character. Match both the virtual key and character before inferring it.
+        bool inferredCtrl = key.Down != 0 && key.Character >= 1 && key.Character <= 26 &&
+            key.Key == key.Character + 64 && (key.Controls & 31) == 0;
         return ((key.Controls & 3) != 0 ? 1 : 0) |
-            ((key.Controls & 16) != 0 ? 2 : 0) | ((key.Controls & 12) != 0 ? 4 : 0);
+            ((key.Controls & 16) != 0 ? 2 : 0) |
+            ((key.Controls & 12) != 0 || inferredCtrl ? 4 : 0);
     }
     public static List<Record> Keys(Record[] records, uint count) {
         var keys = new List<Record>();

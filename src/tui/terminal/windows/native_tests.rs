@@ -29,6 +29,9 @@ mod native_permissions;
 #[path = "native_background.rs"]
 mod native_background;
 
+#[path = "native_auth_panels.rs"]
+mod native_auth_panels;
+
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
@@ -68,6 +71,7 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "startup-key-removed",
         "startup-plain",
         "startup-setup-empty",
+        "auth-panels",
     ] {
         let directory = Directory::new();
         let script = format!(
@@ -257,6 +261,12 @@ fn native_console_fixture() {
         native_permissions::fixture(&path);
         restored(&path);
         println!("NATIVE_PERMISSIONS_RESTORED");
+        return;
+    }
+    if scenario == "auth-panels" {
+        native_auth_panels::console();
+        restored(&path);
+        println!("NATIVE_AUTH_PANELS_VERIFIED");
         return;
     }
     if matches!(scenario.as_str(), "background-light" | "background-native") {

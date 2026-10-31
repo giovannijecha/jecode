@@ -43,7 +43,7 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
         let environment = agent.environment();
         let history = agent.messages.lock().unwrap();
         assert!(
-            agent.context_estimate(&environment, &history) < agent.fixture_capacity(1_024, 100)
+            agent.context_estimate(&environment, &history) < agent.fixture_capacity(2_048, 100)
         );
     }
     assert!(
@@ -65,7 +65,8 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
     resumed
         .prepare_turn("Audit without more code changes")
         .unwrap();
-    let payload = text(&resumed.transport_messages());
+    let request = resumed.transport_messages();
+    let payload = text(crate::test_support::durable_messages(&request));
     assert!(payload.contains("history:3 — archived user request"));
     assert!(payload.ends_with("Audit without more code changes"));
     assert!(fixture.finish().is_empty());
@@ -208,12 +209,7 @@ fn model_boundaries_keep_tool_pairs_and_archive_evidence_but_strip_old_provider_
     agent.set_model("fixture/other".into()).unwrap();
     agent.run_turn("second", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
-    let messages = requests[2]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[2].body);
     assert_eq!(messages.len(), 6);
     assert!(messages[2].get("reasoning_details").is_none());
     assert!(messages[4].get("reasoning_details").is_none());

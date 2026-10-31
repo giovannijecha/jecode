@@ -1,8 +1,7 @@
 use super::*;
 use crate::test_support::{Directory, HttpFixture, tool_call};
 
-#[test]
-fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_proof() {
+fn large_result_can_fit_by_preview(field: &str, forced: bool) {
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![]);
@@ -35,7 +34,22 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
                 Value::string(
                     Value::object([
                         ("exit_code", Value::number(0)),
-                        ("stdout", Value::string(&original_output)),
+                        (
+                            "content",
+                            Value::string(if field == "content" {
+                                &original_output
+                            } else {
+                                ""
+                            }),
+                        ),
+                        (
+                            "stdout",
+                            Value::string(if field == "stdout" {
+                                &original_output
+                            } else {
+                                ""
+                            }),
+                        ),
                         ("stderr", Value::string("")),
                     ])
                     .encode(),
@@ -57,15 +71,16 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
         context: 24000,
         output: None,
     });
-    assert!(
-        !agent
-            .compact_if_needed(limits, false, &mut |event| {
+    assert_eq!(
+        agent
+            .compact_if_needed(limits, forced, &mut |event| {
                 if matches!(event, Event::Recovering { .. }) {
                     return Err("A model summary was not needed".into());
                 }
                 Ok(())
             })
-            .unwrap()
+            .unwrap(),
+        forced
     );
     assert_eq!(agent.context.from, 1);
     assert_eq!(agent.context.summary, old_summary);
@@ -105,4 +120,95 @@ fn a_large_result_can_fit_by_preview_without_a_model_summary_or_losing_original_
             .contains("HEAD")
     );
     assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn a_large_stdout_result_uses_a_preview_without_a_model_summary() {
+    large_result_can_fit_by_preview("stdout", false);
+}
+
+#[test]
+fn a_large_read_content_uses_a_preview_without_a_model_summary() {
+    large_result_can_fit_by_preview("content", false);
+}
+
+#[test]
+fn a_forced_context_recovery_tries_a_preview_before_a_model_summary() {
+    large_result_can_fit_by_preview("content", true);
+}
+
+#[test]
+fn a_provider_context_rejection_retries_with_a_preview_and_keeps_the_tool_pair() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            400,
+            Value::object([(
+                "error",
+                Value::object([
+                    ("code", Value::string("context_length_exceeded")),
+                    ("message", Value::string("Maximum context length exceeded")),
+                ]),
+            )]),
+        ),
+        (
+            200,
+            crate::test_support::completion("Inspection complete.", vec![]),
+        ),
+    ]);
+    let mut agent = Agent::new(
+        crate::backend::openrouter::OpenRouter::fixture(fixture.endpoint.clone()),
+        crate::tools::Tools::new(directory.path()).unwrap(),
+    );
+    agent.set_auto_compact(99);
+    agent.client.fixture_limits(160_000, Some(4096));
+    agent.prepare_turn("Inspect once").unwrap();
+    let original_output = format!("HEAD\n{}\nTAIL", "evidence ".repeat(10_000));
+    agent.messages.lock().unwrap().extend([
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "tool_calls",
+                Value::Array(vec![tool_call(
+                    "once",
+                    "read",
+                    Value::object([("path", Value::string("source"))]),
+                )]),
+            ),
+        ]),
+        Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string("once")),
+            (
+                "content",
+                Value::string(
+                    Value::object([("content", Value::string(&original_output))]).encode(),
+                ),
+            ),
+        ]),
+    ]);
+    let answer = agent
+        .next_completion(
+            Some(Limits {
+                context: 160_000,
+                output: Some(4096),
+            }),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(answer.text, "Inspection complete.");
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].body.get("tools").is_some());
+    assert!(requests[1].body.get("tools").is_some());
+    assert!(requests[1].body.encode().contains("context_truncated"));
+    assert!(requests[1].body.encode().contains("history:3"));
+    assert!(requests[1].body.encode().contains("tool_calls"));
+    assert_eq!(agent.context.from, 1);
+    let messages = agent.messages.lock().unwrap();
+    let saved = crate::json::parse(messages[3].get("content").unwrap().as_str().unwrap()).unwrap();
+    assert_eq!(
+        saved.get("content").and_then(Value::as_str),
+        Some(original_output.as_str())
+    );
 }

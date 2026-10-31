@@ -83,7 +83,11 @@ fn large_images_survive_native_write_and_avanti_without_replaying_the_write() {
             results.push((
                 length,
                 exact_images,
-                messages.last().unwrap().encode().contains("avanti"),
+                crate::test_support::durable_messages(messages)
+                    .last()
+                    .unwrap()
+                    .encode()
+                    .contains("avanti"),
             ));
             let response = response.encode();
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();

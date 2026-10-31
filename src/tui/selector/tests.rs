@@ -33,9 +33,14 @@ fn provider_settings_have_two_sections_and_account_choices_distinguish_active_fr
             .collect::<Vec<_>>(),
         ["Credentials", "API keys"]
     );
-    let credentials = Selector::credentials(false);
+    let credentials = Selector::credentials(false, true);
     assert_eq!(credentials.options[0].name, "OpenAI");
     assert!(credentials.options[0].badge.is_none());
+    assert_eq!(credentials.options[1].name, "Anthropic");
+    assert_eq!(
+        credentials.options[1].badge,
+        Some(Badge::Note("configured".into()))
+    );
     let keys = Selector::api_keys(true);
     assert_eq!(keys.options[0].name, "OpenRouter");
     assert_eq!(
@@ -44,27 +49,27 @@ fn provider_settings_have_two_sections_and_account_choices_distinguish_active_fr
     );
 
     let accounts = vec![
-        crate::auth::openai::Account {
-            client_id: "a".into(),
-            subject: "one".into(),
-            email: "one@example.test".into(),
+        crate::auth::Account {
+            id: "a".into(),
+            identity: "a:one".into(),
+            detail: "one@example.test".into(),
             label: "First".into(),
             enabled: true,
         },
-        crate::auth::openai::Account {
-            client_id: "b".into(),
-            subject: "two".into(),
-            email: "two@example.test".into(),
+        crate::auth::Account {
+            id: "b".into(),
+            identity: "b:two".into(),
+            detail: "two@example.test".into(),
             label: "Second".into(),
             enabled: false,
         },
     ];
-    let menu = Selector::accounts(&accounts, Some("b"));
+    let menu = Selector::accounts("openai", &accounts, Some("b"));
     assert_eq!(menu.options.len(), 3);
     assert_eq!(menu.options[0].badge, None);
     assert_eq!(menu.options[1].badge, Some(Badge::Current));
     assert!(matches!(menu.options[2].choice, Choice::AddAccount));
-    let account = Selector::account(&accounts[0], false);
+    let account = Selector::account("openai", &accounts[0], false);
     assert!(
         account
             .options
@@ -76,6 +81,13 @@ fn provider_settings_have_two_sections_and_account_choices_distinguish_active_fr
             .options
             .iter()
             .any(|row| matches!(row.choice, Choice::ManageUsage))
+    );
+    let claude = Selector::account("anthropic", &accounts[0], false);
+    assert!(
+        claude
+            .options
+            .iter()
+            .all(|row| !matches!(row.choice, Choice::ManageUsage))
     );
 }
 

@@ -202,12 +202,7 @@ fn interactive_session_recovers_from_api_errors_and_can_clear_history() {
     );
     assert!(String::from_utf8(events).unwrap().contains("HTTP 401"));
     let requests = fixture.finish();
-    let messages = requests[2]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[2].body);
     assert_eq!(messages.len(), 2);
     assert_eq!(
         messages[1].get("content").unwrap().as_str(),
@@ -250,12 +245,7 @@ fn model_command_preserves_context_and_does_not_change_saved_defaults() {
         Some("fixture/new")
     );
     assert_eq!(
-        requests[1]
-            .body
-            .get("messages")
-            .and_then(Value::as_array)
-            .unwrap()
-            .len(),
+        crate::test_support::request_messages(&requests[1].body).len(),
         4
     );
 }
@@ -407,12 +397,7 @@ fn init_runs_a_model_tool_turn_for_root_project_instructions() {
     );
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
-    let messages = requests[0]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[0].body);
     let request = messages
         .last()
         .unwrap()

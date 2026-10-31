@@ -1,4 +1,5 @@
 use super::{Agent, ToolCall, Value};
+use crate::{backend::Usage, effort::Effort};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy)]
@@ -25,6 +26,74 @@ impl RequestTiming {
             request_bytes: None,
             notification: Duration::ZERO,
         }
+    }
+
+    /// A single provider attempt. Counters are snapshots, never accumulated
+    /// across streaming updates or retries.
+    pub(super) fn event(
+        self,
+        operation: &str,
+        (backend, model, effort): (&str, &str, Effort),
+        attempt: usize,
+        status: &str,
+        usage: Option<Usage>,
+        after_message: usize,
+    ) -> Value {
+        let finished = Instant::now();
+        let milliseconds = |duration: Duration| Value::number(duration.as_millis());
+        let since = |later: Instant, earlier: Instant| {
+            milliseconds(later.saturating_duration_since(earlier))
+        };
+        let tokens = |field: fn(Usage) -> Option<usize>| {
+            usage.and_then(field).map_or(Value::Null, Value::number)
+        };
+        Value::object([
+            ("type", Value::string("request_timing")),
+            ("operation", Value::string(operation)),
+            ("backend", Value::string(backend)),
+            ("model", Value::string(model)),
+            ("effort", Value::string(effort.name())),
+            ("attempt", Value::number(attempt)),
+            ("started_at_unix_ms", Value::number(self.clock.unix_ms)),
+            (
+                "request_bytes",
+                self.request_bytes.map_or(Value::Null, Value::number),
+            ),
+            ("status", Value::string(status)),
+            ("input_tokens", tokens(|usage| usage.input_tokens)),
+            ("output_tokens", tokens(|usage| usage.output_tokens)),
+            ("total_tokens", tokens(|usage| usage.total_tokens)),
+            ("cached_tokens", tokens(|usage| usage.cached_tokens)),
+            (
+                "cache_write_tokens",
+                tokens(|usage| usage.cache_write_tokens),
+            ),
+            ("reasoning_tokens", tokens(|usage| usage.reasoning_tokens)),
+            (
+                "preparation_ms",
+                self.dispatched.map_or(Value::Null, |dispatched| {
+                    milliseconds(
+                        dispatched
+                            .saturating_duration_since(self.clock.started)
+                            .saturating_sub(self.notification),
+                    )
+                }),
+            ),
+            ("notification_ms", milliseconds(self.notification)),
+            (
+                "first_update_ms",
+                self.dispatched
+                    .zip(self.first_update)
+                    .map_or(Value::Null, |(dispatched, first)| since(first, dispatched)),
+            ),
+            (
+                "response_ms",
+                self.dispatched
+                    .map_or(Value::Null, |dispatched| since(finished, dispatched)),
+            ),
+            ("total_ms", since(finished, self.clock.started)),
+            ("after_message", Value::number(after_message)),
+        ])
     }
 }
 

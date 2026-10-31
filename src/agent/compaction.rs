@@ -189,30 +189,14 @@ impl Agent {
         if !forced && estimate < input_budget {
             return Ok(false);
         }
-        if !forced {
+        if forced || estimate >= input_budget {
             let before = self.context_bytes(&self.projected_context(&self.context, &original));
             let mut preview = self.context.clone();
             preview.preview_until = original.len();
             preview.preview_limit = (input_budget / 12).clamp(512, 2048);
             preview.clear_measurement();
             let after = self.context_bytes(&self.projected_context(&preview, &original));
-            let large_output = original[self.context.from..].iter().any(|message| {
-                message.get("role").and_then(Value::as_str) == Some("tool")
-                    && message
-                        .get("content")
-                        .and_then(Value::as_str)
-                        .and_then(|text| crate::json::parse(text).ok())
-                        .is_some_and(|result| {
-                            ["stdout", "stderr"].iter().any(|key| {
-                                result
-                                    .get(key)
-                                    .and_then(Value::as_str)
-                                    .is_some_and(|text| text.len() > preview.preview_limit / 3)
-                            })
-                        })
-            });
-            if large_output
-                && after < before
+            if after < before
                 && self.context_estimate_for(&preview, &environment, &original) < input_budget
             {
                 // Keep every conversation group and its proof. A native preview
@@ -237,7 +221,7 @@ impl Agent {
                 events.emit(Event::ContextCompacted {
                     text: "Large tool results shown as context previews · full original results remain readable in history".into(),
                 })?;
-                return Ok(false);
+                return Ok(forced);
             }
         }
         if self.context.from >= original.len() {
@@ -256,7 +240,11 @@ impl Agent {
         let fixed = self
             .context_estimate_for(&next, &environment, &original)
             .saturating_add(next.estimate_bytes(768));
-        let limit = input_budget.saturating_sub(fixed).min(input_budget / 2);
+        // A handoff needs room for the active intent, evidence references and
+        // next steps, not a fraction of a million-token input window. This is
+        // a request to the model, never a post-hoc truncation of its answer.
+        let available_tokens = input_budget.saturating_sub(fixed).min(input_budget / 2);
+        let limit = next.summary_byte_budget(available_tokens).min(16 * 1024);
         if limit < 512 {
             return Err(format!(
                 "The original user requests and system instructions leave no room for a summary within {budget_text}. The original session and previous context are preserved; raise Auto-compact at in /settings or choose a model with more context."
@@ -381,6 +369,8 @@ impl Agent {
 
 #[cfg(test)]
 mod input_tests;
+#[cfg(test)]
+mod live_tests;
 #[cfg(test)]
 mod summary_budget_tests;
 #[cfg(test)]

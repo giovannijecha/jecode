@@ -4,8 +4,8 @@
 
 A terminal coding agent in Rust.
 
-Jecode connects to OpenRouter with an API key or to OpenAI through your ChatGPT
-account. It works in your project through fifteen tools: `read`, `list`,
+Jecode connects to OpenRouter with an API key, to OpenAI through your ChatGPT
+account, or to Anthropic through your Claude account. It works in your project through fifteen tools: `read`, `list`,
 `search`, `map`, `write`, `edit`, `bash`, `exec`, `process`, `checkpoint`, `web`,
 `browser`, `agent`, `ask_user` and `todo_list`. `map` surveys code structure and can save or forget sourced
 notes; `list` and `search` discover files and matching lines.
@@ -50,7 +50,7 @@ require Full. Unsupported hosts reject confined command launch, and local
 servers must currently start in Full. See [permissions](docs/usage/PERMISSIONS.md)
 for scope, approvals and platform limits.
 
-ChatGPT browser sign-in opens the system browser; its callback listens only on
+Account sign-in opens the system browser; its callback listens only on
 `127.0.0.1`. HTTPS uses OS certificate verification. Jecode does not install or
 download additional applications to enable its tools.
 
@@ -101,22 +101,24 @@ Open the project directory you want Jecode to work in, then run:
 jecode
 ```
 
-1. The TUI opens even without credentials. Open `/settings` → **Providers** to connect a ChatGPT account or add an [OpenRouter API key](https://openrouter.ai/settings/keys).
+1. The TUI opens even without credentials. Open `/settings` → **Providers** to connect a ChatGPT or Claude account, or add an [OpenRouter API key](https://openrouter.ai/settings/keys).
 2. Choose a model with `/model`, or set the default in `/settings` → **Default model**.
 3. Type a task and press Enter.
 
 `jecode setup` also provides guided configuration and checks access without
 sending an inference request. `/cancel` leaves saved defaults unchanged. Saved
 defaults and the OpenRouter API key live in plaintext at `~/.jecode/config.json`;
-protected ChatGPT account records live separately under
-`~/.jecode/accounts/openai/`. OpenAI API keys are not supported.
+protected account records live separately under `~/.jecode/accounts/openai/`
+and `~/.jecode/accounts/anthropic/`. OpenAI and Anthropic API keys are not
+supported. Claude subscription access uses a native compatibility route;
+see [the Anthropic adapter](docs/development/ANTHROPIC.md) for its limits.
 
 First-time configuration is saved after choosing a default model. Until then,
 an OpenRouter key and settings changes stay in memory for the current session;
 cancelling model selection leaves the configuration file absent. Connecting a
 provider and choosing its first model also activates it for the current conversation.
 
-Use `/settings` → **Providers** → **Credentials** for ChatGPT accounts, or
+Use `/settings` → **Providers** → **Credentials** for ChatGPT or Claude accounts, or
 **API keys** for OpenRouter. With multiple configured providers, `/model` asks
 for the provider before the model. ChatGPT plan usage is managed in
 [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage).
@@ -182,7 +184,7 @@ Workspace (the default) or Full. In Workspace, file access outside the working
 folder, or a command run from outside it, asks first. Levels govern Jecode's tool
 calls, not what a command does once it runs: commands run with your system
 permissions, and the working directory is not a sandbox. Provider requests send conversation content and supported attachments to
-the selected backend: OpenAI directly or OpenRouter and its selected provider;
+the selected backend: OpenAI or Anthropic directly, or OpenRouter and its selected provider;
 see [security](SECURITY.md).
 
 ## CLI and pipes

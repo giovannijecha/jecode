@@ -86,6 +86,63 @@ Write-Output ($text.ToString().Trim())
 }
 
 #[test]
+fn native_control_character_with_matching_letter_key_is_a_shortcut() {
+    let script = format!(
+        "Add-Type -TypeDefinition @'\n{}\n'@\n",
+        include_str!("../terminal.cs")
+    ) + r#"
+function Record([int]$key, [int]$character, [int]$controls) {
+    $record = New-Object JecodeConsole+Record
+    $record.Type = 1; $record.Down = 1; $record.Repeat = 1
+    $record.Key = $key; $record.Character = $character; $record.Controls = $controls
+    return $record
+}
+$writer = [IO.StringWriter]::new()
+$burst = New-Object JecodeConsole+Burst
+$burst.Emit(@((Record 85 21 0)), 1, $writer, 0)
+Write-Output $writer.ToString().Trim()
+$writer = [IO.StringWriter]::new()
+$burst = New-Object JecodeConsole+Burst
+$burst.Emit(@((Record 65 97 0), (Record 66 98 0)), 2, $writer, 0)
+$burst.Emit(@((Record 85 21 0)), 1, $writer, 10)
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+$writer = [IO.StringWriter]::new()
+$burst = New-Object JecodeConsole+Burst
+$burst.Emit(@((Record 85 21 8), (Record 50 64 9), (Record 0 10 0)), 3, $writer, 0)
+Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
+"#;
+    let output = process::run_observed(
+        Command::new("powershell.exe").args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ]),
+        None,
+        Duration::from_secs(10),
+        4096,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        output.exit_code,
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        ["K|85|4|21", "P|97,98;K|85|4|21", "K|85|4|21;P|64,10"]
+    );
+}
+
+#[test]
 fn native_burst_joins_console_reads_and_keeps_keys_in_order() {
     let script = format!(
         "Add-Type -TypeDefinition @'\n{}\n'@\n",

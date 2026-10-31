@@ -2,7 +2,6 @@ use super::super::*;
 use crate::{
     backend::openrouter::OpenRouter,
     config::{Settings, Store},
-    json::Value,
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,
 };
@@ -48,11 +47,7 @@ fn plain_chat_sends_initial_attachment_once() {
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
     let last = |index: usize| {
-        requests[index]
-            .body
-            .get("messages")
-            .and_then(Value::as_array)
-            .unwrap()
+        crate::test_support::request_messages(&requests[index].body)
             .last()
             .unwrap()
             .encode()

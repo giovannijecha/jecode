@@ -208,12 +208,7 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
             crate::tools::definitions().as_array().unwrap().len()
         );
     }
-    let fourth = requests[3]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let fourth = crate::test_support::request_messages(&requests[3].body);
     assert_eq!(
         fourth.last().unwrap().get("content").unwrap().as_str(),
         Some("What did you change?")
@@ -269,12 +264,7 @@ fn sends_tool_errors_back_so_the_model_can_repair_its_call() {
         "fixed"
     );
     let requests = fixture.finish();
-    let messages = requests[1]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[1].body);
     assert!(
         messages
             .last()
@@ -384,12 +374,7 @@ fn failed_tool_event_output_cancels_calls_without_corrupting_history() {
     assert!(!directory.path().join("must-not-exist").exists());
     agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
-    let messages = requests[1]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[1].body);
     assert_eq!(messages.len(), 5);
     assert_eq!(
         messages[3].get("tool_call_id").and_then(Value::as_str),

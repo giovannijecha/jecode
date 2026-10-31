@@ -68,7 +68,9 @@ impl App {
             }
             (Choice::Credentials, Purpose::ProviderSettings) => self.open_credentials(),
             (Choice::ApiKeys, Purpose::ProviderSettings) => self.open_api_keys(),
-            (Choice::Provider("openai"), Purpose::Credentials) => self.open_accounts(),
+            (Choice::Provider(provider @ ("openai" | "anthropic")), Purpose::Credentials) => {
+                self.open_accounts_for(provider)
+            }
             (Choice::OpenRouterKey, Purpose::ApiKeys) => {
                 self.state.selector = Some(Selector::key())
             }
@@ -443,7 +445,7 @@ impl App {
                 }
             }
             ResultValue::Endpoints(purpose, result) => self.show_routing(purpose, result),
-            ResultValue::SignIn(result) => self.finish_sign_in(result),
+            ResultValue::SignIn(provider, result) => self.finish_sign_in(provider, result),
             ResultValue::SignOut(result) => self.finish_sign_out(result),
             ResultValue::Key(key, result) => self.finish_key(key, result)?,
         }

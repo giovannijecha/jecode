@@ -78,11 +78,7 @@ fn context_only_update_keeps_the_assignment_after_return_and_resume() {
     let updated = requests[1].body.encode();
     assert!(updated.contains("Assignment v2: Report the source state"));
     assert!(updated.contains("The data contract now includes an ID"));
-    let followup = requests[2]
-        .body
-        .get("messages")
-        .and_then(Value::as_array)
-        .unwrap();
+    let followup = crate::test_support::request_messages(&requests[2].body);
     let latest = followup
         .iter()
         .rev()

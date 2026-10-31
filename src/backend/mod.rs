@@ -1,5 +1,6 @@
 //! Model inference and account services independent of a provider's wire format.
 
+pub(crate) mod anthropic;
 mod charges;
 #[cfg(test)]
 mod delegation_tests;
@@ -92,6 +93,8 @@ pub struct Usage {
     pub total_tokens: Option<usize>,
     pub cached_tokens: Option<usize>,
     pub cache_write_tokens: Option<usize>,
+    /// Provider-reported reasoning is included in output_tokens, not added to it.
+    pub reasoning_tokens: Option<usize>,
 }
 
 impl Usage {
@@ -107,6 +110,7 @@ impl Usage {
         self.output_tokens = newer.output_tokens.or(self.output_tokens);
         self.cached_tokens = newer.cached_tokens.or(self.cached_tokens);
         self.cache_write_tokens = newer.cache_write_tokens.or(self.cache_write_tokens);
+        self.reasoning_tokens = newer.reasoning_tokens.or(self.reasoning_tokens);
     }
 
     /// Tokens in the active context, using only provider-reported counters.
@@ -288,6 +292,10 @@ pub trait Backend: Send {
     fn model(&self) -> &str;
     fn effort(&self) -> Effort;
     fn set_effort(&mut self, effort: Effort);
+    /// Resolve a maintenance preference against the current model's capabilities.
+    fn maintenance_effort(&self, requested: Effort) -> Effort {
+        requested
+    }
     /// Collaborators retain working tools but never receive delegation tools.
     fn set_delegation(&mut self, _enabled: bool) {}
     fn inputs(&self) -> Inputs;
@@ -303,6 +311,19 @@ pub trait Backend: Send {
         pool: Option<&Pool>,
         emit: &mut dyn FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure>;
+    /// A per-request effort keeps maintenance independent of the active selection.
+    /// Reasoning-neutral backends can retain their ordinary sampling behavior.
+    fn sample_with_effort(
+        &self,
+        _effort: Effort,
+        messages: &[Value],
+        with_tools: bool,
+        output_tokens: Option<usize>,
+        pool: Option<&Pool>,
+        emit: &mut dyn FnMut(Update) -> Result<(), String>,
+    ) -> Result<Completion, Failure> {
+        self.sample(messages, with_tools, output_tokens, pool, emit)
+    }
     fn redactor(&self) -> Redactor;
     fn set_cancellation(&mut self, cancellation: Cancellation);
     fn set_conversation(&mut self, id: Option<String>);
@@ -337,7 +358,7 @@ pub struct BackendInfo {
     pub key_url: Option<&'static str>,
     pub credential_env: &'static [&'static str],
 }
-static AVAILABLE: [BackendInfo; 2] = [
+static AVAILABLE: [BackendInfo; 3] = [
     BackendInfo {
         id: "openrouter",
         name: "OpenRouter",
@@ -349,6 +370,12 @@ static AVAILABLE: [BackendInfo; 2] = [
         name: "OpenAI",
         key_url: None,
         credential_env: openai::CREDENTIAL_ENV,
+    },
+    BackendInfo {
+        id: "anthropic",
+        name: "Anthropic",
+        key_url: None,
+        credential_env: anthropic::CREDENTIAL_ENV,
     },
 ];
 pub fn available() -> &'static [BackendInfo] {
@@ -415,9 +442,17 @@ impl Services {
             )?)),
             "openai" => Ok(Self::from_service(openai::Api::new(
                 credential
-                    .account_session()
+                    .openai_session()
                     .ok_or(
                         "OpenAI needs a ChatGPT account; open Settings > Providers > Credentials",
+                    )?
+                    .clone(),
+            )?)),
+            "anthropic" => Ok(Self::from_service(anthropic::Api::new(
+                credential
+                    .anthropic_session()
+                    .ok_or(
+                        "Anthropic needs a Claude account; open Settings > Providers > Credentials",
                     )?
                     .clone(),
             )?)),

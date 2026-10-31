@@ -321,7 +321,8 @@ public sealed partial class JecodeTestPty : IDisposable {
                     pty.Wait("Keep my task", typed);
                     int request = pty.Mark(); pty.Send("\r");
                     pty.Wait("No configured provider", request);
-                    pty.Send("\x15");
+                    int cleared = pty.Mark(); pty.Send("\x15");
+                    pty.Wait("Ask anything", cleared);
                 }
                 int next = pty.Mark(); pty.Send("/new");
                 pty.Wait("Commands", next); pty.Send("\r");
@@ -389,6 +390,9 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Finish(true);
             } else if (scenario == "permissions") {
                 pty.Permissions();
+            } else if (scenario == "auth-panels") {
+                pty.Wait("NATIVE_AUTH_PANELS_VERIFIED");
+                pty.Finish(true);
             } else if (scenario == "interactive") {
                 // Each renderer phase completes before the TUI startup wait begins.
                 pty.Wait("NATIVE_FULL_WIDTH_VERIFIED");

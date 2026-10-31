@@ -149,7 +149,20 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
         assert_eq!(system.matches("Working files and verification:").count(), 1);
         assert!(system.contains("useful durable tests"));
         assert!(system.contains("one-off verification"));
-        assert!(system.contains(&temporary));
+        assert!(
+            request
+                .body
+                .get("messages")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap()
+                .contains(&temporary)
+        );
         for tool in request.body.get("tools").unwrap().as_array().unwrap() {
             let function = tool.get("function").unwrap();
             let description = function.get("description").and_then(Value::as_str).unwrap();

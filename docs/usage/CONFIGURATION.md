@@ -3,13 +3,14 @@
 Start Jecode from the project directory. The TUI opens without credentials and
 shows a warning with `/settings` as the next step. `jecode setup` provides guided
 provider and model selection; plain interactive chat also offers setup. OpenAI uses
-**Continue with ChatGPT**; OpenRouter uses an API key. In the TUI, use
+**Continue with ChatGPT**; Anthropic uses **Continue with Claude**;
+OpenRouter uses an API key. In the TUI, use
 `/settings` to change saved defaults and **Providers** to manage authentication.
 Saved defaults and the OpenRouter API key are stored in plain text in
 `~/.jecode/config.json` (on Windows,
 `%USERPROFILE%\.jecode\config.json`). Keep this personal file private.
 
-During browser-based ChatGPT sign-in from `jecode setup`, press Enter to cancel
+During browser-based account sign-in from `jecode setup`, press Enter to cancel
 the pending login and return to provider selection. Once sign-in completes,
 Enter belongs to the next setup prompt.
 
@@ -45,7 +46,7 @@ instead report how to run `jecode setup`.
 | `/effort [NAME]` | Change this conversation's reasoning effort. |
 | `/settings` → **Default model** | Save the model and effort for future conversations and launches. |
 | `/settings` → **Default effort** | Change the saved model's default effort. |
-| `/settings` → **Providers** → **Credentials** | Connect, select or sign out of a ChatGPT account or workspace. |
+| `/settings` → **Providers** → **Credentials** | Connect, select or sign out of a ChatGPT or Claude account. |
 | `/settings` → **Providers** → **API keys** | Configure the OpenRouter key with hidden input. |
 | `jecode --model provider/model-id "task"` | Override the model for one launch. |
 
@@ -59,8 +60,19 @@ The ChatGPT catalog supplies the model's effective context window and supported
 reasoning levels. The picker offers these levels and the provider default;
 `/effort NAME` can also explicitly request a level. The context meter and
 automatic compaction use the account's declared window. If metadata is missing,
-capacity displays `?`. OpenAI endpoint
-routing is managed by OpenAI, so `/routing` applies only to OpenRouter.
+capacity displays `?`. Claude's catalog supplies its input/output limits and
+supported effort levels. Missing metadata stays unknown. `/routing` applies
+only to OpenRouter.
+
+For Claude subscription access, sign in under **Credentials >
+Anthropic > Continue with Claude**, then choose a model. It uses Jecode's own
+agent loop, tools and saved conversations, without installing Claude Code or
+an Agent SDK. Anthropic may change or reject this compatibility route; see
+[the implementation notes](../development/ANTHROPIC.md).
+
+Requests use the selected Claude account and its account-level usage settings.
+Jecode does not enable extra usage, change spending limits or fall back to an
+API key. OpenAI and Anthropic API-key backends are not implemented.
 
 ## Stored settings
 
@@ -107,8 +119,9 @@ model. If the default provider is unavailable at launch, Jecode restores the
 fallback provider's model from this field; OpenRouter first checks the legacy
 `openrouter.model`. Conversation-only model switches do not rewrite these saved
 models. The OpenRouter API key lives under `backends.openrouter`.
-ChatGPT tokens are stored separately under `accounts/openai/`; selecting OpenAI
-requires no API key in `config.json`. The original `openrouter` block remains
+ChatGPT and Claude tokens are stored separately under `accounts/openai/` and
+`accounts/anthropic/`; neither account provider needs an API key in
+`config.json`. The original `openrouter` block remains
 readable and is updated for compatibility. Its key, model, effort and routing
 take precedence for OpenRouter when both formats are present, so edits made by
 an older installed binary remain effective. Its values do not replace another
@@ -137,6 +150,7 @@ its own purpose:
 | --- | --- |
 | `config.json` | Saved settings and the OpenRouter API key; Jecode updates it through setup and settings. |
 | `accounts/openai/` | Protected ChatGPT registrations, rotating tokens, active account, stable host ID and refresh lock. |
+| `accounts/anthropic/` | Protected Claude account records, rotating tokens, active account and refresh lock. |
 | `skills/` | Your reusable skill files; Jecode reads this library. |
 | `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
 | `projects/<canonical-root-key>/map.json` | Source-backed project notes saved by `map remember` and removed by `map forget`; shared across conversations for the same canonical project root. |

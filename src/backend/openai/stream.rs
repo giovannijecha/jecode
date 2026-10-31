@@ -281,6 +281,10 @@ fn parse_usage(value: &Value) -> Option<Usage> {
             .get("input_tokens_details")
             .and_then(|details| details.get("cache_write_tokens"))
             .and_then(Value::as_usize),
+        reasoning_tokens: value
+            .get("output_tokens_details")
+            .and_then(|details| details.get("reasoning_tokens"))
+            .and_then(Value::as_usize),
     };
     (usage != Usage::default()).then_some(usage)
 }

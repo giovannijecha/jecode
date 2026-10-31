@@ -6,21 +6,27 @@ impl Selector {
             "Providers",
             Purpose::ProviderSettings,
             vec![
-                row("Credentials", "OpenAI", Choice::Credentials),
+                row("Credentials", "OpenAI · Anthropic", Choice::Credentials),
                 row("API keys", "OpenRouter", Choice::ApiKeys),
             ],
         );
         menu.parent = Some(SETTINGS);
         menu
     }
-    pub fn credentials(configured: bool) -> Self {
+    pub fn credentials(openai_configured: bool, anthropic_configured: bool) -> Self {
         let mut menu = Self::new(
             "Credentials",
             Purpose::Credentials,
-            vec![OptionRow {
-                badge: configured.then_some(Badge::Note("configured".into())),
-                ..row("OpenAI", "ChatGPT", Choice::Provider("openai"))
-            }],
+            vec![
+                OptionRow {
+                    badge: openai_configured.then_some(Badge::Note("configured".into())),
+                    ..row("OpenAI", "ChatGPT plan", Choice::Provider("openai"))
+                },
+                OptionRow {
+                    badge: anthropic_configured.then_some(Badge::Note("configured".into())),
+                    ..row("Anthropic", "Claude plan", Choice::Provider("anthropic"))
+                },
+            ],
         );
         menu.parent = Some("Providers");
         menu
@@ -37,48 +43,58 @@ impl Selector {
         menu.parent = Some("Providers");
         menu
     }
-    pub fn accounts(accounts: &[crate::auth::openai::Account], active: Option<&str>) -> Self {
+    pub fn accounts(
+        provider: &'static str,
+        accounts: &[crate::auth::Account],
+        active: Option<&str>,
+    ) -> Self {
         let mut options: Vec<_> = accounts
             .iter()
             .enumerate()
             .map(|(index, account)| OptionRow {
-                badge: if active == Some(account.client_id.as_str()) {
+                badge: if active == Some(account.id.as_str()) {
                     Some(Badge::Current)
                 } else if !account.enabled {
                     Some(Badge::Note("unavailable".into()))
                 } else {
                     None
                 },
-                search: account.email.clone(),
+                search: account.detail.clone(),
                 ..row(
                     account.label.clone(),
-                    account.email.clone(),
+                    account.detail.clone(),
                     Choice::Account(index),
                 )
             })
             .collect();
         options.push(row("Add account", "", Choice::AddAccount));
-        let mut menu = Self::new("OpenAI", Purpose::Accounts, options);
+        let mut menu = Self::new(provider_name(provider), Purpose::Accounts, options);
         menu.parent = Some("Credentials");
-        menu.context = "ChatGPT accounts".into();
+        menu.context = if provider == "anthropic" {
+            "Claude accounts"
+        } else {
+            "ChatGPT accounts"
+        }
+        .into();
         menu
     }
-    pub fn account(account: &crate::auth::openai::Account, active: bool) -> Self {
+    pub fn account(provider: &'static str, account: &crate::auth::Account, active: bool) -> Self {
+        let mut options = vec![OptionRow {
+            badge: active.then_some(Badge::Current),
+            ..row("Use account", &account.detail, Choice::Account(0))
+        }];
+        if provider == "openai" {
+            options.push(row("Manage usage", "", Choice::ManageUsage));
+        }
+        options.push(row("Sign out", "", Choice::SignOut));
         let mut menu = Self::new(
             "Account",
             Purpose::Account {
                 confirm_sign_out: false,
             },
-            vec![
-                OptionRow {
-                    badge: active.then_some(Badge::Current),
-                    ..row("Use account", &account.email, Choice::Account(0))
-                },
-                row("Manage usage", "", Choice::ManageUsage),
-                row("Sign out", "", Choice::SignOut),
-            ],
+            options,
         );
-        menu.parent = Some("OpenAI");
+        menu.parent = Some(provider_name(provider));
         menu.context = account.label.clone();
         menu
     }
@@ -95,6 +111,7 @@ impl Selector {
                 let (name, fact) = match id {
                     "openrouter" => ("OpenRouter", "API key"),
                     "openai" => ("OpenAI", "ChatGPT plan"),
+                    "anthropic" => ("Anthropic", "Claude plan"),
                     _ => (id, ""),
                 };
                 OptionRow {
@@ -126,5 +143,13 @@ impl Selector {
         }
         .into();
         menu
+    }
+}
+
+fn provider_name(provider: &str) -> &'static str {
+    if provider == "anthropic" {
+        "Anthropic"
+    } else {
+        "OpenAI"
     }
 }

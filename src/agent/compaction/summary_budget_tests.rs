@@ -33,6 +33,46 @@ fn historical_notes(agent: &Agent) {
 }
 
 #[test]
+fn a_large_window_requests_a_compact_handoff_with_room_to_recover_truncation() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(200, completion(&candidate(), vec![]))]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.prepare_turn("Inspect only").unwrap();
+    agent.messages.lock().unwrap().extend([
+        Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::string("Earlier evidence. ".repeat(8_000))),
+        ]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Continue the inspection")),
+        ]),
+    ]);
+    let original = agent.messages.lock().unwrap().clone();
+    agent
+        .compact_if_needed(
+            Some(Limits {
+                context: 272_000,
+                output: None,
+            }),
+            true,
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(*agent.messages.lock().unwrap(), original);
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].body.encode().contains("under 16384 bytes"));
+    assert_eq!(
+        requests[0].body.get("max_completion_tokens"),
+        Some(&Value::number(8192))
+    );
+}
+
+#[test]
 fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
     let charged = |mut response: Value, cost: f64| {
         let Value::Object(fields) = &mut response else {
@@ -115,7 +155,6 @@ fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
         .compact_if_needed(limits, true, &mut |_| Ok(()))
         .unwrap();
     let learned = first.context.summary_output_tokens;
-    assert!(learned > capacity / 8 && learned <= capacity / 4);
     assert_eq!(*first.messages.lock().unwrap(), original);
     first.save_session().unwrap();
     let id = first.sessions().unwrap().id();
@@ -146,7 +185,16 @@ fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
                 .unwrap()
         })
         .collect::<Vec<_>>();
-    assert_eq!(allowances, [capacity / 8, learned, learned]);
+    assert!(allowances[0] <= 8_192);
+    assert!(learned > allowances[0]);
+    assert_eq!(allowances, [allowances[0], learned, learned]);
+    for (request, allowance) in requests.iter().zip(allowances) {
+        let messages = request.body.get("messages").unwrap().as_array().unwrap();
+        let input = resumed
+            .context
+            .estimate_bytes(crate::context::bytes(messages).saturating_add(768));
+        assert!(input.saturating_add(allowance) <= capacity);
+    }
 }
 
 #[test]
@@ -291,10 +339,11 @@ fn output_regression_normal_turn_uses_declared_output_and_selected_effort() {
 }
 
 #[test]
-fn output_regression_compaction_uses_declared_output_and_selected_effort() {
+fn output_regression_compaction_uses_a_modest_allowance_and_medium_effort() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion(&candidate(), vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.fixture_efforts(&[Effort::Medium]);
     client.set_effort(Effort::High);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.prepare_turn("Inspect only").unwrap();
@@ -322,7 +371,7 @@ fn output_regression_compaction_uses_declared_output_and_selected_effort() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].body.get("max_completion_tokens"),
-        Some(&Value::number(9000))
+        Some(&Value::number(3000))
     );
     assert_eq!(
         requests[0]
@@ -331,7 +380,8 @@ fn output_regression_compaction_uses_declared_output_and_selected_effort() {
             .unwrap()
             .get("effort")
             .and_then(Value::as_str),
-        Some("high")
+        Some("medium")
     );
+    assert_eq!(agent.effort(), Effort::High);
     assert!(requests[0].body.get("tools").is_none());
 }

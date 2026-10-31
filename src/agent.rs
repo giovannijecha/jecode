@@ -470,6 +470,8 @@ mod persistence_tests;
 #[cfg(test)]
 mod process_tests;
 #[cfg(test)]
+mod projection_tests;
+#[cfg(test)]
 mod provider_usage_tests;
 #[cfg(test)]
 mod recovery_tests;
