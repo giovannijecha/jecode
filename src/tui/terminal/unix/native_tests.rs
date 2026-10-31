@@ -1,4 +1,5 @@
 mod driver;
+mod npm_tests;
 use super::*;
 use crate::{
     agent::Agent,

@@ -216,12 +216,50 @@ $package = Get-ChildItem target\package -Directory | Select-Object -First 1
 On Linux or macOS, run `sh PACKAGE.sh`, then
 `sh target/package/jecode-<platform>-<arch>/INSTALL.sh /absolute/test/root`.
 
+## npm distribution checks
+
+Node.js 22 or later and npm are needed for these distribution checks, not for
+the standalone Rust executable. From the repository root, test the launcher:
+
+```text
+node --test npm/launcher.test.cjs
+node --test tools/npm/release.test.mjs
+```
+
+The [release runbook](RELEASING.md) describes staging and packing the platform
+binaries. After preparing a tarball, replace `path/to/jecode-0.1.0.tgz` below
+with its actual path and run the lifecycle fixture on each supported platform:
+
+```text
+node tools/npm/lifecycle.mjs path/to/jecode-0.1.0.tgz
+```
+
+The fixture uses an isolated npm installation, local registry, and user home
+to exercise real installation, update, removal, and native `--version`
+execution without touching your normal installation or `~/.jecode` data.
+These checks do not publish a package.
+
+The npm terminal fixtures are opt-in. After packing locally, set
+`JECODE_NPM_LAUNCHER` to the absolute path of
+`target/npm-local/package/bin/jecode.cjs` and `JECODE_NPM_NODE` to Node's
+absolute `process.execPath`. Run the fixture for the current platform:
+
+```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_npm::npm_launcher_native_tui -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::unix::native_tests::npm_tests::npm_launcher_native_tui -- --exact --ignored --nocapture --test-threads=1
+```
+
+The second command applies to Linux and macOS. CI supplies both paths and runs
+the matching fixture through the packaged launcher and real terminal bridge.
+
 ## CI
 
 [`CI.yml`](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml)
 runs formatting, the offline build, all-target Clippy and the test suite, then
 the platform's native terminal fixtures (on Windows, also the direct-input
-fixture). It runs no other ignored tests. The required checks are
+fixture). It also builds a release executable, tests npm packaging and the
+install/update/uninstall lifecycle, and runs the opt-in native terminal fixture
+through the npm launcher. The required checks are
 `Rust (Windows)`, `Rust (Linux)` and `Rust (macOS)`.
 
 Windows and Linux jobs run on maintainer-hosted runners with fresh checkouts and

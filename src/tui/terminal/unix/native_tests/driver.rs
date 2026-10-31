@@ -22,12 +22,27 @@ pub(super) struct Pty {
 
 impl Pty {
     pub(super) fn new(case: &str) -> Self {
+        Self::new_with_run(case, None)
+    }
+
+    pub(super) fn new_external(node: &Path, launcher: &Path) -> Self {
+        let run = format!(
+            "printf '\\nPTY_META|%s|%s\\n' \"$$\" \"$(tty)\"; exec {} {}",
+            quote(node.to_str().unwrap()),
+            quote(launcher.to_str().unwrap())
+        );
+        Self::new_with_run("npm-launcher", Some(run))
+    }
+
+    fn new_with_run(case: &str, external_run: Option<String>) -> Self {
         let directory = Directory::new();
         let startup = directory.path().join("unexpected-startup.sh");
         fs::write(&startup, "printf 'UNEXPECTED_BASH_ENV\\n'; exit 7\n").unwrap();
         let executable = quote(std::env::current_exe().unwrap().to_str().unwrap());
         let fixture = "tui::terminal::unix::native_tests::native_pty_fixture";
-        let run = format!("{executable} --exact {fixture} --ignored --nocapture --test-threads=1");
+        let run = external_run.unwrap_or_else(|| {
+            format!("{executable} --exact {fixture} --ignored --nocapture --test-threads=1")
+        });
         let script = if case == "owner-death" {
             let terminal_helper = quote(
                 crate::native::helper("terminal_unix")
@@ -45,6 +60,8 @@ impl Pty {
             format!(
                 "stty rows 24 cols 80; saved=$({terminal_helper} mode -g); printf '\\nPTY_OWNER_SAVED|%s\\n' \"$saved\"; {run}; while [ ! -f {release} ]; do sleep 0.1; done; printf '\\nPTY_OWNER_RESTORED\\n'"
             )
+        } else if case == "npm-launcher" {
+            format!("stty rows 24 cols 80; {run}")
         } else {
             format!("stty rows 24 cols 80; exec {run}")
         };
@@ -53,7 +70,7 @@ impl Pty {
         helper.args(["-qefc", &script, "/dev/null"]);
         #[cfg(target_os = "macos")]
         helper.args(["-q", "/dev/null", "/bin/sh", "-c", &script]);
-        let mut child = helper
+        helper
             .env("SHELL", "/bin/sh")
             .env("TERM", "xterm-256color")
             .env("BASH_ENV", startup)
@@ -62,7 +79,14 @@ impl Pty {
             .env("JECODE_TUI_CASE", case)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        if case == "npm-launcher" {
+            helper
+                .env("JECODE_HOME", directory.path().join("home"))
+                .env_remove("OPENROUTER_API_KEY")
+                .env_remove("OPENROUTER_MODEL");
+        }
+        let mut child = helper
             .spawn()
             .expect("native PTY checks require the system script tool");
         let input = child.stdin.take();
@@ -102,6 +126,10 @@ impl Pty {
         self.input.as_mut().unwrap().flush().unwrap();
     }
 
+    pub(super) fn mark(&self) -> usize {
+        plain(&self.bytes).len()
+    }
+
     fn poll(&mut self) {
         if let Ok(bytes) = self.output.recv_timeout(Duration::from_millis(20)) {
             self.bytes.extend(bytes);
@@ -114,7 +142,7 @@ impl Pty {
                 if let Some(line) = text.lines().find(|line| line.starts_with("PTY_META|")) {
                     let fields: Vec<_> = line.trim().split('|').collect();
                     if fields.len() == 3 {
-                        self.owner = fields[1].parse().ok();
+                        self.owner = fields[1].parse().ok().filter(|pid| *pid > 1);
                         self.tty = Some(PathBuf::from(fields[2]));
                     }
                 }

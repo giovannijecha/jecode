@@ -47,6 +47,7 @@ repository root.
 | Reference | Contents |
 | --- | --- |
 | [Development and testing](development/TESTING.md) | Toolchain, checks, native fixtures, live checks and CI. |
+| [Releasing](development/RELEASING.md) | Preparing and verifying native and npm release artifacts. |
 | [Architecture](development/ARCHITECTURE.md) | Modules, request lifecycle, storage and native boundaries. |
 | [Platform support](development/PLATFORMS.md) | Verification status, platform limits and host checks. |
 | [OpenAI backend](development/OPENAI.md) | Sign in with ChatGPT and the Responses route. |

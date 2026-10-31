@@ -1,8 +1,9 @@
 # Installation
 
-Jecode is a single executable. You build it from source, optionally package it,
-and install it with the included installer script. No prebuilt downloads are
-published yet.
+Jecode can be installed through npm or as a standalone executable built from
+source. The first npm package and prebuilt downloads have **not been published
+yet**. The npm commands below describe the prepared release; use the source
+instructions until it is published.
 
 ## Requirements
 
@@ -25,6 +26,71 @@ Linux and macOS are built and tested in CI. See
 macOS, and note that on those platforms commands require the Full
 [permission level](PERMISSIONS.md#platform-limits).
 
+## Install with npm (after publication)
+
+The npm package supports Windows x64, Linux x64 with glibc 2.39 or newer, and
+macOS on Apple silicon. Its macOS build is verified on macOS 15; earlier
+versions have not been tested. Install Node.js 22 or later and npm, then run:
+
+```sh
+npm install -g jecode
+jecode --version
+```
+
+The version command should print a line beginning with `jecode 0.1.0` for the
+first release. The package includes the native executables and does not build
+Rust code or download a binary when you first run it. Node.js starts the npm
+command; the standalone executable below needs no Node.js.
+
+If a global npm install fails with a permissions error, follow
+[npm's user-owned installation guidance](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally/).
+
+### Update or remove the npm installation
+
+To update:
+
+```sh
+npm update -g jecode
+jecode --version
+```
+
+To remove:
+
+```sh
+npm uninstall -g jecode
+```
+
+npm removes its own package and command. Your settings, accounts, conversations,
+and checkpoints in `~/.jecode/` (or the directory selected by `JECODE_HOME`)
+remain in place. An npm uninstall does not remove a separate source-built
+installation. On Windows, close any running Jecode process before updating or
+uninstalling if npm reports that the executable is in use.
+
+### Existing standalone installations
+
+An earlier source-built `jecode` may be found before npm's command on `PATH`.
+Check which command runs:
+
+**Windows (PowerShell):**
+
+```powershell
+Get-Command jecode -All
+```
+
+**Linux and macOS:**
+
+```sh
+command -v jecode
+```
+
+If that resolves to the standalone install directory instead of npm's command,
+remove only that directory's `bin` entry from your `PATH`, or use the npm
+command by its resolved path. npm does not delete the older installation or
+change your shell configuration. See [Remove a standalone installation](#remove-a-standalone-installation)
+if you no longer need it.
+
+## Build and install from source
+
 ### Build prerequisites
 
 - **Git.** Needed to clone the source repository.
@@ -41,7 +107,7 @@ macOS, and note that on those platforms commands require the Full
 These are build requirements only: the native adapters are compiled into the
 executable, so running Jecode needs no compiler.
 
-## Build from source
+### Build a standalone executable
 
 Clone the repository and build a release executable:
 
@@ -63,12 +129,12 @@ The output looks like `jecode 0.1.0 (linux-x86_64-release, exe fnv1a64:…)`: th
 version, the platform and build profile, and a fingerprint of the executable
 that helps tell builds apart.
 
-## Install
+### Install the standalone executable
 
 The installers copy a packaged executable into a per-user directory. They never
 build source, so prepare a package first.
 
-### Windows
+#### Windows
 
 In PowerShell, from the repository root:
 
@@ -99,7 +165,7 @@ If the installer warns that another command overrides `jecode`, an earlier entry
 on `PATH` wins. Run the installed executable by its full path or remove the
 other entry.
 
-### Linux and macOS
+#### Linux and macOS
 
 From the repository root:
 
@@ -144,25 +210,29 @@ For example, using the Linux x86_64 package:
 sh target/package/jecode-linux-x86_64/INSTALL.sh "$HOME/.local/opt/jecode"
 ```
 
-### Run without installing
+#### Run without installing
 
 A package directory works on its own: run `jecode` (or `jecode.exe`) from it
 directly, or run `target/release/jecode` after building.
 
-## Update
+### Update a standalone installation
 
 Pull the newer source, then repeat the package and install steps. The installer
 replaces the executable it installed earlier. Your configuration, accounts and
 conversations in `~/.jecode/` are not touched.
 
-## Uninstall
+### Remove a standalone installation
 
-1. Delete the install directory: `%LOCALAPPDATA%\Jecode` on Windows, or
-   `${XDG_DATA_HOME:-$HOME/.local/share}/jecode` on Linux and macOS (or the
-   root you chose).
-2. Remove its `bin` directory from your `PATH`. On Windows, edit the user `Path`
-   variable in **Settings → System → About → Advanced system settings →
-   Environment Variables**.
-3. Optionally delete `~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows). It holds
-   your configuration, OpenRouter key, account tokens, saved conversations and
-   checkpoints; see [Configuration](CONFIGURATION.md#files-jecode-keeps).
+1. Identify the root you used for the standalone installer (by default,
+   `%LOCALAPPDATA%\Jecode` on Windows or
+   `${XDG_DATA_HOME:-$HOME/.local/share}/jecode` on Linux and macOS). Check
+   its `.jecode-install` marker and remove its `bin/jecode` executable
+   (`bin\jecode.exe` on Windows) and marker. Remove empty directories afterward;
+   keep any unrelated files in a custom install root.
+2. Remove only this standalone `bin` directory from your `PATH` or shell
+   profile. On Windows, edit the user `Path` in **Settings → System → About →
+   Advanced system settings → Environment Variables**.
+
+This does not remove `~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows), which
+holds your configuration, credentials, saved conversations, and checkpoints;
+see [Configuration](CONFIGURATION.md#files-jecode-keeps).

@@ -12,7 +12,7 @@ terminal host by hand.
 | --- | --- | --- |
 | Windows 10 or later, x86_64 | CI on pull requests from this repository: build, formatting, Clippy, the full test suite and the ConPTY terminal fixtures. Opt-in confinement, browser and light-background fixtures run locally. | Primary development platform. Live ChatGPT and Claude sign-in, inference and token refresh have been exercised. |
 | Linux, x86_64 | CI on pull requests from this repository: build, formatting, Clippy, the full test suite and the PTY terminal fixture. Browser fixtures and X11 clipboard transfer have been run locally. | Exercised under WSL on a native Linux filesystem. Wayland clipboard access is implemented but has not been exercised with a real compositor. |
-| macOS | CI on every pull request on GitHub's hosted `macos-15` runner: build, formatting, Clippy, the full test suite and the PTY terminal fixture. | No interactive, browser or live-provider use has been recorded on a Mac. |
+| macOS 15, ARM64 | CI on every pull request on GitHub's hosted `macos-15` runner: build, formatting, Clippy, the full test suite and the PTY terminal fixture. | No interactive, browser or live-provider use has been recorded on a Mac. |
 
 The Windows and Linux runners reject fork code before workflow steps. Queued,
 skipped or rejected checks do not establish verification.
@@ -20,6 +20,13 @@ skipped or rejected checks do not establish verification.
 Other architectures, such as Windows or Linux on ARM64, have no recorded
 verification. CI results apply to the revision they ran on; check the jobs for
 the revision you are reviewing.
+
+The prebuilt npm Linux x64 executable and embedded Rust shell helper reference
+GLIBC_2.39; their embedded C helpers reference versions up to GLIBC_2.34. The
+runner uses glibc 2.43, so behavior on older hosts remains untested. The npm
+launcher checks for glibc 2.39 or newer before starting the executable. The
+macOS ARM64 build's deployment target has not been inspected; macOS versions
+earlier than the CI runner's version are unverified.
 
 ## Platform limitations
 

@@ -25,15 +25,19 @@ jobs:
           - name: Windows
             os: [self-hosted, Windows, X64, workspace-ci]
             toolchain: 1.95.0-x86_64-pc-windows-gnullvm
+            npm_target: win32-x64
           - name: Linux
             os: [self-hosted, Linux, X64, workspace-ci]
             toolchain: 1.95.0
+            npm_target: linux-x64
           - name: macOS
             os: macos-15
             toolchain: 1.95.0
+            npm_target: darwin-arm64
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -83,3 +87,28 @@ jobs:
       - name: Verify native macOS PTY
         if: runner.os == 'macOS'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Install Node for npm distribution checks
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test npm launcher
+        run: node --test npm/launcher.test.cjs
+      - name: Test npm release packaging
+        run: node --test tools/npm/release.test.mjs
+      - name: Build release executable
+        run: cargo +${{ matrix.toolchain }} build --release --locked --offline
+      - name: Stage native npm artifact
+        run: node tools/npm/release.mjs stage "${{ runner.os == 'Windows' && 'target/release/jecode.exe' || 'target/release/jecode' }}" "target/npm-stage/${{ matrix.npm_target }}"
+      - name: Pack local npm fixture
+        run: node tools/npm/release.mjs pack target/npm-stage target/npm-package --local
+      - name: Locate npm runtime for native terminal checks
+        run: node -e "const fs=require('node:fs'); const path=require('node:path'); fs.appendFileSync(process.env.GITHUB_ENV,'JECODE_NPM_LAUNCHER='+path.resolve('target/npm-package/package/bin/jecode.cjs')+'\nJECODE_NPM_NODE='+process.execPath+'\n');"
+      - name: Verify native npm Windows terminal
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_npm::npm_launcher_native_tui -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native npm Unix terminal
+        if: runner.os != 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::npm_tests::npm_launcher_native_tui -- --exact --ignored --nocapture --test-threads=1
+      - name: Check npm install, update and uninstall
+        run: node -e "const fs=require('node:fs'); const cp=require('node:child_process'); const files=fs.readdirSync('target/npm-package').filter(name=>name.endsWith('.tgz')); if(files.length!==1) throw Error('Expected one npm tarball'); cp.execFileSync(process.execPath,['tools/npm/lifecycle.mjs','target/npm-package/'+files[0]],{stdio:'inherit'});"
