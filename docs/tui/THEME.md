@@ -77,22 +77,30 @@ The dock holds, top to bottom: the pending draft, the status row, the composer
 (top rule, draft, bottom rule) and the footer, key hints or an open panel. See
 [Composer and controls](COMPOSER.md).
 
-The header reads `>_ jecode <version>`, with `>_` bold `ACCENT`, `jecode`
-bold `STRONG` and the version `MUTED`, shortened from the right. The model,
-effort and folder sit in the footer, so each appears once on screen.
+After the first prompt, the header reads `>_ jecode <version>`, with `>_`
+bold `ACCENT`, `jecode` bold `STRONG` and the version `MUTED`, shortened from
+the right. The model, effort and folder sit in the footer, so each appears
+once on screen.
 With active collaborators or pending review, the same footer row replaces the
 folder with a quiet `AGENTS` badge (`LIT` on `BADGE_IDLE`) and readable state
 counts. Failed work uses the existing error roles; uncertain outcomes use
 `WARNING`. An accent `/agents` hint appears when space permits. The context
 gauge remains and model details yield at narrow widths. The normal footer
 returns once nothing needs attention; the dock keeps its height.
-Until the conversation shows its first item, the space below lists
-`Recent in this folder` in `DIM`: up to three other conversations of this
-folder with compact ages such as `2h`, then a ` /resume ` keycap for all
-conversations. Deleting one through `/resume` updates the list at once. With
-none saved, on a first run or after deleting the last, one key row shows instead:
-`/ commands · Alt+V image · Ctrl+O expand · Ctrl+Q quit`. Both key rows drop
-keys from the right when narrow.
+An empty conversation shows a centred startup splash above the dock: the
+`>_ jecode` scanline mark in `ACCENT`, its blinking `_` in `LIT`, the version,
+a `/permissions` tip, the available skill count and whether this folder has
+an `AGENTS.md`. The key row offers `/ commands · Alt+V image · Ctrl+O expand ·
+Ctrl+Q quit`. Saved conversations add `Recent in this folder` in `DIM`, up to
+three titles with compact ages such as `2h`, and a ` /resume ` keycap.
+Deleting a conversation through `/resume` updates this list at once.
+
+The mark needs at least 53 columns. As the available height shrinks, the tip
+disappears first, then the key row when recent conversations are present,
+then the mark becomes three compact rows. Smaller screens use the one-line
+header with recent conversations or the first-run keys at column 2. Trailing
+keys drop when narrow. The first prompt removes the splash; the dock keeps
+its normal layout throughout.
 
 ## Status row and motion
 
