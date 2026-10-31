@@ -39,12 +39,12 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
                 "PgUp/PgDn",
                 "Scroll, also with the mouse wheel · new output keeps your reading position",
             ),
-            (
-                "Alt+Home/End",
-                "Conversation start / follow latest output · Esc returns to bottom",
-            ),
+            ("Alt+Home/End", "Conversation start / follow latest output"),
             ("Ctrl+O", "Expand/collapse the last finished turn's tools"),
-            ("Esc · Ctrl+C", "Stop work · close panel / clear draft"),
+            (
+                "Esc · Ctrl+C",
+                "Close panel / prompt history · stop work · Ctrl+C also clears the draft",
+            ),
             ("Ctrl+Q", "Quit, asking first while work runs"),
         ],
     ),

@@ -1,242 +1,152 @@
 # Collaborating agents
 
-The main agent can use `agent` to delegate focused assignments, revise them while
-work is in progress, inspect evidence and review the result. You continue talking
-to the main agent. `/agents` provides read-only inspection without making a model
-request or marking a result reviewed. Review belongs to the main agent; you do
-not have a review queue. The panel lists open assignments, including returned
-work still being assessed by the main agent.
+The main agent can delegate focused assignments to collaborators: separate
+agents that work in parallel and report back. You keep talking to the main
+agent; it writes the assignments, follows their progress, reviews what comes
+back and decides what to keep. You can watch with `/agents`, but reviewing and
+closing assignments is the main agent's job.
+
+## How collaborators work
 
 Each collaborator starts with its own conversation and the main agent's current
-model, effort and routing. It receives the assignment, supplied context, scoped
-project instructions, personal skills and access to shared project-map notes.
-The whole parent conversation is not copied. Follow-up assignments retain the
-collaborator's conversation. Changes to the main agent's model settings do not
-reconfigure existing workers.
+model, effort and routing. It receives its assignment and any context the main
+agent supplies, plus the project's `AGENTS.md` instructions, your personal
+skills and the shared project-map notes. It does not receive the main
+conversation. Later model changes in the main conversation do not affect
+collaborators that already exist.
 
-Collaborators have the same file, command, process, checkpoint, web, browser and
-map tools. Their tool catalog excludes `agent`; runtime dispatch also rejects
-delegation from a collaborator. Child processes, browser handles, scratch output
-and session histories belong to the individual worker.
+Collaborators have the same file, command, process, checkpoint, web, browser,
+map and plan tools as the main agent, and follow the same permission level and
+approvals. They cannot delegate further and cannot ask you questions; they
+report questions to the main agent. Each collaborator has its own processes,
+browsers, temporary files and history.
 
-The main agent and its collaborators share the project's attachment pool.
-Pass an `attachment:ID` reference in the assignment or context so the worker
-can read the stored image, PDF or file. References keep the same IDs in shared
-and isolated workspaces, including attachments added after a worker starts.
-Files imported by a collaborator are also readable by the main agent.
+Attachments are shared: the main agent can pass an `attachment:ID` in an
+assignment, and files a collaborator imports are readable by the main agent.
 
-## Assign and coordinate
+## Shared or isolated workspace
 
-The main model supplies an objective, file or component scope, relevant source
-references, expected deliverable and checks in `instructions` and `context`.
-For example, an `agent` call can create independent analysis and implementation
-assignments together:
+Every assignment chooses where it works:
 
-```json
-{
-  "action": "create",
-  "tasks": [
-    {
-      "title": "Inspect search behavior",
-      "instructions": "Read the search implementation and tests. Report edge cases with source references; do not edit files.",
-      "context": "The current task concerns empty queries.",
-      "workspace": "shared"
-    },
-    {
-      "title": "Implement empty-query behavior",
-      "instructions": "Update the search component and focused tests. Report changes, executed checks and unresolved issues.",
-      "context": "An empty query should preserve the original result order.",
-      "workspace": "isolated"
-    }
-  ]
-}
-```
+- **`shared`** works directly in your project. It suits analysis and coordinated
+  changes, but collaborators can affect the same files and external state, so
+  the main agent must give them compatible scopes and check the combined result.
+- **`isolated`** works in a private copy of the project in Jecode's storage. The
+  main agent compares the copy with your project and applies selected files
+  only after review.
 
-`create` accepts one to eight assignments per call. It returns stable IDs such as
-`a1`; the interface displays `AGENT 1`. IDs are never reused in a conversation.
-The displayed number is the lowest one no open collaborator holds, so a single
-assignment created after the previous one closed is `AGENT 1` again, while
-collaborators open at the same time keep distinct numbers. Each control call is serialized with other
-main-agent tools, even with `parallel:true`. The workers continue independently.
-
-| Action | Required fields and behavior |
-| --- | --- |
-| `create` | `tasks`, each with `title`, `instructions`, `workspace`; optional focused `context`. |
-| `update` | `id` and at least one of `instructions` or `context`. Omitted fields retain the latest sent values, including queued revisions. Sends a new version during work or starts follow-up work on an available returned worker. |
-| `list` | Returns open assignments in the current conversation. |
-| `inspect` | `id`. Returns activity, assignment versions and report evidence; does not review it. |
-| `wait` | Optional `id` and `timeout_ms` (0–60000). Waits for selected running work, remaining cancellable. |
-| `stop` | `id`. Requests cancellation; a request is distinct from a confirmed stop. |
-| `review` | `id`, `report_version`, `note`. Records the main agent's assessment of the latest returned assignment. |
-| `diff` | `id`. Compares an isolated workspace against its starting state and the current main project. Optional `path`, byte `offset` and `limit` page before/after content. |
-| `integrate` | `id`, explicit `paths`, `expected_review_token` from `diff`. Applies selected changes with conflict checks. |
-| `close` | `id`. Releases the worker and its tool resources, removes its owned isolated copy and removes the assignment from the active list. A chronological `closed` receipt retains the final record. Close after preserving needed work. |
-
-To send new information while keeping the assignment, use
-`{"action":"update","id":"a1","context":"The data contract now includes an ID."}`.
-The collaborator receives a new assignment version in its existing conversation.
-
-When changing `instructions`, supply the complete revised assignment. An update
-being sent does not mean it has been received. Running workers consume
-updates at model boundaries; a tool already executing may finish first. Reports
-identify their received assignment version. Older reports remain evidence of
-older work and cannot review a newer active assignment.
-
-Returned work still needs the main agent's inspection, correction and verification.
-`review` records that assessment; it does not run tests or imply integration.
-After any needed correction or integration, the main agent calls `close` to
-finish the assignment. Reading or summarizing a report does not perform either
-action. A closed collaborator cannot receive more work; create a new assignment
-when needed; its ID is not reused, though its displayed number may be.
-The TUI receives return events while the main agent is idle and resumes the main
-model to examine new work without inserting a user message. Queued user input
-takes priority. Explicitly stopping the main turn suppresses this automatic
-continuation until another user turn starts. Historical receipts restored from
-disk do not trigger a model request.
-
-## Choose the working space
-
-`shared` uses the current project directly. It suits analysis and coordinated
-changes, but workers can affect the same files and external state. The main agent
-must assign compatible scopes and inspect the combined result.
-
-`isolated` copies the project's current files and directories into Jecode-owned
-storage outside the project. It includes working changes, new files, empty
-directories and local `AGENTS.md` files; Git and an existing commit are
-unnecessary. The copy omits `.git` and `.jecode` metadata at every directory
-level, plus root `target` and `.tmp` directories or links. Regular files with
-those names and nested `target` or `.tmp` directories remain in scope. Other
-files are included even when Git ignores them. Starting entries are retained
-separately for comparison. No commit or branch is created.
-
-Each file is read once. The baseline is the content that was copied, so a file
-that a running server or build changes during the copy does not stop
-preparation; if the project later differs from that baseline, integration
-reports a conflict for that path. Entries the copy cannot hold are left out and
-listed as `omitted_from_copy` in the creation result and in `diff`, with a
-count and up to 50 named paths and reasons:
+An isolated copy takes the project's current files, including uncommitted
+changes, new files, empty directories and files Git ignores. Git is not needed
+and no commit or branch is created. The copy leaves out `.git` and `.jecode`
+directories at every level, and `target` and `.tmp` directories at the project
+root. Entries the copy cannot hold are listed as `omitted_from_copy` in the
+result, with up to 50 named paths:
 
 - sockets, pipes and devices;
-- names that are not UTF-8, or that contain `:` or `\`;
+- names that are not UTF-8 or contain `:` or `\`;
 - files that cannot be read, such as files locked by another process;
-- directories that cannot be listed (the directory itself is copied);
+- directories that cannot be listed (the directory itself is still created);
 - links that cannot be created, such as symbolic links or junctions on Windows
   without Developer Mode or administrator rights.
 
-A copied link whose target lies inside the project resolves inside the copy:
-absolute targets are rewritten relative to the link, while relative targets
-keep their original path. Relative targets that leave the project are made
-absolute so they retain their original destination. Commands that rely on
-omitted links, such as a package manager's linked `node_modules`, may need the
-links recreated in the copy, for example by reinstalling there.
+Links pointing inside the project are adjusted to point inside the copy.
+Commands that depend on omitted links, such as a package manager's linked
+`node_modules`, may need them recreated in the copy, for example by reinstalling.
 
-If a copy cannot be written, Jecode reports the filesystem error and any
-incomplete cleanup without starting the worker. This is file isolation; command
-and browser access follows the active permission settings. Coordinate external
-effects separately.
+Isolation applies to files only. Commands and browsers in an isolated copy have
+the same network and system access as anywhere else.
 
-`diff` returns changed paths, baseline/child/current fingerprints, bounded change
-evidence and a review token. For longer files, request `diff` with `path`; byte
-pages default to 16384 and accept at most 65536 bytes. Binary or unsupported text
-is identified rather than presented as a complete text diff. File contents are
-read for each comparison, even when size, mode and modification time match the
-copy. Sockets or similar entries a command created in
-the copy are listed as `unsupported_in_copy`.
+## Assignment lifecycle
 
-`integrate` rechecks the token and each selected path. Main-project changes since
-the starting state are conflicts unless they already match the child. The result
-reports applied, already-current, conflicting and failed paths. Integration is
-per file, not an atomic multi-file transaction. Ordinary file additions, edits
-and deletions are supported; link and directory-type changes require explicit
-coordinator handling. Integration captures the selected main-project paths in a
-checkpoint and includes its receipt in the result. Each worker also has its own
-checkpoint store. Recheck the combined project after integration.
+1. **Create.** The main agent creates one to eight assignments at a time, each
+   with a title, instructions, a workspace and optional context. The interface
+   numbers them `AGENT 1`, `AGENT 2` and so on.
+2. **Update.** While a collaborator works, the main agent can send revised
+   instructions or new context. The collaborator receives the new version at its
+   next model request; a tool call already running finishes first. Reports say
+   which version they answer.
+3. **Return.** The collaborator reports what it did and what it checked. If the
+   main agent is idle in the TUI, a return wakes it to examine the result,
+   unless you have a message queued or explicitly stopped the main turn.
+4. **Review.** The main agent inspects the evidence, corrects or integrates the
+   work and records its assessment. Recording a review runs no tests and does
+   not integrate anything.
+5. **Close.** Closing releases the collaborator, removes its isolated copy and
+   removes it from `/agents`. A closed collaborator cannot take more work; the
+   main agent creates a new assignment instead.
 
-## Inspect in the terminal
+For isolated work, `diff` shows changed files against the starting state and
+your current project, and `integrate` applies explicitly selected files. A file
+you changed in the meantime is reported as a conflict instead of being
+overwritten. Integration works file by file, not as one transaction, saves a
+[checkpoint](CHECKPOINTS.md) of the files it replaces, and handles ordinary file
+additions, edits and deletions. Check the combined project afterwards.
 
-Agent events are tool rows in the conversation. Creation shows as `AGENTS`,
-the other events under the collaborator's `AGENT N` name: sent and received
-assignments, returns, reviews, stops, closures and unknown outcomes. `agent`
-takes the same optional `work` label as the discovery tools, so its events and
-inspection calls join a Work chapter with related calls; agent members keep one
-row each. An event written by an agent call joins that call's chapter; another
-event that happens during a turn joins the chapter it follows. One that happens
-outside a turn, such as a return while the main agent is idle or an unknown
-outcome found on resume, or after the turn's prose, is a lone row at its
-position. Each event records these facts when it happens, so its place does not
-depend on when the terminal sees it, and a resumed conversation shows it where
-it was shown live. Events never split prose that is still streaming; they land
-before it. The transcript shows no clock times. Failed checks and failed runs
-are red, unknown outcomes amber and routine waiting quiet. `Ctrl+O` opens the
-latest chapter or row and shows every agent event as its full receipt:
-instruction, working space, changed files with `+` and `−` line counts, report
-and review state. Earlier receipts retain their original snapshots.
+### Agent actions
 
-`/agents` opens a filterable list of open assignments below the composer. Each
-row names the collaborator with its `AGENT N` badge and title, with its state in
-the fact column: running time, returned or failed work awaiting the main
-agent's review, or an unknown outcome. Enter goes inside the agent: its own
-conversation replaces the main column, drawn like the main conversation and read
-only. It shows each received assignment as a request, then its calls, chapters
-and messages in the order they happened, and the return receipt last. File
-edits show their hunks as in the main conversation, read from the agent's own
-saved history; if that history is unavailable, the card keeps its `+` and `−`
-line counts. One row
-of keys replaces the composer, status row and footer: `Esc back to agents`,
-`↑↓ scroll` and, while reading back, `Alt+End back to bottom`. The view follows
-new output; scrolling up pauses it and Alt+End returns to the bottom, as in the
-main conversation. Esc returns from the
-agent to the list, then to the main conversation with its draft and caret. The
-list says `Esc close`. While `/agents` is open, Esc does not interrupt the main
-turn, and the readback shortcut is Alt+End. There is no child chat or
-task-control UI. If the main agent closes the inspected assignment, the view
-returns to the remaining open assignments.
+| Action | Fields | Behavior |
+| --- | --- | --- |
+| `create` | `tasks`: 1–8 items with `title`, `instructions`, `workspace` and optional `context` | Starts collaborators and returns IDs such as `a1`. |
+| `update` | `id` and `instructions` and/or `context` | Sends a new version; omitted fields keep their last values. Also starts follow-up work on a returned collaborator. |
+| `list` | — | Open assignments. |
+| `inspect` | `id` | Activity, assignment versions and report evidence. |
+| `wait` | optional `id`, `timeout_ms` (0–60,000) | Waits for running work; stays cancellable. |
+| `stop` | `id` | Requests cancellation. |
+| `review` | `id`, `report_version`, `note` | Records the main agent's assessment of the latest report. |
+| `diff` | `id`; optional `path`, `offset`, `limit` | Compares an isolated copy with its start and with your project, with a review token. Pages default to 16,384 bytes, at most 65,536. |
+| `integrate` | `id`, `paths`, `expected_review_token` | Applies selected files after rechecking for conflicts. |
+| `close` | `id` | Releases the collaborator and its isolated copy. |
 
-While work is running or needs attention, the existing footer shows a quiet
-`AGENTS` badge and counts. Failed and uncertain outcomes remain visible. The
-context gauge stays; model details yield on narrow terminals. No extra footer row
-is added. The normal footer returns once no work or review is pending; completed
-assignments leave `/agents` when the main agent closes them. Their creation,
-return, review and closure receipts remain at their original points in history.
+Collaborator IDs are never reused within a conversation. The displayed number is
+the lowest one not held by an open collaborator, so `AGENT 1` can appear again
+after the first one is closed.
 
-Resuming a conversation with returned reports in open assignments lets the main
-agent continue their review and closure. This also handles older sessions whose
-results were returned without a recorded close. Resume does not mark reports as
-reviewed itself. Closed assignments stay in history and do not restart the model.
+## Watch in the TUI
 
-In `--plain`, `/agents` prints the list and `/agents <number>` prints an individual
-record by its displayed number. `/agents aN` resolves the unique internal ID;
-closing that agent never redirects the ID to a new holder of its old number.
-The line-based interface does not poll while waiting for stdin; live
-inspection and automatic idle continuation are TUI features. For single prompts,
-the model should wait for and review delegated work before ending its turn.
+Collaboration events appear as rows in the conversation: `AGENTS` when
+collaborators are created, then `AGENT N` rows for sent and received
+assignments, returns, reviews, stops and closures. Failures show in red and
+uncertain outcomes in amber. Ctrl+O shows each event's full receipt: the
+instructions, workspace, changed files with line counts, report and review
+state. See [Tool activity](../tui/TOOL_ACTIVITY.md#collaborators).
+
+While collaborators work or need review, the footer shows an `AGENTS` badge with
+counts.
+
+`/agents` opens a list of open assignments with their state: running time,
+returned or failed work awaiting review, or an unknown outcome. Press Enter on
+one to read its conversation, drawn like the main one but read-only: its
+assignments, tool calls, messages and final report, with file edits shown as
+diffs. The view follows new output; scroll up to pause and press Alt+End to
+return to the bottom. Esc goes back to the list, then to your draft. While
+`/agents` is open, Esc does not stop the main turn. Opening a result does not
+mark it reviewed.
+
+In `--plain`, `/agents` prints the list and `/agents NUMBER` prints one record.
+Plain chat does not watch collaborators while waiting for your input, so a
+returned collaborator does not wake the main agent there. In a single prompt,
+the main agent should wait for and review delegated work before it finishes.
 
 ## Stop, close and recover
 
-Leaving a conversation or shutting down cancels its active workers and waits for
-their termination. Isolated copies remain until explicitly closed; stopping work
-does not discard its files. Child histories live under the parent session's
-collaboration storage and do not appear as independently resumable main sessions.
+Leaving a conversation or quitting stops its running collaborators and waits
+for them to end. Stopping does not discard an isolated copy; only closing does.
 
-After an interrupted process, a saved running assignment becomes `unknown`;
-Jecode does not replay it or restart the worker. Inspect its files and saved
-evidence before deciding what to retry. Closed assignments are not restored to
-the active list or repeated in the model's current collaborator context. Their
-historical receipts and saved child histories remain on disk. An unavailable copy
-is reported rather than preventing the
-parent conversation from opening.
+If Jecode stops unexpectedly, a collaborator that was running is marked
+**unknown** on resume. It is not restarted or replayed; check its files and
+evidence before deciding what to retry. When you resume a conversation with
+returned but unreviewed work, the main agent continues the review. Closed
+assignments stay in history and do not trigger any model request.
 
-An isolated copy is prepared just before the receipt that records its
-assignment. If Jecode stops in between, no assignment owns the copy. Resuming
-that conversation removes such owned copies without following links inside.
-Only the resumed conversation's own collaborator storage is examined, while its
-session lock keeps other
-conversations out, and copies of its saved assignments stay. A copy whose
-ownership marker does not name this project and assignment is left in place
-and reported in the resume status; new assignments skip its ID.
+An isolated copy prepared just before Jecode stopped, but never recorded as
+belonging to an assignment, is removed when the conversation is resumed. A copy
+whose ownership cannot be confirmed is left in place and reported.
 
-Deleting a parent conversation retains its collaborator files, child histories
-and a recovery record at the location reported by the deletion result. This
-preserves isolated work that may not have been integrated. Use `agent close`
-before deleting the conversation to discard an isolated working copy explicitly;
-retained histories are still identified separately in the deletion result.
+Deleting a parent conversation keeps its collaborator files, histories and a
+recovery record, and the deletion result says where, so unintegrated isolated
+work is not lost. To discard an isolated copy explicitly, have the main agent
+close the assignment before you delete the conversation.
+
+Collaborator data lives with the conversation, under
+`~/.jecode/sessions/<project>/collaboration/`. Collaborator histories cannot be
+opened from `/resume`.

@@ -1,85 +1,98 @@
-# Personal configuration
+# Configuration
 
-Start Jecode from the project directory. The TUI opens without credentials and
-shows a warning with `/settings` as the next step. `jecode setup` provides guided
-provider and model selection; plain interactive chat also offers setup. OpenAI uses
-**Continue with ChatGPT**; Anthropic uses **Continue with Claude**;
-OpenRouter uses an API key. In the TUI, use
-`/settings` to change saved defaults and **Providers** to manage authentication.
-Saved defaults and the OpenRouter API key are stored in plain text in
-`~/.jecode/config.json` (on Windows,
-`%USERPROFILE%\.jecode\config.json`). Keep this personal file private.
+Jecode keeps one personal configuration for your user account. There is no
+project-level configuration file; project rules belong in
+[`AGENTS.md`](PROJECT_INSTRUCTIONS.md). Connecting providers is covered in
+[Providers](PROVIDERS.md).
 
-During browser-based account sign-in from `jecode setup`, press Enter to cancel
-the pending login and return to provider selection. Once sign-in completes,
-Enter belongs to the next setup prompt.
+## Change settings
 
-The first TUI configuration stays in memory until a real default model is
-selected. Adding an OpenRouter key opens that selection; cancelling it does not
-save the key. Preferences changed before setup is complete apply to the current
-session and are saved along with the eventual default model. No placeholder
-provider/model selection is written to `config.json`. Choosing the first model
-also activates it for the current conversation; later default changes retain
-their usual scope of new conversations.
+Most settings have two scopes:
 
-On a first launch, the banner says **No configured provider** and points to
-`/settings`. If a saved selection becomes unavailable, its warning includes the
-provider diagnostic and a single settings action.
+- **This conversation.** `/model`, `/effort`, `/routing` and `/permissions`
+  change the current conversation. The choice is saved with it and restored on
+  resume, but new conversations do not inherit it.
+- **Defaults.** `/settings` saves defaults for new conversations, launches,
+  single prompts and pipes. Saving a default does not change the current
+  conversation, except where noted below.
 
-If the saved default provider has no credentials, the TUI falls back to another
-configured provider for the current conversation. It uses that provider's saved
-model, or offers `/model` when none is saved. `/new` and deletion of the current
-session keep the active provider, model and effort while the saved default
-provider is unavailable. With no configured providers, local commands and
-settings remain available; model requests report that credentials
-are needed. Startup does not rewrite saved defaults or contact a provider to
-validate credentials. A fallback warning includes the failure reason and states
-when a `--model` override is skipped across providers. Plain interactive chat
-offers setup if its saved provider credentials are missing; noninteractive tasks
-instead report how to run `jecode setup`.
+| `/settings` item | What it sets |
+| --- | --- |
+| **Default model** | Provider, model and effort for new conversations. |
+| **Default effort** | Reasoning effort for the default model. |
+| **Default routing** | OpenRouter endpoint choice for the default model. |
+| **Default permissions** | The [permission level](PERMISSIONS.md) new conversations start at. |
+| **Auto-compact at** | When long conversations are compacted; applies immediately, including to the current conversation. |
+| **Providers** | API keys and account sign-in; see [Providers](PROVIDERS.md). |
+
+In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 
 ## Models and effort
 
-| Action | Scope |
+| Action | Effect |
 | --- | --- |
-| `/model [ID]` | Choose a provider when more than one is configured, then a model and its effort for this conversation. A direct ID uses the current provider. |
-| `/effort [NAME]` | Change this conversation's reasoning effort. |
-| `/settings` → **Default model** | Save the model and effort for future conversations and launches. |
-| `/settings` → **Default effort** | Change the saved model's default effort. |
-| `/settings` → **Providers** → **Credentials** | Connect, select or sign out of a ChatGPT or Claude account. |
-| `/settings` → **Providers** → **API keys** | Configure the OpenRouter key with hidden input. |
-| `jecode --model provider/model-id "task"` | Override the model for one launch. |
+| `/model` | Choose a provider (when several are configured), then a model and effort, for this conversation. |
+| `/model ID` | Switch this conversation to model `ID` on the current provider, without a catalog lookup. |
+| `/effort` or `/effort NAME` | Change this conversation's reasoning effort. |
+| `jecode --model ID "task"` | Use model `ID` for one launch without changing defaults. A different model starts at `default` effort. |
 
-The effort selector shows the levels supported by the model. A direct model ID
-is accepted without a catalog lookup. `default` leaves
-reasoning effort to the provider. Model and effort changes preserve the conversation;
-saved defaults do not switch an existing conversation. Replace `provider/model-id`
-with the model's catalog ID.
+The effort selector lists the levels the model's catalog reports. `default`
+leaves the choice to the provider. `/effort NAME` can request a level the
+catalog does not list; the provider may reject it.
 
-The ChatGPT catalog supplies the model's effective context window and supported
-reasoning levels. The picker offers these levels and the provider default;
-`/effort NAME` can also explicitly request a level. The context meter and
-automatic compaction use the account's declared window. If metadata is missing,
-capacity displays `?`. Claude's catalog supplies its input/output limits and
-supported effort levels. Missing metadata stays unknown. `/routing` applies
-only to OpenRouter.
+Switching model or provider keeps the conversation, its history, attachments,
+processes and browser. Provider-specific data, such as encrypted reasoning, is
+sent only back to the backend, account and model that produced it; another
+model receives the portable history.
 
-For Claude subscription access, sign in under **Credentials >
-Anthropic > Continue with Claude**, then choose a model. It uses Jecode's own
-agent loop, tools and saved conversations, without installing Claude Code or
-an Agent SDK. Anthropic may change or reject this compatibility route; see
-[the implementation notes](../development/ANTHROPIC.md).
+## Automatic compaction
 
-Requests use the selected Claude account and its account-level usage settings.
-Jecode does not enable extra usage, change spending limits or fall back to an
-API key. OpenAI and Anthropic API-key backends are not implemented.
+Long conversations eventually exceed the model's context window. Before each
+model request, Jecode checks whether the request would exceed a share of the
+window, set by **Auto-compact at** (default 80%). When it would, Jecode first
+shortens large tool results and then, if needed, asks the model to summarize
+earlier work. The original history stays saved and readable. See
+[Long-running work](LONG_WORK.md#context-and-compaction) for what is kept.
 
-## Stored settings
+Set the threshold in `/settings` → **Auto-compact at** as a whole number from 1
+to 99, with or without `%`. A saved change applies from the next model request,
+including in the current conversation and its collaborators. A higher value
+uses more of the window before compacting but leaves less room for the reply.
 
-The relevant fields can look like this after selecting OpenAI and retaining a
-previous OpenRouter selection. Model IDs and the key value are illustrative;
-choose available models and replace the key placeholder through setup or
-Settings. Connect the ChatGPT account separately.
+If even the instructions, your original requests and a minimal summary cannot
+fit, the turn stops with an error that names the budget. Raise the threshold or
+choose a model with a larger context window, then continue.
+
+## OpenRouter endpoint routing
+
+A model on OpenRouter is often served by several endpoints. `/routing` chooses
+how the current conversation reaches them; `/settings` → **Default routing**
+saves a choice for the default model. Other providers have no routing choice.
+
+| Choice | Behavior |
+| --- | --- |
+| **Auto — Best balance** | OpenRouter picks endpoints and falls back between them. When recent statistics are available, Jecode adds soft preferences for faster endpoints without excluding any. |
+| A specific endpoint | Requests go only to that endpoint, without fallbacks. If it disappears, becomes stale or is incompatible, the turn stops and asks you to choose again in `/routing`. |
+
+The selector lists each endpoint's input and output price per million tokens
+and, when available, recent throughput and first-token latency; `?` or
+`no stats` means OpenRouter did not report them. Prices are list rates, not an
+estimate of a turn's cost. After a turn, the status row and `/routing` show the
+provider that served it and, when OpenRouter reports it, the charge.
+
+Endpoint listings are fetched when the selector opens and reused for up to 10
+minutes. If a fetch fails, Auto keeps working with OpenRouter's own routing, but
+a pinned endpoint cannot be verified and the turn stops. Account-level provider
+preferences in your OpenRouter settings still apply where Jecode does not
+override them. In `--plain`, `/routing` offers numbered choices for the
+conversation; save defaults in the TUI or in the file.
+
+## The configuration file
+
+Settings live in `~/.jecode/config.json` (`%USERPROFILE%\.jecode\config.json` on
+Windows). Jecode writes it from setup and `/settings`; you can also edit it.
+A typical file after connecting OpenRouter and then choosing a ChatGPT model as
+the default:
 
 ```json
 {
@@ -89,186 +102,91 @@ Settings. Connect the ChatGPT account separately.
     "effort": "default"
   },
   "backends": {
-    "openai": {
-      "model": "chatgpt-model-id"
-    },
+    "openai": { "model": "chatgpt-model-id" },
     "openrouter": {
-      "api_key": "REPLACE_WITH_OPENROUTER_KEY",
+      "api_key": "YOUR_OPENROUTER_KEY",
       "model": "provider/model-id",
-      "routing": {
-        "provider/model-id": { "mode": "auto" }
-      }
+      "routing": { "provider/model-id": { "mode": "auto" } }
     }
   },
   "openrouter": {
-    "api_key": "REPLACE_WITH_OPENROUTER_KEY",
+    "api_key": "YOUR_OPENROUTER_KEY",
     "model": "provider/model-id",
     "effort": "default",
-    "routing": {
-      "provider/model-id": { "mode": "auto" }
-    }
+    "routing": { "provider/model-id": { "mode": "auto" } }
   },
   "context": { "auto_compact_percent": 80 },
   "permissions": { "default": "workspace" }
 }
 ```
 
-`selection` is the default for new conversations; switching a conversation does
-not change it. Each `backends.<id>.model` remembers that provider's last saved
-model. If the default provider is unavailable at launch, Jecode restores the
-fallback provider's model from this field; OpenRouter first checks the legacy
-`openrouter.model`. Conversation-only model switches do not rewrite these saved
-models. The OpenRouter API key lives under `backends.openrouter`.
-ChatGPT and Claude tokens are stored separately under `accounts/openai/` and
-`accounts/anthropic/`; neither account provider needs an API key in
-`config.json`. The original `openrouter` block remains
-readable and is updated for compatibility. Its key, model, effort and routing
-take precedence for OpenRouter when both formats are present, so edits made by
-an older installed binary remain effective. Its values do not replace another
-backend's selection. Routing choices belong to a backend, so an OpenRouter pin
-cannot affect another backend using the same model ID. Other backend selections
-do not require an OpenRouter key. The model ID and any OpenRouter key must be
-valid; `effort` defaults to `default` in older files. The file must be a JSON
-object of at most 64 KiB. Jecode retains unknown fields when saving. An invalid
-or unreadable file blocks setup and launch with an error; Jecode leaves it
-unchanged so you can correct it. Saves replace the file atomically. New Unix
-configuration directories and files use permissions `0700` and `0600`; Windows
-inherits permissions from the user's directory.
-`permissions.default` is the level new conversations start at: `read`,
-`workspace` or `full`, with `workspace` when absent; see
-[Permissions](PERMISSIONS.md). Jecode does not load `.env` files. See [Sessions](SESSIONS.md) for conversation
-storage and resume. Per-call checkpoints have a fixed 24-hour lifetime and no
-policy file; see [Checkpoints](CHECKPOINTS.md).
-
-## Personal storage layout
-
-Jecode uses `~/.jecode/` as its personal home (`%USERPROFILE%\.jecode\` on
-Windows). `JECODE_HOME` can select another absolute directory. Each part has
-its own purpose:
-
-| Path | Contents and owner |
+| Field | Meaning |
 | --- | --- |
-| `config.json` | Saved settings and the OpenRouter API key; Jecode updates it through setup and settings. |
-| `accounts/openai/` | Protected ChatGPT registrations, rotating tokens, active account, stable host ID and refresh lock. |
-| `accounts/anthropic/` | Protected Claude account records, rotating tokens, active account and refresh lock. |
-| `skills/` | Your reusable skill files; Jecode reads this library. |
-| `sessions/` | Saved conversations and attachments, managed by conversation saves and session commands. |
-| `projects/<canonical-root-key>/map.json` | Source-backed project notes saved by `map remember` and removed by `map forget`; shared across conversations for the same canonical project root. |
-| `tmp/` | Session working files, managed by Jecode's temporary-file actions. |
-| `browser/profiles/` | Named persistent Chromium profiles selected by the `browser` tool. |
-| `cache/` | Native helper binaries generated when needed. |
-| `checkpoints/<workspace>-<id>/` | Jecode-managed `rc-ID.rcp` packs and `.internal/` identity and lease metadata. |
+| `selection` | The default `backend` (`openrouter`, `openai` or `anthropic`), `model` and `effort` for new conversations. |
+| `backends.<id>.model` | The last saved model for each provider, used when Jecode falls back to that provider. |
+| `backends.openrouter.api_key` | The OpenRouter key, in plain text. Account tokens are never stored here. |
+| `backends.<id>.routing` | Saved routing per model ID. |
+| `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
+| `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
+| `permissions.default` | `read`, `workspace` or `full`. Default `workspace`. |
 
-Normal configured launches create the checkpoint directory for the current
-workspace, even before a modifying tool call; this does not scan or capture
-workspace files. Provider-free checkpoint commands also open the workspace
-directory. Each pack expires 24 hours after capture and Jecode removes expired
-packs while running or on the next use. The deadline does not apply to
-`.internal/` metadata. Checkpoint cleanup does not manage the other home paths.
-
-Project notes are separate from session storage, so resuming or starting a new
-conversation in the same project can use them. Jecode loads notes when `map`
-is called and checks saved source fingerprints against the current full file
-contents. Opening a project does not scan its files for the map. See
-[Project map](TOOLS.md#project-map) for the tool actions and freshness states.
-
-## Automatic compaction threshold
-
-`context.auto_compact_percent` is an integer from 1 to 99, defaulting to 80.
-The threshold is a share of the effective model context window: the catalog
-window, reduced if a provider context rejection establishes a lower ceiling.
-It governs when Jecode reduces the next model request and how much input the
-reduced request may use. Output room is calculated separately; raising the
-threshold can leave less space for the reply.
-
-Change it with `/settings` → **Auto-compact at**. The selector accepts a whole
-number with an optional `%`. A successful save applies on the next model
-request, including in the current conversation and existing collaborators,
-even while a turn is working. Invalid input or a failed save
-keeps the previous value. If even the system instructions, original user
-requests and a useful summary cannot fit, the turn stops with a resource error;
-raise the threshold or choose a model with more context. See
-[Long-running work](LONG_WORK.md#active-context-and-original-history).
-
-## Endpoint routing
-
-Use `/routing` to choose how the current conversation reaches a model's
-OpenRouter endpoints. The choice applies from the next request, including
-summary requests. `/settings` → **Default routing** saves a choice for the
-default model; saved choices apply to new conversations, model switches, single
-prompts and piped tasks. A saved change does not switch the current
-conversation. Models without an entry use Auto. In `--plain` chat, `/routing`
-offers numbered choices; save defaults in the TUI or edit the JSON file.
-
-| Choice | Behavior |
-| --- | --- |
-| **Auto — Best balance** | OpenRouter chooses endpoints with fallbacks. Jecode can add soft speed preferences from recent endpoint statistics. |
-| **Specific endpoint** | Pin one listed endpoint without fallbacks. An absent, stale or incompatible pin stops the turn. |
-
-Auto sends the conversation ID to help cache reuse. Its speed preferences do
-not exclude endpoints; see [provider transport](../development/ARCHITECTURE.md#provider-transport)
-for the selection method. Pin an endpoint when you need a particular provider
-or variant and accept that its unavailability stops work.
-
-The selector fetches the model's endpoint listing when opened; listings guide
-turns for up to 10 minutes. A failed fetch leaves Auto using OpenRouter's
-native routing, but an unverified pin stops with instructions to use `/routing`.
-Automatic fetch retries wait at least a minute. If a pinned endpoint disappears,
-choose Auto or another listed endpoint. A pin to an available endpoint can still
-fail when that endpoint rejects or cannot serve a request.
-
-Endpoint rows show listed input/output rates per million tokens and, when
-available, recent throughput and first-token latency. `?` or `no stats` means
-data is unavailable. The completion notice and `/routing` show the serving
-provider and reported charge when OpenRouter supplies them; rates in the
-selector are not an estimate of a turn's cost.
-
-To set a per-model default manually, use:
+To pin an endpoint by hand, set the model's routing entry, in the `openrouter`
+block when the file has one:
 
 ```json
-{
-  "openrouter": {
-    "routing": {
-      "provider/model-id": { "mode": "endpoint", "endpoint": "provider/variant" },
-      "provider/other-model": { "mode": "auto" }
-    }
-  }
-}
+{ "mode": "endpoint", "endpoint": "provider/variant" }
 ```
 
-These are fields within the full configuration, not a replacement for its key
-and model. Unknown routing entries are retained but ignored; a `routing` value
-that is not an object makes the file invalid. Conversations saved before
-routing existed retain their original no-preference behavior until routing is
-chosen. Account-level OpenRouter provider preferences can still influence
-requests when Jecode has not overridden them.
+Rules for the file:
 
-## Precedence and environment
+- It must be a JSON object of at most 64 KiB.
+- Unknown fields are kept when Jecode saves. Unknown routing entries are ignored.
+- If the file is invalid or unreadable, setup and launch stop with an error and
+  leave the file unchanged so you can fix it.
+- Saves replace the file atomically. On Unix a new file gets mode `0600` and a
+  new directory `0700`; on Windows the file inherits your profile's permissions.
+- Jecode never reads `.env` files.
 
-The personal file wins over `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`. With no
-file, those variables can configure a run without saving credentials; both are
-required, though `--model` can supply the model. `--model MODEL` overrides the
-model for one launch without editing defaults; a different model starts at
-`default` effort and uses that model's saved routing choice. `jecode setup`
-always manages the personal file.
+## Files Jecode keeps
 
-`JECODE_HOME` selects an absolute configuration directory, including sessions,
-temporary storage, checkpoint archives and the personal [skill library](SKILLS.md).
-This is useful for isolated development. The command interpreter and HTTP
-adapters are embedded in Jecode; `JECODE_BASH` and `JECODE_CURL` are not used.
+Everything personal lives under the Jecode home, `~/.jecode/`
+(`%USERPROFILE%\.jecode\` on Windows). Set `JECODE_HOME` to an absolute path to
+use another directory, for example for an isolated test; a relative path is an
+error.
 
-HTTP proxies follow the platform. Windows uses the system proxy configuration
-through WinHTTP's automatic proxy mode, and macOS uses the system proxy settings;
-neither reads `HTTP_PROXY` or `HTTPS_PROXY`. Linux reads `HTTPS_PROXY`,
-`HTTP_PROXY` (or their lowercase forms) and `NO_PROXY`, supports only `http://`
-proxies without credentials, and fails a request rather than bypassing a proxy
-with another scheme. Loopback requests never use a proxy.
+| Path | Contents |
+| --- | --- |
+| `config.json` | Settings and the OpenRouter key. |
+| `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
+| `skills/` | Your [personal skills](SKILLS.md). |
+| `sessions/<project>/` | [Saved conversations](SESSIONS.md), their complete command output, [attachments](ATTACHMENTS.md) and collaborator data, grouped by project directory. |
+| `tmp/<project>/<session>/` | Each conversation's [temporary files](TEMPORARY.md). |
+| `projects/<project>/map.json` | Notes saved by the project map tool; see [Tools](TOOLS.md#project-map). |
+| `checkpoints/<project>-<id>/` | [Checkpoints](CHECKPOINTS.md), each expiring after 24 hours. |
+| `browser/profiles/` | Named persistent browser profiles. |
+| `cache/native/` | Native helpers extracted from the executable on first use. This directory must be writable. |
 
-`/model`, `/effort` and `/routing` change the conversation without
-changing saved defaults. Changing the OpenRouter key in `/settings` refreshes
-authentication for an active OpenRouter conversation; otherwise it registers
-the key for later use. Connecting or selecting a ChatGPT account registers that
-account separately. The TUI opens the model selector when the conversation
-needs configuration or its active OpenAI account changes; connecting an account
-while another backend is active does not switch that conversation. For what
-resumes with a conversation, see [Sessions](SESSIONS.md).
+All of these files are local and can contain sensitive data: conversations,
+command output and checkpoints hold project file contents, including files Git
+ignores such as `.env`.
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `JECODE_HOME` | Absolute path of the Jecode home. |
+| `JECODE_BROWSER` | Path to the browser executable for the `browser` tool. |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Configure a run when no `config.json` exists; see [Providers](PROVIDERS.md#environment-variables). |
+
+## Network proxies
+
+HTTP proxy settings follow the platform:
+
+- **Windows** uses the system proxy configuration (WinHTTP automatic proxy).
+- **macOS** uses the system proxy settings.
+- **Linux** reads `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` (or their lowercase
+  forms). Only `http://` proxies without credentials are supported; a proxy URL
+  with another scheme makes the request fail rather than bypass the proxy.
+
+`HTTP_PROXY` and `HTTPS_PROXY` have no effect on Windows and macOS. Loopback
+addresses never use a proxy.

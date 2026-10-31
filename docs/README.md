@@ -1,41 +1,55 @@
-# Documentation
+# Jecode documentation
 
-Start with the [project README](../README.md) for installation and first launch.
-Runtime commands run from your project directory. Cargo commands and repository
-scripts run from the Jecode repository root.
+New to Jecode? Start with the [project README](../README.md): it covers what
+Jecode does, installation and a first task. Run Jecode commands from your
+project directory; run Cargo commands and repository scripts from the Jecode
+repository root.
 
-## Usage
+## Get started
 
-| Task | Guide |
+| Guide | Covers |
 | --- | --- |
-| Connect OpenRouter, ChatGPT or Claude; choose a model, effort or endpoint | [Configuration](usage/CONFIGURATION.md) |
-| Initialize project rules and scope `AGENTS.md` files | [Project instructions](usage/PROJECT_INSTRUCTIONS.md) |
-| Add personal workflows and inspect the skill library | [Skills](usage/SKILLS.md) |
-| Explore and search files, inspect command output and manage background processes | [Tools](usage/TOOLS.md) |
-| Recover files from a modifying tool call | [Checkpoints](usage/CHECKPOINTS.md) |
-| Resume, recover or delete a conversation | [Saved sessions](usage/SESSIONS.md) |
-| Add files and clipboard images | [Attachments](usage/ATTACHMENTS.md) |
-| Copy an answer or code block | [Copy](usage/COPY.md) |
-| Save a conversation snapshot | [Export](usage/EXPORT.md) |
-| Inspect or clear session working files | [Temporary files](usage/TEMPORARY.md) |
-| Understand retries, compaction and retained history | [Long-running work](usage/LONG_WORK.md) |
+| [Installation](usage/INSTALLATION.md) | Requirements, building, installing, updating and uninstalling. |
+| [Providers](usage/PROVIDERS.md) | Connecting OpenRouter, a ChatGPT account or a Claude account. |
+| [Terminal interface](tui/INTERFACE.md) | Working in the fullscreen interface: sending, queueing, stopping, reading and quitting. |
+| [Command line](usage/CLI.md) | Single prompts, pipes, plain chat, options and exit codes. |
 
-## Terminal interface
+## Work with Jecode
+
+| Guide | Covers |
+| --- | --- |
+| [Permissions](usage/PERMISSIONS.md) | Read, Workspace and Full; approvals; platform limits. |
+| [Project instructions](usage/PROJECT_INSTRUCTIONS.md) | `AGENTS.md` files and `/init`. |
+| [Personal skills](usage/SKILLS.md) | Reusable procedures in `~/.jecode/skills`. |
+| [Tools](usage/TOOLS.md) | What the agent can do: files, search, commands, processes, web and browser. |
+| [Checkpoints](usage/CHECKPOINTS.md) | Recovering files after a modifying tool call. |
+| [Saved conversations](usage/SESSIONS.md) | Resuming, recovering and deleting conversations. |
+| [Attachments](usage/ATTACHMENTS.md) | Files and clipboard images. |
+| [Collaborating agents](usage/COLLABORATION.md) | Delegated assignments, isolated workspaces and review. |
+| [Questions and plans](usage/QUESTIONS_AND_PLANS.md) | Answering the agent's questions and following its plan. |
+| [Copy and export](usage/COPY_AND_EXPORT.md) | Copying answers and saving conversations as JSON. |
+| [Temporary files](usage/TEMPORARY.md) | Each conversation's working area and its cleanup. |
+| [Long-running work](usage/LONG_WORK.md) | Retries, context compaction and history. |
+
+## Reference
 
 | Reference | Contents |
 | --- | --- |
-| [Composer and controls](tui/COMPOSER.md) | Editing, keyboard shortcuts, commands, selectors and pending messages. |
-| [Markdown](tui/MARKDOWN.md) | Supported syntax, code blocks, tables and display limits. |
-| [Scrolling and resize](tui/RESIZE.md) | Reading position, reflow and terminal restoration. |
-| [Theme and Work chapters](tui/THEME.md) | Semantic colors, compact Work chapters, tool cards and `Ctrl+O`. |
+| [Configuration](usage/CONFIGURATION.md) | Settings, `config.json`, routing, stored files, environment variables and proxies. |
+| [Commands and keys](tui/COMMANDS.md) | Every slash command and keyboard control in the TUI. |
+| [Tool activity](tui/TOOL_ACTIVITY.md) | Reading tool cards, Work chapters, diffs and Ctrl+O. |
+| [Markdown display](tui/MARKDOWN.md) | How answers are formatted in the terminal. |
+| [Tool reference](usage/TOOL_REFERENCE.md) | Exact tool arguments, defaults and limits. |
+| [Command language](usage/SHELL.md) | Syntax and built-ins of the `bash` tool. |
 
 ## Development
 
 | Reference | Contents |
 | --- | --- |
-| [Architecture](development/ARCHITECTURE.md) | Module map, agent flow, persistence and native boundaries. |
-| [OpenAI backend](development/OPENAI.md) | Implemented provider boundary, Sign in with ChatGPT and native cryptography. |
-| [Anthropic backend](development/ANTHROPIC.md) | Native Claude subscription access, account lifecycle and Messages streaming. |
-| [Development and testing](development/TESTING.md) | Offline checks, isolated fixtures and manual smoke tests. |
-| [Platform verification](development/PLATFORMS.md) | Native test commands, local coverage and host checks. |
-| [Performance](development/PERFORMANCE.md) | Recorded measurements, methodology and current benchmark commands. |
+| [Development and testing](development/TESTING.md) | Toolchain, checks, native fixtures, live checks and CI. |
+| [Architecture](development/ARCHITECTURE.md) | Modules, request lifecycle, storage and native boundaries. |
+| [Platform support](development/PLATFORMS.md) | Verification status, platform limits and host checks. |
+| [OpenAI backend](development/OPENAI.md) | Sign in with ChatGPT and the Responses route. |
+| [Anthropic backend](development/ANTHROPIC.md) | The Claude account compatibility route. |
+| [TUI theme](tui/THEME.md) | Colour tokens, grid and drawing rules. |
+| [Performance measurement](development/PERFORMANCE.md) | Probes, method and recorded results. |

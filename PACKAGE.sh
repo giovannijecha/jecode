@@ -14,7 +14,8 @@ esac
 package=$target_root/package/jecode-$platform-$architecture
 mkdir -p "$package"
 cp "$target_root/release/jecode" "$package/jecode"
-cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" "$package/"
+cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" \
+    "$script_dir/SECURITY.md" "$script_dir/CONTRIBUTING.md" "$package/"
 mkdir -p "$package/docs"
 # Without -L, find neither follows nor matches symbolic links.
 find "$script_dir/docs" -type f ! -name 'HARNESS*' ! -name AGENTS.md ! -name CLAUDE.md | while IFS= read -r document; do

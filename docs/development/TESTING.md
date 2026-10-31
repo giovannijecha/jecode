@@ -1,25 +1,24 @@
 # Development and testing
 
-Run these commands from the repository root with Rust 1.95.0, pinned by
-`rust-toolchain.toml`. Building from source needs the platform infrastructure
-listed in the [README](../../README.md#building-from-source); prebuilt packages
-already contain the owned native adapters.
+Run every command on this page from the repository root. Rust 1.95.0 is pinned
+by `rust-toolchain.toml`, so `rustup` selects it automatically. The build
+prerequisites for each platform are listed in
+[Installation](../usage/INSTALLATION.md#build-prerequisites).
 
 ## Windows toolchain
 
-MSVC builds need the Visual C++ linker on PATH. To use the installed GNU LLVM
-toolchain instead, open PowerShell at the repository root and select its bundled
-linker for this terminal:
+The pinned toolchain uses your default host. With the MSVC host, the Visual C++
+linker must be on `PATH`. To use the GNU LLVM toolchain and its bundled linker
+instead, run this once per PowerShell session:
 
 ```powershell
+rustup toolchain install 1.95.0-x86_64-pc-windows-gnullvm --component rust-mingw --component rustfmt --component clippy
 $env:RUSTUP_TOOLCHAIN = '1.95.0-x86_64-pc-windows-gnullvm'
-$taskSysroot = rustc --print sysroot
-$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = "$taskSysroot\lib\rustlib\x86_64-pc-windows-gnullvm\bin\rust-lld.exe"
+$sysroot = rustc --print sysroot
+$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = "$sysroot\lib\rustlib\x86_64-pc-windows-gnullvm\bin\rust-lld.exe"
 ```
 
-This requires the pinned GNU LLVM toolchain with its `rust-mingw` component.
-The [Windows installer](../../README.md#windows) selects it automatically when
-available; that selection applies only to the install command.
+CI uses this toolchain on Windows.
 
 ## Normal checks
 
@@ -30,113 +29,99 @@ cargo clippy --locked --offline --all-targets -- -D warnings
 cargo test --locked --offline
 ```
 
-All four commands must exit successfully. Ignored tests require an explicit
-invocation; a normal test run does not establish their coverage.
+All four must succeed before a change is delivered. The test suite uses original
+Rust fixtures, synthetic credentials, isolated directories under `target` and
+loopback HTTP. It exercises the native HTTP adapter and process boundaries
+without contacting a provider or reading your configuration.
 
-Tests use original Rust fixtures, synthetic credentials, isolated directories
-under `target` and loopback HTTP. They exercise the build-embedded native HTTP
-adapter and process boundaries without contacting inference providers or
-reading personal configuration.
+Ignored tests run only when named explicitly; a normal run says nothing about
+them. They are the native terminal fixtures, live-provider checks, manual smoke
+tests and measurements described below.
 
-Unix owner-loss tests also use the system `ps` command to inspect process groups.
-They synchronize owner exit with live descendants, then wait for the group to
-stop; zombies awaiting reaping do not count as running commands.
-
-OpenAI fixtures also use isolated account records and loopback HTTP. They do
-not read Codex credentials or launch a real ChatGPT sign-in. Native signature
-checks exercise Windows .NET, macOS Security or Linux OS libcrypto. A successful
-fixture run does not establish account eligibility or real plan inference.
-Claude fixtures likewise use synthetic credentials and isolated account records.
-They cover callback validation, token rotation, account separation, signed
-thinking replay, fragmented tool calls, cache usage and provider errors. They
-do not read Claude Code credentials or launch a real Claude sign-in.
-The ignored `http::tests::trusted_https_uses_os_tls_policy` smoke check uses
-`https://example.com/` without credentials to verify the native TLS boundary.
-
-Opt-in live OpenAI checks use the selected saved ChatGPT registration and
-synthetic inputs. They consume ChatGPT plan usage, never print tokens, and stay
-outside ordinary offline verification:
-
-```text
-cargo test --locked --offline backend::openai::live::inspect_live_model_and_stream -- --exact --ignored --nocapture --test-threads=1
-cargo test --locked --offline backend::openai::live::live_tool_roundtrip_uses_context_and_selected_effort -- --exact --ignored --nocapture --test-threads=1
-cargo test --locked --offline backend::openai::live::live_image_and_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
-```
-
-Claude's opt-in checks require an explicit absolute `JECODE_HOME` containing a
-signed-in test account. They verify extra usage is disabled before inference,
-use synthetic messages, and make one request for the minimal stream or two for
-the tool roundtrip. They bypass automatic agent retries:
-
-```text
-cargo test --locked --offline backend::anthropic::live::minimal_subscription_stream -- --exact --ignored --nocapture --test-threads=1
-cargo test --locked --offline backend::anthropic::live::subscription_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
-```
-
-The opt-in cache checks require an explicit absolute `JECODE_HOME` for both
-providers. They use only synthetic reference records and print token/timing
-counters, including cache writes and reads. Claude makes four bounded requests
-and ChatGPT three; the warm request grows the conversation and changes runtime
-state. No agent recovery retries are involved:
-
-```text
-cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_runtime_state_changes -- --ignored --nocapture --test-threads=1
-```
-
-See [performance](PERFORMANCE.md#subscription-context-reuse) for measured
-ratios and their limits.
-
-## Run a focused check
+## Focused checks
 
 Pass a test-name filter after the Cargo options:
 
 ```text
-cargo test --locked --offline agent::routing_tests::
-cargo test --locked --offline agent::backend_tests::
-cargo test --locked --offline backend::delegation_tests::
-cargo test --locked --offline agent::collaboration::
-cargo test --locked --offline collaboration::workspace::tests::
-cargo test --locked --offline tui::agents::tests::
-cargo test --locked --offline session::agents::tests::
-cargo test --locked --offline backend::openrouter::calls::tests::
-cargo test --locked --offline auth::openai::
-cargo test --locked --offline backend::openai::
-cargo test --locked --offline auth::accounts::
-cargo test --locked --offline auth::anthropic::
-cargo test --locked --offline backend::anthropic::
-cargo test --locked --offline tools::processes::tests::
-cargo test --locked --offline tools::exec::tests::
-cargo test --locked --offline tools::interactive::tests::
-cargo test --locked --offline tools::schema::tests::map_is_appended_as_a_bounded_routine_tool
-cargo test --locked --offline project_map::
-cargo test --locked --offline agent::map_tests::
-cargo test --locked --offline agent::execution::scheduling::tests::
-cargo test --locked --offline agent::execution::declared::tests::
-cargo test --locked --offline sessions::tool_batch_tests::
-cargo test --locked --offline sessions::journal_tests::
 cargo test --locked --offline checkpoint
+cargo test --locked --offline tools::discovery
+cargo test --locked --offline agent::backend_tests::
 ```
 
-Check the reported test count: a successful command that matched no tests has not
-verified the change. Use `-- --list` to inspect available names.
+Check the reported count: a command that matched no tests verified nothing. Use
+`cargo test --locked --offline -- --list` to see available names, and add
+`--ignored` to list the opt-in tests.
 
-| Change | Relevant checks |
+| Area | Where the tests are |
 | --- | --- |
-| Agent/context/backend | `agent::backend_tests` uses two synthetic protocols across tool execution, compaction, save and resume. Both `backend/openrouter/` and `backend/openai/` tests use loopback responses for their adapters. |
-| Files/processes | Tests beside `tools/` and `process/`; retain timeout, cancellation and owner-loss behavior. |
-| Native discovery | `tools::discovery` covers filtering, paging, literal matches, UTF-8/long lines, bounds and cancellation. `path_filter::tests` retains checkpoint ignore-rule coverage; `agent::discovery_tests` exercises both provider wrappers and session resume. |
-| Project map | `project_map::` covers on-demand survey, Rust/Markdown outlines, note persistence, full-file freshness and paging. `agent::map_tests::` exercises OpenRouter and OpenAI tool receipts, source changes, resume and a new conversation using the same project notes. `tools::schema::tests::map_is_appended_as_a_bounded_routine_tool` checks the provider-facing argument shape. |
-| Parallel tool calls | `agent::execution::scheduling::tests::` covers explicit, automatic and serial boundaries. `agent::execution::declared::tests::` covers overlapping commands, joined workers and unknown outcomes after a worker failure. `sessions::tool_batch_tests::` covers out-of-order saved results, recovery, redaction, legacy readers and malformed batch state. |
-| Sessions/attachments | Tests beside `sessions/` and `attachments/`; use isolated storage and check recovery. |
-| Checkpoints | Tests beside `checkpoints/` and integration tests in agent, session, tools and TUI. Cover per-call preimages, no startup acquisition, scoped Bash, partial/unreadable/reparse scope, Unicode/aliases, corruption, cancellation, cross-process locks and process death, fixed 24-hour expiry, conflict checks and precise partial undo. |
-| TUI | State/layout/VT screen tests in `tui/`, plus the platform's native terminal fixture. |
-| Browser | `browser::` tests use loopback DevTools fixtures for waits, log paging, eviction and reconnection, plus the installed-browser fixtures below. |
+| Agent loop, context and backends | `agent::backend_tests` drives two synthetic protocols through tools, compaction, save and resume. `backend::openrouter`, `backend::openai` and `backend::anthropic` use loopback servers for their adapters. |
+| Accounts | `auth::openai`, `auth::anthropic`, `auth::accounts`. |
+| Routing | `agent::routing_tests`, `backend::openrouter`. |
+| Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
+| Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
+| Processes and terminals | `tools::processes`, `tools::exec`, `tools::interactive`, `process`. |
+| Project map | `project_map`, `agent::map_tests`. |
+| Collaboration | `agent::collaboration`, `collaboration::workspace`, `session::agents`, `tui::agents`. |
+| Sessions and attachments | `sessions`, `attachments`. |
+| Checkpoints | `checkpoint` matches the store and its agent, session, tool and TUI integration tests. |
+| TUI | State, layout and VT screen tests under `tui`, plus the native terminal fixture for your platform. |
+| Browser | `browser` uses loopback DevTools fixtures; installed-browser checks are below. |
 
-Installed Chrome or Edge fixtures serve a loopback site and use isolated
-profiles under `target` or ignored `.tmp/`. Run them one at a time after
-browser changes; the last one briefly opens a visible window:
+Keep credentials, logs, screenshots and temporary drivers out of tracked files;
+use the ignored `.tmp/` or `target` directories.
+
+## Native terminal fixtures
+
+These drive the real renderer through a pseudo-terminal and check input,
+resize, quitting and terminal restoration after normal exit and owner loss. CI
+runs the one for each platform. Run them after the normal suite, one at a time;
+running them concurrently with other suites can exceed their wait limits.
 
 ```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+```
+
+The first two need Windows 10 or later with ConPTY; the Linux fixture needs the
+util-linux `script` tool; the macOS fixture needs the system `script` and `tty`
+utilities. Do not run the private `native_pty_fixture` child directly. Other
+Windows fixtures cover permission requests
+(`native_tests::native_permissions::native_windows_permissions`) and light
+terminal backgrounds (`native_tests::native_background::`).
+
+Interactive `exec` tests need `cc` on first use on Unix, plus `/proc` on Linux
+or `/bin/ps` on macOS. The compiled helper is cached under
+`target/measurements/pty-cache`. Unix interrupt probes also use the system
+`stty` and `od`, and owner-loss tests use `ps`.
+
+## Windows command confinement
+
+The normal suite launches an original Rust probe inside the Workspace
+confinement and checks permitted and denied file operations, inherited
+confinement in descendants and rejection of interactive terminals. PowerShell
+and .NET compatibility checks are opt-in because Windows cannot start some
+programs inside the confinement from a service session (see
+[Permissions](../usage/PERMISSIONS.md#platform-limits)). Run them from an
+interactive user session:
+
+```text
+cargo test --locked --offline agent::execution::sandbox_tests::workspace_powershell_uses_installed_rust_tools_and_git_status -- --exact --ignored --test-threads=1
+cargo test --locked --offline process::windows::sandbox_tests::workspace_native_powershell_runs_without_user_profile -- --exact --ignored --test-threads=1
+cargo test --locked --offline process::windows::sandbox_tests::workspace_native_child_and_grandchild_enforce_file_policy -- --exact --ignored --test-threads=1
+cargo test --locked --offline process::windows::sandbox_tests::workspace_native_loopback_client_and_server -- --exact --ignored --test-threads=1
+cargo test --locked --offline tools::interactive::tests::windows::workspace_sandbox_runs_native_exec_and_rejects_interactive_terminal -- --exact --ignored --test-threads=1
+```
+
+## Installed-browser checks
+
+These use an installed Chrome or Edge with isolated profiles under `target` or
+`.tmp/` and a loopback site; no model request is made. Run them one at a time
+after browser changes. The last one briefly opens a visible window.
+
+```text
+cargo test --locked --offline agent::browser_tests::native_browser_tool_delivers_images_and_preserves_only_named_profile_state -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline browser::tests::live_chromium_localhost_interaction_and_profile_persistence -- --exact --ignored --test-threads=1
 cargo test --locked --offline browser::live_tests::live_chromium_viewport_dimensions_and_validation -- --exact --ignored --test-threads=1
 cargo test --locked --offline browser::live_tests::live_chromium_snapshot_semantics_logs_and_wait_diagnostics -- --exact --ignored --test-threads=1
@@ -144,137 +129,49 @@ cargo test --locked --offline browser::snapshot::tests::live_chromium_snapshot_v
 cargo test --locked --offline browser::live_tests::live_chromium_visible_viewport -- --exact --ignored --test-threads=1
 ```
 
-Work chapters have focused card, state and viewport tests, including a 10,000-call
-replay and latest-turn expansion. To paint the actual compact and expanded cards
-at 80 and 40 cells with synthetic events:
+`http::tests::trusted_https_uses_os_tls_policy` checks the native TLS boundary
+against `https://example.com/` without credentials.
+
+## Live provider checks
+
+These make real requests with a saved account and are never part of offline
+verification. They print no tokens.
+
+ChatGPT checks use the selected saved ChatGPT account and consume plan usage:
 
 ```text
-cargo test --locked --offline tui::specimen::work_chapters -- --ignored --nocapture
-cargo test --locked --offline tui::specimen::discovery::discovery_cards -- --exact --ignored --nocapture
-cargo test --locked --offline tui::specimen::alignment::alignment -- --exact --ignored --nocapture
+cargo test --locked --offline backend::openai::live::inspect_live_model_and_stream -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline backend::openai::live::live_tool_roundtrip_uses_context_and_selected_effort -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline backend::openai::live::live_image_and_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
 ```
 
-The [native terminal fixture](PLATFORMS.md#windows) also checks compact chapter
-facts and existing-card expansion through Ctrl+O.
-
-Run the applicable normal checks after focused verification. Keep credentials,
-logs, screenshots and temporary drivers out of tracked files; use ignored `.tmp/`
-or `target` directories.
-
-Focused recovery checks run without a provider:
+Claude checks require an explicit absolute `JECODE_HOME` containing a
+signed-in test account. They verify that extra usage is disabled before any
+inference, use synthetic messages, make one request (stream) or two (tool round
+trip) and bypass automatic retries:
 
 ```text
-cargo test --locked --offline checkpoint
+cargo test --locked --offline backend::anthropic::live::minimal_subscription_stream -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline backend::anthropic::live::subscription_tool_roundtrip -- --exact --ignored --nocapture --test-threads=1
 ```
 
-Storage subprocess fixtures terminate a writer or reader and verify released OS
-locks, retained live reads and cleanup of expired pending data. Normal tests use
-isolated homes; no real archive is read or deleted. Free-space probes have
-separate cancellation, insufficient-space and failed-helper checks.
-
-The opt-in matched tool workload uses release binaries with identical fixtures:
+The cache-reuse checks also require an explicit absolute `JECODE_HOME`. This
+filter runs both the Claude check (four requests) and the ChatGPT check (three
+requests) and prints token and cache counters:
 
 ```text
-cargo test --locked --offline --release checkpoint_bench::matched_tools -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_runtime_state_changes -- --ignored --nocapture --test-threads=1
 ```
 
-Set `JECODE_BENCH_CASE` to `write4k`, `edit1m`, `bash1`, `bash100`, `bash1000`,
-`restore1`, `restore100`, `restore1000` or `large256m`; set `JECODE_BENCH_COUNT`
-for measured samples. Two warmups precede them. `JECODE_BENCH_ENABLED=0` disables
-capture for control cases. Exact output validation and restore setup are outside
-the timed interval. Run variants serially with no builds/CI in progress and
-alternate their order. See [performance](PERFORMANCE.md) for evidence and limits.
+`agent::compaction::live_tests::live_summary_and_resumed_readback_preserve_critical_work`
+makes two Claude requests to check that a compaction summary keeps critical
+task facts across a resume. Results are recorded in
+[Performance](PERFORMANCE.md#subscription-context-reuse).
 
-## Development binary and installation
+## Manual checks
 
-```text
-cargo run --locked --offline -- --help
-cargo run --locked --offline
-```
-
-The first command checks CLI startup without configuration. The second opens the
-application with normal user configuration. To work in a different project,
-invoke the built executable there by its absolute path.
-
-To check the Windows installer without changing PATH, choose a disposable install
-root in PowerShell:
-
-```powershell
-.\INSTALL.ps1 -InstallRoot "$PWD\.tmp\install-check" -NoPath
-& "$PWD\.tmp\install-check\bin\jecode.exe" --version
-```
-
-The Unix installer accepts an absolute root: `sh INSTALL.sh /absolute/test/root`.
-Both installers build offline and print the installed executable's version.
-
-## Native and manual checks
-
-Required Windows confinement tests launch an original Rust probe inside the
-granted workspace. Cargo builds a small standalone probe and embeds it only in
-the test executable, keeping native startup independent of the full harness's
-size. These tests verify selected environment variables, permitted file
-operations, denied reads and writes outside the workspace, inherited confinement
-in descendants and rejection of interactive terminals. PowerShell and .NET
-compatibility checks are additional opt-in tests because of the documented
-[PSEC session-0 limitation](../usage/PERMISSIONS.md#windows-commands). Run them
-from an interactive Windows user session:
-
-```text
-cargo test --locked --offline agent::execution::sandbox_tests::workspace_powershell_uses_installed_rust_tools_and_git_status -- --exact --ignored --test-threads=1
-cargo test --locked --offline process::windows::sandbox_tests::workspace_native_powershell_runs_without_user_profile -- --exact --ignored --test-threads=1
-cargo test --locked --offline process::windows::sandbox_tests::workspace_native_child_and_grandchild_enforce_file_policy -- --exact --ignored --test-threads=1
-cargo test --locked --offline tools::interactive::tests::windows::workspace_sandbox_runs_native_exec_and_rejects_interactive_terminal -- --exact --ignored --test-threads=1
-```
-
-Collaborator fixtures use isolated session homes, synthetic model services and
-temporary project directories without Git. They cover provider catalogs,
-in-flight assignment updates, late returns resuming the main model, review,
-cancellation, recovery, working-file baselines, omitted entries (sockets,
-unportable names, locked files, uncreatable links), link retargeting,
-read-only directory cleanup, legacy worktree registrations, conflict-aware
-integration and owned cleanup. A
-subprocess fixture stops after preparing an isolated copy and before its
-`created` receipt; resume reclaims the copy only once that session is no longer
-live. The TUI
-suite covers read-only inspection, stable selection, draft/caret restoration,
-visible activity, readback and summary layout. No personal credentials or live
-provider inference are needed.
-
-The Windows fullscreen fixture also paints collaboration receipts, the `/agents`
-panel and the selected footer through the real Rust renderer into ConPTY:
-
-```text
-cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
-```
-
-Interactive execution tests use original Rust fixtures and isolated native
-terminals. Unix PTY tests require `cc` on first use, plus `/proc` on Linux or
-`/bin/ps` on macOS for session cleanup. The compiled helper cache is reused
-across test runs under `target/measurements/pty-cache`, keyed by platform and
-source contents. They check input, resize, interrupt, owner loss, job-control groups,
-saved output and per-control checkpoints. Password-entry checks use synthetic
-values with the target's echo disabled.
-
-Unix interrupt probes also use system `stty` and `od` to check synthetic bytes,
-terminal modes and queued input. They cover raw input, remapped or disabled
-`VINTR`, `NOFLSH`, delayed input frames, saturated connections and input/resize
-after a client detaches its controlling terminal.
-The Linux-only blocked raw-input probe also uses system `tty` and `kill`.
-The `TIOCNOTTY` detachment fixture is Linux-only; both Unix platforms check
-no-foreground handling on a newly opened PTY before terminal acquisition.
-
-The Windows direct-input fixture drives the real Rust renderer and verifies
-that local terminal input, including emoji, stays outside conversation history:
-
-```text
-cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
-```
-
-[Platform verification](PLATFORMS.md) contains native ConPTY/PTY commands,
-local coverage and physical host checks. Use those fixtures for input, resize,
-terminal restoration and owner-loss changes. They use synthetic conversations.
-
-Windows also has interactive smoke fixtures. Run one at a time in a real console:
+Windows has interactive smoke fixtures that wait for keyboard input. Run one at
+a time in a real console and follow the printed prompts:
 
 ```text
 cargo test --locked --offline tui::manual_tests::composer_windows_smoke -- --exact --ignored --nocapture --test-threads=1
@@ -283,20 +180,52 @@ cargo test --locked --offline tui::persistence_smoke::sessions_windows_smoke -- 
 cargo test --locked --offline tui::long_work_smoke::long_work_windows_smoke -- --exact --ignored --nocapture --test-threads=1
 ```
 
-Follow each fixture's printed prompts; these tests wait for keyboard interaction.
-Do not run private child fixtures directly. Opt-in timing probes are documented
-in [performance](PERFORMANCE.md).
+The `tui::specimen::` tests paint real cards and panels with synthetic events,
+for example `tui::specimen::chapter_live::chapter_live` or
+`tui::specimen::discovery::discovery_cards`. Run them with
+`-- --exact --ignored --nocapture` to inspect the output.
+
+For checks that need a real terminal host, such as physical input, fonts and
+clipboard delivery, use the checklist in
+[Platform support](PLATFORMS.md#check-a-terminal-host).
+
+## Development binary and installers
+
+```text
+cargo run --locked --offline -- --help
+cargo run --locked --offline
+```
+
+The first command checks CLI startup without configuration; the second opens
+Jecode with your normal user configuration in the repository directory. To work
+in another project, run the built executable from that project by its absolute
+path, or set `JECODE_HOME` to an absolute scratch directory to keep your real
+configuration untouched.
+
+The installers only copy a prebuilt executable; they never build. To check the
+Windows installer without changing `PATH`, prepare a package and install it into
+a disposable root:
+
+```powershell
+.\PACKAGE.ps1
+$package = Get-ChildItem target\package -Directory | Select-Object -First 1
+& "$($package.FullName)\INSTALL.ps1" -InstallRoot "$PWD\.tmp\install-check" -NoPath
+& "$PWD\.tmp\install-check\bin\jecode.exe" --version
+```
+
+On Linux or macOS, run `sh PACKAGE.sh`, then
+`sh target/package/jecode-<platform>-<arch>/INSTALL.sh /absolute/test/root`.
 
 ## CI
 
-[CI.yml](../../.github/workflows/CI.yml) runs the normal checks and then the
-platform's exact, ignored native terminal fixture from [platform
-verification](PLATFORMS.md). It does not run the other ignored tests, which
-include manual interaction, private child fixtures, live-provider evaluation and
-opt-in measurements. Windows and Linux use maintainer-hosted local runners;
-macOS uses GitHub's hosted runner. The required checks are `Rust (Windows)`,
-`Rust (Linux)` and `Rust (macOS)`.
+[`CI.yml`](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml)
+runs formatting, the offline build, all-target Clippy and the test suite, then
+the platform's native terminal fixtures (on Windows, also the direct-input
+fixture). It runs no other ignored tests. The required checks are
+`Rust (Windows)`, `Rust (Linux)` and `Rust (macOS)`.
 
-Local runners use fresh checkouts and one-job credentials, with a host policy
-rejecting fork code before workflow steps. Their jobs queue while the maintainer's
-PC is offline. A queued or skipped job is not a successful verification.
+Windows and Linux jobs run on maintainer-hosted runners with fresh checkouts and
+one-job credentials; the host rejects fork code before workflow steps run.
+These jobs queue while the maintainer's machine is offline, and a queued or
+skipped job is not a successful verification. macOS runs on GitHub's hosted
+`macos-15` runner.

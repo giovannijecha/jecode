@@ -1,128 +1,124 @@
 # Permissions
 
-Each conversation has a user-selected permission level. Jecode applies its
-boundaries; the model does not classify danger or grant itself more authority.
+Every conversation has a permission level that decides what the agent's tools
+may do. You choose the level; the model cannot raise it or approve its own
+requests. Jecode enforces the level on each tool call.
 
-| Level | Inside the working folder and its subfolders | Outside the working folder |
+## Levels
+
+The working folder is the directory you started Jecode in, with all its
+subdirectories.
+
+| Level | In the working folder | Outside it |
 | --- | --- | --- |
-| **Read** | Read and analyze. Project edits, commands and checkpoint restores are unavailable. | Unavailable. |
-| **Workspace** (default) | Edit files and run native commands within the recursive workspace and authorized session scratch. Network access is enabled. | File access and an external command working directory ask first. |
-| **Full** | Read, write and execute with the invoking user's OS permissions. | The same authority applies here. |
+| **Read** | Read and search files; fetch web pages with GET or HEAD. No edits, commands, checkpoint restores or browser control. | Refused. |
+| **Workspace** (default) | Read and edit files; run commands, confined on Windows (see [Platform limits](#platform-limits)). Network access is allowed. | Each file access, and each command started from an outside directory, asks for [approval](#approval-requests). |
+| **Full** | Everything, with your normal user permissions. | Everything, with your normal user permissions. |
 
-Read still permits Jecode to save conversation state and use its own temporary
-storage. It never asks for project writes: select another level instead.
-Workspace and Full can reach the network; the level is not a domain allowlist.
+Levels govern Jecode's tool calls. Once a command runs, it acts with whatever
+authority it was given; the working folder is not a sandbox on its own. The
+network is reachable in Workspace and Full, and no level restricts which hosts
+can be contacted.
 
-## Choosing a level
+Read still lets Jecode save the conversation and use its own temporary storage.
+It never asks for permission to edit: switch levels instead.
+
+## Choose a level
 
 | Action | Scope |
 | --- | --- |
-| TUI `/permissions` | Choose this conversation's level, or open **Remembered**. |
-| `/permissions read`, `workspace` or `full` | Change this conversation's level. |
-| `/settings` → **Default permissions** | Save the level for new conversations. |
-| `--plain`: `/permissions` | Print the levels, current selection and saved default. |
-| `--plain`: `/permissions remembered` | List remembered grants. |
-| `--plain`: `/permissions revoke N` | Revoke the numbered grant. |
+| `/permissions` | Choose this conversation's level, or open **Remembered** approvals. |
+| `/permissions read`, `/permissions workspace`, `/permissions full` | Change this conversation's level directly. |
+| `/settings` → **Default permissions** | Save the level new conversations start at. |
+| `permissions.default` in [`config.json`](CONFIGURATION.md#the-configuration-file) | The same default, edited by hand. |
 
-Changing a saved default leaves the current conversation unchanged. `/new`
-uses that default; resume restores the conversation's level and grants.
-The TUI shows the current level as a chip on the composer's bottom rule, on
-the tool-badge colour of what it allows: reading, editing or commands.
+The TUI shows the current level as a chip on the composer's lower border. A
+level change applies to later tool calls. Calls already running, including
+background processes, keep the authority they started with; stop a process from
+`/terminal` if needed. Resume restores the conversation's level and approvals;
+`/new` starts at the saved default.
 
-Level changes apply to subsequent calls. Already running calls and background
-processes retain their starting authority. The notice identifies this; use
-`/terminal` to stop a process. Revoking a grant likewise affects later calls.
+## Approval requests
 
-## Windows commands
+In Workspace, a file call outside the working folder, or an `exec` call with an
+outside working directory, waits for you. The request shows which agent is
+asking, the target and the kind of access:
 
-Workspace runs the owned `bash` interpreter and non-interactive `exec` inside a native Windows Process
-Security Environment. The OS enforces the filesystem policy on the command
-and its descendants. The workspace grant includes all subfolders. Session
-scratch is writable; installed Rust runtime data is read-only when present,
-and Cargo's default cache is redirected to session scratch. Explicit command
-environment overrides do not widen the OS filesystem policy.
+1. **Approve** runs this call once.
+2. **Approve and remember** also allows the same access for the rest of this
+   conversation, including after resume. File and folder approvals match their
+   exact path. Command approvals match the exact program, arguments, explicit
+   environment, input and terminal settings; no command prefix is approved.
+3. **Deny** runs nothing and tells the agent.
 
-Confined commands inherit a fixed set of OS and toolchain environment variables,
-not the invoking shell's arbitrary tokens and secrets. Explicit `exec.env`
-values and removals still apply. Full retains normal environment inheritance.
+In the TUI, type `1`, `2` or `3`, or move with the arrow keys and press Enter.
+Nothing is selected when the request appears, so a stray Enter does nothing, and
+pasted text never answers it. If the request arrives while you are typing, your
+keys keep going to the draft until you pause or press an arrow key or Tab.
+Ctrl+C stops the turn. Requests appear one at a time.
 
-Workspace does not grant access to all of `~/.jecode`. Configuration,
-credentials and unrelated sessions are outside the command's writable roots.
-If Jecode's configuration directory lies within a writable root, launch is
-refused: choose a narrower project directory or select Full explicitly.
+Approving never switches the conversation to Full. To review approvals, open
+`/permissions` → **Remembered** and press Ctrl+D on one to revoke it. Read and
+Full pause remembered Workspace approvals without deleting them.
 
-The `bash` tool uses Jecode's embedded interpreter and needs no Git Bash or
-installed Bash. Its exact executable has read-only access inside the native
-boundary; this grants no access to adjacent credentials or configuration files.
-Use `exec` for explicit native programs. Interactive `exec`
-(`tty:true`) also requires Full: on the verified Windows build, combining
-ConPTY with the native security environment loses terminal output. Workspace
-rejects that combination before launching a process.
+Collaborators share the conversation's level and approvals, and their requests
+name the collaborator. In `--plain`, the main agent's requests appear as
+numbered questions and closing stdin denies them; collaborators cannot ask
+there. Single prompts and pipes cannot ask at all, so calls that need approval
+are refused.
 
-On the verified Windows 26H2 build, isolated commands can connect to a host
-localhost service, but the host cannot connect to a server inside the isolated
-environment. **Start local development servers explicitly in Full.** You can
-then return to Workspace; the server keeps its starting Full authority.
-Jecode does not change global firewall rules or loopback exemptions.
+## Command confinement
 
-Confined commands require native Process Security Environment 1.1 with the
-required filesystem and network policy support. Unsupported Windows hosts,
-Linux and macOS reject Workspace command launch; select Full explicitly to run
-unconfined commands there. There is no automatic fallback to Full.
+On Windows, Workspace runs `bash` and non-interactive `exec` commands inside a
+Windows Process Security Environment. The operating system enforces a
+filesystem policy on the command and every process it starts:
 
-On the verified Windows host, services and CI workers in session 0 cannot start
-some programs, including PowerShell, inside PSEC: Windows fails their DLL
-initialization before user code runs. The owned interpreter and native commands
-without that requirement remain confined and usable. Run affected programs in
-an interactive user session or choose Full explicitly. See the
-[Windows PSEC issue](https://github.com/microsoft/mxc/issues/1465).
+- The working folder and the conversation's temporary area are writable.
+- Installed Rust toolchain data is readable, and Cargo's cache is redirected to
+  the temporary area.
+- The rest of the Jecode home, including configuration, credentials and other
+  conversations, is outside the writable area.
+- Commands inherit only a fixed set of operating-system and toolchain
+  environment variables, not arbitrary tokens from your shell. Values set
+  explicitly in an `exec` call still apply.
 
-## Requests
+If the Jecode home lies inside the working folder, Workspace refuses to run
+commands. Start Jecode in a narrower project directory, or choose Full.
 
-Workspace waits before a file call outside its folder or an `exec` with an
-outside working directory. The request identifies the caller, target and
-access before anything runs:
+## Platform limits
 
-- **Approve** runs this call once.
-- **Approve and remember** grants the same access for this conversation,
-  including after resume. File and folder grants match their exact target;
-  command grants also distinguish arguments, explicit environment, input and
-  terminal parameters. No command prefix is granted.
-- **Deny** runs nothing and returns the decision to the agent.
+- **Linux and macOS have no command confinement.** In Workspace, every `bash`
+  and `exec` call fails with: `Workspace command confinement is supported only
+  on Windows. Choose /permissions full to run without confinement on this
+  platform.` File tools still follow the Workspace rules. To let the agent run
+  commands, choose Full for the conversation (`/permissions full`) or as the
+  default.
+- **Windows hosts without the required support** (Process Security Environment
+  1.1 with filesystem and network policies) also refuse Workspace commands.
+  There is no automatic fallback to Full on any platform.
+- **Interactive terminals** (`exec` with `tty: true`) require Full on every
+  platform.
+- **Browser control** requires Full, because browser file access and downloads
+  are not confined. Closing or stopping a browser the conversation already
+  started works at any level. In Read and Workspace, use the `web` tool for
+  network retrieval.
+- **Local servers on Windows.** A confined command can connect to a server on
+  your machine, but your machine cannot connect to a server running inside the
+  confinement. Start development servers in Full; you can return to Workspace
+  afterwards and the server keeps running.
+- **Windows services and CI workers.** In a service session (session 0), Windows
+  cannot start some programs, including PowerShell, inside the confinement. Run
+  such programs from an interactive user session, or choose Full. See the
+  [Windows issue](https://github.com/microsoft/mxc/issues/1465).
 
-An exception does not switch the conversation to Full. In the TUI, typed
-1–3 choose; pasted text never approves. Up/down then Enter also chooses,
-while Enter without a focused option does nothing. Ctrl+C stops the turn.
-Requests are shown one at a time and keep the conversation draft. A request
-that arrives while you are typing decides nothing: further keys keep editing
-the draft until they pause briefly or an arrow or Tab moves into the request.
+## What permissions do not cover
 
-The line-based `--plain` chat asks numbered questions for the main agent;
-closed input denies. Collaborators cannot ask there. Single prompts and pipes
-cannot ask, so calls needing approval are unavailable in those modes.
+Permissions do not isolate the whole Jecode process. File tools check paths
+before they act, and Windows confinement covers command processes; network
+services you reach act with their own authority. Full is unconfined, and
+confinement does not undo changes made inside the working folder. Use
+[checkpoints](CHECKPOINTS.md) to recover files after an unwanted change.
 
-`/permissions` → **Remembered** lists grants; Ctrl+D revokes one. Read and
-Full pause remembered Workspace exceptions without deleting them.
-Collaborators share the level and grants, and their TUI requests name the
-asking agent. An isolated collaborator's owned project copy is its workspace.
-
-## Other tools and limits
-
-Read allows web GET/HEAD retrieval without a request body, but not explicit
-modifying HTTP requests. Browser control currently requires Full because its
-local-file access and download destinations are not confined by the command
-policy. Closing or stopping an already owned browser remains available.
-Use `web` for network retrieval in Read or Workspace.
-
-These permissions do not isolate the entire Jecode process. Native file tools
-resolve and check paths; Windows command isolation covers command processes
-and descendants. Network access can reach services with their own authority.
-Full is unconfined, and filesystem confinement does not undo allowed project
-changes. Checkpoints provide a separate recovery mechanism.
-
-## Stored settings and history
-
-The default is `permissions.default` in `~/.jecode/config.json`: `read`,
-`workspace` or `full`. A missing value means `workspace`. Conversations save
-level changes, grants, revocations and decisions. An unresolved request is
-recorded as not executed on resume, rather than automatically replayed.
+Conversations save level changes, approvals, revocations and decisions. A
+request that was pending when Jecode stopped is recorded as not executed on
+resume; it is never replayed automatically.

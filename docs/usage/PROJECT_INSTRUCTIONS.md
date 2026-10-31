@@ -1,93 +1,72 @@
 # Project instructions
 
-Create `AGENTS.md` to supply project rules, such as coding conventions, required
-checks and files to preserve. This Markdown format can be shared with other coding
-agents. Jecode loads these files from the launch directory and its subdirectories
-before each new turn in the TUI, plain chat, single prompts and piped tasks. No
-setting is needed.
-
-For example:
+Put project rules in an `AGENTS.md` file: coding conventions, required checks,
+files to leave alone. Jecode reads these files before every new turn, in the
+TUI, plain chat, single prompts and pipes. Other coding agents use the same
+format, so one file can serve all of them.
 
 ```markdown
 # Project rules
 
 - Keep changes focused on the requested behavior.
-- Preserve existing public interfaces unless the task explicitly changes them.
-- Run the project's relevant checks before reporting a change as complete.
+- Preserve public interfaces unless the task changes them.
+- Run `cargo test` before reporting a change as complete.
 - Write code, comments and documentation in English.
 ```
 
-## Initialize project rules
+## Create one with /init
 
-In the TUI or `--plain` chat, run `/init` to ask the current model to inspect the
-project and create or update the launch directory's `AGENTS.md`. It uses a normal
-agent turn and the existing file tools, so normal model usage applies. The task
-asks for concise, verified conventions and build/test commands, preserving useful
-existing instructions through targeted updates.
+In the TUI or `--plain`, run `/init`. The current model inspects the project and
+creates or updates the `AGENTS.md` in the launch directory, keeping useful
+existing content and adding only conventions and commands it can verify. It is a
+normal agent turn, so it uses your model and permission level as usual. If a
+turn is running, `/init` waits until it ends. The new instructions apply from
+the next turn.
 
-In the TUI, `/init` waits in the command queue while a turn is running. Stopping
-or failing that turn pauses it like any pending draft. Take it back with Up in an
-empty composer before sending again. The generated instructions become active on the next turn.
+## Which files apply
 
-## Scope and precedence
+Jecode looks for files named exactly `AGENTS.md` in the directory where you
+started it and in all its subdirectories. Each file applies to its own directory
+and everything below it. Launched in `project/`:
 
-Only files named `AGENTS.md` are discovered. Use the uppercase name exactly on
-case-sensitive filesystems. Parent directories and global locations are never
-searched. Other filenames, including `JECODE.md`, are not automatically loaded;
-`@file` references have no special expansion syntax.
-
-If a project previously used `JECODE.md`, move its relevant instructions into
-`AGENTS.md`, preserving any useful existing content. Jecode does not rename or
-merge instruction files automatically.
-
-Each file applies to the directory containing it and that directory's
-descendants. For example, when launched in `project/`:
-
-| Instruction file | Applies to |
+| File | Applies to |
 | --- | --- |
 | `AGENTS.md` | The whole project. |
-| `web/AGENTS.md` | `web/` and its descendants. |
-| `api/AGENTS.md` | `api/` and its descendants. |
+| `web/AGENTS.md` | `web/` and below. |
+| `api/AGENTS.md` | `api/` and below. |
 
-More specific instructions take precedence within their scope. Explicit user
-requests take precedence over project instructions, and native tool contracts
-remain in force. Each loaded section identifies its source and scope for the
-model; rules from sibling directories do not override each other.
+More specific files take precedence within their directory; sibling directories
+do not affect each other. Your explicit requests take precedence over project
+instructions, and Jecode's tool rules always apply.
 
-Launching in `project/web/` excludes `project/AGENTS.md`. A Bash tool changing its
-own directory does not move this boundary. Discovery skips subdirectories named
-`.git`, `node_modules`, `.venv` or `vendor` at every level and does not traverse
-directory symbolic links or junctions. Other real subdirectories, including
-`target`, are searched even if ignored by Git, so local instruction files remain
-usable. An explicitly selected launch directory is always included, even if it
-has one of those names.
+- Parent directories are never read. Launched in `project/web/`,
+  `project/AGENTS.md` does not apply. A command changing directory does not move
+  this boundary.
+- The search skips `.git`, `node_modules`, `.venv` and `vendor` directories and
+  does not follow directory links or junctions. Other directories, including
+  `target`, are searched even when Git ignores them.
+- Other names, such as `JECODE.md`, are not read, and `@file` references are not
+  expanded. If you used `JECODE.md` before, move its content into `AGENTS.md`.
 
-## Updates and saved sessions
+## When changes take effect
 
-Each new turn starts with one snapshot of all discovered files. Ordinary edits,
-creation or deletion of `AGENTS.md` take effect on the next turn, including when
-tools change the files during a running turn. Follow-up tool calls and live
-requests after context compaction keep the same snapshot.
-After `/resume`, the next turn reads the current files from the launch directory
-and its subdirectories.
+Each new turn takes one snapshot of all instruction files, and the snapshot
+stays fixed for the rest of the turn, including after compaction. Edits,
+additions and deletions, even ones made by the agent during a turn, apply from
+the next turn. Restoring an `AGENTS.md` from a checkpoint applies before the next
+model request. After `/resume`, the next turn reads the current files.
 
-Restoring an instruction file through this conversation's checkpoints refreshes
-the instructions before the next model request, including within the same turn.
+Instructions enter the model's context without changing the saved conversation.
 
-Instructions enter the current model context without rewriting saved messages
-or the exported system message. Compaction retains the turn's snapshot; see
-[LONG_WORK.md](LONG_WORK.md).
+## Requirements and errors
 
-## File requirements
+`AGENTS.md` is optional; a missing or empty file adds nothing. Files must be
+UTF-8 text (a byte-order mark is accepted) of at most 64 KiB each, and all of
+them together at most 64 KiB. A linked `AGENTS.md` must point inside the launch
+directory.
 
-`AGENTS.md` is optional, including at the launch root. A missing, empty or
-whitespace-only file adds no rules. Use regular UTF-8 text files; a UTF-8
-byte-order mark is accepted. Each file and the combined source text have a 64 KiB
-limit. A file symbolic link must resolve inside the launch directory.
-
-An unreadable instruction file or directory, invalid UTF-8, a non-file instruction
-path, an out-of-scope file link or an exceeded size limit stops the new request
-before contacting the model. Fix or remove the cause and submit the request
-again. Instructions are never silently truncated.
-The credential redactor masks the configured OpenRouter key and saved ChatGPT
-tokens before project instructions enter a model request.
+An unreadable file, invalid UTF-8, an instruction path that is not a file, a
+link pointing outside the launch directory or an exceeded size limit stops the
+request before anything is sent. Fix or remove the cause and send the request
+again. Instructions are never silently truncated. Known credentials are masked
+before instructions reach the model.

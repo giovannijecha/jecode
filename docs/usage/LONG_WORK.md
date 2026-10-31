@@ -1,120 +1,82 @@
 # Long-running work
 
-A turn continues while the selected model requests tools. Jecode sets no
-elapsed-time, model-request or tool-call count limit. A final response, user
-interruption or an error needing intervention ends it. Jecode does not infer
-completion from quiet output or repeated commands; inspect a running process
-with [`process`](TOOLS.md#persistent-processes) when its state matters.
+A turn keeps going for as long as the model keeps calling tools. Jecode sets no
+limit on elapsed time, model requests or tool calls, and it does not guess that
+work is finished from quiet output or repeated commands. A turn ends when the
+model answers without a tool call, when you stop it (Esc or Ctrl+C in the TUI),
+or on an error that needs you. Work runs only while Jecode is open.
 
-The activity row distinguishes preparing a request, waiting for the model,
-thinking, writing a response, running tools and reconnecting. Its duration
-belongs to the current phase; the finished-turn summary retains total elapsed
-time. Interleaved reasoning and text start new phases and restart that phase
-timer. Preparation includes local context and attachment work. Waiting begins
-at request dispatch, so it includes upload and remote service time. An export
-records request sizes and timing boundaries for investigation; see
-[EXPORT.md](EXPORT.md).
+## Connection problems
 
-## Connection recovery
+Temporary network failures, dropped streams, rate limits and temporary provider
+errors retry the current request until it succeeds or you stop it. The delay
+between attempts grows from 2 to 64 seconds and honors a longer `Retry-After`
+from the provider; there is no attempt limit. The TUI status row shows the
+countdown, attempt number and reason, and you can keep typing or stop the turn.
 
-Temporary network failures, incomplete streaming connections, rate limits and
-temporary provider errors retry the current model request until recovery or
-interruption. Delays grow from 2 to 64 seconds and respect a longer provider
-`Retry-After` value. The delay caps request frequency, not attempt count or
-turn duration. The HTTP connection has a 10-second deadline, and 120 seconds
-without response bytes triggers recovery; received chunks, including stream
-comments, reset that idle timer.
+- A request that receives no data for 120 seconds is retried. On Windows and
+  Linux, connecting has a 10-second deadline.
+- An empty response is retried; three empty responses for the same request end
+  the turn with an error.
+- Invalid requests, rejected credentials, a ChatGPT plan's usage limit,
+  insufficient OpenRouter credit and other permanent errors stop immediately.
+- An interrupted or incomplete response never runs its partial tool calls.
+  Results of tool calls from earlier requests stay in the conversation.
 
-An empty provider response is retried, but three empty responses for one
-request return an error. Invalid requests, credential failures, ChatGPT plan
-usage limits, OpenRouter credit failures and other permanent errors return
-control immediately. Interrupted or incomplete
-responses never execute their partial tool calls. Completed tool results from
-earlier requests remain in the conversation while a later request retries.
+Failed attempts and their diagnostics stay in the saved conversation and in
+[exports](COPY_AND_EXPORT.md#export). If a command's completion cannot be
+confirmed, its result is `unknown`; check its output and the project before
+retrying.
 
-The TUI displays reconnection status and keeps input and interruption
-available. Stop a TUI wait with Esc or Ctrl+C. Failed attempt text and
-diagnostics remain in the saved session and export. If a tool command's
-completion cannot be confirmed, its result is `unknown`; inspect its output
-and workspace before retrying. The [tool guide](TOOLS.md#bash-execution-and-saved-output)
-describes command output and process controls.
+## Context and compaction
 
-## Active context and original history
+Every model has a context window. The TUI footer shows how much of it the latest
+request used, as a share of the window, filling toward the **Auto-compact at**
+threshold (default 80%). `?` means no usage has been reported yet or the window
+is unknown. The figure includes cached input. It is not your plan's usage or
+remaining quota. The `↓` count in the status row is the turn's generated output,
+not context.
 
-Jecode keeps original messages and tool results in the saved conversation and
-export. After compaction, the next model request uses a smaller view built from
-system instructions, a fixed excerpt of archived user requests, a summary and
-recent original exchanges. The excerpt keeps the first request and the latest
-requests that fit its budget; `history:requests` retains the complete sequence.
-The TUI footer shows the latest ordinary provider usage as a share of the
-provider catalog's context window. It uses the reported total when available,
-otherwise reported input plus output, including cached input and reasoning
-output. `?` means that an ordinary response
-has not reported usage yet, or the catalog window is unknown. The reading stays
-fixed while tools run and during compaction; summary requests do not replace the
-conversation's reading. New ordinary usage updates it as soon as it arrives,
-including during streaming when the provider supplies it.
+Before each model request, Jecode estimates whether the request would exceed the
+threshold. If it would:
 
-Automatic compaction separately estimates the next request against its input
-budget. New text uses observed token density when available; otherwise four
-text bytes approximate one token. Media are counted separately. Known response
-counts remain attached to their model and account, including reasoning, so
-rebuilding a view after compaction or resume can reuse them. A provider context
-rejection can still correct the internal budget. The status row's `↓` is the
-turn's generated output, including reasoning, rather than occupied context.
-For example, a 500,000-token effective window at 75% has a 375,000-token input
-budget regardless of the turn's `↓` total. The selected account may expose less
-context than the public model specification.
+1. Large tool results, such as long file reads, are replaced by previews that
+   point to the original.
+2. If that is not enough, the same model summarizes the work since the last
+   compaction into a plain-text handoff of at most about 16 KiB, at medium effort
+   when the model supports it and with tools disabled. The summary keeps goals,
+   constraints, decisions, completed work, errors and next steps. Your model and
+   effort for the task do not change.
 
-OpenRouter measurements and native response data are scoped to the API key
-through a saved SHA-256 digest; the key itself stays out of the conversation.
-Changing the key clears the previous key's measurements. Older sessions without
-a credential scope remain readable as portable history.
+The next request then contains the instructions, an excerpt of your earlier
+requests (the first one and the latest that fit), the summary and the most
+recent messages verbatim. The recent part uses up to a quarter of the budget,
+and a tool call always stays together with its results.
 
-Input returned to the composer is withdrawn from the model's history view:
-neither `history:N` nor `history:requests` exposes that attempt. Submitting it
-again creates a new history entry. The original attempt remains in the saved
-session and export for diagnosis; withdrawal does not erase archived data.
+Compaction never deletes anything. The full original history stays in the saved
+conversation and export, and the model can read any part of it again with
+`history:N` or the complete list of your requests with `history:requests`; see
+the [Tool reference](TOOL_REFERENCE.md#read). Skills the model had read are
+remembered so it can read them again. Compaction happens inside the current
+turn: it does not send your draft or rerun a completed tool call.
 
-The [Auto-compact at setting](CONFIGURATION.md#automatic-compaction-threshold)
-defaults to 80% of the effective window. Before each model request, reaching
-that input budget first turns large tool results, including file reads, into previews containing
-`history_reference`. If that is insufficient, Jecode asks the same selected
-model at medium effort when supported, with tools disabled, to fold the work
-since the previous compaction into a plain-text handoff targeting at most
-16 KiB. The main task's
-model and effort selection stay unchanged. Models without advertised medium
-effort use their default; an OpenRouter endpoint pin can also require this
-fallback. It processes the transcript in chronological portions,
-including large records split across portions. It carries the prior summary
-and archived user requests into each portion. Recent original messages stay
-verbatim when they fit within a quarter of the input budget. A tool call and
-all its results stay together; an oversized group may leave no verbatim tail.
-The saved originals are not replaced. Use `read(path="history:N")` or
-`history:requests` to recover omitted content; [Tools](TOOLS.md#file-paths-and-paged-reads)
-explains pagination and other references.
+If a provider rejects a request as too large, Jecode lowers its estimate of the
+window and compacts earlier. If even the instructions, your requests and a
+minimal summary do not fit, the turn stops with an error naming the budget:
+raise **Auto-compact at** or choose a model with a larger window, then continue.
+A failed or interrupted summary leaves the previous context in place.
 
-Cache boundaries cover the stable instructions and durable conversation before
-the current session state. The state remains visible to the model but does not
-invalidate that prefix on each update. Cache eligibility, expiry and reuse are
-controlled by the provider. Context percentages count cached input too; they
-do not indicate subscription usage or remaining quota.
+The context window comes from the provider's catalog. Your account may offer
+less than a model's public specification.
 
-The handoff asks the model to retain goals, constraints, decisions, completed
-work, errors and next steps. References to skills read before compaction are
-saved alongside it so the model can reread them when relevant. Compaction stays
-within the current turn, so it does not submit a draft or replay a completed
-tool call. A provider context rejection can lower the effective window and
-trigger reduction earlier than the configured percentage suggests. A truncated
-ordinary response reports incomplete output without executing partial calls.
+## Input you take back
 
-If the system instructions and original requests leave too little room for a
-useful summary, or the new summary does not fit, the turn stops with a resource
-error naming the budget. Raise **Auto-compact at** or select a model with more
-context, then continue the retained conversation. An empty, interrupted or
-unsaved summary also leaves the previous context and originals available.
-Resume restores the saved context view; it does not restart work. See
-[Sessions](SESSIONS.md) for resume and storage behavior.
+When a turn fails or stops before producing any answer or tool result, your
+message returns to the composer. Taken-back input is removed from what the model
+sees, including `history:N`, but stays in the saved conversation and export for
+diagnosis. Sending it again creates a new entry.
 
-Work runs only while Jecode is open. Disk space, memory, provider availability,
-context capacity and account usage limits or credit remain practical limits.
+## Practical limits
+
+Disk space, memory, provider availability, the context window and your plan's
+usage or credit still bound long work.

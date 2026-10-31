@@ -1,5 +1,9 @@
 # TUI theme
 
+This is the visual reference for contributors changing the TUI: colour tokens,
+the screen grid and how each element is drawn. For how to use the interface, see
+[Terminal interface](INTERFACE.md) and [Tool activity](TOOL_ACTIVITY.md).
+
 The interactive TUI runs on the terminal's alternate screen. It queries OSC 11
 once after setup. A complete `rgb:R/G/B` reply with relative luminance above
 0.5 selects a local `#0C0C0C` background for unsurfaced cells, gutters and
@@ -12,7 +16,7 @@ other terminals without a reply, cells use the terminal's own background
 changed, and exit restores its original background. Text and surfaces use the
 Violet palette below. Colour is 24-bit; `NO_COLOR` is ignored. The terminal
 still chooses the font and how bold, italic, underline and strikethrough look. Tokens live in
-[`theme.rs`](../../src/tui/theme.rs).
+[`src/tui/theme.rs`](https://github.com/giovannijecha/jecode/blob/main/src/tui/theme.rs).
 
 ## Tokens
 
@@ -75,7 +79,7 @@ have one cell of padding.
 
 The dock holds, top to bottom: the pending draft, the status row, the composer
 (top rule, draft, bottom rule) and the footer, key hints or an open panel. See
-[Composer and controls](COMPOSER.md).
+[Terminal interface](INTERFACE.md).
 
 After the first prompt, the header reads `>_ jecode <version>`, with `>_`
 bold `ACCENT`, `jecode` bold `STRONG` and the version `MUTED`, shortened from
@@ -333,4 +337,4 @@ the conversation, the gap row may show `Reflowing conversation…`.
 After the alternate screen closes, the normal screen keeps the terminal's own
 colours. The exit summary uses only ANSI magenta for `>_`, bold for `jecode`,
 SGR dim for the facts and the default foreground for the resume command; see
-[Scrolling and resize](RESIZE.md#entering-and-leaving).
+[Terminal interface](INTERFACE.md#quit).
