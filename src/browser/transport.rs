@@ -6,6 +6,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) use crate::attachments::base64::encode as base64;
 
+#[cfg(test)]
+mod tests;
+
 /// Whether a `Cdp::call` error came from its deadline rather than the page.
 pub(super) fn timed_out(error: &str) -> bool {
     error.starts_with("DevTools ") && error.ends_with(" timed out")
@@ -83,9 +86,6 @@ impl Cdp {
         let mut stream =
             TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|e| e.to_string())?;
         stream
-            .set_read_timeout(Some(Duration::from_millis(200)))
-            .map_err(|e| e.to_string())?;
-        stream
             .set_write_timeout(Some(Duration::from_secs(2)))
             .map_err(|e| e.to_string())?;
         let nonce = SystemTime::now()
@@ -95,10 +95,35 @@ impl Cdp {
             .to_be_bytes();
         let key = base64(&nonce);
         write!(stream, "GET /{path} HTTP/1.1\r\nHost: {authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").map_err(|e| e.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(2);
         let mut headers = Vec::new();
         let mut byte = [0u8];
         while !headers.ends_with(b"\r\n\r\n") {
-            stream.read_exact(&mut byte).map_err(|e| e.to_string())?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("DevTools WebSocket handshake timed out".into());
+            }
+            stream
+                .set_read_timeout(Some(remaining.max(Duration::from_millis(1))))
+                .map_err(|e| e.to_string())?;
+            match stream.read(&mut byte) {
+                Ok(0) => return Err("DevTools connection closed".into()),
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::TimedOut
+                            | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+            if Instant::now() >= deadline {
+                return Err("DevTools WebSocket handshake timed out".into());
+            }
             headers.push(byte[0]);
             if headers.len() > 8192 {
                 return Err("Oversized DevTools handshake".into());
