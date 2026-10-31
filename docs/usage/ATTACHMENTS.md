@@ -1,128 +1,96 @@
 # Attachments
 
-Files and clipboard images appear as numbered draft elements, such as
-`[1# Image]` or `[2# File: report.pdf]`. Each element points to a stored copy;
-typing a label does not attach a file.
+You can attach files and clipboard images to a message. Jecode copies each one
+into its own storage, so later changes to the original do not affect the
+conversation.
 
-## Attaching
+## Attach files
 
 | Where | How |
 | --- | --- |
-| Fullscreen composer | Drop files onto the terminal or press Alt+V for a clipboard image. |
-| `jecode --plain` | Start with `jecode --plain --attach PATH` to attach a file to the first message. Enter on an empty line sends only staged attachments. |
-| Single prompts and pipes | `jecode --attach PATH [--attach PATH]... "prompt"` attaches files to the first message. |
+| TUI | Drop files onto the terminal window, or paste their paths. Press Alt+V to attach an image from the clipboard. |
+| `jecode --plain` | Start with `jecode --plain --attach PATH`. Enter on an empty line sends only the staged attachments. |
+| Single prompt or pipe | `jecode --attach PATH [--attach PATH]... "prompt"` |
 
-Any regular file can be attached, including binaries and files outside the
-working directory, up to 1 GiB each. A drop accepts at most 64 paths at once.
-Elements appear at the caret after copying; Backspace or Delete
-removes a whole element. A message can contain only attachments. Wait for the
-import to finish before sending; an early Enter keeps the draft and sends
-nothing.
+Attachments appear in the draft as numbered elements, such as `[1# Image]` or
+`[2# File: report.pdf]`, shown as chips. Backspace or Delete removes a whole
+element; typing a label yourself attaches nothing. A message can contain only
+attachments.
 
-Ctrl+V remains the terminal's text paste. Jecode reads the clipboard only on
-Alt+V and only for an image. A missing image or failed import shows a warning
-and keeps the draft.
+Wait for an import to finish before sending; pressing Enter early keeps the
+draft and sends nothing. Any regular file up to 1 GiB can be attached, including
+binaries and files outside the project. A single drop accepts up to 64 paths.
 
-### File drops and paths
+Ctrl+V remains your terminal's normal text paste. Jecode reads the clipboard only
+on Alt+V and only for an image; if there is none, it shows a warning and keeps
+the draft.
 
-Terminals deliver a drop as pasted file paths. Jecode imports them only when
-every path names an existing regular file; otherwise the paste remains text.
-Quotes and backslash escapes are removed without variable expansion, globbing
-or command execution. Quoted Windows and WSL paths and `file://` URIs work.
-Under WSL, Windows paths are converted with `wslpath` using the live mount
-table; paths through `\\wsl.localhost\<distro>\...` into the running
-distribution also map to Linux paths.
+### How drops are recognized
 
-`--attach PATH` accepts a path for the first message; repeat the flag for more
-files. Paths can be absolute or relative to the working directory. In plain
-chat, staged files remain available after exit, `/new`, `/resume`, and deletion
-of the source conversation. Open the session in the fullscreen composer to
-review or discard staged elements and saved drafts with attachments.
+Terminals deliver a dropped file as pasted text. Jecode treats a paste as files
+only when every path in it names an existing regular file; otherwise the paste
+stays text. Quotes and backslash escapes are removed without variable
+expansion, globbing or command execution. Quoted Windows paths, WSL paths and
+`file://` URIs work. Under WSL, Windows paths are translated through the live
+mount table, and `\\wsl.localhost\<distro>\...` paths into the running
+distribution map to Linux paths.
 
 ## What the model receives
 
-Jecode keeps the original bytes and sends a manifest with each attachment's
-name, `attachment:ID` reference, stored path and delivery status. It builds
-provider content from the copy just before a request.
+Each request carries a manifest listing every attachment's name, its
+`attachment:ID` reference, its stored path and how it was delivered. The
+content is built from the stored copy just before the request:
 
 | Kind | Delivery |
 | --- | --- |
-| PNG, JPEG, WebP, GIF | Original image bytes. A PNG or JPEG up to 16 MiB that exceeds 512 KiB or 2048 pixels on the long side can use a derived view: scaled to at most 2048 pixels, PNG or JPEG quality 85, whichever is smaller. The view is kept only when it is smaller than the original. Images above 16 MiB use their original bytes to avoid loading the whole file for conversion. The stored original never changes. |
-| Other image formats | Converted to PNG or JPEG, at most 2048 pixels on the long side. Without a converter, the original stays local and the manifest says so. |
-| PDF | Sent as a file part up to 32 MiB. OpenRouter uses its `file-parser`: `native` for a model with file input, otherwise `cloudflare-ai`. OpenAI sends an `input_file` with the PDF bytes. Larger PDFs stay local. |
-| Text | Read through `read attachment:ID` with normal pagination. |
-| Other binaries | Kept locally; the manifest gives the path for a suitable tool. |
+| PNG, JPEG, WebP, GIF | The image. A PNG or JPEG up to 16 MiB that is larger than 512 KiB or 2,048 pixels on its long side is sent as a smaller copy (scaled to at most 2,048 pixels, PNG or JPEG at quality 85) when that copy is smaller. The stored original never changes. |
+| Other image formats | Converted to PNG or JPEG, at most 2,048 pixels on the long side. If conversion is unavailable, the original stays local and the manifest says so. |
+| PDF | Sent as a document up to 32 MiB. Through OpenRouter, models with native file input read it directly; others use OpenRouter's parser. Larger PDFs stay local. |
+| Text | The model reads it with `read attachment:ID`, a page at a time. |
+| Other files | Kept locally; the manifest gives the path so the model can use a suitable tool. |
 
-When an OpenRouter model's catalog entry rules out image input, it receives a
-note instead of the image. The OpenAI adapter sends a supported image view
-without filtering it against the ChatGPT catalog's input modalities; the service
-may reject an image for a model that cannot accept it. OpenRouter PDF parse
-annotations are stored with the response and reused on later requests, avoiding
-a repeat parse.
+When an OpenRouter model's catalog says it cannot take images, it receives a
+note instead. The ChatGPT and Claude routes send supported images without that
+check, and the provider may reject them. OpenRouter's PDF parsing results are
+saved and reused, so a PDF is not parsed twice.
 
-`read attachment:ID` can revisit copies in the session's project bucket.
-Text returns pages; images and PDFs are shown to the model in the next
-request; other binaries return a path and an uninterpreted-data note. The
-result includes `attached_from`. References remain available after
-compaction; see [LONG_WORK.md](LONG_WORK.md). File tools keep their normal
-scope, with these references adding access to the stored copies.
+Images and PDFs you attach stay in the conversation's active context. Images a
+tool returns, such as browser screenshots, are sent with the next request only;
+afterwards the model can read the `attachment:ID` again to see them, or read
+several together to compare. References stay valid after compaction, resume and
+temporary cleanup.
 
-Collaborators use this same project pool. A reference passed in an assignment
-or context resolves to the stored copy in both shared and isolated workspaces.
-An attachment imported by a collaborator is also readable by the main agent.
+Collaborators share the project's attachments: an `attachment:ID` passed in an
+assignment works in their workspace, and files they import are readable by the
+main agent.
 
-User-provided attachments stay in the active conversation view. Media returned
-by tools is sent for the next assistant response, including retries and user
-messages arriving before that response. Later requests retain the original tool
-results and attachment references without resending those media bytes. Read an
-older `attachment:ID` again to show it; read several references together for a
-visual comparison. This also applies to browser screenshots and tool-read PDFs.
+## Storage
 
-## Storage and retention
+Copies live in the project's session storage, under
+`~/.jecode/sessions/<project>/attachments/`. Drafts, staged and queued messages,
+prompt history and saved messages keep their attachments across cancellation,
+switching conversations, restarts and crash recovery.
 
-The model can also use `read` on an image or PDF in the project or the current
-`tmp:` area. Jecode recognizes the file's contents, imports a copy into this
-same pool and returns its `attachment:ID` reference. It then sends the visual
-content on the next request, just as for `read attachment:ID`. No composer
-attachment is needed. The normal file-tool path boundaries still apply.
+An attachment is removed only when no saved conversation, collaborator history
+or recovery record in the project refers to it. When you quit the TUI, unused
+imports are kept for 10 minutes in case another Jecode instance is using them.
+[Deleting a conversation](SESSIONS.md#delete-a-conversation) releases its
+attachments immediately if nothing else needs them.
 
-Copies live in the project's session bucket, under
-`~/.jecode/sessions/<project>/attachments/`. Each asset has metadata and an
-exact-byte copy; converted images can also have a provider view. Changes to
-the original file do not change its copy. Drafts, plain-chat staging, queued
-and paused messages, prompt history and saved messages retain their elements
-across cancellation, session switches, restarts and crash recovery. Tool results
-that reference imported images or PDFs also retain their copies. Cleaning the
-temporary area removes its originals, not these saved copies. PDF annotation
-images are stored here too.
+[`/export`](COPY_AND_EXPORT.md#export) keeps attachment references but does not
+copy the files.
 
-An asset is removed only when no saved session, retained collaborator history
-or collaborator recovery record in the project refers to it. Closing a worker
-or deleting its parent conversation can retain those histories and their
-referenced attachments.
-On TUI exit, collection gives unreferenced imports a 10-minute grace period
-to protect other running instances. [Session deletion](SESSIONS.md#delete)
-immediately releases attachments of its messages when no other session needs
-them; inherited drafts retain their copies.
-
-## Export
-
-`/export` writes only the conversation JSON. Messages and PDF annotations keep
-their attachment references, but the referenced files are not copied. See
-[EXPORT.md](EXPORT.md).
-
-## Native requirements
+## Platform requirements
 
 | Platform | Clipboard image (Alt+V) | Image conversion |
 | --- | --- | --- |
 | Windows | Windows PowerShell 5.1 (`powershell.exe`) with System.Windows.Forms | System.Drawing through PowerShell |
-| WSL | `powershell.exe` through Windows interop | Same, through interop |
+| WSL | `powershell.exe` through Windows interop | The same, through interop |
 | macOS | `osascript` | `sips` |
-| Linux | Embedded adapter using X11 `libX11` or the compositor's Wayland data-control protocol | Desktop `gdk-pixbuf` library through the embedded adapter |
+| Linux | `libX11` (X11) or the compositor's Wayland data-control protocol | The desktop GdkPixbuf library |
 
-Wayland clipboard access requires the compositor to advertise `ext-data-control-v1`
-or `wlr-data-control-unstable-v1`. If it does not, Jecode falls back to X11
-through XWayland when `DISPLAY` is set; otherwise it reports that desktop
-clipboard access is unavailable. Installing a clipboard utility does not change
-the compositor's permission. Image bytes use standard input and output, not
-command arguments.
+On Wayland, the compositor must offer `ext-data-control-v1` or
+`wlr-data-control-unstable-v1`. If it does not, Jecode uses X11 through XWayland
+when `DISPLAY` is set, and otherwise reports that clipboard access is
+unavailable. Installing a clipboard utility does not change what the compositor
+allows.

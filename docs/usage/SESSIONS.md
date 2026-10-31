@@ -1,131 +1,102 @@
-# Saved sessions
+# Saved conversations
 
-Jecode saves conversations under `~/.jecode/sessions/` (`JECODE_HOME` changes
-the home location). Sessions belong to the canonical working directory where
-they started. Run resume commands from that directory; moving the project to a
-new path does not move its sessions. Opening `jecode` starts a new conversation,
-even when saved sessions exist.
+Jecode saves every conversation automatically under `~/.jecode/sessions/`. Each
+conversation belongs to the directory where it started: you can resume it only
+from that directory, and moving the project to another path does not move its
+conversations. Starting `jecode` always opens a new conversation.
 
-## Start and resume
+## Resume a conversation
 
-```powershell
+```text
 jecode resume
 jecode resume SESSION_ID
 jecode --plain resume SESSION_ID
 ```
 
-`jecode resume` opens a folder-scoped picker. In the TUI, `/resume` opens the
-same picker and `/resume ID` opens a specific session. The picker shows the
-most recently updated sessions first, each with its title and a compact age
-(`5m`, `2h`, `3d`); typing filters by title, backend, model or ID. The plain
-picker lists all of them on each row. Once saved, the active session appears
-as `current`; selecting it returns to the composer. A session already open in
-another process cannot be resumed at the same time.
+`jecode resume` opens a picker of this directory's conversations. In the TUI,
+`/resume` opens the same picker and `/resume ID` opens one directly. The newest
+conversations come first, each with its title and age (`just now`, `5m`, `2h`,
+`3d`); type to filter by title, provider, model or ID. When you quit the TUI, it
+prints the command to resume what you were working on:
 
-After the first request is saved, Jecode asks the session's model in the
-background at low effort for a short title in the request's language and keeps
-it for the session's life. Models without advertised low effort use their
-default, as do OpenRouter endpoint pins without reasoning support.
-Until it arrives, or if that request fails, the title is the first request
-itself. A single-prompt command can exit before the background
-request finishes. Its usage and timing are recorded when the session remains
-available. Switching away from a session also ends its pending title
-update; its first request remains the title.
+```text
+>_ jecode closed · 3 prompts · 12 tools · 4m 12s
+   jecode resume 7f3a9c2e
+```
 
-The exit summary prints `jecode resume SESSION_ID` after a successful save.
-Resume restores the conversation, tool results, backend, model, effort, routing,
-prompt history and saved input. It uses the current credential for that backend
-(the OpenRouter key or active ChatGPT/Claude account) and does not rerun requests or
-tools. `/settings` defaults are unchanged.
-Use `/new` to save the old conversation and start an independent one with those
-defaults when their provider is available. Otherwise, it keeps the active
-provider, model and effort. The unsent composer and the pending draft move to the
-new conversation. Without a usable selection, an action banner points to
-model or provider configuration and leaves the current conversation intact.
+Resume restores the history, tool results, provider, model, effort, routing,
+permission level and approvals, prompt history and any unsent input. It uses the
+current credentials for that provider. It does not run anything again:
+interrupted requests and tool calls are not replayed, and background processes
+from the earlier run are gone (their saved output stays readable). A
+conversation open in another Jecode process cannot be resumed or deleted until
+that process exits.
 
-`/model` changes the active provider and model within the same conversation.
-The session ID, original history, attachments, live processes and browser remain
-available. The next request uses the new selection and resets its token
-calibration. A failed selection save retains the previous backend and model.
-Native response metadata stays attributed to its original backend, model and account;
-only a compatible selection reuses it. Older sessions infer OpenRouter when
-backend identity is absent, without rewriting the original messages.
+`/new` starts a separate conversation with your saved defaults and keeps any
+unsent text in the composer. `/model` switches the model inside the same
+conversation instead.
 
-A session is saved from its first sent request, before provider work starts.
-Adding an attachment to unsent input also saves it so the copied bytes remain
-reachable. Opening Jecode, drafting text, queueing messages or running local
-commands alone does not create a saved session. Before the first request or
-attachment, unsent input is lost on exit. A failed or interrupted first request
-still leaves a saved session if its initial checkpoint succeeded.
+## Titles
 
-## Recover unsent work
+After your first request is saved, Jecode asks the conversation's model, at low
+effort, for a short title in the language of your request. Until it arrives, or
+if it fails, the title is the first request itself. A single prompt can exit
+before the title request finishes.
 
-Sending a task before provider configuration is complete returns it to the
-composer without saving an execution turn. Attachment drafts can still be saved
-and recovered before a model is selected. They appear as **Not selected** in the
-session list and store `model: null`, rather than a made-up model identifier.
-Resuming such a draft uses the current selection, or keeps waiting for
-configuration. Its text and attachment bytes remain intact.
+## When a conversation is saved
 
-The TUI saves the composer, caret, the pending draft and sent prompt history
-after a session has a request or attachment. On resume, a queued message
-becomes the paused draft; the composer retains its own text.
-Sent attachments stay in the conversation and prompt history; only unsent
-input returns to the composer.
-Press Up in an empty composer to take the paused draft back; Enter sends it.
-Nothing pending runs automatically after resume or an interruption. In
-`--plain`, recovered drafts are displayed for copying and editing.
+A conversation is saved when you send its first request, before any provider
+work starts, or when you add an attachment to the composer. Opening Jecode,
+typing a draft or running local commands alone saves nothing, so a draft typed
+before the first request is lost when you quit.
 
-If the initial save fails, Jecode does not start the provider request or a
-tool. Restore storage access, review the retained drafts and send the intended
-work again. If Jecode stops after a tool starts but before its result is saved,
-its effect is **unknown**: inspect project files and external state before
-deciding whether to retry. In an independent parallel group, each completed
-call is saved separately before its result appears in the interface. Recovery
-keeps those known results and file diffs in original call order, even if they
-finished out of order. Started calls without saved results remain **unknown**;
-calls that had not started are marked **not executed**. Recovery does not rerun
-any of them. A returned `process_id` may still have work running; poll it
-before treating the command as finished. Partial streamed text is retained as
-incomplete evidence; the conversation reopens ready for a new request. A forced exit can
-lose the latest unsaved draft edit or streaming tail.
+From then on, Jecode saves around every model request and tool call, and keeps
+your unsent draft, the pending message and your prompt history. On resume, a
+queued message becomes a paused draft: press Up in an empty composer to take it
+back, then Enter to send it. Nothing pending is sent automatically.
 
-An incomplete final journal transaction is recovered from the last complete
-checkpoint, with the incomplete bytes preserved separately. Corrupt complete
-records, unsupported formats and records belonging to another folder are
-reported and left unchanged. Session files from before the version 3 journal
-are not read. Save and recovery errors remain visible; retry only after checking
-the reported files. See [architecture](../development/ARCHITECTURE.md) for the
-journal format and transaction details.
+If you send a task before any provider is configured, it returns to the
+composer. A draft with attachments can still be saved; it appears as **Not
+selected** in the picker and uses whichever model is configured when resumed.
 
-## Delete
+## After an interruption
 
-In the TUI `/resume` picker, select a row and press Ctrl+D to mark it. Enter
-confirms; Esc, Ctrl+C or Ctrl+D cancels the mark. The picker stays open after
-deletion, including when the last saved session is removed. In `--plain`, enter
-`d NUMBER` or `d ID` in `/resume`, then type `delete` to confirm. A session
-open in another process cannot be deleted.
+If Jecode stops unexpectedly, resuming shows exactly what is known:
 
-Deletion removes that session's journal, recovery copies, listing cache,
-[temporary area](TEMPORARY.md) and owned complete tool outputs. Attachments no
-longer referenced by another saved session are also eligible for removal; see
-[attachment retention](ATTACHMENTS.md#storage-and-retention). Project files and
-manual [exports](EXPORT.md) remain.
-Original snapshots and backups left by a previous migration are removed too;
-an unreadable or foreign original blocks deletion and remains untouched.
+- Tool calls whose results were saved keep them, with their file diffs.
+- A call that had started but whose result was not saved is marked **unknown**.
+  Check the project files and anything else it could have affected before
+  retrying.
+- Calls that had not started are marked **not executed**.
+- Partially streamed text is kept as incomplete.
 
-Deleting the current session opens a fresh conversation with the saved
-model and effort defaults, or the active selection if the default provider is
-unavailable. Without a usable selection, configuration is required before
-deleting the current session; other saved sessions can still be deleted.
-Its context and sent prompt history are cleared; unsent composer text and the
-pending draft are kept. The new
-session is saved when a request is sent or inherited input contains
-attachments. If deletion fails partway through, some owned files may already
-be gone. Read the error and retry from `/resume`; Jecode removes the last valid
-conversation record last. A foreign or unreadable journal blocks deletion and
-remains untouched.
+A background process reported by `process_id` may still be running; check
+before assuming it finished. A forced exit can lose the latest unsaved draft
+edit or streamed text.
 
-Saved sessions have no automatic retention period. Temporary files and their
-explicit cleanup are described in [TEMPORARY.md](TEMPORARY.md); exports are
-separate snapshots and cannot be resumed.
+If the initial save fails, Jecode does not contact the provider or run tools.
+Fix the storage problem and send the work again. A damaged final save is
+recovered from the previous complete one, with the incomplete bytes kept
+separately. Damaged earlier records, unsupported formats and conversations from
+another directory are reported and left unchanged. Conversations saved by
+versions before the current storage format (version 3) cannot be opened.
+
+## Delete a conversation
+
+In the TUI's `/resume` picker, select a conversation and press Ctrl+D to mark it,
+then Enter to confirm; Esc or Ctrl+C cancels. The picker stays open. In
+`--plain`, type `d NUMBER` or `d ID` in `/resume`, then type `delete` to
+confirm.
+
+Deleting removes the conversation's saved history, recovery copies, complete
+command output and [temporary files](TEMPORARY.md). Attachments are removed when
+no other saved conversation uses them. Project files and
+[exports](COPY_AND_EXPORT.md#export) stay. If the conversation had
+[collaborators](COLLABORATION.md#stop-close-and-recover), their files and
+histories are kept and the result says where.
+
+Deleting the current conversation opens a new one with your defaults and keeps
+your unsent input. If deletion fails partway, some files may already be gone;
+read the error and retry from `/resume`.
+
+Conversations have no automatic expiry.

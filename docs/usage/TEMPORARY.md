@@ -1,98 +1,49 @@
-# Session temporary files
+# Temporary files
 
-Jecode provides an owned working area for disposable scripts, experiments, dumps,
-one-off verification files and isolated browser profiles:
+Each conversation has its own working area for disposable files: one-off
+scripts, probes, logs, reports, screenshots and browser data. Using it keeps
+throwaway files out of your project.
 
 ```text
-~/.jecode/tmp/FOLDER_BUCKET/SESSION_ID/
+~/.jecode/tmp/<project>/<session>/
 ```
 
-`JECODE_HOME` moves it together with configuration and saved sessions. The folder
-bucket uses the existing canonical project identity. An ownership record checks
-both project and session before files are used or cleared. The area is created
-on first use; its metadata is excluded from file and size counts.
+The area is created on first use and moves with `JECODE_HOME`.
 
-## Put disposable files here
+## How the agent uses it
 
-Keep source code and reusable tests in the project. Put one-off verification
-scripts, fixtures, logs, reports, screenshots and browser traces in the active
-session area. Use `tmp:` with file tools or quoted `$JECODE_TMP` paths in the shell.
-Honor explicit user or project output requirements.
-The `web` and `browser` tools also save fetched responses, snapshots, screenshots
-and logs here. A named persistent browser profile lives separately under
-`~/.jecode/browser/profiles/` and survives `/tmp clean` and session deletion.
-Browser screenshots are also copied into session attachment storage and shown
-to the model on the next request. Their returned `attachment:ID` references
-survive temporary cleanup.
+- File tools accept `tmp:relative/path`, for example
+  `{"path": "tmp:probes/check.sh", "content": "printf 'ok\\n'\n"}`. `write`
+  creates missing parent directories inside the area.
+- Commands start in the project directory with `JECODE_TMP`, `TMPDIR`, `TEMP`
+  and `TMP` pointing to the area, so a command can write
+  `"$JECODE_TMP/report.txt"`. Programs that ignore those variables still need
+  explicit output paths.
+- The `web` and `browser` tools save responses, crawl data, snapshots,
+  screenshots, logs and unnamed browser profiles here.
 
-Set output paths explicitly: `TMPDIR`, `TEMP` and `TMP` affect only programs
-that use them. Jecode does not move or classify files automatically.
+The model is told the area's location in every request, including after
+compaction and resume. Links, junctions and paths that escape the area are
+rejected. Images and PDFs read from the area are copied into
+[attachment storage](ATTACHMENTS.md), so their `attachment:ID` survives cleanup.
 
-## Use from file and shell tools
+## Inspect and clean up
 
-`read`, `write` and `edit` accept `tmp:relative/path` in the active session area.
-For example, a `write` call can use these arguments:
+| Command | Effect |
+| --- | --- |
+| `/tmp` | Show the area's path, file and directory counts and total size. |
+| `/tmp clean` | Delete this conversation's temporary files. |
 
-```json
-{"path": "tmp:probes/check.sh", "content": "printf 'ok\\n'\n"}
-```
+Temporary files are never deleted automatically: they survive finished turns,
+interruptions and quitting, and `/new` simply starts a new area. To clean an
+older conversation's area, resume it and run `/tmp clean`. Deleting a
+conversation from `/resume` removes its area entirely.
 
-`write` creates parent directories for temporary paths. Project writes retain
-their existing parent-directory requirement. Absolute paths inside the same
-temporary area are accepted too, using native absolute paths on each platform.
-Other sessions and configuration directories are not extra file-tool roots.
-Traversal, ownership metadata paths, links and Windows junctions are rejected
-within temporary paths. `write` and `edit` use UTF-8 text. `read` also recognizes
-images and PDFs and shows them to the model through a saved attachment copy;
-its returned `attachment:ID` remains readable after temporary cleanup. Shell
-and direct executable calls can create other file types in the area. See
-[Attachments](ATTACHMENTS.md).
+`/tmp clean` first stops browsers the conversation is using. It never touches
+project files, saved conversations, complete command output or named browser
+profiles under `~/.jecode/browser/profiles/`. It runs only when the conversation
+is idle; during a turn it waits as a pending message.
 
-Shell commands run in the project with `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP`
-pointing to this session area. Use quoted paths:
-
-```sh
-sh "$JECODE_TMP/probes/check.sh"
-printf 'probe\n' > "$JECODE_TMP/report.txt"
-```
-
-Jecode passes native absolute paths on Windows and Unix. It does not change the
-parent terminal's environment. Temporary scripts must reference
-project paths explicitly when their imports resolve relative to the script.
-Programs that generate files beside their inputs need explicit output paths.
-The area does not redirect arbitrary writes; command access follows the active
-permission settings.
-
-The tool contracts and each model request describe the active area, including
-after context compaction and resume.
-
-## Retention and explicit cleanup
-
-Completed turns, interruption and application exit keep working files. Explicit
-resume reuses the same area. `/new` selects a new area and preserves the previous
-one for its saved session. There is no age limit or automatic eviction.
-
-Jecode stops browsers using the active session before cleaning its temporary area.
-Read-only inventory skips links and special files without following them and
-reports their count; Chromium can create such entries in a live profile.
-`/tmp` shows the current path, file/directory counts, logical file bytes and
-retention policy. `/tmp clean` clears only that session's working files, keeping
-its ownership record so the area can be reused. It does not clear project files,
-saved conversations or complete tool-output streams. Older areas can be cleared
-by explicitly resuming their sessions and running the same command.
-
-Deleting a conversation from `/resume` removes its entire owned working
-area and owned tool outputs. It uses the same marker/type checks and rejects
-sessions open in another process. See [SESSIONS.md](SESSIONS.md#delete).
-
-Cleanup is available only when the session is ready. In the TUI, a command
-submitted during generation waits as the pending draft. A stopped/failed
-turn leaves an unprocessed command as the paused draft for review.
-Before deleting, Jecode rejects links, junctions and special files and saves
-a cleanup-intent event. Cleanup success or failure is also recorded. An
-interrupted cleanup is never retried automatically. If cleanup fails or Jecode
-stops during it, run `/tmp` and inspect the area before relying on old `tmp:`
-references or retrying `/tmp clean`; some files may already be gone.
-
-The next model request includes the latest cleanup status, even after
-compaction. Cleanup events also appear in exports.
+Cleanup rejects links and special files, and records its intent and result in
+the conversation. If it fails or Jecode stops during it, some files may already
+be gone: run `/tmp` and check before retrying or relying on old `tmp:` paths.

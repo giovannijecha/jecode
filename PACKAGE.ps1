@@ -18,7 +18,7 @@ try {
     $package = Join-Path $targetRoot ('package/jecode-windows-' + $hostTriple.Split('-')[0])
     New-Item -ItemType Directory -Path $package -Force | Out-Null
     Copy-Item -LiteralPath $binary -Destination (Join-Path $package 'jecode.exe') -Force
-    foreach ($name in @('INSTALL.ps1', 'LICENSE', 'README.md')) {
+    foreach ($name in @('INSTALL.ps1', 'LICENSE', 'README.md', 'SECURITY.md', 'CONTRIBUTING.md')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name) -Force
     }
     $docsRoot = Join-Path $PSScriptRoot 'docs'

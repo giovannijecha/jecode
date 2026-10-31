@@ -110,7 +110,7 @@ pub const COMMANDS: [Command; 19] = [
     },
     Command {
         name: "/checkpoints",
-        description: "Inspect, restore or configure workspace checkpoints; /checkpoints help",
+        description: "Inspect or restore workspace checkpoints; /checkpoints help",
         tui_usage: "/checkpoints",
         plain_usage: Some("/checkpoints"),
     },
@@ -146,7 +146,7 @@ pub const COMMANDS: [Command; 19] = [
     },
 ];
 
-const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nUp            Edit the pending draft from an empty composer\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel, return to bottom, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Quit, asking first while work runs\nCtrl+D        In /terminal, mark stop; in /resume, mark deletion; Enter confirms, Esc cancels\ni             In active terminal output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End or Esc while reading returns to the bottom.\nHost scrolling shortcuts take precedence.";
+const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image\nBackspace/Del Remove an attachment element whole\nUp            Edit the pending draft from an empty composer\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel or prompt history, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Quit, asking first while work runs\nCtrl+D        In /terminal, mark stop; in /resume, mark deletion; Enter confirms, Esc cancels\ni             In active terminal output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End returns to the bottom and follows new output.\nHost scrolling shortcuts take precedence.";
 const PLAIN_CONTROLS: &str = "/terminal write ID TEXT   Send one line directly to an interactive process\n/terminal interrupt ID    Send Ctrl+C to an interactive process\n/terminal resize ID C R   Resize its terminal to C columns and R rows\n/terminal stop ID         Request a stop for a background process\n\nUse fullscreen direct input for hidden password entry.\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
 
 pub fn help(tui: bool) -> String {
