@@ -247,8 +247,9 @@ fn queued_init_starts_after_the_active_turn_and_keeps_its_visible_name() {
     assert!(rows(&app).iter().any(|row| row == "user: /init"));
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
-    assert_eq!(last_content(&requests[0]), "First task");
-    assert!(last_content(&requests[1]).starts_with("/init\n\n"));
+    assert_eq!(task_content(&requests[0]), "First task");
+    assert!(task_content(&requests[1]).starts_with("/init\n\n"));
+    assert!(runtime_state(&requests[1]).contains("Permissions:"));
 }
 
 #[test]

@@ -122,7 +122,10 @@ fn attachments_are_sent_as_parts_and_pdf_annotations_are_replayed() {
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    assert_eq!(parts(first.last().unwrap()), ["text", "file"]);
+    assert_eq!(
+        parts(crate::test_support::durable_messages(first).last().unwrap()),
+        ["text", "file"]
+    );
     assert_eq!(
         requests[0]
             .body
@@ -154,14 +157,17 @@ fn attachments_are_sent_as_parts_and_pdf_annotations_are_replayed() {
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    let roles = third
+    let roles = crate::test_support::durable_messages(third)
         .iter()
         .rev()
         .take(2)
         .map(|message| message.get("role").and_then(Value::as_str).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(roles, ["user", "tool"]);
-    assert_eq!(parts(third.last().unwrap()), ["text", "image_url"]);
+    assert_eq!(
+        parts(crate::test_support::durable_messages(third).last().unwrap()),
+        ["text", "image_url"]
+    );
     // History keeps references and annotations but never the bytes.
     let saved = agent.messages.lock().unwrap().clone();
     let encoded = Value::Array(saved).encode();
@@ -325,7 +331,7 @@ fn text_only_model_does_not_budget_for_unsent_image_parts() {
     let request = agent.transport_messages();
     let bare = request
         .iter()
-        .map(|message| message.encode().len())
+        .map(|message| crate::conversation::portable(message).encode().len())
         .sum::<usize>()
         + crate::tools::encoded_size();
     assert_eq!(
@@ -338,5 +344,12 @@ fn text_only_model_does_not_budget_for_unsent_image_parts() {
         agent.client.inputs(),
     )
     .unwrap();
-    assert_eq!(parts(request.last().unwrap()), ["text"]);
+    assert_eq!(
+        parts(
+            crate::test_support::durable_messages(&request)
+                .last()
+                .unwrap()
+        ),
+        ["text"]
+    );
 }

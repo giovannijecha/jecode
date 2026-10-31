@@ -242,7 +242,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         (
             "Credentials",
-            selecting(columns, Selector::credentials(true)),
+            selecting(columns, Selector::credentials(true, true)),
         ),
         ("API keys", selecting(columns, Selector::api_keys(true))),
         (
@@ -250,18 +250,19 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             selecting(
                 columns,
                 Selector::accounts(
+                    "openai",
                     &[
-                        crate::auth::openai::Account {
-                            client_id: "fixture-one".into(),
-                            subject: "one".into(),
-                            email: "first.account@example.test".into(),
+                        crate::auth::Account {
+                            id: "fixture-one".into(),
+                            identity: "fixture-one:one".into(),
+                            detail: "first.account@example.test".into(),
                             label: "First account".into(),
                             enabled: true,
                         },
-                        crate::auth::openai::Account {
-                            client_id: "fixture-two".into(),
-                            subject: "two".into(),
-                            email: "second.account@example.test".into(),
+                        crate::auth::Account {
+                            id: "fixture-two".into(),
+                            identity: "fixture-two:two".into(),
+                            detail: "second.account@example.test".into(),
                             label: "Second account".into(),
                             enabled: false,
                         },
@@ -279,6 +280,35 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                     false,
                 );
                 menu.parent = Some("OpenAI");
+                menu
+            }),
+        ),
+        (
+            "Anthropic accounts",
+            selecting(
+                columns,
+                Selector::accounts(
+                    "anthropic",
+                    &[crate::auth::Account {
+                        id: "fixture-claude".into(),
+                        identity: "fixture-claude".into(),
+                        label: "claude.account@example.test".into(),
+                        detail: String::new(),
+                        enabled: true,
+                    }],
+                    Some("fixture-claude"),
+                ),
+            ),
+        ),
+        (
+            "Anthropic sign-in",
+            selecting(columns, {
+                let mut menu = Selector::loading(
+                    "Continue with Claude",
+                    "Waiting for Claude sign-in… · Open in browser: https://claude.ai/oauth/authorize?state=fixture",
+                    false,
+                );
+                menu.parent = Some("Anthropic");
                 menu
             }),
         ),

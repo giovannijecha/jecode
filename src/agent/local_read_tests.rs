@@ -70,7 +70,9 @@ fn local_media_tool_receipts_feed_provider_and_survive_resume_without_sources() 
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    let shown = messages.last().unwrap();
+    let shown = crate::test_support::durable_messages(messages)
+        .last()
+        .unwrap();
     assert_eq!(shown.get("role").and_then(Value::as_str), Some("user"));
     assert_eq!(parts(shown), ["text", "image_url", "file"]);
     assert_eq!(
@@ -195,7 +197,14 @@ fn local_media_tool_receipts_feed_provider_and_survive_resume_without_sources() 
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    assert_eq!(parts(replay.last().unwrap()), ["text", "image_url", "file"]);
+    assert_eq!(
+        parts(
+            crate::test_support::durable_messages(replay)
+                .last()
+                .unwrap()
+        ),
+        ["text", "image_url", "file"]
+    );
     assert!(
         !Value::Array(resumed.messages.lock().unwrap().clone())
             .encode()

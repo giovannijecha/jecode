@@ -16,6 +16,23 @@ isolated files.
 These are local verification boundaries. CI jobs and ignored/manual fixtures
 provide separate evidence; inspect the checks executed for the revision under review.
 
+The October 31 Claude subscription and context-efficiency changes passed offline
+build, formatting, all-target Clippy and ordinary tests on Windows (1,866 passed,
+68 ignored) and an Ubuntu/WSL native-filesystem copy (1,867 passed, 56 ignored). The Windows
+ConPTY fixture passed with the new credentials, Claude account and sign-in
+panels; the Linux PTY fixture also passed. One Windows run concurrent with the
+ordinary suites exceeded its 20-second wait for the preexisting card fixture;
+the isolated rerun passed without a code change. Run terminal fixtures after
+the ordinary suite. Live Claude login, tool inference, rotating refresh and
+conversation resume were verified on Windows with an isolated home. This pass
+has no live Anthropic or native UI evidence on macOS.
+Bounded account checks also verified growing-history cache reuse on Claude and
+ChatGPT and a medium-effort summary followed by resumed high-effort fact
+readback; see [performance](PERFORMANCE.md#subscription-context-reuse).
+The Windows IPv6 HTTP fixture now explicitly restores blocking mode after
+accepting a socket from its nonblocking listener; its regression passed 30
+consecutive runs after the CI `WouldBlock` failure was traced to that mode.
+
 The October 29 native-runtime pass completed the ordinary suite on Windows
 (1,721 passed, 57 ignored) and an Ubuntu/WSL native-filesystem copy (1,725 passed,
 49 ignored). Windows build, formatting and all-target Clippy passed; Linux

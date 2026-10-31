@@ -186,6 +186,26 @@ fn provider_meter_changes_during_streaming_only_when_usage_arrives() {
     assert_eq!(count_at_text, Some(500));
     assert_eq!(counts, [None, Some(500), Some(520), Some(530)]);
     assert_eq!(agent.context_status().tokens, Some(530));
+    let document = agent.archive().document();
+    let timing = document
+        .get("events")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|event| event.get("type").and_then(Value::as_str) == Some("request_timing"))
+        .unwrap();
+    assert_eq!(
+        timing.get("input_tokens").and_then(Value::as_usize),
+        Some(500)
+    );
+    assert_eq!(
+        timing.get("output_tokens").and_then(Value::as_usize),
+        Some(20)
+    );
+    assert_eq!(
+        timing.get("total_tokens").and_then(Value::as_usize),
+        Some(530)
+    );
     assert_eq!(fixture.finish().len(), 1);
 }
 
@@ -292,6 +312,43 @@ fn nonstreaming_usage_uses_the_same_contract_for_any_backend() {
 }
 
 #[test]
+fn final_usage_is_recorded_even_if_the_context_event_sink_fails() {
+    use super::backend_tests::fixture::{Account, Reply};
+    let directory = Directory::new();
+    let account = Account::new("alpha", vec![Reply::text("Done")]);
+    let mut agent = Agent::new(account.client(), Tools::new(directory.path()).unwrap());
+    let error = agent
+        .run_turn("Inspect.", &mut |event| {
+            if matches!(event, Event::Context(status) if status.tokens == Some(77)) {
+                return Err("fixture event sink failed".into());
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(error.contains("fixture event sink failed"));
+    let document = agent.archive().document();
+    let timing = document
+        .get("events")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|event| event.get("type").and_then(Value::as_str) == Some("request_timing"))
+        .unwrap();
+    assert_eq!(
+        timing.get("status").and_then(Value::as_str),
+        Some("complete")
+    );
+    assert_eq!(
+        timing.get("input_tokens").and_then(Value::as_usize),
+        Some(73)
+    );
+    assert_eq!(
+        timing.get("output_tokens").and_then(Value::as_usize),
+        Some(4)
+    );
+}
+
+#[test]
 fn resume_restores_the_last_reported_count_without_predicting_the_next_request() {
     let directory = Directory::new();
     let home = Directory::new();
@@ -357,6 +414,23 @@ fn an_incomplete_response_keeps_reported_usage_when_its_input_returns_to_the_com
     let input = agent.input_checkpoint();
     assert!(agent.run_turn("Inspect.", &mut |_| Ok(())).is_err());
     assert_eq!(agent.context_status().tokens, Some(540));
+    let document = agent.archive().document();
+    let timing = document
+        .get("events")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|event| event.get("type").and_then(Value::as_str) == Some("request_timing"))
+        .unwrap();
+    assert_eq!(timing.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(
+        timing.get("input_tokens").and_then(Value::as_usize),
+        Some(500)
+    );
+    assert_eq!(
+        timing.get("output_tokens").and_then(Value::as_usize),
+        Some(40)
+    );
     assert!(agent.return_input(input));
     assert_eq!(agent.context_status().tokens, Some(540));
     assert_eq!(fixture.finish().len(), 1);

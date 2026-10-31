@@ -221,6 +221,11 @@ pub fn project(message: &Value, current: &Origin) -> Value {
     let Value::Object(mut projected) = portable(message) else {
         unreachable!()
     };
+    // Request-only runtime state is consumed by adapters at the wire boundary.
+    // It never enters the durable transcript or a provider's request fields.
+    if fields.get("jecode_request_state") == Some(&Value::Bool(true)) {
+        projected.insert("jecode_request_state".into(), Value::Bool(true));
+    }
     match fields.get(ENVELOPE) {
         Some(Value::Object(envelope))
             if envelope.get("backend").and_then(Value::as_str)

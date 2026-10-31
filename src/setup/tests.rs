@@ -89,6 +89,9 @@ fn provider_selection_explains_auth_methods_and_cancels_without_storage() {
     assert_eq!(choose_provider(&mut ui).unwrap(), Some("openai"));
     assert!(ui.messages.contains("OpenAI · Continue with ChatGPT"));
     assert!(ui.messages.contains("OpenRouter · API key"));
+    assert!(ui.messages.contains("Anthropic · Continue with Claude"));
+    let mut claude = Prompts::new(&["3"], &[]);
+    assert_eq!(choose_provider(&mut claude).unwrap(), Some("anthropic"));
     let mut cancelled = Prompts::new(&["/cancel"], &[]);
     assert_eq!(choose_provider(&mut cancelled).unwrap(), None);
 }

@@ -125,12 +125,19 @@ fn model_and_effort_commit_together_preserve_context_and_leave_defaults_unchange
         .unwrap()
         .as_array()
         .unwrap();
-    assert_eq!(messages.len(), 4);
+    assert_eq!(messages.len(), 5);
     assert_eq!(
         messages[2].get("content").and_then(Value::as_str),
         Some("Before.")
     );
     assert!(messages[2].get("reasoning_details").is_none());
+    assert!(
+        messages
+            .last()
+            .unwrap()
+            .encode()
+            .contains("Jecode session state")
+    );
     assert_eq!(
         requests[2]
             .body
@@ -306,7 +313,9 @@ fn an_ordinary_message_joins_the_turn_and_a_local_command_waits_for_it() {
         .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
         .filter_map(|message| message.get("content").and_then(Value::as_str))
         .collect();
-    assert_eq!(users, ["first", "second\nline"]);
+    assert_eq!(users.len(), 3);
+    assert_eq!(&users[..2], ["first", "second\nline"]);
+    assert!(users[2].starts_with("Jecode session state for the next request."));
     assert!(
         requests
             .iter()

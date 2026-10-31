@@ -389,6 +389,9 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Finish(true);
             } else if (scenario == "permissions") {
                 pty.Permissions();
+            } else if (scenario == "auth-panels") {
+                pty.Wait("NATIVE_AUTH_PANELS_VERIFIED");
+                pty.Finish(true);
             } else if (scenario == "interactive") {
                 // Each renderer phase completes before the TUI startup wait begins.
                 pty.Wait("NATIVE_FULL_WIDTH_VERIFIED");

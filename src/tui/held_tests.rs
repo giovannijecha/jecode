@@ -204,6 +204,7 @@ fn a_sign_out_finishing_after_a_question_does_not_restore_its_menu() {
     ));
     app.job = Some(jobs::Job::sign_out(
         directory.path().to_path_buf(),
+        "openai",
         "missing".into(),
     ));
     let request = crate::ask::Request::parse("ask-1", &question()).unwrap();

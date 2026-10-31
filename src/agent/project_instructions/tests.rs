@@ -396,7 +396,20 @@ fn live_requests_keep_the_rules_after_context_compaction() {
         assert!(system(request).contains("Compaction project rules"));
         assert!(!system(request).contains("Changed during compaction"));
         assert!(system(request).contains("Source: src/AGENTS.md"));
-        assert!(system(request).contains(&temporary));
+        assert!(
+            request
+                .body
+                .get("messages")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap()
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap()
+                .contains(&temporary)
+        );
         assert!(system(request).contains("useful durable tests"));
         assert!(system(request).contains("one-off verification"));
         assert_eq!(

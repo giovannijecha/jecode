@@ -111,15 +111,27 @@ fn submit_keeps_the_draft_until_its_attachment_import_finishes() {
     settle(&mut app);
     let requests = fixture.finish();
     assert_eq!(requests.len(), 1);
-    let user = requests[0]
+    let messages = requests[0]
         .body
         .get("messages")
         .and_then(Value::as_array)
-        .unwrap()
-        .last()
+        .unwrap();
+    let user = messages
+        .iter()
+        .find(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+                && message.encode().contains("image_url")
+        })
         .unwrap();
     assert!(user.encode().contains("explain"));
     assert!(user.encode().contains("image_url"));
+    assert!(
+        messages
+            .last()
+            .unwrap()
+            .encode()
+            .contains("Jecode session state")
+    );
 }
 
 #[test]
@@ -203,7 +215,20 @@ fn dropped_attachment_only_messages_reach_the_provider_as_parts() {
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    let user = messages.last().unwrap();
+    let user = messages
+        .iter()
+        .find(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+                && message
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            part.get("type").and_then(Value::as_str) == Some("image_url")
+                        })
+                    })
+        })
+        .unwrap();
     let parts = user.get("content").and_then(Value::as_array).unwrap();
     assert_eq!(
         parts[1].get("type").and_then(Value::as_str),
@@ -401,6 +426,13 @@ fn a_message_sent_during_a_turn_joins_it_with_its_attachment() {
         .filter_map(|message| message.get("role").and_then(Value::as_str))
         .filter(|role| *role != "system")
         .collect();
-    assert_eq!(roles, ["user", "assistant", "user"]);
-    assert!(messages.last().unwrap().encode().contains("image_url"));
+    assert_eq!(roles, ["user", "assistant", "user", "user"]);
+    assert!(messages[messages.len() - 2].encode().contains("image_url"));
+    assert!(
+        messages
+            .last()
+            .unwrap()
+            .encode()
+            .contains("Jecode session state")
+    );
 }

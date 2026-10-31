@@ -186,7 +186,7 @@ impl App {
                     self.archive = agent.archive();
                 }
                 Deferred::Credentials => {
-                    if let Err(error) = self.sync_openai_credentials() {
+                    if let Err(error) = self.sync_account_credentials() {
                         self.warn(&error);
                     }
                 }

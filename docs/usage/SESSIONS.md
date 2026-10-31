@@ -23,16 +23,17 @@ as `current`; selecting it returns to the composer. A session already open in
 another process cannot be resumed at the same time.
 
 After the first request is saved, Jecode asks the session's model in the
-background for a short title in the request's language and keeps it for the
+background at low effort for a short title in the request's language and keeps it for the
 session's life. Until it arrives, or if that request fails, the title is the
 first request itself. A single-prompt command can exit before the background
-request finishes. Switching away from a session also ends its pending title
+request finishes. Its usage and timing are recorded when the session remains
+available. Switching away from a session also ends its pending title
 update; its first request remains the title.
 
 The exit summary prints `jecode resume SESSION_ID` after a successful save.
 Resume restores the conversation, tool results, backend, model, effort, routing,
 prompt history and saved input. It uses the current credential for that backend
-(the OpenRouter key or active ChatGPT account) and does not rerun requests or
+(the OpenRouter key or active ChatGPT/Claude account) and does not rerun requests or
 tools. `/settings` defaults are unchanged.
 Use `/new` to save the old conversation and start an independent one with those
 defaults when their provider is available. Otherwise, it keeps the active
@@ -44,7 +45,7 @@ model or provider configuration and leaves the current conversation intact.
 The session ID, original history, attachments, live processes and browser remain
 available. The next request uses the new selection and resets its token
 calibration. A failed selection save retains the previous backend and model.
-Native response metadata stays attributed to its original backend and model;
+Native response metadata stays attributed to its original backend, model and account;
 only a compatible selection reuses it. Older sessions infer OpenRouter when
 backend identity is absent, without rewriting the original messages.
 

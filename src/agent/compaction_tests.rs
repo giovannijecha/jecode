@@ -243,7 +243,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
     )
     .unwrap();
     let first = completion(
-        "",
+        &"Earlier inspection details. ".repeat(2_000),
         vec![tool_call(
             "read",
             "read",
@@ -253,16 +253,14 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
             ]),
         )],
     );
-    let fixture = HttpFixture::new(vec![
-        (200, first),
+    let mut replies = vec![(200, first)];
+    replies.extend((0..3).map(|_| {
         (
             200,
-            completion(
-                &String::from("Goal and original evidence preserved."),
-                vec![],
-            ),
-        ),
-    ]);
+            completion("Goal and original evidence preserved.", vec![]),
+        )
+    }));
+    let fixture = HttpFixture::new(replies);
     let client = OpenRouter::fixture(fixture.endpoint.clone());
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.enable_sessions(home.path()).unwrap();
@@ -292,7 +290,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
         .unwrap_err();
     assert!(original_permissions.is_some(), "{error}");
     std::fs::set_permissions(&path, original_permissions.unwrap()).unwrap();
-    assert!(error.contains("read-only"));
+    assert!(error.contains("read-only"), "{error}");
     assert_eq!(agent.context.from, 1);
     assert!(agent.context.summary.is_empty());
     agent.save_session().unwrap();
@@ -303,7 +301,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
     }));
     assert_eq!(saved.messages.len(), 4);
     assert!(saved.messages[3].encode().contains("evidence"));
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish().len(), 4);
 }
 
 #[test]

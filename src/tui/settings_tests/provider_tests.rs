@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn claude_account_selection_keeps_openrouter_conversation_and_default() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let home = app.config.store.path().parent().unwrap().to_path_buf();
+    let account =
+        crate::auth::anthropic::Store::fixture_account(home.clone(), "isolated-claude-token")
+            .unwrap();
+    app.open_accounts_for("anthropic");
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(menu.purpose, selector::Purpose::Accounts));
+    assert!(menu.options[0].name.contains("Fixture"));
+    app.open_account(0);
+    app.activate_account();
+    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openrouter");
+    assert_eq!(app.config.settings.backend_id, "openrouter");
+    assert_eq!(app.archive.model, "fixture/model");
+    assert_eq!(
+        crate::auth::anthropic::Store::new(home)
+            .active()
+            .unwrap()
+            .unwrap()
+            .id(),
+        account.id
+    );
+    assert!(app.job.is_none());
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn two_configured_providers_choose_provider_then_model_and_effort_for_this_conversation() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(

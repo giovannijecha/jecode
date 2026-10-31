@@ -113,6 +113,8 @@ fn ipv6_loopback_connects_without_proxy() {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // Winsock can inherit the listener's nonblocking mode.
+                    stream.set_nonblocking(false).unwrap();
                     let mut reader = BufReader::new(stream.try_clone().unwrap());
                     loop {
                         let mut line = String::new();

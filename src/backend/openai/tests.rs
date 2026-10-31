@@ -132,6 +132,122 @@ fn retry_after_survives_http_and_stream_failures() {
 }
 
 #[test]
+fn request_only_state_uses_a_midconversation_developer_item() {
+    let messages = [
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Durable question")),
+        ]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Changing state")),
+            ("jecode_request_state", Value::Bool(true)),
+        ]),
+    ];
+    let request = wire::request("gpt-6.1-sol", Effort::Medium, &messages, false, None).unwrap();
+    let input = request.get("input").and_then(Value::as_array).unwrap();
+    assert_eq!(input[0].get("role").and_then(Value::as_str), Some("user"));
+    assert_eq!(
+        input[0].get("content"),
+        Some(&Value::string("Durable question"))
+    );
+    assert_eq!(
+        input[1].get("role").and_then(Value::as_str),
+        Some("developer")
+    );
+    assert_eq!(
+        input[1].get("content"),
+        Some(&Value::string("Changing state"))
+    );
+    assert!(request.get("prompt_cache_options").is_none());
+    assert!(!request.encode().contains("prompt_cache_breakpoint"));
+    assert!(!request.encode().contains("jecode_request_state"));
+}
+
+#[test]
+fn implicit_cache_keeps_durable_history_exact_across_growing_batches() {
+    fn add_batch(durable: &mut Vec<Value>, batch: usize) {
+        for index in 0..24 {
+            durable.push(Value::object([
+                ("role", Value::string("tool")),
+                (
+                    "tool_call_id",
+                    Value::string(format!("call_{batch}_{index}")),
+                ),
+                ("content", Value::string(format!("Result {batch}:{index}"))),
+            ]));
+        }
+    }
+    let mut durable = vec![Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Original task")),
+    ])];
+    let state = Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Changing request state")),
+        ("jecode_request_state", Value::Bool(true)),
+    ]);
+    add_batch(&mut durable, 0);
+    let mut first_messages = durable.clone();
+    first_messages.push(state.clone());
+    let first = wire::request("gpt-6.1-sol", Effort::Medium, &first_messages, false, None).unwrap();
+    let first_input = first.get("input").and_then(Value::as_array).unwrap();
+    assert_eq!(
+        first_input[24].get("output"),
+        Some(&Value::string("Result 0:23"))
+    );
+    let reasoning = Value::object([
+        ("type", Value::string("reasoning")),
+        (
+            "encrypted_content",
+            Value::string("opaque-native-reasoning"),
+        ),
+    ]);
+    durable.push(Value::object([
+        ("role", Value::string("assistant")),
+        ("openai_items", Value::Array(vec![reasoning.clone()])),
+    ]));
+    add_batch(&mut durable, 1);
+    durable.push(state);
+    let second = wire::request("gpt-6.1-sol", Effort::Medium, &durable, false, None).unwrap();
+    let input = second.get("input").and_then(Value::as_array).unwrap();
+    assert_eq!(&first_input[..25], &input[..25]);
+    assert_eq!(input[25], reasoning);
+    assert_eq!(
+        input.last().unwrap().get("role").and_then(Value::as_str),
+        Some("developer")
+    );
+    assert_eq!(
+        input.last().unwrap().get("content"),
+        Some(&Value::string("Changing request state"))
+    );
+    assert!(second.get("prompt_cache_options").is_none());
+    assert!(!second.encode().contains("prompt_cache_breakpoint"));
+}
+
+#[test]
+fn request_effort_overrides_selection_without_changing_it() {
+    let response = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Done\"}]}]}}\n\n";
+    let (server, endpoint) = serve(200, response);
+    let api = Api::fixture(Session::fixture("fixture-access-token"), &endpoint);
+    let backend = OpenAi::with_api(api, "gpt-6.1-sol".into()).unwrap();
+    let result = backend
+        .sample_with_effort(Effort::Medium, &[], false, None, None, &mut |_| Ok(()))
+        .unwrap();
+    assert_eq!(result.text, "Done");
+    assert_eq!(backend.effort(), Effort::Default);
+    let (_, body) = server.finish().unwrap();
+    let request = crate::json::parse(&body).unwrap();
+    assert_eq!(
+        request
+            .get("reasoning")
+            .and_then(|value| value.get("effort"))
+            .and_then(Value::as_str),
+        Some("medium")
+    );
+}
+
+#[test]
 fn local_transport_lists_models_with_scoped_oauth_token() {
     let (server, endpoint) = serve(
         200,

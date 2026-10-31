@@ -224,7 +224,17 @@ fn an_approved_outside_read_runs_inside_a_turn() {
     text(&mut app, "1");
     finish(&mut app);
     let requests = fixture.finish();
-    let result = super::super::tests::last_content(&requests[1]);
+    let result = requests[1]
+        .body
+        .get("messages")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap();
     assert!(result.contains("wall-clock"), "{result}");
 }
 

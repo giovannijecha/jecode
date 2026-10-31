@@ -5,7 +5,11 @@
 
 use std::process::Command;
 
+mod accounts;
+pub mod anthropic;
 pub mod openai;
+pub use accounts::{Account, AccountSession, AccountStore, SignInUpdate, account_backend};
+pub(crate) use openai::open_browser;
 
 /// A stable credential scope for saved measurements and provider-owned history.
 /// Only the OS-computed digest is retained beside conversation data.
@@ -39,7 +43,7 @@ pub struct Identity {
 #[derive(Clone)]
 pub enum Secret {
     ApiKey(String),
-    AccountSession(openai::Session),
+    AccountSession(AccountSession),
 }
 
 #[derive(Clone)]
@@ -50,19 +54,41 @@ pub struct Credential {
 
 impl Credential {
     pub fn openai(session: openai::Session) -> Self {
+        Self::account(AccountSession::OpenAi(session))
+    }
+
+    pub fn anthropic(session: anthropic::Session) -> Self {
+        Self::account(AccountSession::Anthropic(session))
+    }
+
+    pub fn account(session: AccountSession) -> Self {
         Self {
             identity: Identity {
-                backend: "openai".into(),
+                backend: session.backend().into(),
                 account: Some(session.identity()),
             },
             secret: Secret::AccountSession(session),
         }
     }
 
-    pub fn account_session(&self) -> Option<&openai::Session> {
+    pub fn account_session(&self) -> Option<&AccountSession> {
         match &self.secret {
             Secret::AccountSession(session) => Some(session),
             Secret::ApiKey(_) => None,
+        }
+    }
+
+    pub fn openai_session(&self) -> Option<&openai::Session> {
+        match self.account_session()? {
+            AccountSession::OpenAi(session) => Some(session),
+            AccountSession::Anthropic(_) => None,
+        }
+    }
+
+    pub fn anthropic_session(&self) -> Option<&anthropic::Session> {
+        match self.account_session()? {
+            AccountSession::Anthropic(session) => Some(session),
+            AccountSession::OpenAi(_) => None,
         }
     }
 

@@ -79,12 +79,7 @@ fn input_during_a_tool_preview_joins_the_immediately_following_request() {
     assert!(sent);
     assert_eq!(requests.len(), 1);
     assert!(requests[0].body.get("tools").is_some());
-    let messages = requests[0]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[0].body);
     assert_eq!(
         messages
             .last()
@@ -105,10 +100,6 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
     std::fs::create_dir_all(&workspace).unwrap();
     let fixture = HttpFixture::new(vec![
         (200, completion("Original objective retained.", vec![])),
-        (
-            200,
-            completion("Original and updated objectives retained.", vec![]),
-        ),
         (
             200,
             completion("Original and updated objectives retained.", vec![]),
@@ -179,16 +170,16 @@ fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
     let requests = fixture.finish();
     assert!(sent);
     assert_eq!(summaries_started, 2);
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 3);
     assert!(
-        requests[..3]
+        requests[..2]
             .iter()
             .all(|request| request.body.get("tools").is_none())
     );
     assert!(!requests[0].body.encode().contains("updated requirement"));
+    assert!(requests[1].body.encode().contains("updated requirement"));
+    assert!(requests[2].body.get("tools").is_some());
     assert!(requests[2].body.encode().contains("updated requirement"));
-    assert!(requests[3].body.get("tools").is_some());
-    assert!(requests[3].body.encode().contains("updated requirement"));
     assert_eq!(
         agent
             .messages

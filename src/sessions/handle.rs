@@ -7,6 +7,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 mod autosave;
+mod naming;
 mod receipts;
 mod save;
 
@@ -349,46 +350,6 @@ impl Handle {
             live.dirty.get_or_insert_with(Instant::now);
             live.revision = live.revision.wrapping_add(1);
         }
-    }
-
-    /// Whether the session already has a generated title.
-    pub fn titled(&self) -> bool {
-        self.0.live.lock().unwrap().document.title.is_some()
-    }
-
-    /// The naming request may outlive the active session. Its writer must not
-    /// keep the session lease while the provider is still responding.
-    pub(crate) fn namer(&self) -> impl FnOnce(&str) + Send + 'static {
-        let shared = Arc::downgrade(&self.0);
-        move |title| {
-            if let Some(shared) = shared.upgrade() {
-                let _ = Handle(shared).name(title);
-            }
-        }
-    }
-
-    /// Saves the first generated title; later ones never replace it.
-    pub fn name(&self, title: &str) -> Result<(), String> {
-        let mut live = self.0.live.lock().unwrap();
-        if live.deleted || live.document.title.is_some() {
-            return Ok(());
-        }
-        // Redaction may lengthen it; the saved title keeps the parse limit.
-        let title = live.redactor.text(title);
-        let title: String = title
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(100)
-            .collect();
-        let title = title.trim();
-        if title.is_empty() {
-            return Ok(());
-        }
-        live.document.title = Some(title.into());
-        live.dirty.get_or_insert_with(Instant::now);
-        live.revision = live.revision.wrapping_add(1);
-        drop(live);
-        self.flush()
     }
 
     /// Capture composer state without copying the conversation or replacing

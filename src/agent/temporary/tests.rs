@@ -161,14 +161,21 @@ fn resumed_and_new_sessions_keep_their_own_working_files_and_complete_outputs() 
     let requests = fixture.finish();
     assert_eq!(requests.len(), 4);
     for request in requests {
-        let system = request.body.get("messages").unwrap().as_array().unwrap()[0]
+        let state = request
+            .body
+            .get("messages")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
             .get("content")
             .unwrap()
             .as_str()
             .unwrap();
-        assert!(system.contains("tmp:relative/path"));
-        assert!(system.contains("JECODE_TMP"));
-        assert!(system.contains(&path));
+        assert!(state.contains("tmp:relative/path"));
+        assert!(state.contains("JECODE_TMP"));
+        assert!(state.contains(&path));
     }
 }
 
@@ -228,7 +235,9 @@ fn legacy_system_messages_get_current_tool_paths_without_rewriting_saved_evidenc
     resumed.context.from = resumed.messages.lock().unwrap().len();
     let request = resumed.transport_messages();
     assert!(
-        request[0]
+        request
+            .last()
+            .unwrap()
             .get("content")
             .unwrap()
             .as_str()
@@ -236,7 +245,7 @@ fn legacy_system_messages_get_current_tool_paths_without_rewriting_saved_evidenc
             .contains("tmp:relative/path")
     );
     assert!(
-        request
+        crate::test_support::durable_messages(&request)
             .last()
             .unwrap()
             .get("content")
@@ -306,7 +315,10 @@ fn an_unfinished_cleanup_record_survives_restart_and_warns_the_next_model_reques
     resumed.resume(&id).unwrap();
     assert_eq!(resumed.temporary_info().unwrap().files, 0);
     assert!(
-        resumed.transport_messages()[0]
+        resumed
+            .transport_messages()
+            .last()
+            .unwrap()
             .get("content")
             .unwrap()
             .as_str()

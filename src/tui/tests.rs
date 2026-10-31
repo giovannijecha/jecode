@@ -80,14 +80,36 @@ pub(super) fn rows(app: &App) -> Vec<String> {
         })
         .collect()
 }
-/// The content of the last message in a recorded request.
-pub(super) fn last_content(request: &crate::test_support::Request) -> String {
+/// The last durable user task, followed by separate request-local runtime state.
+pub(super) fn task_content(request: &crate::test_support::Request) -> String {
+    let messages = request.body.get("messages").unwrap().as_array().unwrap();
+    messages
+        .iter()
+        .rev()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .find(|message| {
+            !message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|content| {
+                    content.starts_with("Jecode session state for the next request.")
+                })
+        })
+        .unwrap()
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap()
+        .into()
+}
+
+pub(super) fn runtime_state(request: &crate::test_support::Request) -> String {
     let messages = request.body.get("messages").unwrap().as_array().unwrap();
     messages
         .last()
         .unwrap()
         .get("content")
         .and_then(Value::as_str)
+        .filter(|content| content.starts_with("Jecode session state for the next request."))
         .unwrap()
         .into()
 }

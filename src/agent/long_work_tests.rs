@@ -267,7 +267,7 @@ fn an_interrupted_stream_is_archived_and_its_incomplete_tool_call_never_executes
 }
 
 #[test]
-fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing() {
+fn repeated_previews_keep_original_history_and_save_context_before_continuing() {
     let directory = Directory::new();
     let home = Directory::new();
     let original = "source evidence\n".repeat(1600);
@@ -291,52 +291,40 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
     };
     let fixture = HttpFixture::new(vec![
         (200, read("first")),
-        (
-            200,
-            completion(
-                &String::from("Goal: inspect source. First read completed; continue verification."),
-                vec![],
-            ),
-        ),
         (200, read("second")),
-        (
-            200,
-            completion(
-                &String::from("Goal: inspect source. Both reads completed; report verified facts."),
-                vec![],
-            ),
-        ),
         (200, completion("Inspection complete.", vec![])),
     ]);
     let mut agent = compacting_agent(&directory, &home, &fixture.endpoint);
     let handle = agent.sessions().unwrap();
-    let mut compacted = 0;
+    let mut previews = 0;
     agent
         .run_turn("Inspect the source and report evidence", &mut |event| {
-            if matches!(event, Event::ContextCompacted { .. }) {
-                compacted += 1;
+            if matches!(event, Event::ContextCompacted { ref text } if text.starts_with("Large tool results")) {
+                previews += 1;
                 let saved = handle.store().fixture_load(&handle.id()).unwrap();
-                assert!(!saved.context.summary.is_empty());
+                assert!(saved.context.preview_until >= 4);
                 assert!(saved.pending.active);
             }
             Ok(())
         })
         .unwrap();
-    assert_eq!(compacted, 2);
+    assert_eq!(previews, 2);
     let requests = fixture.finish();
-    for index in [1, 3] {
-        assert!(requests[index].body.get("tools").is_none());
+    for request in &requests {
+        assert!(request.body.get("tools").is_some());
         assert_eq!(
-            requests[index].body.get("model").and_then(Value::as_str),
+            request.body.get("model").and_then(Value::as_str),
             Some("fixture/model")
         );
     }
-    assert!(requests[3].body.encode().contains("First read completed"));
-    assert!(requests[4].body.encode().contains("Both reads completed"));
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].body.encode().contains("history:3"));
+    assert!(requests[2].body.encode().contains("history:5"));
     let doc = handle.store().fixture_load(&handle.id()).unwrap();
     assert_eq!(doc.messages.len(), 7);
     let saved_from = doc.context.from;
-    assert!(saved_from > 1);
+    assert_eq!(saved_from, 1);
+    assert_eq!(doc.context.preview_until, 6);
     assert!(
         doc.messages[3]
             .get("content")
@@ -355,7 +343,7 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
         resumed
             .transport_messages()
             .iter()
-            .any(|message| message.encode().contains("Both reads completed"))
+            .any(|message| message.encode().contains("history:5"))
     );
     assert!(
         resumed
@@ -370,48 +358,62 @@ fn repeated_compaction_keeps_original_history_and_saves_memory_before_continuing
 fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() {
     let directory = Directory::new();
     let home = Directory::new();
-    std::fs::write(
-        directory.path().join("source"),
-        "original evidence\n".repeat(1800),
-    )
-    .unwrap();
-    let fixture = HttpFixture::new(vec![(
-        200,
-        // Budget-relative synthetic usage keeps cancellation at the compaction boundary.
-        used(
-            completion(
-                "",
-                vec![tool_call(
-                    "read",
-                    "read",
-                    Value::object([
-                        ("path", Value::string("source")),
-                        ("limit", Value::number(2000)),
-                    ]),
-                )],
-            ),
-            crate::context::Context::default().estimate_bytes(6000 + crate::tools::encoded_size()),
-        ),
-    )]);
+    let fixture = HttpFixture::new(vec![]);
     let mut agent = compacting_agent(&directory, &home, &fixture.endpoint);
+    agent.prepare_turn("Inspect").unwrap();
+    let original_evidence = "original evidence\n".repeat(1800);
+    agent.messages.lock().unwrap().extend([
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "tool_calls",
+                Value::Array(vec![tool_call(
+                    "read",
+                    "read",
+                    Value::object([("path", Value::string("source"))]),
+                )]),
+            ),
+        ]),
+        Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string("read")),
+            (
+                "content",
+                Value::string(
+                    Value::object([("content", Value::string(&original_evidence))]).encode(),
+                ),
+            ),
+        ]),
+        Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::string("Earlier analysis. ".repeat(7_000))),
+        ]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Finish the inspection")),
+        ]),
+    ]);
+    let original_context = agent.context.value();
+    let original_messages = agent.messages.lock().unwrap().clone();
     let signal = agent.cancellation.clone();
-    assert!(
-        agent
-            .run_turn("Inspect", &mut |event| {
+    let capacity = agent.fixture_capacity(40_000, 80);
+    let error = agent
+        .next_completion(
+            Some(crate::backend::Limits {
+                context: capacity,
+                output: Some(4096),
+            }),
+            &mut |event| {
                 if matches!(event, Event::Maintenance { .. }) {
                     signal.cancel();
                 }
                 Ok(())
-            })
-            .unwrap_err()
-            .contains("cancelled")
-    );
-    assert_eq!(agent.context.from, 1);
-    assert!(agent.context.summary.is_empty());
-    assert!(
-        agent.messages.lock().unwrap()[3]
-            .encode()
-            .contains("original evidence")
-    );
-    assert_eq!(fixture.finish().len(), 1);
+            },
+        )
+        .err()
+        .expect("cancellation must stop compaction");
+    assert!(error.contains("cancelled"), "{error}");
+    assert_eq!(agent.context.value(), original_context);
+    assert_eq!(*agent.messages.lock().unwrap(), original_messages);
+    assert_eq!(fixture.finish().len(), 0);
 }

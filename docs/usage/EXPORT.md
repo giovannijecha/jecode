@@ -30,7 +30,15 @@ diagnostic, not an authenticity check; it is `null` if the executable cannot
 be opened or read.
 
 New `request_timing` events record each model attempt's backend, model,
-operation, attempt number, start time, request byte count and outcome. Durations
+operation, actual effort, attempt number, start time, request byte count and
+outcome. The operations include ordinary `completion`, `context_compaction`
+and background `session_title`. Provider-reported `input_tokens`,
+`output_tokens`, `total_tokens`, `cached_tokens`, `cache_write_tokens` and
+`reasoning_tokens` are per-attempt snapshots; missing counters are `null`.
+Cache reads and writes are already included in normalized input, and reasoning
+is already included in output. Do not add those subsets again. Failed attempts
+retain usage when the provider reported it before failure. These counters do
+not establish how a subscription provider weights its quota. Durations
 are in milliseconds: `preparation_ms` covers local work up to dispatch,
 excluding `notification_ms`, which measures delivery of the dispatch event to
 the UI or other event consumer. `first_update_ms` runs
@@ -55,7 +63,7 @@ locate the attempt in the transcript. Timing events stay outside model history
 and do not copy request payloads or credentials.
 
 Known credentials, including the configured OpenRouter key and registered
-ChatGPT tokens, are masked, but other conversation content is retained. Review
+ChatGPT and Claude tokens, are masked, but other conversation content is retained. Review
 the export before sharing it. Bash tool results
 contain bounded output previews (16 KiB per stream by default) and references
 to the complete streams in the personal session store; those files are not

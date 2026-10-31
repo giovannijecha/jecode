@@ -11,7 +11,7 @@ Paths are relative to `src/`.
 | Area | Modules |
 | --- | --- |
 | Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `setup/` |
-| Settings, credentials and model effort | `config/`, `auth/`, `auth/openai/`, `effort.rs` |
+| Settings, credentials and model effort | `config/`, `auth/accounts.rs`, `auth/openai/`, `auth/anthropic/`, `effort.rs` |
 | Agent, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs` |
 | Input during a turn | `inbox.rs`, `agent/input.rs` |
 | Collaborator workers, receipts and working copies | `collaboration/`, `agent/collaboration.rs`, `agent/continuation.rs` |
@@ -24,7 +24,7 @@ Paths are relative to `src/`.
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments | `attachments/`, `tools/attachment.rs` |
-| Model backends | `backend/`, `backend/openrouter/`, `backend/openai/` |
+| Model backends | `backend/`, `backend/openrouter/`, `backend/openai/`, `backend/anthropic/` |
 | Interfaces | `session.rs`, `session/`, `console.rs`, `tui/` |
 | Shared utilities | `json.rs`, `cancel.rs`, `redact.rs`, `copy.rs`, `clipboard.rs`, `export.rs`, `disk.rs`, `disk/` |
 
@@ -67,8 +67,15 @@ a bounded ordered queue and retain cancellation-aware backpressure.
 
 OpenRouter prepares uncached model capacities and stale endpoint metadata in
 parallel, then validates a pinned endpoint and narrows the effective limits.
-Live Claude tool requests enable automatic prefix caching; summary requests do
-not opt in. Reported cache reads and writes remain distinct from charged cost.
+The stable instruction and conversation prefix is separate from the final
+request-only session state. Anthropic requests mark the stable system block
+and recent durable user-message boundaries for caching; OpenRouter Claude and
+eligible OpenAI tool requests mark recent durable user/tool-batch boundaries.
+OpenAI's ChatGPT route retains
+implicit caching and the conversation's cache-affinity key; request-only state
+is a final developer message, leaving the latest user/tool cache boundary stable.
+Provider adapters consume the local state marker before transmission.
+Reported cache reads and writes remain distinct from charged cost.
 Provider inference latency and cache-hit rates need live measurements; loopback
 and parsing tests establish local behavior only.
 The `web` tool uses the build-embedded native HTTP adapter and keeps responses
@@ -140,10 +147,16 @@ effective model window, lowered when a provider rejection reveals a smaller
 ceiling. The trigger, result previews, retained requests and summary sizing use
 that budget. Prompt estimates calibrate from provider usage when available.
 
-`agent/compaction.rs` keeps a verbatim tail within one quarter of the input
+Before model summarization, `agent/compaction.rs` tries native previews of large
+tool payloads, including file-read content, while retaining complete original
+results. The same reduction is attempted after a provider context rejection.
+It keeps a verbatim tail within one quarter of the input
 budget. An assistant tool call and all its results stay on the same side of the
 boundary; an oversized group can leave no verbatim tail.
-`agent/summary.rs` asks the same model for a plain-text handoff. It folds every
+`agent/summary.rs` asks the same model at medium effort for a plain-text handoff
+targeting at most 16 KiB. This is a prompt target, not an output truncation.
+The initial output allowance is 2,048–8,192 tokens within the remaining model
+capacity; a truncated attempt can grow it. It folds every
 supplied transcript record into the previous summary in chronological portions;
 an oversized record continues at a UTF-8 boundary in the next portion. Failed
 compaction leaves the previous context in place. A learned summary output
@@ -155,10 +168,18 @@ replaces large older tool results with previews and history references.
 `context/source.rs` tracks original roles, user requests and tool ownership;
 `agent/history.rs` exposes paged original messages through `read`.
 
+Each request attempt records its operation, actual effort, timing and the usage
+counters the provider reported, including failed attempts with reported usage.
+Reasoning is a subset of output tokens. Background titles use the same model at
+low effort and participate in request accounting; a 512-token output cap applies
+only on routes supporting it.
+
 The native communication and behavior instructions live in `agent/PROMPT.md`
-and are compiled into the application. The current environment, project
-instructions and personal skill catalog are projected separately from
-the original saved system message. Reading a skill leaves that catalog stable;
+and are compiled into the application. Project instructions and the personal
+skill catalog form the stable system prefix; permissions, temporary paths,
+plans and collaboration updates form a separate final request-only state
+message. Neither projection rewrites the original saved system message.
+Reading a skill leaves that catalog stable;
 at compaction, references to skills already read are saved separately from the
 model-written summary. Skill bodies are read on demand through the agent's
 `read` dispatch, alongside history references; terminal presentation
@@ -220,7 +241,7 @@ queue and saved conversation. Focused instructions and context replace whole
 parent-conversation inheritance. Shared project-map notes and personal skills
 retain the parent project's identity.
 
-OpenRouter and OpenAI requests select the catalog for the agent's role. Child
+Provider requests select the catalog for the agent's role. Child
 catalogs omit `agent` and `ask_user`, and agent dispatch rejects child delegation independently
 of provider behavior. Existing workers keep the model, effort and routing with
 which they were created.
@@ -441,8 +462,10 @@ untagged OpenRouter messages are assigned their archived origin on a transient
 request copy; the saved originals remain intact. `auth/` represents user-scoped
 credential material and account identity, while `backend::Services` exposes
 catalog, credential checks and optional routing choices to setup and the TUI.
-The existing user-scoped configuration stays readable. OpenAI OAuth records are
-separate from API-key settings. Shared redaction sources mask newly rotated
+The existing user-scoped configuration stays readable. OpenAI and Anthropic
+OAuth records are separate from API-key settings. `auth/accounts.rs` dispatches
+account discovery and lifecycle operations without mixing provider identities.
+Shared redaction sources mask newly rotated
 tokens in already-created tools, output readers and persistence handles.
 
 `backend/openai/` translates the same transcript and local tools into stateless
@@ -451,6 +474,14 @@ native output items and assistant phases, and requires `response.completed`
 before returning executable calls. `auth/openai/` owns browser authorization,
 PKCE, ID-token validation, protected records, serialized refresh and logout.
 See [OpenAI](OPENAI.md) for the route contract and native crypto boundary.
+
+`backend/anthropic/` maps canonical messages and local tools to streamed
+Messages requests. It retains signed thinking and native content blocks only
+for their originating account and model. `auth/anthropic/` owns Claude browser
+authorization, profile identity, protected records, serialized refresh and local
+sign-out. It uses the same owned native HTTP and cryptography boundary, without
+a Claude Code runtime or SDK. The subscription route uses a compatibility profile; see
+[Anthropic](ANTHROPIC.md) for the compatibility profile and verification limits.
 
 `backend/openrouter/` uses the fixed HTTPS OpenRouter API through the native
 HTTP adapter with TLS certificate and hostname validation. The JSON body and
@@ -475,7 +506,7 @@ after credential masking and length bounding. See
 
 `agent/backend_tests.rs` exercises two synthetic backends with different wire
 layouts through tool execution, compaction, save, resume and a failed switch.
-Both OpenRouter and OpenAI adapters have loopback fixtures for their HTTP and
+All three adapters have loopback fixtures for their HTTP and
 streaming paths.
 
 Auto routing keeps OpenRouter fallbacks. With enough fresh comparable endpoint

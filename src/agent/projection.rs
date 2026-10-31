@@ -20,11 +20,8 @@ impl Agent {
         let environment = self.environment();
         let original = self.messages.lock().unwrap();
         let mut messages = self.projected_context(&self.context, &original);
-        if let Some(system) = messages.first_mut() {
-            *system = self.request_system_message(&environment, &original);
-        }
-        let overhead = self.request_overhead(&self.context, &messages[0], &original);
-        super::continuation::end_with_user_turn(&mut messages);
+        let overhead = self.request_overhead(&self.context, &messages[0], &original, &environment);
+        self.append_environment(&mut messages, &environment, &original);
         let measurement = self.context.request_measurement(
             &original,
             &messages,
@@ -44,7 +41,9 @@ impl Agent {
         context: &crate::context::Context,
         system: &Value,
         messages: &[Value],
+        environment: &environment::Environment,
     ) -> usize {
+        let state = self.request_state_message(environment, messages);
         let last = messages
             .iter()
             .enumerate()
@@ -52,7 +51,7 @@ impl Agent {
             .filter(|(index, _)| !context.returned.contains(index))
             .map(|(_, message)| message)
             .next_back();
-        let note = if context.summary.is_empty() || last.is_some() {
+        let note = if state.is_none() && (context.summary.is_empty() || last.is_some()) {
             super::continuation::note_after(last.or(Some(system)))
         } else {
             None
@@ -61,26 +60,40 @@ impl Agent {
             .encode()
             .len()
             .saturating_add(crate::tools::encoded_size_for(!self.child))
+            .saturating_add(state.map_or(0, |state| state.encode().len()))
             .saturating_add(note.map_or(0, |note| note.encode().len()))
     }
 
-    fn request_system_message(
+    fn request_state_message(
         &self,
         environment: &environment::Environment,
         messages: &[Value],
-    ) -> Value {
-        let mut system = self.current_system_message();
-        let temporary = self.request_environment_for(environment, messages);
-        if !temporary.is_empty()
-            && let Value::Object(fields) = &mut system
-        {
-            let native = fields.get("content").and_then(Value::as_str).unwrap_or("");
-            fields.insert(
-                "content".into(),
-                Value::string(format!("{native}\n\n{temporary}")),
-            );
+    ) -> Option<Value> {
+        let state = self.request_environment_for(environment, messages);
+        (!state.is_empty()).then(|| {
+            Value::object([
+                ("role", Value::string("user")),
+                ("jecode_request_state", Value::Bool(true)),
+                (
+                    "content",
+                    Value::string(format!(
+                        "Jecode session state for the next request. This is runtime context, not a new user task. Continue the existing task using the current state below.\n\n{state}"
+                    )),
+                ),
+            ])
+        })
+    }
+
+    fn append_environment(
+        &self,
+        projected: &mut Vec<Value>,
+        environment: &environment::Environment,
+        messages: &[Value],
+    ) {
+        if let Some(state) = self.request_state_message(environment, messages) {
+            projected.push(state);
         }
-        system
+        super::continuation::end_with_user_turn(projected);
     }
 
     pub(super) fn projected_context(
@@ -134,7 +147,7 @@ impl Agent {
         environment: &environment::Environment,
         messages: &[Value],
     ) -> usize {
-        let system = self.request_system_message(environment, messages);
+        let system = self.current_system_message();
         match context.measured_input(messages, self.client.inputs()) {
             Some(tokens) => {
                 let estimate = context.estimate_growth(messages, tokens, self.client.inputs());
@@ -142,16 +155,13 @@ impl Agent {
                     context.adjust_system(
                         estimate,
                         before,
-                        self.request_overhead(context, &system, messages),
+                        self.request_overhead(context, &system, messages, environment),
                     )
                 })
             }
             None => {
                 let mut projected = self.projected_context(context, messages);
-                if let Some(first) = projected.first_mut() {
-                    *first = system;
-                }
-                super::continuation::end_with_user_turn(&mut projected);
+                self.append_environment(&mut projected, environment, messages);
                 context.estimate_projected_for(&projected, self.client.inputs(), !self.child)
             }
         }

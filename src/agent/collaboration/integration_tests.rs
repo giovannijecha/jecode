@@ -141,7 +141,7 @@ impl Backend for MockBackend {
             2 => {
                 self.shared.saw_return.store(
                     messages
-                        .first()
+                        .last()
                         .and_then(|message| message.get("content"))
                         .and_then(Value::as_str)
                         .is_some_and(|text| text.contains("Child completed the assigned check")),

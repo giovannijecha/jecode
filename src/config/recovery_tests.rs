@@ -71,3 +71,47 @@ fn provider_diagnostics_and_settings_actions_are_separate() {
         "OpenRouter has no saved API key; open Settings > Providers > API keys"
     );
 }
+
+#[test]
+fn claude_subscription_needs_an_account_and_preserves_other_provider_defaults() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let mut settings = Settings::new("isolated-router-key".into(), "router/model".into()).unwrap();
+    store.save(&settings).unwrap();
+    settings.select_backend("openai", String::new()).unwrap();
+    settings.model = "chatgpt-model".into();
+    store.save(&settings).unwrap();
+    settings.select_backend("anthropic", String::new()).unwrap();
+    settings.model = "claude-model".into();
+    store.save(&settings).unwrap();
+    let saved = store.load().unwrap().unwrap();
+    assert_eq!(saved.backend_id, "anthropic");
+    assert_eq!(
+        saved.credential_for("openrouter"),
+        Some("isolated-router-key")
+    );
+    assert_eq!(
+        store.previous_model("openai").unwrap().as_deref(),
+        Some("chatgpt-model")
+    );
+    assert_eq!(
+        store.previous_model("anthropic").unwrap().as_deref(),
+        Some("claude-model")
+    );
+    let error = saved
+        .service_status(directory.path(), "anthropic")
+        .err()
+        .unwrap();
+    assert_eq!(error.diagnostic, "Anthropic has no active Claude account");
+    assert_eq!(error.settings, Some("Settings > Providers > Credentials"));
+    crate::auth::anthropic::Store::fixture_account(
+        directory.path().to_path_buf(),
+        "isolated-claude-token",
+    )
+    .unwrap();
+    let services = saved.services(directory.path(), "anthropic").unwrap();
+    assert_eq!(services.id(), "anthropic");
+    assert!(services.account().is_some());
+    assert!(crate::backend::Services::for_backend("anthropic", "isolated-api-key".into()).is_err());
+    assert_eq!(saved.configured_services(directory.path()).len(), 2);
+}

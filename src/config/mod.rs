@@ -78,15 +78,19 @@ impl Settings {
         home: &Path,
         id: &str,
     ) -> Result<crate::backend::Services, ServiceError> {
-        if id == "openai" {
-            let session = crate::auth::openai::Store::new(home.to_path_buf())
+        if crate::auth::account_backend(id) {
+            let session = crate::auth::AccountStore::new(home.to_path_buf(), id)
                 .active()?
                 .ok_or_else(|| ServiceError {
-                    diagnostic: "OpenAI has no active ChatGPT account".into(),
+                    diagnostic: match id {
+                        "openai" => "OpenAI has no active ChatGPT account",
+                        "anthropic" => "Anthropic has no active Claude account",
+                        _ => unreachable!(),
+                    }
+                    .into(),
                     settings: Some("Settings > Providers > Credentials"),
                 })?;
-            crate::backend::Services::for_credential(&crate::auth::Credential::openai(session))
-                .map_err(Into::into)
+            crate::backend::Services::for_credential(&session.credential()).map_err(Into::into)
         } else {
             let key = self
                 .credential_for(id)

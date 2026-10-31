@@ -41,12 +41,7 @@ fn messages(request: &Request) -> Vec<(String, String)> {
             .unwrap_or_default()
             .to_owned()
     };
-    request
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap()
+    crate::test_support::request_messages(&request.body)
         .iter()
         .filter(|message| text(message, "role") != "system")
         .map(|message| (text(message, "role"), text(message, "content")))

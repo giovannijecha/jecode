@@ -99,7 +99,7 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
     );
     drop(handle);
     let projected = agent.transport_messages();
-    assert!(projected.ends_with(&original[3..]));
+    assert!(crate::test_support::durable_messages(&projected).ends_with(&original[3..]));
     assert!(projected[1].encode().contains("preserve protected.txt"));
     agent.checkpoint(crate::sessions::Stage::Ready).unwrap();
     let id = agent.sessions().unwrap().id();
@@ -114,6 +114,97 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
     let requests = fixture.finish();
     assert_eq!(requests.len(), 1);
     assert!(!requests[0].body.encode().contains("LATEST EXACT RESULT"));
+}
+
+#[test]
+fn repeated_model_summaries_carry_prior_work_across_resume_without_changing_history() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion("First findings; keep the original objective.", vec![]),
+        ),
+        (
+            200,
+            completion("First and second findings; finish the objective.", vec![]),
+        ),
+    ]);
+    let endpoint = fixture.endpoint.clone();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent
+        .prepare_turn("Inspect both batches and report.")
+        .unwrap();
+    let capacity = agent.fixture_capacity(16_000, 80);
+    let limits = Limits {
+        context: capacity,
+        output: Some(4096),
+    };
+    let add_batch = |agent: &Agent, number: usize| {
+        let budget = agent.context.budget(limits, 80) / 4;
+        let expected_boundary = agent.messages.lock().unwrap().len() + 1;
+        let mut repeats = 100;
+        loop {
+            let batch = [
+                message(
+                    "assistant",
+                    &format!("Batch {number} finding. ").repeat(repeats),
+                ),
+                message("user", &format!("Continue with batch {number}.")),
+            ];
+            let mut candidate = agent.messages.lock().unwrap().clone();
+            candidate.extend(batch.clone());
+            if agent.recent_boundary(&candidate, budget) == expected_boundary {
+                agent.messages.lock().unwrap().extend(batch);
+                break;
+            }
+            repeats += 100;
+            assert!(
+                repeats <= 2_200,
+                "a bounded batch must cross the recent-tail budget"
+            );
+        }
+    };
+    add_batch(&agent, 1);
+    let first_original = agent.messages.lock().unwrap().clone();
+    assert!(
+        agent
+            .compact_if_needed(Some(limits), true, &mut |_| Ok(()))
+            .unwrap()
+    );
+    assert_eq!(agent.context.from, 3);
+    assert_eq!(*agent.messages.lock().unwrap(), first_original);
+    add_batch(&agent, 2);
+    let complete_original = agent.messages.lock().unwrap().clone();
+    assert!(
+        agent
+            .compact_if_needed(Some(limits), true, &mut |_| Ok(()))
+            .unwrap()
+    );
+    assert_eq!(agent.context.from, 5);
+    assert_eq!(*agent.messages.lock().unwrap(), complete_original);
+    assert!(agent.context.summary.contains("First and second findings"));
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].body.encode().contains("First findings"));
+    assert!(requests[1].body.encode().contains("Batch 2 finding"));
+    agent.checkpoint(crate::sessions::Stage::Ready).unwrap();
+    let id = agent.sessions().unwrap().id();
+    let projected = agent.transport_messages();
+    drop(agent);
+    let mut resumed = Agent::new(
+        OpenRouter::fixture(endpoint),
+        Tools::new(directory.path()).unwrap(),
+    );
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    assert_eq!(*resumed.messages.lock().unwrap(), complete_original);
+    assert_eq!(resumed.context.from, 5);
+    assert_eq!(resumed.transport_messages(), projected);
 }
 
 #[test]

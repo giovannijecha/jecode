@@ -1,4 +1,4 @@
-use crate::auth::openai::{SignInUpdate, Store};
+use crate::auth::{Account, AccountStore, SignInUpdate};
 use crate::{
     backend::{Endpoints, Model, Services},
     cancel::Cancellation,
@@ -27,7 +27,7 @@ pub enum ResultValue {
     Catalog(CatalogPurpose, Result<Vec<Model>, String>),
     Key(String, Result<Services, String>),
     Endpoints(RoutingPurpose, Result<Option<Endpoints>, String>),
-    SignIn(Result<crate::auth::openai::Account, String>),
+    SignIn(Result<Account, String>),
     SignOut(Result<Option<String>, String>),
 }
 pub struct Job {
@@ -59,9 +59,14 @@ impl Job {
             ResultValue::Key(key, result.map(|()| services))
         })
     }
-    pub fn sign_in(home: PathBuf, existing: Option<String>, updates: Sender<SignInUpdate>) -> Self {
+    pub fn sign_in(
+        home: PathBuf,
+        provider: &'static str,
+        existing: Option<String>,
+        updates: Sender<SignInUpdate>,
+    ) -> Self {
         let mut job = Self::start(move |cancellation| {
-            let store = Store::new(home);
+            let store = AccountStore::new(home, provider);
             let result = store
                 .sign_in(existing.as_deref(), cancellation, &mut |update| {
                     updates
@@ -74,11 +79,11 @@ impl Job {
         job.detach_on_cancel = true;
         job
     }
-    pub fn sign_out(home: PathBuf, client_id: String) -> Self {
+    pub fn sign_out(home: PathBuf, provider: &'static str, account_id: String) -> Self {
         Self::start(move |cancellation| {
-            let store = Store::new(home);
+            let store = AccountStore::new(home, provider);
             let result = store
-                .session(&client_id)
+                .session(&account_id)
                 .and_then(|session| session.sign_out(&cancellation));
             ResultValue::SignOut(result)
         })

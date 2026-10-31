@@ -392,7 +392,8 @@ fn a_message_sent_after_the_turn_closed_starts_the_next_turn_exactly_once() {
     );
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
-    assert_eq!(super::tests::last_content(&requests[1]), "after");
+    assert_eq!(super::tests::task_content(&requests[1]), "after");
+    assert!(super::tests::runtime_state(&requests[1]).contains("Permissions:"));
 }
 
 #[test]

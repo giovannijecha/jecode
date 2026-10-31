@@ -42,8 +42,8 @@ pub fn configure(
         let Some(backend_id) = backend_id else {
             return cancelled(ui);
         };
-        if backend_id == "openai" {
-            match accounts::configure(store, current, ui)? {
+        if crate::auth::account_backend(backend_id) {
+            match accounts::configure(store, current, ui, backend_id)? {
                 accounts::Outcome::Finished(settings) => return Ok(settings),
                 accounts::Outcome::Back => continue,
             }
@@ -59,10 +59,10 @@ fn choose_provider(ui: &mut impl Prompter) -> Result<Option<&'static str>, Strin
     loop {
         ui.message("Providers:")?;
         for (index, backend) in available.iter().enumerate() {
-            let method = if backend.id == "openai" {
-                "Continue with ChatGPT"
-            } else {
-                "API key"
+            let method = match backend.id {
+                "openai" => "Continue with ChatGPT",
+                "anthropic" => "Continue with Claude",
+                _ => "API key",
             };
             ui.message(&format!("{}. {} · {method}", index + 1, backend.name))?;
         }

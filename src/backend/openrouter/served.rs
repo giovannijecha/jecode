@@ -17,17 +17,23 @@ pub(super) fn usage(value: Option<&Value>) -> Option<crate::backend::Usage> {
         .get("prompt_tokens_details")
         .and_then(|details| details.get("cache_write_tokens"))
         .and_then(Value::as_usize);
+    let reasoning_tokens = value
+        .get("completion_tokens_details")
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_usize);
     (input_tokens.is_some()
         || output_tokens.is_some()
         || total_tokens.is_some()
         || cached_tokens.is_some()
-        || cache_write_tokens.is_some())
+        || cache_write_tokens.is_some()
+        || reasoning_tokens.is_some())
     .then_some(crate::backend::Usage {
         input_tokens,
         output_tokens,
         total_tokens,
         cached_tokens,
         cache_write_tokens,
+        reasoning_tokens,
     })
 }
 

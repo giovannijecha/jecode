@@ -4,59 +4,72 @@ use super::{
     jobs::Job,
     selector::{Purpose, Selector},
 };
-use crate::auth::openai::{SignInUpdate, Store};
+use crate::auth::{AccountStore, Credential, SignInUpdate};
 use crate::backend::Services;
 use std::{path::PathBuf, sync::mpsc};
 
 const USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 
 impl App {
-    pub(super) fn sync_openai_credentials(&mut self) -> Result<(), String> {
+    pub(super) fn sync_account_credentials(&mut self) -> Result<(), String> {
         if self.agent.is_none() {
             self.defer(Deferred::Credentials);
             return Ok(());
         }
-        let store = Store::new(self.home());
-        let redactor = store.redactor()?;
-        let services = store
-            .active()?
-            .map(|session| {
-                crate::backend::Services::for_credential(&crate::auth::Credential::openai(session))
-            })
-            .transpose()?;
+        let mut registered = Vec::new();
+        for provider in ["openai", "anthropic"] {
+            let store = AccountStore::new(self.home(), provider);
+            let redactor = store.redactor()?;
+            let services = store
+                .active()?
+                .map(|session| Services::for_credential(&Credential::account(session)))
+                .transpose()?;
+            registered.push((redactor, services));
+        }
         let agent = self.agent.as_mut().unwrap();
-        agent.include_credentials(redactor);
-        if let Some(services) = services {
-            agent.register_backend(services);
+        for (redactor, services) in registered {
+            agent.include_credentials(redactor);
+            if let Some(services) = services {
+                agent.register_backend(services);
+            }
         }
         self.archive = agent.archive();
         Ok(())
     }
 
     pub(super) fn provider_account_detail(&self, services: &Services) -> Option<String> {
-        if services.id() != "openai" {
+        if !matches!(services.id(), "openai" | "anthropic") {
             return None;
         }
         let identity = services.account()?;
-        match Store::new(self.home()).accounts() {
+        let provider = services.id();
+        let (plan, name) = if provider == "anthropic" {
+            ("Claude", "Claude")
+        } else {
+            ("ChatGPT", "ChatGPT")
+        };
+        match AccountStore::new(self.home(), provider).accounts() {
             Ok(accounts) => Some(
                 accounts
                     .into_iter()
-                    .find(|account| {
-                        format!("{}:{}", account.client_id, account.subject) == identity
-                    })
+                    .find(|account| account.identity == identity)
                     .map_or_else(
-                        || "ChatGPT account unavailable".to_string(),
+                        || format!("{name} account unavailable"),
                         |account| {
-                            if account.enabled {
-                                format!("Using ChatGPT plan · {}", account.email)
+                            let detail = if account.detail.is_empty() {
+                                &account.label
                             } else {
-                                format!("ChatGPT account signed out · {}", account.email)
+                                &account.detail
+                            };
+                            if account.enabled {
+                                format!("Using {plan} plan · {detail}")
+                            } else {
+                                format!("{name} account signed out · {detail}")
                             }
                         },
                     ),
             ),
-            Err(error) => Some(format!("ChatGPT account unavailable · {error}")),
+            Err(error) => Some(format!("{name} account unavailable · {error}")),
         }
     }
 
@@ -139,7 +152,7 @@ impl App {
                 for (option, service) in menu.options.iter_mut().zip(&services) {
                     if let Some(detail) = self.provider_account_detail(service) {
                         option.fact = detail;
-                        if active.id() == "openai"
+                        if active.id() == service.id()
                             && active.account() != service.account()
                             && let Some(current) = self.provider_account_detail(&active)
                         {
@@ -155,12 +168,17 @@ impl App {
     }
 
     pub(super) fn open_credentials(&mut self) {
-        let configured = self
+        let openai = self
             .config
             .settings
             .services(&self.home(), "openai")
             .is_ok();
-        self.state.selector = Some(Selector::credentials(configured));
+        let anthropic = self
+            .config
+            .settings
+            .services(&self.home(), "anthropic")
+            .is_ok();
+        self.state.selector = Some(Selector::credentials(openai, anthropic));
     }
 
     pub(super) fn open_api_keys(&mut self) {
@@ -173,44 +191,50 @@ impl App {
     }
 
     pub(super) fn open_accounts(&mut self) {
-        let store = Store::new(self.home());
+        let store = AccountStore::new(self.home(), self.auth_provider);
         match store.accounts().and_then(|accounts| {
             let active = store
                 .active()?
                 .map(|session| session.account())
                 .transpose()?
-                .map(|account| account.client_id);
+                .map(|account| account.id);
             Ok((accounts, active))
         }) {
             Ok((accounts, active)) => {
                 self.auth_accounts = accounts;
                 self.auth_account_index = None;
-                self.state.selector =
-                    Some(Selector::accounts(&self.auth_accounts, active.as_deref()));
+                self.state.selector = Some(Selector::accounts(
+                    self.auth_provider,
+                    &self.auth_accounts,
+                    active.as_deref(),
+                ));
             }
             Err(error) => {
-                self.state.selector = Some(Selector::credentials(false));
+                self.open_credentials();
                 self.warn(&error);
             }
         }
     }
 
+    pub(super) fn open_accounts_for(&mut self, provider: &'static str) {
+        self.auth_provider = provider;
+        self.open_accounts();
+    }
+
     pub(super) fn open_account(&mut self, index: usize) {
         if let Some(account) = self.auth_accounts.get(index) {
-            let active = match Store::new(self.home())
+            let active = match AccountStore::new(self.home(), self.auth_provider)
                 .active()
                 .and_then(|session| session.map(|session| session.account()).transpose())
             {
-                Ok(current) => {
-                    current.is_some_and(|current| current.client_id == account.client_id)
-                }
+                Ok(current) => current.is_some_and(|current| current.id == account.id),
                 Err(error) => {
                     self.warn(&error);
                     return;
                 }
             };
             self.auth_account_index = Some(index);
-            self.state.selector = Some(Selector::account(account, active));
+            self.state.selector = Some(Selector::account(self.auth_provider, account, active));
         }
     }
 
@@ -221,29 +245,48 @@ impl App {
         let Some(account) = self.auth_accounts.get(index).cloned() else {
             return;
         };
-        let email = account.email.clone();
+        let detail = if account.detail.is_empty() {
+            account.label.clone()
+        } else {
+            account.detail.clone()
+        };
         if !account.enabled {
-            self.start_sign_in(Some(account.client_id.clone()));
+            self.start_sign_in(Some(account.id.clone()));
             return;
         }
-        let store = Store::new(self.home());
+        let store = AccountStore::new(self.home(), self.auth_provider);
         match store
-            .activate(&account.client_id)
-            .and_then(|()| self.sync_openai_credentials())
+            .activate(&account.id)
+            .and_then(|()| self.sync_account_credentials())
         {
             Ok(()) => {
                 let facts = self.facts();
-                let switch = facts.backend_id == "openai"
-                    && facts.services.account()
-                        != Some(format!("{}:{}", account.client_id, account.subject));
+                let switch = facts.backend_id == self.auth_provider
+                    && facts.services.account() != Some(account.identity);
                 drop(facts);
                 self.open_accounts();
+                let provider_name = if self.auth_provider == "anthropic" {
+                    "Anthropic"
+                } else {
+                    "OpenAI"
+                };
+                let plan_name = if self.auth_provider == "anthropic" {
+                    "Claude"
+                } else {
+                    "ChatGPT"
+                };
                 self.state.notify(Feedback::result(
                     Kind::Notice,
-                    format!("OpenAI account selected · {email} · Using your ChatGPT plan"),
+                    format!(
+                        "{provider_name} account selected · {detail} · Using your {plan_name} plan"
+                    ),
                 ));
                 if switch {
-                    match self.config.settings.services(&self.home(), "openai") {
+                    match self
+                        .config
+                        .settings
+                        .services(&self.home(), self.auth_provider)
+                    {
                         Ok(services) => {
                             self.auth_model_switch = true;
                             self.load_catalog_for(
@@ -277,14 +320,14 @@ impl App {
         let Some(account) = self.auth_accounts.get(index) else {
             return;
         };
-        let client_id = account.client_id.clone();
+        let account_id = account.id.clone();
         self.state.selector = Some(Selector::loading(
             "Sign out",
             "Removing saved credentials…",
             false,
         ));
         self.auth_signing_out = true;
-        self.job = Some(Job::sign_out(self.home(), client_id));
+        self.job = Some(Job::sign_out(self.home(), self.auth_provider, account_id));
     }
 
     pub(super) fn finish_sign_out(&mut self, result: Result<Option<String>, String>) {
@@ -307,10 +350,20 @@ impl App {
         let (sender, receiver) = mpsc::channel();
         self.auth_updates = Some(receiver);
         self.auth_browser_url = None;
-        let mut menu = Selector::loading("Continue with ChatGPT", "Starting sign-in…", false);
-        menu.parent = Some("OpenAI");
+        let (title, parent) = if self.auth_provider == "anthropic" {
+            ("Continue with Claude", "Anthropic")
+        } else {
+            ("Continue with ChatGPT", "OpenAI")
+        };
+        let mut menu = Selector::loading(title, "Starting sign-in…", false);
+        menu.parent = Some(parent);
         self.state.selector = Some(menu);
-        self.job = Some(Job::sign_in(self.home(), existing, sender));
+        self.job = Some(Job::sign_in(
+            self.home(),
+            self.auth_provider,
+            existing,
+            sender,
+        ));
     }
 
     pub(super) fn poll_auth_updates(&mut self) -> bool {
@@ -328,11 +381,16 @@ impl App {
                         menu.message = format!("Open in browser: {url}");
                     }
                     SignInUpdate::Waiting => {
+                        let plan = if self.auth_provider == "anthropic" {
+                            "Claude"
+                        } else {
+                            "ChatGPT"
+                        };
                         menu.message = match &self.auth_browser_url {
                             Some(url) => {
-                                format!("Waiting for ChatGPT sign-in… · Open in browser: {url}")
+                                format!("Waiting for {plan} sign-in… · Open in browser: {url}")
                             }
-                            None => "Waiting for ChatGPT sign-in… · Esc cancels".into(),
+                            None => format!("Waiting for {plan} sign-in… · Esc cancels"),
                         }
                     }
                 }
@@ -342,33 +400,42 @@ impl App {
         dirty
     }
 
-    pub(super) fn finish_sign_in(&mut self, result: Result<crate::auth::openai::Account, String>) {
+    pub(super) fn finish_sign_in(&mut self, result: Result<crate::auth::Account, String>) {
         self.auth_updates = None;
         self.auth_browser_url = None;
         let result = result.and_then(|account| {
             if account.enabled {
-                Store::new(self.home())
-                    .activate(&account.client_id)
+                AccountStore::new(self.home(), self.auth_provider)
+                    .activate(&account.id)
                     .map(|()| true)
             } else {
                 Ok(false)
             }
         });
-        let result = result.and_then(|enabled| self.sync_openai_credentials().map(|()| enabled));
+        let result = result.and_then(|enabled| self.sync_account_credentials().map(|()| enabled));
         self.open_accounts();
         match result {
             Ok(true) => {
+                let provider = self.auth_provider;
+                let notice = if provider == "anthropic" {
+                    "Connected Anthropic · Using your Claude plan"
+                } else {
+                    "Connected OpenAI · Using your ChatGPT plan · Manage usage in account details"
+                };
                 self.state.notify(Feedback::result(
                     Kind::Notice,
-                    "Connected OpenAI · Using your ChatGPT plan · Manage usage in account details",
+                    notice,
                 ));
-                if let Ok(services) = self.config.settings.services(&self.home(), "openai") {
+                if let Ok(services) = self.config.settings.services(&self.home(), provider) {
                     self.offer_connected_models(services);
                 }
             }
-            Ok(false) => self.state.notify(Feedback::result(
-                Kind::Warning,
-                "Signed in, but ChatGPT plan access was not granted · check your plan or sign in again",
+            Ok(false) => self.state.notify(Feedback::result(Kind::Warning,
+                if self.auth_provider == "anthropic" {
+                    "Signed in, but Claude plan access was not granted · check your plan or sign in again"
+                } else {
+                    "Signed in, but ChatGPT plan access was not granted · check your plan or sign in again"
+                },
             )),
             Err(error) => self.warn(&error),
         }
@@ -381,7 +448,7 @@ impl App {
                 && services.account() != facts.services.account());
         drop(facts);
         if offer {
-            self.auth_model_switch = services.id() == "openai";
+            self.auth_model_switch = matches!(services.id(), "openai" | "anthropic");
             self.load_catalog_for(
                 super::jobs::CatalogPurpose::Models {
                     defaults: !self.config.settings.has_model(),
@@ -393,7 +460,7 @@ impl App {
     }
 
     pub(super) fn manage_usage(&mut self) {
-        match crate::auth::openai::open_browser(USAGE_URL) {
+        match crate::auth::open_browser(USAGE_URL) {
             Ok(()) => self.state.notify(Feedback::result(
                 Kind::Notice,
                 format!("Manage usage · {USAGE_URL}"),

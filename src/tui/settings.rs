@@ -68,7 +68,9 @@ impl App {
             }
             (Choice::Credentials, Purpose::ProviderSettings) => self.open_credentials(),
             (Choice::ApiKeys, Purpose::ProviderSettings) => self.open_api_keys(),
-            (Choice::Provider("openai"), Purpose::Credentials) => self.open_accounts(),
+            (Choice::Provider(provider @ ("openai" | "anthropic")), Purpose::Credentials) => {
+                self.open_accounts_for(provider)
+            }
             (Choice::OpenRouterKey, Purpose::ApiKeys) => {
                 self.state.selector = Some(Selector::key())
             }
