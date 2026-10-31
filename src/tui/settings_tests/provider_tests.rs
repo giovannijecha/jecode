@@ -1,4 +1,117 @@
 use super::*;
+use std::fs;
+
+#[test]
+fn account_selection_ignores_an_unrelated_corrupt_active_account() {
+    for provider in ["openai", "anthropic"] {
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![]);
+        let mut app = app(&directory, &fixture);
+        let home = app.config.store.path().parent().unwrap().to_path_buf();
+        let other = if provider == "openai" {
+            crate::auth::openai::Store::fixture_account(home.clone(), "fixture-openai-token")
+                .unwrap();
+            "anthropic"
+        } else {
+            crate::auth::anthropic::Store::fixture_account(home.clone(), "fixture-claude-token")
+                .unwrap();
+            "openai"
+        };
+        let other_directory = home.join("accounts").join(other);
+        fs::create_dir_all(&other_directory).unwrap();
+        fs::write(other_directory.join("active.json"), "{broken").unwrap();
+
+        app.open_accounts_for(provider);
+        app.open_account(0);
+        app.activate_account();
+
+        assert!(
+            app.agent.as_ref().unwrap().has_backend(provider),
+            "{provider}"
+        );
+        assert!(
+            app.state
+                .notice
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("account selected"),
+            "{provider}"
+        );
+        assert!(fixture.finish().is_empty());
+    }
+}
+
+#[test]
+fn completed_sign_in_updates_its_origin_provider_even_after_menu_changes() {
+    for provider in ["openai", "anthropic"] {
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![]);
+        let mut app = app(&directory, &fixture);
+        let home = app.config.store.path().parent().unwrap().to_path_buf();
+        let (account, other) = if provider == "openai" {
+            (
+                crate::auth::openai::Store::fixture_account(home.clone(), "fixture-openai-token")
+                    .unwrap()
+                    .into(),
+                "anthropic",
+            )
+        } else {
+            (
+                crate::auth::anthropic::Store::fixture_account(
+                    home.clone(),
+                    "fixture-claude-token",
+                )
+                .unwrap()
+                .into(),
+                "openai",
+            )
+        };
+        let other_directory = home.join("accounts").join(other);
+        fs::create_dir_all(&other_directory).unwrap();
+        fs::write(other_directory.join("active.json"), "{broken").unwrap();
+
+        app.auth_provider = other;
+        app.finish_sign_in(provider, Ok(account));
+
+        assert!(
+            app.agent.as_ref().unwrap().has_backend(provider),
+            "{provider}"
+        );
+        assert!(!app.agent.as_ref().unwrap().has_backend(other), "{other}");
+        assert!(
+            app.state
+                .notice
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("Connected"),
+            "{provider}"
+        );
+        assert!(fixture.finish().is_empty());
+    }
+}
+
+#[test]
+fn deferred_account_refresh_keeps_the_provider_chosen_during_a_turn() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let home = app.config.store.path().parent().unwrap().to_path_buf();
+    crate::auth::openai::Store::fixture_account(home, "fixture-openai-token").unwrap();
+    app.open_accounts_for("openai");
+    app.open_account(0);
+
+    let agent = app.hold();
+    app.activate_account();
+    app.auth_provider = "anthropic";
+    app.agent = Some(agent);
+    app.apply_deferred();
+
+    assert!(app.agent.as_ref().unwrap().has_backend("openai"));
+    assert!(!app.agent.as_ref().unwrap().has_backend("anthropic"));
+    assert!(fixture.finish().is_empty());
+}
 
 #[test]
 fn claude_account_selection_keeps_openrouter_conversation_and_default() {

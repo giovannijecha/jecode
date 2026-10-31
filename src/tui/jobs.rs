@@ -27,7 +27,7 @@ pub enum ResultValue {
     Catalog(CatalogPurpose, Result<Vec<Model>, String>),
     Key(String, Result<Services, String>),
     Endpoints(RoutingPurpose, Result<Option<Endpoints>, String>),
-    SignIn(Result<Account, String>),
+    SignIn(&'static str, Result<Account, String>),
     SignOut(Result<Option<String>, String>),
 }
 pub struct Job {
@@ -74,7 +74,7 @@ impl Job {
                         .map_err(|_| "Sign-in cancelled".to_string())
                 })
                 .and_then(|session| session.account());
-            ResultValue::SignIn(result)
+            ResultValue::SignIn(provider, result)
         });
         job.detach_on_cancel = true;
         job

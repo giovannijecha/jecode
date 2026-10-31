@@ -445,7 +445,7 @@ impl App {
                 }
             }
             ResultValue::Endpoints(purpose, result) => self.show_routing(purpose, result),
-            ResultValue::SignIn(result) => self.finish_sign_in(result),
+            ResultValue::SignIn(provider, result) => self.finish_sign_in(provider, result),
             ResultValue::SignOut(result) => self.finish_sign_out(result),
             ResultValue::Key(key, result) => self.finish_key(key, result)?,
         }

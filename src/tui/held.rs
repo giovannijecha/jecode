@@ -82,8 +82,8 @@ pub(super) enum Deferred {
         preferences: BTreeMap<String, Routing>,
     },
     Register(Services),
-    /// The active ChatGPT account changed.
-    Credentials,
+    /// The active account changed for this provider.
+    Credentials(&'static str),
     Key(Services),
 }
 
@@ -185,8 +185,8 @@ impl App {
                     agent.register_backend(services);
                     self.archive = agent.archive();
                 }
-                Deferred::Credentials => {
-                    if let Err(error) = self.sync_account_credentials() {
+                Deferred::Credentials(provider) => {
+                    if let Err(error) = self.sync_account_credentials(provider) {
                         self.warn(&error);
                     }
                 }

@@ -11,27 +11,24 @@ use std::{path::PathBuf, sync::mpsc};
 const USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 
 impl App {
-    pub(super) fn sync_account_credentials(&mut self) -> Result<(), String> {
+    pub(super) fn sync_account_credentials(
+        &mut self,
+        provider: &'static str,
+    ) -> Result<(), String> {
         if self.agent.is_none() {
-            self.defer(Deferred::Credentials);
+            self.defer(Deferred::Credentials(provider));
             return Ok(());
         }
-        let mut registered = Vec::new();
-        for provider in ["openai", "anthropic"] {
-            let store = AccountStore::new(self.home(), provider);
-            let redactor = store.redactor()?;
-            let services = store
-                .active()?
-                .map(|session| Services::for_credential(&Credential::account(session)))
-                .transpose()?;
-            registered.push((redactor, services));
-        }
+        let store = AccountStore::new(self.home(), provider);
+        let redactor = store.redactor()?;
+        let services = store
+            .active()?
+            .map(|session| Services::for_credential(&Credential::account(session)))
+            .transpose()?;
         let agent = self.agent.as_mut().unwrap();
-        for (redactor, services) in registered {
-            agent.include_credentials(redactor);
-            if let Some(services) = services {
-                agent.register_backend(services);
-            }
+        agent.include_credentials(redactor);
+        if let Some(services) = services {
+            agent.register_backend(services);
         }
         self.archive = agent.archive();
         Ok(())
@@ -257,7 +254,7 @@ impl App {
         let store = AccountStore::new(self.home(), self.auth_provider);
         match store
             .activate(&account.id)
-            .and_then(|()| self.sync_account_credentials())
+            .and_then(|()| self.sync_account_credentials(self.auth_provider))
         {
             Ok(()) => {
                 let facts = self.facts();
@@ -400,23 +397,29 @@ impl App {
         dirty
     }
 
-    pub(super) fn finish_sign_in(&mut self, result: Result<crate::auth::Account, String>) {
+    pub(super) fn finish_sign_in(
+        &mut self,
+        provider: &'static str,
+        result: Result<crate::auth::Account, String>,
+    ) {
         self.auth_updates = None;
         self.auth_browser_url = None;
         let result = result.and_then(|account| {
             if account.enabled {
-                AccountStore::new(self.home(), self.auth_provider)
+                AccountStore::new(self.home(), provider)
                     .activate(&account.id)
                     .map(|()| true)
             } else {
                 Ok(false)
             }
         });
-        let result = result.and_then(|enabled| self.sync_account_credentials().map(|()| enabled));
-        self.open_accounts();
+        let result =
+            result.and_then(|enabled| self.sync_account_credentials(provider).map(|()| enabled));
+        if self.auth_provider == provider {
+            self.open_accounts();
+        }
         match result {
             Ok(true) => {
-                let provider = self.auth_provider;
                 let notice = if provider == "anthropic" {
                     "Connected Anthropic · Using your Claude plan"
                 } else {
@@ -431,7 +434,7 @@ impl App {
                 }
             }
             Ok(false) => self.state.notify(Feedback::result(Kind::Warning,
-                if self.auth_provider == "anthropic" {
+                if provider == "anthropic" {
                     "Signed in, but Claude plan access was not granted · check your plan or sign in again"
                 } else {
                     "Signed in, but ChatGPT plan access was not granted · check your plan or sign in again"
