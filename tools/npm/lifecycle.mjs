@@ -78,6 +78,7 @@ async function fixture(version, scratch, template, options) {
   const linker = process.platform === 'win32' && process.env.CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER;
   const compiler = await command('rustc', [
     '--edition=2024', '-Dunsafe_code', '-Copt-level=1',
+    ...(process.platform === 'win32' ? ['-Ctarget-feature=+crt-static'] : []),
     ...(linker ? ['-C', `linker=${linker}`] : []),
     path.join(root, 'tools/npm/fixture.rs'), '-o', path.join(native, target.binary),
   ], {env: {...process.env, JECODE_NPM_FIXTURE_VERSION: version}});
@@ -138,6 +139,13 @@ async function registry(fixtures) {
   };
 }
 
+async function checkFixtureVersion(prefix, version, options) {
+  const result = await runInstalled(prefix, ['--version'], options);
+  const detail = `Fixture ${version} exit=${result.status ?? result.signal}; stderr=${result.stderr.trim() || '(empty)'}`;
+  assert.equal(result.status, 0, detail);
+  assert.equal(result.stdout.trim(), `jecode npm fixture ${version}`, detail);
+}
+
 export async function lifecycle(tarball) {
   if (!target) throw new Error(`Unsupported test host: ${host}`);
   const bytes = regularFile(path.resolve(tarball)), contents = unpack(bytes);
@@ -170,7 +178,7 @@ export async function lifecycle(tarball) {
     service = await registry(fixtures);
     options.env.npm_config_registry = service.origin;
     await npm(['install', '--global', 'jecode'], options);
-    assert.equal((await runInstalled(state.prefix, ['--version'], options)).stdout.trim(), 'jecode npm fixture 0.0.1');
+    await checkFixtureVersion(state.prefix, '0.0.1', options);
     const forwarded = ['text with spaces', 'λ', 'a&b', '$(untouched)', '--flag=value'];
     const args = await command(process.execPath, [installed(state.prefix).launcher, '--args', ...forwarded], options);
     assert.equal(args.status, 0, args.stderr);
@@ -183,7 +191,7 @@ export async function lifecycle(tarball) {
     assert.equal(exit.status, 7, exit.stderr);
     service.update();
     await npm(['update', '--global', 'jecode'], options);
-    assert.equal((await runInstalled(state.prefix, ['--version'], options)).stdout.trim(), 'jecode npm fixture 0.0.2');
+    await checkFixtureVersion(state.prefix, '0.0.2', options);
     assert.equal(digest(regularFile(installed(state.prefix).binary)), fixtures.get('0.0.2').binaryDigest);
     preserved(state);
     await uninstall(state, options);
