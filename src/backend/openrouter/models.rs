@@ -61,7 +61,7 @@ fn parse_models(value: Value, limit: usize) -> Result<Vec<Model>, String> {
     Ok(models)
 }
 
-fn efforts(model: &Value) -> Vec<Effort> {
+pub(super) fn efforts(model: &Value) -> Vec<Effort> {
     let mut result = vec![Effort::Default];
     let Some(reasoning) = model.get("reasoning") else {
         return result;

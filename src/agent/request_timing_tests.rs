@@ -161,10 +161,9 @@ fn compaction_attempt_uses_medium_without_changing_the_selected_effort() {
     }
     let fixture = HttpFixture::new(vec![(200, reply)]);
     let directory = Directory::new();
-    let mut agent = Agent::new(
-        OpenRouter::fixture(fixture.endpoint.clone()),
-        Tools::new(directory.path()).unwrap(),
-    );
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.fixture_efforts(&[crate::effort::Effort::Medium]);
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.set_effort(crate::effort::Effort::High);
     let messages = [Value::object([
         ("role", Value::string("user")),

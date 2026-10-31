@@ -101,6 +101,22 @@ impl Api {
             .copied()
     }
 
+    fn supports_effort(&self, model: &str, effort: Effort) -> bool {
+        self.metadata
+            .lock()
+            .ok()
+            .and_then(|catalog| {
+                catalog.as_ref().and_then(|catalog| {
+                    catalog
+                        .models
+                        .iter()
+                        .find(|entry| entry.id == model)
+                        .map(|entry| entry.efforts.contains(&effort))
+                })
+            })
+            .unwrap_or(false)
+    }
+
     fn redactor(&self) -> Redactor {
         self.session.redactor()
     }
@@ -177,6 +193,13 @@ impl Backend for OpenAi {
     }
     fn set_effort(&mut self, effort: Effort) {
         self.effort = effort;
+    }
+    fn maintenance_effort(&self, requested: Effort) -> Effort {
+        if self.api.supports_effort(&self.model, requested) {
+            requested
+        } else {
+            Effort::Default
+        }
     }
     fn set_delegation(&mut self, enabled: bool) {
         self.delegation = enabled;

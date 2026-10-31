@@ -83,8 +83,9 @@ that input budget first turns large tool results, including file reads, into pre
 model at medium effort when supported, with tools disabled, to fold the work
 since the previous compaction into a plain-text handoff targeting at most
 16 KiB. The main task's
-model and effort selection stay unchanged. Claude models without medium effort
-use their default. It processes the transcript in chronological portions,
+model and effort selection stay unchanged. Models without advertised medium
+effort use their default; an OpenRouter endpoint pin can also require this
+fallback. It processes the transcript in chronological portions,
 including large records split across portions. It carries the prior summary
 and archived user requests into each portion. Recent original messages stay
 verbatim when they fit within a quarter of the input budget. A tool call and

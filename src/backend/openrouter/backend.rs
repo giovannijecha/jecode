@@ -27,6 +27,21 @@ impl Backend for OpenRouter {
     fn set_effort(&mut self, effort: Effort) {
         self.set_effort(effort);
     }
+    fn maintenance_effort(&self, requested: Effort) -> Effort {
+        let supported = self
+            .efforts
+            .as_ref()
+            .is_some_and(|efforts| efforts.contains(&requested));
+        let pinned_without_reasoning = self
+            .router
+            .pinned(&self.model)
+            .is_some_and(|endpoint| endpoint.supports("reasoning") == Some(false));
+        if supported && !pinned_without_reasoning {
+            requested
+        } else {
+            Effort::Default
+        }
+    }
     fn set_delegation(&mut self, enabled: bool) {
         self.delegation = enabled;
     }

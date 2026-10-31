@@ -343,6 +343,7 @@ fn output_regression_compaction_uses_a_modest_allowance_and_medium_effort() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion(&candidate(), vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client.fixture_efforts(&[Effort::Medium]);
     client.set_effort(Effort::High);
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     agent.prepare_turn("Inspect only").unwrap();

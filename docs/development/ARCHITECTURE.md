@@ -174,8 +174,11 @@ counters the provider reported, including failed attempts with reported usage.
 Reasoning is a subset of output tokens. Background titles use the same model at
 low effort and participate in request accounting; a 512-token output cap applies
 only on routes supporting it. The backend resolves maintenance effort before
-sampling and accounting. Claude falls back to default when its catalog does
-not advertise the requested level, without changing the active task's selection.
+sampling and accounting. Account providers and OpenRouter fall back to default
+when model metadata does not advertise the requested level. An OpenRouter pin
+also falls back when its endpoint does not support reasoning. Resolution uses
+metadata already loaded for the turn, without changing the active task's
+selection or routing.
 
 The native communication and behavior instructions live in `agent/PROMPT.md`
 and are compiled into the application. Project instructions and the personal

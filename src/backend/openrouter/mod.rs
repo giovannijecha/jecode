@@ -42,6 +42,8 @@ pub struct OpenRouter {
     model: String,
     effort: Effort,
     limits: Option<Option<Limits>>,
+    /// Exact model effort capabilities from the already fetched catalog.
+    efforts: Option<Vec<Effort>>,
     /// The model's input modalities from the catalog; None when unknown.
     inputs: Option<Vec<String>>,
     router: Router,
@@ -137,6 +139,7 @@ impl OpenRouter {
             api,
             model,
             effort: Effort::Default,
+            efforts: None,
             inputs: None,
             router: Router::new(Routing::Default),
             delegation: true,
@@ -167,6 +170,11 @@ impl OpenRouter {
         self.inputs = Some(inputs.iter().map(|input| (*input).to_owned()).collect());
     }
 
+    #[cfg(test)]
+    pub fn fixture_efforts(&mut self, efforts: &[Effort]) {
+        self.efforts = Some(efforts.to_vec());
+    }
+
     pub fn api(&self) -> Api {
         self.api.clone()
     }
@@ -186,6 +194,7 @@ impl OpenRouter {
         validate_model(&model)?;
         if model != self.model {
             self.inputs = None;
+            self.efforts = None;
             let session = self.router.session.take();
             self.router = Router::new(match &self.router.routing {
                 Routing::Endpoint(_) => Routing::Auto,

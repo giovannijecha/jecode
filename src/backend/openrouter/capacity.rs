@@ -31,6 +31,7 @@ impl OpenRouter {
         let model = data
             .iter()
             .find(|model| model.get("id").and_then(Value::as_str) == Some(&self.model));
+        self.efforts = model.map(super::models::efforts);
         self.inputs = model
             .and_then(|model| model.get("architecture"))
             .and_then(|architecture| architecture.get("input_modalities"))

@@ -267,6 +267,21 @@ fn local_transport_lists_models_with_scoped_oauth_token() {
 }
 
 #[test]
+fn maintenance_effort_uses_only_catalog_supported_levels() {
+    let api = Api::fixture(
+        Session::fixture("fixture-access-token"),
+        "http://127.0.0.1:1",
+    );
+    *api.metadata.lock().unwrap() = Some(metadata::parse(&crate::json::parse(
+        r#"{"models":[{"slug":"model-a","visibility":"list","supported_reasoning_levels":[{"effort":"low"}]}]}"#,
+    )
+    .unwrap()).unwrap());
+    let backend = OpenAi::with_api(api, "model-a".into()).unwrap();
+    assert_eq!(backend.maintenance_effort(Effort::Low), Effort::Low);
+    assert_eq!(backend.maintenance_effort(Effort::Medium), Effort::Default);
+}
+
+#[test]
 fn first_turn_loads_model_capacity_and_reuses_it_within_the_account_handle() {
     let (server, endpoint) = serve(
         200,
