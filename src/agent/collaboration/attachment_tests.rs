@@ -109,9 +109,14 @@ fn shared_and_isolated_collaborators_read_parent_images_and_send_exact_bytes() {
                 .collaboration()
                 .wait(Some("a1"), Duration::from_secs(5), &Cancellation::default())
                 .unwrap();
-            let result = &records[0].get("tools").and_then(Value::as_array).unwrap()[0]
-                .get("result")
-                .unwrap();
+            assert_eq!(
+                records[0].get("state").and_then(Value::as_str),
+                Some("returned"),
+                "{provider}/{mode}: {records:?}"
+            );
+            let tools = records[0].get("tools").and_then(Value::as_array).unwrap();
+            assert_eq!(tools.len(), 1, "{provider}/{mode}: {records:?}");
+            let result = tools[0].get("result").unwrap();
             assert!(
                 result.get("error").is_none(),
                 "{provider}/{mode}: {result:?}"
