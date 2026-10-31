@@ -321,7 +321,8 @@ public sealed partial class JecodeTestPty : IDisposable {
                     pty.Wait("Keep my task", typed);
                     int request = pty.Mark(); pty.Send("\r");
                     pty.Wait("No configured provider", request);
-                    pty.Send("\x15");
+                    int cleared = pty.Mark(); pty.Send("\x15");
+                    pty.Wait("Ask anything", cleared);
                 }
                 int next = pty.Mark(); pty.Send("/new");
                 pty.Wait("Commands", next); pty.Send("\r");

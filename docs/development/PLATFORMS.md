@@ -17,7 +17,7 @@ These are local verification boundaries. CI jobs and ignored/manual fixtures
 provide separate evidence; inspect the checks executed for the revision under review.
 
 The October 31 Claude subscription and context-efficiency changes passed offline
-build, formatting, all-target Clippy and ordinary tests on Windows (1,866 passed,
+build, formatting, all-target Clippy and ordinary tests on Windows (1,867 passed,
 68 ignored) and an Ubuntu/WSL native-filesystem copy (1,867 passed, 56 ignored). The Windows
 ConPTY fixture passed with the new credentials, Claude account and sign-in
 panels; the Linux PTY fixture also passed. One Windows run concurrent with the
@@ -32,6 +32,10 @@ readback; see [performance](PERFORMANCE.md#subscription-context-reuse).
 The Windows IPv6 HTTP fixture now explicitly restores blocking mode after
 accepting a socket from its nonblocking listener; its regression passed 30
 consecutive runs after the CI `WouldBlock` failure was traced to that mode.
+Windows record fixtures also preserve a control-character shortcut when its
+matching letter key has no Ctrl modifier flag, including during a text burst.
+The startup ConPTY check verifies the composer is empty after clearing a
+retained request before sending the next command.
 
 The October 29 native-runtime pass completed the ordinary suite on Windows
 (1,721 passed, 57 ignored) and an Ubuntu/WSL native-filesystem copy (1,725 passed,
