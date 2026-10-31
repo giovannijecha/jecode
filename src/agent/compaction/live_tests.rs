@@ -31,8 +31,47 @@ fn synthetic_notes() -> String {
     notes
 }
 
+fn readback_has_facts(answer: &str) -> bool {
+    let answer = answer.to_ascii_lowercase();
+    let tasks = [
+        ("jx-104", "done", "e_parse_14", "checksum"),
+        ("jx-207", "open", "e_retry_06", "counter"),
+        ("jx-319", "open", "e_save_09", "checkpoint"),
+    ];
+    tasks.iter().all(|(id, status, error, action)| {
+        answer.lines().any(|line| {
+            let words: Vec<_> = line
+                .split(|character: char| {
+                    !character.is_ascii_alphanumeric() && character != '-' && character != '_'
+                })
+                .filter(|word| !word.is_empty())
+                .collect();
+            words.contains(id)
+                && words.contains(status)
+                && words.contains(error)
+                && words.contains(action)
+                && tasks
+                    .iter()
+                    .filter(|(other, ..)| other != id)
+                    .all(|(other, ..)| !words.contains(other))
+        })
+    })
+}
+
 #[test]
-#[ignore = "uses two bounded synthetic Claude requests on the explicitly selected account"]
+fn readback_accepts_task_facts_kept_together() {
+    let correct = "JX-104: done, E_PARSE_14; verify the fixture checksum.\nJX-207: open, E_RETRY_06; inspect the retry counter.\nJX-319: open, E_SAVE_09; restore the journal checkpoint.";
+    assert!(readback_has_facts(correct));
+}
+
+#[test]
+fn readback_rejects_swapped_task_facts() {
+    let swapped = "JX-104 open E_SAVE_09 checkpoint\nJX-207 done E_PARSE_14 checksum\nJX-319 open E_RETRY_06 counter";
+    assert!(!readback_has_facts(swapped));
+}
+
+#[test]
+#[ignore = "uses two bounded synthetic Claude inference requests after a usage check"]
 fn live_summary_and_resumed_readback_preserve_critical_work() {
     let account_home = std::env::var_os("JECODE_HOME")
         .map(std::path::PathBuf::from)
@@ -42,9 +81,12 @@ fn live_summary_and_resumed_readback_preserve_critical_work() {
         .active()
         .unwrap()
         .expect("Sign in to Claude in the selected home first");
-    // The selected account's extra usage setting is checked by the separate
-    // account probe before this test. This module cannot access Api::get.
     let api = Api::new(session).unwrap();
+    assert!(
+        api.extra_usage_disabled().unwrap(),
+        "This bounded live check requires extra usage disabled"
+    );
+    api.catalog().unwrap();
     let workspace = Directory::new();
     let session_home = Directory::new();
     let mut agent = Agent::with_backend(
@@ -158,25 +200,10 @@ fn live_summary_and_resumed_readback_preserve_critical_work() {
         .unwrap();
     let readback_elapsed = readback_started.elapsed();
     let answer = readback.text.to_ascii_lowercase();
-    let facts = [
-        "jx-104",
-        "done",
-        "e_parse_14",
-        "checksum",
-        "jx-207",
-        "open",
-        "e_retry_06",
-        "counter",
-        "jx-319",
-        "e_save_09",
-        "checkpoint",
-    ];
-    for fact in facts {
-        assert!(
-            answer.contains(fact),
-            "Missing synthetic continuity fact {fact}"
-        );
-    }
+    assert!(
+        readback_has_facts(&answer),
+        "Synthetic task facts were lost or mixed"
+    );
     assert_eq!(*resumed.messages.lock().unwrap(), originals);
     println!(
         "summary_requests={attempts} summary_bytes={summary_bytes} summary_ms={} readback_ms={} medium_usage={} original_history={} readback_facts={}",
@@ -191,6 +218,6 @@ fn live_summary_and_resumed_readback_preserve_critical_work() {
                 .and_then(Value::as_usize)
                 .is_some(),
         original_history,
-        facts.iter().all(|fact| answer.contains(fact)),
+        readback_has_facts(&answer),
     );
 }

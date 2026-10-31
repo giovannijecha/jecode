@@ -20,6 +20,15 @@ pub(super) struct Response {
 }
 
 impl Api {
+    #[cfg(test)]
+    pub(crate) fn extra_usage_disabled(&self) -> Result<bool, String> {
+        let usage = self.get("/api/oauth/usage")?;
+        Ok(usage
+            .get("extra_usage")
+            .and_then(|value| value.get("is_enabled"))
+            == Some(&Value::Bool(false)))
+    }
+
     pub(super) fn get(&self, path: &str) -> Result<Value, String> {
         let (response, body) = self
             .raw("GET", path, None, &mut |_| Ok(()))

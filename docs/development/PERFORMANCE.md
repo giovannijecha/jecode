@@ -52,16 +52,20 @@ A separate bounded live continuity check used scattered task IDs, completed
 work, open errors and next actions in 20–40 KiB of synthetic notes. One Opus 5.5
 medium compaction took 4,992 ms and produced a 1,106-byte handoff. After saving
 and reopening the isolated session, a high-effort readback took 2,061 ms and
-retained all eleven checked facts. Original archived messages remained exactly
-equal. This verifies that fixture's continuity; it does not establish lossless
+contained all eleven checked terms. That original check did not verify their
+association with each task ID. The revised fixture checks each task's status,
+error and next action together and has offline coverage rejecting swapped
+associations; the revised live check has not been rerun. Original archived
+messages remained exactly equal. These measurements do not establish lossless
 semantic compression or a five-second guarantee for arbitrary histories.
 
 ```text
 cargo test --locked --offline agent::compaction::live_tests::live_summary_and_resumed_readback_preserve_critical_work -- --exact --ignored --nocapture --test-threads=1
 ```
 
-This check uses two bounded live Claude requests and requires the same selected
-account with extra usage disabled as the preceding cache probe.
+This check uses two bounded live Claude inference requests. Before inference it
+loads the model catalog and verifies that extra usage is disabled on the selected
+account.
 
 ## Model loop and tool payloads
 
