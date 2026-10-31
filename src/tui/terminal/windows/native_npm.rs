@@ -21,17 +21,21 @@ fn npm_launcher_native_tui() {
         launcher.to_string_lossy().replace('\'', "''"),
         directory.path().to_string_lossy().replace('\'', "''"),
     );
-    let script_path = directory.path().join("npm-native-pty.ps1");
-    std::fs::write(&script_path, script).unwrap();
+    let entry = "$ErrorActionPreference = 'Stop'; $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false, $true), $false); try { & ([ScriptBlock]::Create($reader.ReadToEnd())) } finally { $reader.Dispose() }";
     let result = process::run_observed(
         Command::new("powershell.exe")
-            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
-            .arg(&script_path)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                entry,
+            ])
             .env("TEMP", directory.path())
             .env("TMP", directory.path())
             .env_remove("OPENROUTER_API_KEY")
             .env_remove("OPENROUTER_MODEL"),
-        None,
+        Some(script.into_bytes()),
         Duration::from_secs(60),
         64 * 1024,
         &Cancellation::default(),

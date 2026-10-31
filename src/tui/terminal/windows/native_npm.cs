@@ -1,6 +1,3 @@
-using System;
-using System.IO;
-
 public sealed partial class JecodeTestPty {
     public static void RunNpm(string node, string launcher, string directory) {
         using (var pty = new JecodeTestPty()) {
