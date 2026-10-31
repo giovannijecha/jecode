@@ -41,37 +41,20 @@ jecode "Explain the structure of this project"
 
 ## Install
 
-No prebuilt downloads are published yet; build Jecode from source. You need
-[rustup](https://rustup.rs/) and, on Windows, a Rust linker (the Visual Studio
-C++ build tools, or the alternative in
-[Installation](docs/usage/INSTALLATION.md#build-prerequisites)); on Linux, a C
-compiler; on macOS, the Command Line Tools.
-
-**Windows** (PowerShell):
-
-```powershell
-git clone https://github.com/giovannijecha/jecode.git
-cd jecode
-.\PACKAGE.ps1
-.\target\package\jecode-windows-x86_64\INSTALL.ps1
-```
-
-The installer puts `jecode.exe` in `%LOCALAPPDATA%\Jecode\bin` and adds it to
-your user `PATH`.
-
-**Linux and macOS:**
+The first npm release is being prepared; **`jecode` is not published on npm
+yet**. Once published, install it with Node.js 22 or later and npm on Windows
+x64, Linux x64 (glibc 2.39 or newer), or macOS Apple silicon. The macOS build
+has been tested on macOS 15; earlier versions remain unverified.
 
 ```sh
-git clone https://github.com/giovannijecha/jecode.git
-cd jecode
-sh PACKAGE.sh
-sh target/package/jecode-*/INSTALL.sh
-export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/jecode/bin:$PATH"
+npm install -g jecode
+jecode --version
 ```
 
-Add the `export` line to your shell profile to keep it. Check the result with
-`jecode --version`. [Installation](docs/usage/INSTALLATION.md) covers
-requirements, other install locations, updating and uninstalling.
+The npm command launches a bundled native executable. It needs Node.js to
+start; the standalone executable does not. Until publication, build and install
+from source using [Installation](docs/usage/INSTALLATION.md). That guide also
+covers npm updates, removal, and existing standalone installations.
 
 ## First task
 

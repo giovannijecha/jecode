@@ -1,0 +1,163 @@
+name: Prepare npm release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-preparation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    name: Prepare native (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: [self-hosted, Windows, X64, workspace-ci]
+            toolchain: 1.95.0-x86_64-pc-windows-gnullvm
+            npm_target: win32-x64
+          - name: Linux x64
+            os: [self-hosted, Linux, X64, workspace-ci]
+            toolchain: 1.95.0
+            npm_target: linux-x64
+          - name: macOS ARM64
+            os: macos-15
+            toolchain: 1.95.0
+            npm_target: darwin-arm64
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust
+        shell: bash
+        if: runner.os != 'Windows'
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 --fail --silent --show-error https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            export PATH="$HOME/.cargo/bin:$PATH"
+            printf '%s\n' "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
+      - name: Install pinned Windows Rust
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: rustup toolchain install ${{ matrix.toolchain }} --profile minimal --component rustfmt --component clippy
+      - name: Use the bundled Windows linker
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup component add rust-mingw --toolchain ${{ matrix.toolchain }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $taskSysroot = rustc +${{ matrix.toolchain }} --print sysroot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $taskLinker = Join-Path $taskSysroot 'lib/rustlib/x86_64-pc-windows-gnullvm/bin/rust-lld.exe'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=$taskLinker"
+      - name: Check formatting
+        run: cargo +${{ matrix.toolchain }} fmt --all -- --check
+      - name: Check all targets
+        run: cargo +${{ matrix.toolchain }} clippy --locked --offline --all-targets -- -D warnings
+      - name: Run tests
+        run: cargo +${{ matrix.toolchain }} test --locked --offline --quiet
+      - name: Verify native Windows ConPTY
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native Windows interactive input
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native Linux PTY
+        if: runner.os == 'Linux'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native macOS PTY
+        if: runner.os == 'macOS'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Build release executable
+        run: cargo +${{ matrix.toolchain }} build --release --locked --offline
+      - name: Install Node for npm packaging
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Test npm launcher
+        run: node --test npm/launcher.test.cjs
+      - name: Test npm release packaging
+        run: node --test tools/npm/release.test.mjs
+      - name: Stage native artifact
+        run: node tools/npm/release.mjs stage "${{ runner.os == 'Windows' && 'target/release/jecode.exe' || 'target/release/jecode' }}" "target/npm-stage/${{ matrix.npm_target }}"
+      - name: Check local npm lifecycle
+        run: |
+          node tools/npm/release.mjs pack target/npm-stage target/npm-local --local
+          node -e "const fs=require('node:fs'); const cp=require('node:child_process'); const files=fs.readdirSync('target/npm-local').filter(name=>name.endsWith('.tgz')); if(files.length!==1) throw Error('Expected one npm tarball'); cp.execFileSync(process.execPath,['tools/npm/lifecycle.mjs','target/npm-local/'+files[0]],{stdio:'inherit'});"
+      - name: Locate npm runtime for native terminal checks
+        run: node -e "const fs=require('node:fs'); const path=require('node:path'); fs.appendFileSync(process.env.GITHUB_ENV,'JECODE_NPM_LAUNCHER='+path.resolve('target/npm-local/package/bin/jecode.cjs')+'\nJECODE_NPM_NODE='+process.execPath+'\n');"
+      - name: Verify native npm Windows terminal
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_npm::npm_launcher_native_tui -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native npm Unix terminal
+        if: runner.os != 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::npm_tests::npm_launcher_native_tui -- --exact --ignored --nocapture --test-threads=1
+      - name: Upload native artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.npm_target }}
+          path: target/npm-stage/${{ matrix.npm_target }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: Assemble npm tarball
+    needs: native
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust for lifecycle fixtures
+        shell: bash
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 --fail --silent --show-error https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            export PATH="$HOME/.cargo/bin:$PATH"
+            printf '%s\n' "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          rustup toolchain install 1.95.0 --profile minimal
+      - name: Install Node for npm packaging
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Download native artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: '*-*'
+          path: target/npm-stage
+      - name: Assemble npm package
+        run: node tools/npm/release.mjs pack target/npm-stage target/npm-package
+      - name: Check npm install, update and uninstall
+        run: node -e "const fs=require('node:fs'); const cp=require('node:child_process'); const files=fs.readdirSync('target/npm-package').filter(name=>name.endsWith('.tgz')); if(files.length!==1) throw Error('Expected one npm tarball'); cp.execFileSync(process.execPath,['tools/npm/lifecycle.mjs','target/npm-package/'+files[0]],{stdio:'inherit'});"
+      - name: Preview npm publication
+        run: node -e "const fs=require('node:fs'); const cp=require('node:child_process'); const files=fs.readdirSync('target/npm-package').filter(name=>name.endsWith('.tgz')); if(files.length!==1) throw Error('Expected one npm tarball'); cp.execFileSync('npm',['publish','target/npm-package/'+files[0],'--dry-run'],{stdio:'inherit'});"
+      - name: Upload npm tarball for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: jecode-npm-tarball
+          path: |
+            target/npm-package/jecode-*.tgz
+            target/npm-package/manifest.json
+          if-no-files-found: error
+          retention-days: 7

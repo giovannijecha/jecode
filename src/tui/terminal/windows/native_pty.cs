@@ -104,10 +104,10 @@ public sealed partial class JecodeTestPty : IDisposable {
         reader.Start();
     }
 
-    public void Start(string executable, string directory, string scenario) {
+    public void Start(string executable, string directory, string scenario, string launcher = null) {
         Environment.SetEnvironmentVariable("JECODE_NATIVE_DIR", directory);
         Environment.SetEnvironmentVariable("JECODE_NATIVE_CASE", scenario);
-        if (scenario.StartsWith("startup-")) {
+        if (scenario.StartsWith("startup-") || scenario == "npm-launcher") {
             Environment.SetEnvironmentVariable("JECODE_HOME", directory);
             Environment.SetEnvironmentVariable("OPENROUTER_API_KEY", null);
             Environment.SetEnvironmentVariable("OPENROUTER_MODEL", null);
@@ -123,7 +123,9 @@ public sealed partial class JecodeTestPty : IDisposable {
             var startup = new Extended();
             startup.Startup.Size = Marshal.SizeOf(typeof(Extended));
             startup.Attributes = attributes;
-            var command = new StringBuilder("\"" + executable + "\" --exact tui::terminal::windows::native_tests::native_console_fixture --ignored --nocapture --test-threads=1");
+            var command = new StringBuilder(scenario == "npm-launcher"
+                ? "\"" + executable + "\" \"" + launcher + "\""
+                : "\"" + executable + "\" --exact tui::terminal::windows::native_tests::native_console_fixture --ignored --nocapture --test-threads=1");
             ProcessInfo child;
             // A redirected test runner has pipe-valued standard handles. Leave
             // them empty only while creating the client so ConPTY supplies its

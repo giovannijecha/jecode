@@ -9,6 +9,9 @@ behavior a reviewer should check.
 - Jecode is one Cargo package using the Rust standard library and original
   project code. Do not add external crates, copied implementations or
   third-party runtime libraries.
+- npm distribution may use an original Node.js launcher and packaging tools;
+  do not add npm dependencies or make the standalone Rust executable depend on
+  Node.js.
 - Platform features use operating-system APIs through Jecode's own native
   adapters. Application features must not depend on separately installed
   programs such as Git or Git Bash.

@@ -23,6 +23,9 @@ mod card_tests;
 #[path = "native_direct_input.rs"]
 mod native_direct_input;
 
+#[path = "native_npm.rs"]
+mod native_npm;
+
 #[path = "native_permissions.rs"]
 mod native_permissions;
 
