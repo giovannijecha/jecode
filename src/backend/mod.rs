@@ -292,6 +292,10 @@ pub trait Backend: Send {
     fn model(&self) -> &str;
     fn effort(&self) -> Effort;
     fn set_effort(&mut self, effort: Effort);
+    /// Resolve a maintenance preference against the current model's capabilities.
+    fn maintenance_effort(&self, requested: Effort) -> Effort {
+        requested
+    }
     /// Collaborators retain working tools but never receive delegation tools.
     fn set_delegation(&mut self, _enabled: bool) {}
     fn inputs(&self) -> Inputs;

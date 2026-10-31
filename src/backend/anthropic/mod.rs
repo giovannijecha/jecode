@@ -73,6 +73,7 @@ impl Api {
             result.models.extend(parsed.models);
             result.limits.extend(parsed.limits);
             result.thinking_off.extend(parsed.thinking_off);
+            result.thinking_adaptive.extend(parsed.thinking_adaptive);
             next = match page.get("has_more") {
                 Some(Value::Bool(true)) => page
                     .get("last_id")
@@ -111,6 +112,28 @@ impl Api {
             .thinking_off
             .get(model)
             .copied()
+    }
+
+    fn thinking_adaptive(&self, model: &str) -> bool {
+        self.metadata
+            .lock()
+            .ok()
+            .and_then(|catalog| {
+                catalog
+                    .as_ref()
+                    .map(|catalog| catalog.thinking_adaptive.contains(model))
+            })
+            .unwrap_or(false)
+    }
+
+    fn supports_effort(&self, model: &str, effort: Effort) -> Option<bool> {
+        self.metadata.lock().ok()?.as_ref().and_then(|catalog| {
+            catalog
+                .models
+                .iter()
+                .find(|entry| entry.id == model)
+                .map(|entry| entry.efforts.contains(&effort))
+        })
     }
 
     fn ensure_metadata(&self) -> Result<(), String> {
@@ -204,6 +227,13 @@ impl Backend for Anthropic {
     fn set_effort(&mut self, effort: Effort) {
         self.effort = effort;
     }
+    fn maintenance_effort(&self, requested: Effort) -> Effort {
+        if self.api.supports_effort(&self.model, requested) == Some(true) {
+            requested
+        } else {
+            Effort::Default
+        }
+    }
     fn set_delegation(&mut self, enabled: bool) {
         self.delegation = enabled;
     }
@@ -244,13 +274,20 @@ impl Backend for Anthropic {
             .iter()
             .map(|message| conversation::project(message, &origin))
             .collect();
+        let thinking_mode = if effort == Effort::None {
+            self.api.thinking_off(&self.model)
+        } else if self.api.thinking_adaptive(&self.model) {
+            Some("adaptive")
+        } else {
+            None
+        };
         let request = wire::request(
             &self.model,
             effort,
             &projected,
             with_tools.then(|| crate::tools::definitions_for(self.delegation)),
             output_tokens.or_else(|| self.known_limits().and_then(|v| v.output)),
-            self.api.thinking_off(&self.model),
+            thinking_mode,
             pool,
         )
         .map_err(backend::Failure::from)?;

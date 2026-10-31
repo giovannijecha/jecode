@@ -257,3 +257,95 @@ fn background_title_usage_is_saved_without_changing_the_conversation_effort() {
         .unwrap_err();
     assert!(handle.store().read(&handle.id()).is_ok());
 }
+
+fn legacy_claude_fixture() -> (HttpFixture, crate::backend::anthropic::Api) {
+    let catalog = crate::json::parse(
+        r#"{"data":[{"id":"claude-sonnet-4-5","max_input_tokens":200000,"max_tokens":64000,"capabilities":{"effort":{"low":{"supported":false},"medium":{"supported":false}},"thinking":{"types":{"disabled":{"supported":true},"adaptive":{"supported":false}}}}}],"has_more":false}"#,
+    )
+    .unwrap();
+    let stream = concat!(
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":100,\"output_tokens\":1}}}\n\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"Index repair\"}}\n\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    );
+    let fixture = HttpFixture::streaming(vec![
+        Response::Json(200, catalog),
+        Response::Stream(vec![(Duration::ZERO, stream.into())]),
+    ]);
+    let api = crate::backend::anthropic::Api::fixture(
+        crate::auth::anthropic::Session::fixture("fixture-anthropic-token"),
+        fixture.endpoint.trim_end_matches("/chat/completions"),
+    );
+    (fixture, api)
+}
+
+#[test]
+fn claude_compaction_falls_back_to_supported_effort_and_records_it() {
+    use crate::backend::Service;
+    let (fixture, api) = legacy_claude_fixture();
+    let directory = Directory::new();
+    let mut agent = Agent::with_backend(
+        api.create("claude-sonnet-4-5".into()).unwrap(),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.client.prepare_turn().unwrap();
+    let messages = [Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Summarize this work")),
+    ])];
+    agent
+        .complete_retry(&messages, false, Some(2048), &mut |_| Ok(()))
+        .unwrap();
+    let requests = fixture.finish();
+    assert!(requests[1].body.get("thinking").is_none());
+    assert!(requests[1].body.get("output_config").is_none());
+    let events = agent.events.lock().unwrap();
+    let timing = events
+        .iter()
+        .find(|event| event.get("operation").and_then(Value::as_str) == Some("context_compaction"))
+        .unwrap();
+    assert_eq!(
+        timing.get("effort").and_then(Value::as_str),
+        Some("default")
+    );
+    assert_eq!(agent.effort(), crate::effort::Effort::Default);
+}
+
+#[test]
+fn claude_title_falls_back_to_supported_effort_and_saves_it() {
+    use crate::backend::Service;
+    let (fixture, api) = legacy_claude_fixture();
+    let directory = Directory::new();
+    let home = Directory::new();
+    let mut agent = Agent::with_backend(
+        api.create("claude-sonnet-4-5".into()).unwrap(),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.name_sessions();
+    agent.prepare_turn("Repair the index").unwrap();
+    let handle = agent.sessions().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !handle.titled() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(handle.titled());
+    let requests = fixture.finish();
+    assert!(requests[1].body.get("thinking").is_none());
+    assert!(requests[1].body.get("output_config").is_none());
+    agent.save_session().unwrap();
+    let saved = handle.store().read(&handle.id()).unwrap();
+    assert_eq!(saved.title(), "Index repair");
+    let timing = saved
+        .events
+        .iter()
+        .find(|event| event.get("operation").and_then(Value::as_str) == Some("session_title"))
+        .unwrap();
+    assert_eq!(
+        timing.get("effort").and_then(Value::as_str),
+        Some("default")
+    );
+    assert_eq!(agent.effort(), crate::effort::Effort::Default);
+}

@@ -10,6 +10,7 @@ pub(super) struct Catalog {
     pub models: Vec<Model>,
     pub limits: BTreeMap<String, Limits>,
     pub thinking_off: BTreeMap<String, &'static str>,
+    pub thinking_adaptive: BTreeSet<String>,
 }
 
 pub(super) fn parse(response: &Value) -> Result<Catalog, String> {
@@ -52,6 +53,13 @@ pub(super) fn parse(response: &Value) -> Result<Catalog, String> {
             .get("capabilities")
             .and_then(|v| v.get("thinking"))
             .and_then(|v| v.get("types"));
+        if thinking_types
+            .and_then(|types| types.get("adaptive"))
+            .and_then(|value| value.get("supported"))
+            == Some(&Value::Bool(true))
+        {
+            catalog.thinking_adaptive.insert(id.into());
+        }
         let thinking_off = ["between_tools", "disabled"].into_iter().find(|mode| {
             thinking_types
                 .and_then(|types| types.get(mode))

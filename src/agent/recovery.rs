@@ -54,7 +54,11 @@ impl Agent {
         let mut partial = String::new();
         let mut reported_usage = Usage::default();
         let mut has_usage = false;
-        let effort = if tools { self.effort() } else { Effort::Medium };
+        let effort = if tools {
+            self.effort()
+        } else {
+            self.client.maintenance_effort(Effort::Medium)
+        };
         let mut text = super::streaming::Text::new(self.redactor.clone());
         let result = self.client.sample_with_effort(
             effort,

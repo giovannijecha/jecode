@@ -153,8 +153,9 @@ results. The same reduction is attempted after a provider context rejection.
 It keeps a verbatim tail within one quarter of the input
 budget. An assistant tool call and all its results stay on the same side of the
 boundary; an oversized group can leave no verbatim tail.
-`agent/summary.rs` asks the same model at medium effort for a plain-text handoff
-targeting at most 16 KiB. This is a prompt target, not an output truncation.
+`agent/summary.rs` asks the same model at medium effort when supported for a
+plain-text handoff targeting at most 16 KiB. This is a prompt target, not an
+output truncation.
 The initial output allowance is 2,048–8,192 tokens within the remaining model
 capacity; a truncated attempt can grow it. It folds every
 supplied transcript record into the previous summary in chronological portions;
@@ -172,7 +173,9 @@ Each request attempt records its operation, actual effort, timing and the usage
 counters the provider reported, including failed attempts with reported usage.
 Reasoning is a subset of output tokens. Background titles use the same model at
 low effort and participate in request accounting; a 512-token output cap applies
-only on routes supporting it.
+only on routes supporting it. The backend resolves maintenance effort before
+sampling and accounting. Claude falls back to default when its catalog does
+not advertise the requested level, without changing the active task's selection.
 
 The native communication and behavior instructions live in `agent/PROMPT.md`
 and are compiled into the application. Project instructions and the personal

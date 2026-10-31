@@ -402,6 +402,81 @@ fn request_effort_overrides_selection_without_changing_it() {
 }
 
 #[test]
+fn effort_without_adaptive_thinking_uses_only_output_config() {
+    let catalog = crate::json::parse(
+        r#"{"data":[{"id":"claude-opus-4-5","display_name":"Claude Opus 4.5","capabilities":{"effort":{"medium":{"supported":true}},"thinking":{"types":{"adaptive":{"supported":false},"disabled":{"supported":true}}}}}],"has_more":false}"#,
+    )
+    .unwrap();
+    let fixture = HttpFixture::streaming(vec![
+        Response::Json(200, catalog),
+        stream(
+            vec![Value::object([
+                ("type", Value::string("text")),
+                ("text", Value::string("")),
+            ])],
+            vec![delta(0, "text_delta", "text", "Done")],
+            "end_turn",
+        ),
+    ]);
+    let api = Api::fixture(
+        Session::fixture("fixture-anthropic-token"),
+        fixture.endpoint.trim_end_matches("/chat/completions"),
+    );
+    api.catalog().unwrap();
+    let backend = api.create("claude-opus-4-5".into()).unwrap();
+    backend
+        .sample_with_effort(Effort::Medium, &[], false, Some(64), None, &mut |_| Ok(()))
+        .unwrap();
+    let requests = fixture.finish();
+    assert_eq!(requests[1].body.get("thinking"), None);
+    assert_eq!(
+        requests[1]
+            .body
+            .get("output_config")
+            .and_then(|config| config.get("effort"))
+            .and_then(Value::as_str),
+        Some("medium")
+    );
+}
+
+#[test]
+fn adaptive_thinking_is_sent_when_the_catalog_supports_it() {
+    let catalog = crate::json::parse(
+        r#"{"data":[{"id":"claude-opus-5-5","capabilities":{"effort":{"medium":{"supported":true}},"thinking":{"types":{"adaptive":{"supported":true}}}}}],"has_more":false}"#,
+    )
+    .unwrap();
+    let fixture = HttpFixture::streaming(vec![
+        Response::Json(200, catalog),
+        stream(
+            vec![Value::object([
+                ("type", Value::string("text")),
+                ("text", Value::string("")),
+            ])],
+            vec![delta(0, "text_delta", "text", "Done")],
+            "end_turn",
+        ),
+    ]);
+    let api = Api::fixture(
+        Session::fixture("fixture-anthropic-token"),
+        fixture.endpoint.trim_end_matches("/chat/completions"),
+    );
+    api.catalog().unwrap();
+    let backend = api.create("claude-opus-5-5".into()).unwrap();
+    backend
+        .sample_with_effort(Effort::Medium, &[], false, Some(64), None, &mut |_| Ok(()))
+        .unwrap();
+    let requests = fixture.finish();
+    assert_eq!(
+        requests[1]
+            .body
+            .get("thinking")
+            .and_then(|thinking| thinking.get("type"))
+            .and_then(Value::as_str),
+        Some("adaptive")
+    );
+}
+
+#[test]
 fn incomplete_tool_block_never_becomes_an_executable_empty_call() {
     let mut stream = stream::Stream::default();
     let input = format!(

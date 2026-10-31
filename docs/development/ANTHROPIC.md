@@ -88,6 +88,14 @@ Keeping it separate avoids normalizing adjacent user messages differently as
 the durable conversation grows. Unknown or older model IDs retain the user
 fallback. This does not change the top-level compatibility system prefix.
 
+Effort and adaptive thinking are separate catalog capabilities. The adapter
+sends adaptive thinking only when the model reports support; models such as
+Opus 4.5 can accept effort without adaptive thinking. Compaction prefers medium
+effort and session naming prefers low, falling back to default when the catalog
+does not advertise that level. Request accounting records the resolved effort.
+See Anthropic's [thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)
+and [effort](https://platform.claude.com/docs/en/build-with-claude/effort) contracts.
+
 Requests use the account's usage settings. Jecode does not enable extra usage,
 modify spending limits or silently switch to API billing. Provider rate limits
 are reported through the existing cancellable retry path, including a supplied

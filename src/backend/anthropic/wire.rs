@@ -13,7 +13,7 @@ pub(super) fn request(
     messages: &[Value],
     catalog: Option<&Value>,
     output_tokens: Option<usize>,
-    thinking_off: Option<&str>,
+    thinking_mode: Option<&str>,
     pool: Option<&Pool>,
 ) -> Result<Value, String> {
     let mut instructions = vec![COMPATIBILITY_SYSTEM.to_owned()];
@@ -129,17 +129,19 @@ pub(super) fn request(
     match effort {
         Effort::Default => {}
         Effort::None => {
-            let mode = thinking_off.ok_or("Anthropic model has no verified thinking-off mode")?;
+            let mode = thinking_mode.ok_or("Anthropic model has no verified thinking-off mode")?;
             fields.insert(
                 "thinking".into(),
                 Value::object([("type", Value::string(mode))]),
             );
         }
         Effort::Low | Effort::Medium | Effort::High | Effort::Xhigh | Effort::Max => {
-            fields.insert(
-                "thinking".into(),
-                Value::object([("type", Value::string("adaptive"))]),
-            );
+            if let Some(mode) = thinking_mode {
+                fields.insert(
+                    "thinking".into(),
+                    Value::object([("type", Value::string(mode))]),
+                );
+            }
             fields.insert(
                 "output_config".into(),
                 Value::object([("effort", Value::string(effort.name()))]),

@@ -58,9 +58,11 @@ impl Agent {
                 let mut timing = RequestTiming::start();
                 let mut usage = Usage::default();
                 let mut has_usage = false;
+                let mut effort = Effort::Low;
                 let result = client.prepare_turn().and_then(|_| {
+                    effort = client.maintenance_effort(Effort::Low);
                     client.sample_with_effort(
-                        Effort::Low,
+                        effort,
                         &messages,
                         false,
                         Some(512),
@@ -92,7 +94,7 @@ impl Agent {
                 });
                 let event = timing.event(
                     "session_title",
-                    (&backend, &model, Effort::Low),
+                    (&backend, &model, effort),
                     1,
                     if result.is_ok() { "complete" } else { "failed" },
                     has_usage.then_some(usage),
