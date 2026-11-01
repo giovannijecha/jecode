@@ -117,7 +117,7 @@ References: [npm package binaries](https://docs.npmjs.com/cli/v11/configuring-np
 
 ## User lifecycle
 
-The npm commands are:
+Once published, the npm path is:
 
 ```text
 npm install -g jecode
