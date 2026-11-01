@@ -41,12 +41,7 @@ fn submit(app: &mut App, value: &str) {
     key(app, 13, 0);
 }
 fn wait(app: &mut App) {
-    let started = Instant::now();
-    while app.worker.is_some() || app.job.is_some() {
-        app.poll().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(6));
-        thread::sleep(Duration::from_millis(5));
-    }
+    wait_until(app, |app| app.worker.is_none() && app.job.is_none());
 }
 pub(super) fn catalog() -> Value {
     Value::object([(

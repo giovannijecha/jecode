@@ -37,12 +37,7 @@ fn live(app: &App) -> String {
 }
 
 fn wait_job(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while app.job.is_some() {
-        app.poll().unwrap();
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    super::tests::wait_until(app, |app| app.job.is_none());
 }
 
 #[test]
@@ -128,12 +123,9 @@ fn automatic_queue_dispatch_and_catalog_loading_keep_an_unread_error() {
         app.state
             .notify_copy(Feedback::result(Kind::Error, "Copy error after queuing"));
         release.send(()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while app.worker.is_some() || app.job.is_some() || !app.state.queue.messages().is_empty() {
-            app.poll().unwrap();
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        super::tests::wait_until(&mut app, |app| {
+            app.worker.is_none() && app.job.is_none() && app.state.queue.messages().is_empty()
+        });
         assert_eq!(
             app.state.notice.as_ref().unwrap().text,
             "Autosave failed after queuing",
@@ -212,12 +204,7 @@ fn worker_completion_and_connection_events_keep_a_pending_session_error_visible(
     app.state.event(Event::ContextCompacted {
         text: "Context compacted".into(),
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while app.worker.is_some() {
-        app.poll().unwrap();
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    super::tests::finish(&mut app);
     assert_eq!(
         app.state.notice.as_ref().unwrap().text,
         "Pending session error"

@@ -6,7 +6,7 @@ use crate::{
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,
 };
-use std::{collections::BTreeMap, thread, time::Instant};
+use std::{collections::BTreeMap, time::Instant};
 
 /// `notools/x` cannot serve tool requests, so it is listed last and blocked.
 fn listing() -> Value {
@@ -46,12 +46,7 @@ fn enter(app: &mut App) {
 }
 
 fn wait(app: &mut App) {
-    let started = Instant::now();
-    while app.job.is_some() || app.worker.is_some() {
-        app.poll().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(5));
-        thread::sleep(Duration::from_millis(5));
-    }
+    super::tests::wait_until(app, |app| app.job.is_none() && app.worker.is_none());
 }
 
 fn shown(app: &App) -> String {

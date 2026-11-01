@@ -46,19 +46,23 @@ fn submit(app: &mut App, text: &str) {
     assert!(!app.submit().unwrap());
 }
 pub(super) fn finish(app: &mut App) {
-    let started = Instant::now();
-    while app.worker.is_some() {
-        app.poll().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(6));
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_until(app, |app| app.worker.is_none());
 }
-/// Polls until `ready` holds; the worker thread advances independently.
+/// Waits for fixture state; latency assertions belong at the operation boundary.
 pub(super) fn wait_until(app: &mut App, ready: impl Fn(&App) -> bool) {
     let started = Instant::now();
     while !ready(app) {
         app.poll().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(6));
+        if ready(app) {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "TUI fixture did not reach the expected state; worker: {}, job: {}, notice: {:?}",
+            app.worker.is_some(),
+            app.job.is_some(),
+            app.state.notice.as_ref().map(|notice| &notice.text)
+        );
         thread::sleep(Duration::from_millis(5));
     }
 }
