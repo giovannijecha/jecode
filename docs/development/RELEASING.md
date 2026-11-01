@@ -1,7 +1,7 @@
 # Preparing an npm release
 
-The `jecode` npm package contains prebuilt native executables for Windows x64,
-Linux x64 (GNU libc 2.39 or newer), and macOS ARM64. npm installs the package
+The `@giovannijecha/jecode` npm package contains prebuilt native executables for
+Windows x64, Linux x64 (GNU libc 2.39 or newer), and macOS ARM64. npm installs the package
 and exposes a small Node standard-library launcher as the `jecode` command.
 The launcher selects and runs the matching executable. Installing the package needs no Rust
 toolchain, native compiler, third-party npm dependency, or install script. Node
@@ -57,7 +57,7 @@ release check.
    artifact.
 3. The final hosted macOS job downloads all three artifacts, verifies their
    version, revision, checkout cleanliness, and digests, assembles
-   `jecode-<version>.tgz`, runs the
+   `giovannijecha-jecode-<version>.tgz`, runs the
    lifecycle fixture, and previews `npm publish <tarball> --dry-run` against
    those exact bytes. Download its `jecode-npm-tarball` artifact, including
    `manifest.json`, within seven days and inspect the digest, package inventory,
@@ -67,8 +67,9 @@ The workflow does **not** publish to npm, create a Git tag or GitHub release,
 or use an npm credential or OIDC write permission. The local lifecycle fixture
 uses a private registry on loopback; it never contacts a provider. It checks
 the native binary and npm's global install, update, and uninstall behavior.
-Once two public versions exist, also verify `npm update -g jecode` against the
-real registry from the earlier version.
+Once two public versions exist, also verify
+`npm update -g @giovannijecha/jecode` against the real registry from the earlier
+version.
 
 To check one platform from a local checkout, build its release executable with
 `cargo build --release --locked --offline`, then run:
@@ -76,7 +77,7 @@ To check one platform from a local checkout, build its release executable with
 ```text
 node tools/npm/release.mjs stage <path-to-native-executable> target/npm-stage/<target>
 node tools/npm/release.mjs pack target/npm-stage target/npm-local --local
-node tools/npm/lifecycle.mjs target/npm-local/jecode-<version>.tgz
+node tools/npm/lifecycle.mjs target/npm-local/giovannijecha-jecode-<version>.tgz
 ```
 
 Use `win32-x64`, `linux-x64`, or `darwin-arm64` as `<target>`. Local packaging
@@ -88,12 +89,12 @@ Checkouts used for release artifacts must share the same commit.
 
 ## Publication after authorization
 
-The unscoped `jecode` name needs an npm account that can claim it. An E404 from
-`npm view jecode` does not establish ownership or reserve the name. The first
+Publish `@giovannijecha/jecode` under the maintainer's npm user scope. The first
 publication requires the maintainer's authenticated npm account and 2FA, or a
 staged publication followed by 2FA approval. Review and publish the exact
-complete tarball produced by the preparation workflow; never publish a local
-single-platform fixture.
+complete tarball produced by the preparation workflow with
+`npm publish <tarball> --access public`; scoped packages need explicit public
+access. Never publish a local single-platform fixture.
 
 After the first package exists, trusted publishing can be configured in its npm
 settings for `giovannijecha/jecode` and the exact future publication workflow
@@ -111,7 +112,7 @@ References: [npm package binaries](https://docs.npmjs.com/cli/v11/configuring-np
 [global installation](https://docs.npmjs.com/downloading-and-installing-packages-globally/),
 [global update](https://docs.npmjs.com/updating-packages-downloaded-from-the-registry/),
 [global uninstall](https://docs.npmjs.com/uninstalling-packages-and-dependencies/),
-[first public publication](https://docs.npmjs.com/creating-and-publishing-unscoped-public-packages/),
+[first public publication](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/),
 [trusted publishing](https://docs.npmjs.com/trusted-publishers/), and
 [GitHub runner architectures](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job).
 
@@ -120,10 +121,10 @@ References: [npm package binaries](https://docs.npmjs.com/cli/v11/configuring-np
 The npm commands are:
 
 ```text
-npm install -g jecode
+npm install -g @giovannijecha/jecode
 jecode --version
-npm update -g jecode
-npm uninstall -g jecode
+npm update -g @giovannijecha/jecode
+npm uninstall -g @giovannijecha/jecode
 ```
 
 npm uninstall removes the npm package and command shim. It does not remove

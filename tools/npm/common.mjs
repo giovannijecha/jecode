@@ -6,6 +6,7 @@ import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 
 export const root = fileURLToPath(new URL('../../', import.meta.url));
+export const packageName = '@giovannijecha/jecode';
 export const {targets} = createRequire(import.meta.url)('../../npm/targets.cjs');
 export const host = `${process.platform}-${process.arch}`;
 

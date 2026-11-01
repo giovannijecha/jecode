@@ -227,11 +227,12 @@ node --test tools/npm/release.test.mjs
 ```
 
 The [release runbook](RELEASING.md) describes staging and packing the platform
-binaries. After preparing a tarball, replace `path/to/jecode-0.1.0.tgz` below
+binaries. After preparing a tarball, replace
+`path/to/giovannijecha-jecode-0.1.0.tgz` below
 with its actual path and run the lifecycle fixture on each supported platform:
 
 ```text
-node tools/npm/lifecycle.mjs path/to/jecode-0.1.0.tgz
+node tools/npm/lifecycle.mjs path/to/giovannijecha-jecode-0.1.0.tgz
 ```
 
 The fixture uses an isolated npm installation, local registry, and user home

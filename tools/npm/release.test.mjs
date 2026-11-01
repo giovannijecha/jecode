@@ -82,7 +82,10 @@ test('a local package is private and contains only the selected payload and publ
   const tarball = await pack(artifacts, output, {local: true});
   const files = unpack(fs.readFileSync(tarball));
   const manifest = JSON.parse(files.get('package/package.json'));
-  assert.equal(manifest.name, 'jecode');
+  assert.equal(manifest.name, '@giovannijecha/jecode');
+  assert.equal(path.basename(tarball), `giovannijecha-jecode-${version()}.tgz`);
+  assert.deepEqual(manifest.bin, {jecode: 'bin/jecode.cjs'});
+  assert.equal(manifest.publishConfig.access, 'public');
   assert.equal(manifest.version, version());
   assert.equal(manifest.private, true);
   assert.equal(manifest.scripts, undefined);
@@ -111,6 +114,11 @@ test('a complete package uses one Cargo version and records all three verified a
   const files = unpack(fs.readFileSync(tarball));
   const manifest = JSON.parse(files.get('package/package.json'));
   assert.equal(manifest.private, undefined);
+  assert.equal(manifest.name, '@giovannijecha/jecode');
+  assert.equal(path.basename(tarball), `giovannijecha-jecode-${version()}.tgz`);
+  const packageReceipt = JSON.parse(fs.readFileSync(path.join(path.dirname(tarball), 'manifest.json')));
+  assert.equal(packageReceipt.filename, path.basename(tarball));
+  assert.equal(packageReceipt.sha256, digest(fs.readFileSync(tarball)));
   assert.equal(manifest.version, version());
   const receipt = JSON.parse(files.get('package/native/manifest.json'));
   assert.equal(receipt.revision, revision());

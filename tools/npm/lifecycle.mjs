@@ -4,7 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {root, targets, host, digest, regularFile, npm, command, json} from './common.mjs';
+import {root, packageName, targets, host, digest, regularFile, npm, command, json} from './common.mjs';
 import {unpack} from './archive.mjs';
 
 const target = targets[host];
@@ -35,7 +35,7 @@ function isolatedEnvironment(scratch) {
 }
 
 function installed(prefix) {
-  const directory = path.join(prefix, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules/jecode');
+  const directory = path.join(prefix, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', packageName);
   return {
     directory,
     launcher: path.join(directory, 'bin/jecode.cjs'),
@@ -63,7 +63,7 @@ function preserved(state) {
 }
 
 async function uninstall(state, options) {
-  await npm(['uninstall', '--global', 'jecode'], options);
+  await npm(['uninstall', '--global', packageName], options);
   const files = installed(state.prefix);
   assert.ok(!fs.existsSync(files.directory), 'npm must remove its package');
   assert.ok(!fs.existsSync(files.shim), 'npm must remove its command shim');
@@ -84,7 +84,7 @@ async function fixture(version, scratch, template, options) {
   ], {env: {...process.env, JECODE_NPM_FIXTURE_VERSION: version}});
   assert.equal(compiler.status, 0, compiler.stderr);
   const manifest = {
-    name: 'jecode', version, private: true, license: 'MIT',
+    name: packageName, version, private: true, license: 'MIT',
     bin: {jecode: 'bin/jecode.cjs'}, files: ['bin/', 'native/'],
   };
   json(path.join(directory, 'package.json'), manifest);
@@ -103,7 +103,7 @@ async function registry(fixtures) {
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, origin);
     response.setHeader('Cache-Control', 'no-store');
-    if (url.pathname === '/jecode') {
+    if (decodeURIComponent(url.pathname) === `/${packageName}`) {
       const versions = {};
       for (const [version, item] of fixtures) {
         if (version > latest) continue;
@@ -114,7 +114,7 @@ async function registry(fixtures) {
         }};
       }
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify({name: 'jecode', 'dist-tags': {latest}, versions}));
+      response.end(JSON.stringify({name: packageName, 'dist-tags': {latest}, versions}));
       return;
     }
     const version = /^\/jecode-(0\.0\.[12])\.tgz$/.exec(url.pathname)?.[1];
@@ -150,7 +150,7 @@ export async function lifecycle(tarball) {
   if (!target) throw new Error(`Unsupported test host: ${host}`);
   const bytes = regularFile(path.resolve(tarball)), contents = unpack(bytes);
   const metadata = JSON.parse(contents.get('package/package.json'));
-  assert.equal(metadata.name, 'jecode');
+  assert.equal(metadata.name, packageName);
   const native = contents.get(`package/native/${host}/${target.binary}`);
   assert.ok(native, `The package does not contain ${host}`);
   const receipt = JSON.parse(contents.get('package/native/manifest.json'));
@@ -177,7 +177,7 @@ export async function lifecycle(tarball) {
     for (const value of ['0.0.1', '0.0.2']) fixtures.set(value, await fixture(value, scratch, contents, options));
     service = await registry(fixtures);
     options.env.npm_config_registry = service.origin;
-    await npm(['install', '--global', 'jecode'], options);
+    await npm(['install', '--global', packageName], options);
     await checkFixtureVersion(state.prefix, '0.0.1', options);
     const forwarded = ['text with spaces', 'λ', 'a&b', '$(untouched)', '--flag=value'];
     const args = await command(process.execPath, [installed(state.prefix).launcher, '--args', ...forwarded], options);
@@ -190,7 +190,7 @@ export async function lifecycle(tarball) {
     const exit = await runInstalled(state.prefix, ['--exit', '7'], options);
     assert.equal(exit.status, 7, exit.stderr);
     service.update();
-    await npm(['update', '--global', 'jecode'], options);
+    await npm(['update', '--global', packageName], options);
     await checkFixtureVersion(state.prefix, '0.0.2', options);
     assert.equal(digest(regularFile(installed(state.prefix).binary)), fixtures.get('0.0.2').binaryDigest);
     preserved(state);
@@ -208,7 +208,7 @@ export async function lifecycle(tarball) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.length !== 3) {
-    console.error('Usage: node tools/npm/lifecycle.mjs <jecode-version.tgz>');
+    console.error('Usage: node tools/npm/lifecycle.mjs <package.tgz>');
     process.exitCode = 1;
   } else lifecycle(process.argv[2]).catch(error => { console.error(error.stack); process.exitCode = 1; });
 }

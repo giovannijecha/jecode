@@ -30,7 +30,7 @@ macOS on Apple silicon. Its macOS build is verified on macOS 15; earlier
 versions have not been tested. Install Node.js 22 or later and npm, then run:
 
 ```sh
-npm install -g jecode
+npm install -g @giovannijecha/jecode
 jecode --version
 ```
 
@@ -47,14 +47,14 @@ If a global npm install fails with a permissions error, follow
 To update:
 
 ```sh
-npm update -g jecode
+npm update -g @giovannijecha/jecode
 jecode --version
 ```
 
 To remove:
 
 ```sh
-npm uninstall -g jecode
+npm uninstall -g @giovannijecha/jecode
 ```
 
 npm removes its own package and command. Your settings, accounts, conversations,
