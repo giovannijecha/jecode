@@ -39,6 +39,15 @@ $text = [Text.StringBuilder]::new(); $writer = [IO.StringWriter]::new($text)
 $paste = $false; $last = [long]-1000; $wheel = 0
 [JecodeConsole]::Emit($records, 3, $writer, [ref]$paste, [ref]$last, [ref]$wheel, 0)
 Write-Output ($text.ToString().Trim())
+$wheel = 0; $rows = 0
+for ($index = 0; $index -lt 15; $index++) {{ $rows += [JecodeConsole]::WheelRows([ref]$wheel, 128) }}
+$fine = @(); $wheel = 0
+for ($index = 0; $index -lt 4; $index++) {{ $fine += [JecodeConsole]::WheelRows([ref]$wheel, 30) }}
+$wheel = 0; $null = [JecodeConsole]::WheelRows([ref]$wheel, 60)
+Write-Output ("$rows " + ($fine -join ',') + " " + [JecodeConsole]::WheelRows([ref]$wheel, -128))
+$mixed = @(); $wheel = 0
+foreach ($delta in @(90, 120, 30, -90, -120, -30)) {{ $mixed += [JecodeConsole]::WheelRows([ref]$wheel, $delta) }}
+Write-Output ($mixed -join ',')
 "#,
         include_str!("../terminal.cs")
     );
@@ -80,7 +89,10 @@ Write-Output ($text.ToString().Trim())
             "0",
             "K|65|0|97",
             "W|-3",
-            "K|13|0|13"
+            "K|13|0|13",
+            // ConPTY notches and finer deltas both preserve the wheel remainder.
+            "-45 0,0,0,-3 0",
+            "0,-3,-3,0,3,3",
         ]
     );
 }
@@ -429,7 +441,7 @@ Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
             "K|0|0|55357;K|0|0|56898",
             "K|0|0|55357;K|0|0|56898;K|13|0|13",
             "P|102,105,114,115,116,13,10,115,101,99,111,110,100",
-            "K|0|0|27;P|91,50,48,48,126,104,105,13,10,55357,56898,27,91,50,48,49,126;K|13|0|13"
+            "K|0|0|27;P|91,50,48,48,126,104,105,13,10,55357,56898,27,91,50,48,49,126;K|13|0|13",
         ]
     );
 }

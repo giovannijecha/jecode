@@ -186,3 +186,244 @@ fn composer_stream_scroll_and_capture() {
         current.state.editor.text
     );
 }
+
+/// Saved messages for settled turns with prose, code, a table and three tools
+/// with large results; every 50th answer is very long. Lines are distinct so
+/// scrolling repaints rows as a real conversation does.
+pub(super) fn mixed_messages(turns: usize) -> Vec<Value> {
+    let message = |role: &str, content: String| {
+        Value::object([
+            ("role", Value::string(role)),
+            ("content", Value::string(content)),
+        ])
+    };
+    let mut messages = Vec::new();
+    for turn in 0..turns {
+        messages.push(message(
+            "user",
+            format!("Request {turn}: review the module and fix the failing case."),
+        ));
+        let ids: Vec<_> = (0..3).map(|index| format!("call-{turn}-{index}")).collect();
+        let calls = ["read", "bash", "edit"]
+            .into_iter()
+            .zip(&ids)
+            .map(|(name, id)| {
+                let arguments = Value::object([
+                    ("path", Value::string(format!("src/module_{turn}.rs"))),
+                    ("command", Value::string(format!("cargo test case_{turn}"))),
+                ]);
+                crate::test_support::tool_call(id, name, arguments)
+            })
+            .collect();
+        messages.push(Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::Null),
+            ("tool_calls", Value::Array(calls)),
+        ]));
+        let output = (0..400)
+            .map(|line| format!("{turn}:{line:04}: fn synthetic_{line}() -> usize {{ {line} }}\n"))
+            .collect::<String>();
+        for id in &ids {
+            let result = Value::object([
+                ("stdout", Value::string(&output)),
+                ("content", Value::string(&output)),
+                ("exit_code", Value::number(0)),
+            ]);
+            messages.push(Value::object([
+                ("role", Value::string("tool")),
+                ("tool_call_id", Value::string(id)),
+                ("content", Value::string(result.encode())),
+            ]));
+        }
+        let paragraphs = if turn % 50 == 25 { 400 } else { 6 };
+        let mut answer = String::new();
+        for paragraph in 0..paragraphs {
+            answer.push_str(&format!(
+                "Paragraph {turn}.{paragraph} explains **finding {paragraph}** in `module_{turn}`, \
+                 compares it with [the reference](https://example.test/{turn}) and keeps \
+                 ordinary words long enough to wrap across terminal rows.\n\n"
+            ));
+        }
+        answer.push_str("```rust\n");
+        for line in 0..40 {
+            answer.push_str(&format!(
+                "fn handler_{turn}_{line}(input: &str) -> Result<Vec<u8>, String> {{ Ok(input.bytes().rev().collect()) }}\n"
+            ));
+        }
+        answer.push_str("```\n\n| Case | Before | After | Notes |\n| --- | ---: | ---: | --- |\n");
+        for row in 0..12 {
+            answer.push_str(&format!(
+                "| case {turn}.{row} | {} ms | {} ms | synthetic **row** with `code` |\n",
+                row * 7,
+                row * 3
+            ));
+        }
+        if turn + 1 == turns {
+            answer.push_str("\nFINAL-ANSWER-MARK\n");
+        }
+        messages.push(message("assistant", answer));
+    }
+    messages
+}
+
+/// An application that resumed a saved mixed conversation.
+fn mixed_app(turns: usize, home: &Directory, directory: &Directory) -> App {
+    let agent = || {
+        let mut agent = Agent::new(
+            OpenRouter::fixture("http://127.0.0.1:1".into()),
+            Tools::new(directory.path()).unwrap(),
+        );
+        agent.enable_sessions(home.path()).unwrap();
+        agent
+    };
+    let saved = agent();
+    saved
+        .archive()
+        .messages
+        .lock()
+        .unwrap()
+        .extend(mixed_messages(turns));
+    saved.save_session().unwrap();
+    let id = saved.sessions().unwrap().snapshot().id.clone();
+    drop(saved);
+    let mut app = App::new(agent(), super::tests::config(directory), None);
+    app.resume_session(&id);
+    app
+}
+
+#[test]
+#[ignore = "synthetic release UI benchmark; no network, personal configuration or terminal writes"]
+fn mixed_history_scroll() {
+    println!("META,resumed mixed turns; 3 warmups; 21 samples; elapsed microseconds; VT bytes");
+    for turns in [200, 1000] {
+        let (home, directory) = (Directory::new(), Directory::new());
+        let mut app = mixed_app(turns, &home, &directory);
+        scroll_samples(&mut app, turns);
+    }
+}
+
+fn require_settled_document(document: &crate::sessions::Document) -> Result<(), &'static str> {
+    if document.pending.active
+        || document.input.question.is_some()
+        || !document.input.queued.is_empty()
+    {
+        return Err("The copied journal must contain a settled conversation");
+    }
+    Ok(())
+}
+
+fn require_settled_journal(store: &crate::sessions::Store, id: &str) -> Result<(), &'static str> {
+    let document = store
+        .read(id)
+        .map_err(|_| "The copied journal could not be read")?;
+    require_settled_document(&document)
+}
+
+fn resume_for_measurement(app: &mut App, id: &str) -> Result<(), &'static str> {
+    app.resume_session(id);
+    // A returned collaborator can be ready even when the saved turn is settled.
+    // Polling the UI must never continue that work during a measurement.
+    app.collaboration_auto_resume = false;
+    if app.worker.is_some()
+        || app.agent.is_none()
+        || app
+            .persistence
+            .as_ref()
+            .is_none_or(|handle| handle.id() != id)
+    {
+        return Err("The copied journal could not be resumed for measurement");
+    }
+    Ok(())
+}
+
+/// Scrolls a copy of one saved conversation in an isolated home and prints
+/// only timings and byte counts. Set `JECODE_MEASURE_JOURNAL` to a session
+/// journal and `JECODE_MEASURE_DIRECTORY` to the folder it belongs to.
+#[test]
+#[ignore = "local release UI benchmark of a copied journal; prints no conversation text"]
+fn own_history_scroll() {
+    let (Some(journal), Some(workspace)) = (
+        std::env::var_os("JECODE_MEASURE_JOURNAL"),
+        std::env::var_os("JECODE_MEASURE_DIRECTORY"),
+    ) else {
+        println!("SKIPPED,set JECODE_MEASURE_JOURNAL and JECODE_MEASURE_DIRECTORY");
+        return;
+    };
+    let journal = std::path::PathBuf::from(journal);
+    let id = journal.file_stem().unwrap().to_string_lossy().into_owned();
+    let home = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(std::path::Path::new(&workspace)).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let store =
+        crate::sessions::Store::new(home.path().to_path_buf(), std::path::Path::new(&workspace))
+            .unwrap();
+    let target = store.fixture_journal(&id);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::copy(&journal, target).unwrap();
+    require_settled_journal(&store, &id).unwrap_or_else(|error| panic!("{error}"));
+    // Fixture subscription accounts let a journal from any provider resume;
+    // requests are never made.
+    let config = super::tests::config(&home);
+    let config_home = config.store.path().parent().unwrap().to_path_buf();
+    crate::auth::openai::Store::fixture_account(config_home.clone(), "isolated-token").unwrap();
+    crate::auth::anthropic::Store::fixture_account(config_home.clone(), "isolated-token").unwrap();
+    for services in config.settings.configured_services(&config_home) {
+        agent.register_backend(services);
+    }
+    let mut app = App::new(agent, config, None);
+    let started = Instant::now();
+    resume_for_measurement(&mut app, &id).unwrap_or_else(|error| panic!("{error}"));
+    println!("RESUME,{:.3}", started.elapsed().as_secs_f64() * 1e3);
+    let items = app.state.items.len();
+    scroll_samples(&mut app, items);
+}
+
+/// Wheel steps through the application and their parts, at two sizes.
+fn scroll_samples(app: &mut App, size: usize) {
+    println!("ITEMS,{size},{}", app.state.items.len());
+    for (width, height) in [(80, 24), (160, 50)] {
+        app.state.width = width;
+        app.state.height = height;
+        app.renderer = Display::new((width, height));
+        let started = Instant::now();
+        drain(&mut app.renderer, &app.state);
+        println!(
+            "LAYOUT,{size},{width}x{height},{:.3}",
+            started.elapsed().as_secs_f64() * 1e3
+        );
+        // One wheel notch through the application, as the event loop runs it.
+        let mut decoder = super::keys::Decoder::default();
+        samples(&format!("wheel_loop_{width}x{height}"), size, || {
+            app.terminal_event(super::terminal::Input::Scroll(-3), &mut decoder)
+                .unwrap();
+            app.capture_input();
+            app.persist_input(false);
+            drain(&mut app.renderer, &app.state)
+        });
+        samples(&format!("scroll_layout_{width}x{height}"), size, || {
+            app.renderer.scroll(Scroll::Rows(-3));
+            drain(&mut app.renderer, &app.state)
+        });
+        samples(&format!("capture_input_{width}x{height}"), size, || {
+            app.capture_input();
+            0
+        });
+        samples(&format!("poll_settled_{width}x{height}"), size, || {
+            app.poll().unwrap();
+            0
+        });
+        app.state.toggle_tools();
+        drain(&mut app.renderer, &app.state);
+        samples(&format!("scroll_expanded_{width}x{height}"), size, || {
+            app.renderer.scroll(Scroll::Rows(-3));
+            drain(&mut app.renderer, &app.state)
+        });
+        app.state.toggle_tools();
+    }
+}
+
+#[path = "measurement_tests/own_history_tests.rs"]
+mod own_history_tests;

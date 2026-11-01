@@ -292,7 +292,7 @@ They call OS APIs directly; the Rust code uses no `unsafe` and no FFI.
 | Windows command confinement | Workspace commands run inside a Windows Process Security Environment with an OS-enforced filesystem policy; see [Permissions](../usage/PERMISSIONS.md#command-confinement). |
 | Unix processes | A C guardian owns a process group, watches a private owner pipe and cleans up descendants on cancellation, timeout or owner loss. |
 | Interactive terminals | Windows uses ConPTY with current-user named pipes; Unix uses POSIX PTYs with private Unix-domain sockets. Input and control use separate connections. |
-| HTTPS and cryptography | Windows uses WinHTTP and .NET cryptography; macOS uses CFNetwork, Security and CommonCrypto; Linux uses sockets with the system libssl and libcrypto. Request bodies and tokens travel to the adapter on stdin, never in arguments or files. |
+| HTTPS and cryptography | Windows uses WinHTTP and .NET cryptography; macOS uses CFNetwork, Security and CommonCrypto; Linux uses sockets with the system libssl and libcrypto. Request bodies and tokens travel to the adapter on stdin, never in arguments or files. On Windows, account cryptography and owner-only ACL changes share one helper per process, which exits after 10 idle seconds. Requests support cancellation and a 15-second I/O deadline; an interrupted request discards the helper before another can use it. |
 | Terminal input | Windows reads `CONIN$` through a C# adapter; Unix uses `termios` and `/dev/tty` with a guardian that restores terminal modes. |
 | Clipboard and images | Windows PowerShell, macOS system commands, or the Linux X11/Wayland and GdkPixbuf adapter; see [Attachments](../usage/ATTACHMENTS.md#platform-requirements). |
 | Disk space | `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix. |
@@ -302,7 +302,10 @@ children that create their own process group or session leave that cleanup
 boundary. Losing the Unix owner and guardian at the same time can prevent
 terminal restoration.
 
-The TUI uses the alternate screen, 24-bit color and changed-row painting.
+The TUI uses the alternate screen, 24-bit color and changed-row painting. On
+Windows frames use `CONOUT$` to avoid the small writes made by standard output
+to a console. This reduces ConPTY frame delays; it does not bypass the host's
+own rendering or frame pacing. The terminal adapter selects UTF-8 output.
 `--plain` bypasses the terminal adapter entirely. Native fixtures and host
 checks are in [Platform support](PLATFORMS.md).
 

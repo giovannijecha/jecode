@@ -51,7 +51,9 @@ impl Terminal {
                     if started.elapsed() < Duration::from_secs(5)
                         && matches!(child.try_wait(), Ok(None)) =>
                 {
-                    thread::sleep(Duration::from_millis(20))
+                    // The adapter creates its pipe after .NET starts; a short
+                    // interval avoids adding most of a poll period to startup.
+                    thread::sleep(Duration::from_millis(2))
                 }
                 Err(error) => {
                     let _ = child.kill();
@@ -207,6 +209,9 @@ fn parse(line: &str) -> Input {
     }
 }
 
+#[cfg(test)]
+#[path = "windows/burst_regression_tests.rs"]
+mod burst_regression_tests;
 #[cfg(test)]
 mod measurement_tests;
 #[cfg(test)]

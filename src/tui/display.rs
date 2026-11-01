@@ -28,6 +28,9 @@ pub(super) struct Display {
     below: usize,
     fresh: bool,
     light_background: bool,
+    /// The active console screen, opened on the first frame.
+    #[cfg(windows)]
+    console: Option<std::fs::File>,
 }
 
 impl Display {
@@ -45,6 +48,8 @@ impl Display {
             below: 0,
             fresh: false,
             light_background: false,
+            #[cfg(windows)]
+            console: None,
         }
     }
 
@@ -119,12 +124,30 @@ impl Display {
     pub fn draw(&mut self, state: &State, model: &str, directory: &str) -> Result<(), String> {
         let output = self.update(state, model, directory, Instant::now());
         if !output.is_empty() {
-            let mut stdout = io::stdout().lock();
-            write!(stdout, "\x1b[?2026h{output}\x1b[?2026l")
-                .and_then(|_| stdout.flush())
+            self.write_frame(&format!("\x1b[?2026h{output}\x1b[?2026l"))
                 .map_err(|error| format!("Could not draw terminal: {error}"))?;
         }
         Ok(())
+    }
+
+    /// Writes one frame with a single console call where possible. Standard
+    /// output splits console writes into small chunks, and ConPTY paints a
+    /// synchronized frame that arrives in several writes only at its next
+    /// tick, about 16 ms later. The adapter selects UTF-8 console output.
+    fn write_frame(&mut self, frame: &str) -> io::Result<()> {
+        let mut stdout = io::stdout().lock();
+        stdout.flush()?;
+        #[cfg(windows)]
+        {
+            if self.console.is_none() {
+                self.console = std::fs::OpenOptions::new().write(true).open("CONOUT$").ok();
+            }
+            if let Some(console) = &mut self.console {
+                return console.write_all(frame.as_bytes());
+            }
+        }
+        stdout.write_all(frame.as_bytes())?;
+        stdout.flush()
     }
 
     pub(super) fn update(

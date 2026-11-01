@@ -92,22 +92,42 @@ fn materialize(root: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String>
     }
     let (temporary, mut file) = reserve_stage(root, &NEXT)?;
     let result = (|| {
+        #[cfg(unix)]
+        file.lock()
+            .map_err(|error| format!("Could not lock native adapter stage: {error}"))?;
         file.write_all(bytes)
             .and_then(|()| file.sync_all())
             .map_err(|error| format!("Could not write native adapter: {error}"))?;
         drop(file);
-        match fs::rename(&temporary, &path) {
-            Ok(()) => {}
-            Err(_) if matches_asset(&path, bytes)? => {}
-            Err(error) => return Err(format!("Could not install native adapter: {error}")),
-        }
-        if !matches_asset(&path, bytes)? {
-            return Err("Native adapter verification failed".into());
-        }
-        Ok(path)
+        publish_stage(&temporary, &path, bytes)
     })();
     let _ = fs::remove_file(&temporary);
     result
+}
+
+fn publish_stage(temporary: &Path, path: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
+    // A child forked while the stage was writable can retain that descriptor
+    // until exec, even with close-on-exec. Wait before exposing its inode as
+    // an executable; otherwise exec can fail with ETXTBSY.
+    #[cfg(unix)]
+    {
+        let stage = fs::File::open(temporary)
+            .map_err(|error| format!("Could not reopen native adapter stage: {error}"))?;
+        stage
+            .lock()
+            .map_err(|error| format!("Could not lock native adapter stage: {error}"))?;
+        // The inherited writers are now closed. Close this reader before
+        // rename too: WSL's Windows filesystem defers visibility otherwise.
+    }
+    match fs::rename(temporary, path) {
+        Ok(()) => {}
+        Err(_) if matches_asset(path, bytes)? => {}
+        Err(error) => return Err(format!("Could not install native adapter: {error}")),
+    }
+    if !matches_asset(path, bytes)? {
+        return Err("Native adapter verification failed".into());
+    }
+    Ok(path.to_path_buf())
 }
 
 fn reserve_stage(root: &Path, counter: &AtomicU64) -> Result<(PathBuf, fs::File), String> {
@@ -194,6 +214,51 @@ mod tests {
         drop(file);
         assert_eq!(fs::read(&occupied).unwrap(), b"unrelated data");
         assert!(path.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_waits_for_an_inherited_stage_writer() {
+        use std::sync::mpsc::{self, RecvTimeoutError};
+        use std::time::Duration;
+
+        let directory = Directory::new();
+        let published = directory.path().join("published-helper");
+        let bytes = b"owned adapter bytes";
+        let (temporary, mut writer) = reserve_stage(directory.path(), &AtomicU64::new(0)).unwrap();
+        writer.lock().unwrap();
+        let inherited = writer.try_clone().unwrap();
+        writer.write_all(bytes).unwrap();
+        writer.sync_all().unwrap();
+        drop(writer);
+
+        let (entered_sender, entered) = mpsc::channel();
+        let (result_sender, result) = mpsc::channel();
+        let worker = std::thread::spawn({
+            let published = published.clone();
+            move || {
+                entered_sender.send(()).unwrap();
+                result_sender
+                    .send(publish_stage(&temporary, &published, bytes))
+                    .unwrap();
+            }
+        });
+        entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            result.recv_timeout(Duration::from_millis(100)),
+            Err(RecvTimeoutError::Timeout)
+        ));
+        assert!(!published.exists());
+        drop(inherited);
+        assert_eq!(
+            result
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap(),
+            published
+        );
+        worker.join().unwrap();
+        assert_eq!(fs::read(published).unwrap(), bytes);
     }
 
     #[test]

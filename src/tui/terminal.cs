@@ -99,6 +99,15 @@ public static class JecodeConsole {
     public static int Wheel(Record record) {
         return record.Type == 2 && record.MouseFlags == 4 ? (short)(record.MouseButtons >> 16) : 0;
     }
+    // ConPTY reports complete notches in 128-unit steps. Convert those to
+    // 120-unit notches before accumulating finer wheel deltas.
+    public static int WheelRows(ref int wheel, int delta) {
+        if (delta != 0 && delta % 128 == 0) delta = delta / 128 * 120;
+        wheel += delta;
+        int rows = -(wheel / 120) * 3;
+        wheel %= 120;
+        return rows;
+    }
     static void WriteKeys(List<Record> keys, TextWriter writer, ref bool pasteBurst, ref long lastText, long now) {
         if (pasteBurst && now - lastText > 50) pasteBurst = false;
         if (BufferedText(keys, pasteBurst)) {
@@ -118,9 +127,7 @@ public static class JecodeConsole {
             int delta = Wheel(records[index]);
             if (delta != 0) {
                 WriteKeys(keys, writer, ref pasteBurst, ref lastText, now); keys.Clear();
-                wheel += delta;
-                int rows = -(wheel / 120) * 3;
-                wheel %= 120;
+                int rows = WheelRows(ref wheel, delta);
                 if (rows != 0) writer.WriteLine("W|" + rows);
             } else { AddKey(records[index], keys); }
         }
@@ -128,6 +135,8 @@ public static class JecodeConsole {
     }
     // A multi-character console read indicates bulk input. Hold only bulk
     // records across reads so a pasted path or overflow remains one event.
+    // One paste can span several reads, including gaps while the queue is
+    // empty. Hold it until the text gap expires or a bracketed terminator arrives.
     public sealed class Burst {
         const int Gap = 50;
         const int MaxUnits = 1024 * 1024 + 1;
@@ -218,9 +227,7 @@ public static class JecodeConsole {
                     overflow = false;
                     closingMarker = 0;
                     batchPrintable = 0;
-                    wheel += delta;
-                    int rows = -(wheel / 120) * 3;
-                    wheel %= 120;
+                    int rows = WheelRows(ref wheel, delta);
                     if (rows != 0) writer.WriteLine("W|" + rows);
                     continue;
                 }
@@ -272,6 +279,15 @@ public static class JecodeConsole {
             }
         }
     }
+    static void ReportSize(IntPtr output, TextWriter writer, ref string size, ref string background) {
+        ScreenInfo info;
+        Check(GetConsoleScreenBufferInfo(output, out info), "measure screen");
+        string current = (info.Right - info.Left + 1) + "|" + (info.Bottom - info.Top + 1);
+        if (current == size) return;
+        size = current;
+        writer.WriteLine("S|" + size);
+        if (background != null) { writer.WriteLine("B|" + background); background = null; }
+    }
     public static void Run(Stream pipe, StreamWriter writer) {
         using (SafeFileHandle console = CreateFileW("CONIN$", 0xc0000000u, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
             Check(!console.IsInvalid);
@@ -299,21 +315,16 @@ public static class JecodeConsole {
                 Check(SetConsoleOutputCP(65001), "set UTF-8 output");
                 Console.Out.Write("\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1006h\x1b[?25l");
                 Console.Out.Flush();
+                // The first frame waits for this size; start the stop watcher after it.
+                string size = "";
+                ReportSize(output, writer, ref size, ref background);
                 byte[] stop = new byte[1];
                 var stopping = pipe.ReadAsync(stop, 0, 1);
                 Record[] records = new Record[4096];
-                string size = "";
                 var burst = new Burst();
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 while (!stopping.IsCompleted) {
-                    ScreenInfo info;
-                    Check(GetConsoleScreenBufferInfo(output, out info), "measure screen");
-                    string current = (info.Right - info.Left + 1) + "|" + (info.Bottom - info.Top + 1);
-                    if (current != size) {
-                        size = current;
-                        writer.WriteLine("S|" + size);
-                        if (background != null) { writer.WriteLine("B|" + background); background = null; }
-                    }
+                    ReportSize(output, writer, ref size, ref background);
                     uint available;
                     Check(GetNumberOfConsoleInputEvents(input, out available));
                     if (available > 0) {
@@ -322,7 +333,7 @@ public static class JecodeConsole {
                         burst.Emit(records, count, writer, clock.ElapsedMilliseconds);
                     } else burst.Idle(writer, clock.ElapsedMilliseconds);
                     // A console input handle is signaled when records arrive.
-                    // The timeout still polls stop and size changes promptly.
+                    // The timeout also polls stop and size changes promptly.
                     uint wait = WaitForSingleObject(input, 10);
                     if (wait == 0xffffffffu) Check(false, "wait for input");
                 }

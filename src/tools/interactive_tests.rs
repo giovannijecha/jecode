@@ -2,6 +2,7 @@ use crate::json::Value;
 use crate::redact::Redactor;
 use crate::test_support::Directory;
 use crate::tools::Tools;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -117,9 +118,27 @@ fn execute(tools: &Tools, executable: &Path, args: &[&str], extra: &[(&str, Valu
     let result = tools.execute("exec", &arguments.encode());
     assert!(
         result.get("error").is_none(),
-        "PTY launch failed: {result:?}"
+        "PTY launch failed: {result:?}; bridge stderr (first 4096 bytes): {:?}",
+        bridge_stderr(tools, &result)
     );
     result
+}
+
+fn bridge_stderr(tools: &Tools, result: &Value) -> String {
+    let Some(reference) = result.get("stderr_file").and_then(Value::as_str) else {
+        return "<unavailable>".into();
+    };
+    let Ok(path) = tools.outputs.resolve(reference) else {
+        return "<unavailable>".into();
+    };
+    let Ok(file) = std::fs::File::open(path) else {
+        return "<unavailable>".into();
+    };
+    let mut bytes = Vec::new();
+    if file.take(4096).read_to_end(&mut bytes).is_err() {
+        return "<unavailable>".into();
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn action(tools: &Tools, id: &str, name: &str, extra: &[(&str, Value)]) -> Value {

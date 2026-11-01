@@ -61,19 +61,26 @@ export function npmCommand(args) {
 
 export function command(executable, args, options = {}) {
   return new Promise((resolve, reject) => {
+    const input = options.input ?? '';
     const child = spawn(executable, args, {
-      cwd: root, windowsHide: true, ...options, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: root, windowsHide: true, ...options,
+      stdio: [input.length ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
+    let inputError;
     const timer = setTimeout(() => child.kill(), options.timeout ?? 120_000);
     child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
     child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
     child.on('error', error => { clearTimeout(timer); reject(error); });
     child.on('close', (status, signal) => {
       clearTimeout(timer);
+      if (inputError) { reject(inputError); return; }
       resolve({status, signal, stdout, stderr});
     });
-    child.stdin.end(options.input ?? '');
+    // A child can close stdin before consuming a payload. Stop and reap it
+    // before rejecting, instead of leaving an unhandled stream error.
+    child.stdin?.on('error', error => { inputError = error; child.kill(); });
+    child.stdin?.end(input);
   });
 }
 
