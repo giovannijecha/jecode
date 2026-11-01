@@ -41,9 +41,8 @@ jecode "Explain the structure of this project"
 
 ## Install
 
-The first npm release is being prepared; **`jecode` is not published on npm
-yet**. Once published, install it with Node.js 22 or later and npm on Windows
-x64, Linux x64 (glibc 2.39 or newer), or macOS Apple silicon. The macOS build
+Install Jecode with Node.js 22 or later and npm on Windows x64, Linux x64
+(glibc 2.39 or newer), or macOS Apple silicon. The macOS build
 has been tested on macOS 15; earlier versions remain unverified.
 
 ```sh
@@ -52,8 +51,8 @@ jecode --version
 ```
 
 The npm command launches a bundled native executable. It needs Node.js to
-start; the standalone executable does not. Until publication, build and install
-from source using [Installation](docs/usage/INSTALLATION.md). That guide also
+start; the standalone executable does not. To build and install from source,
+see [Installation](docs/usage/INSTALLATION.md). That guide also
 covers npm updates, removal, and existing standalone installations.
 
 ## First task
