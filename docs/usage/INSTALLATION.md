@@ -34,8 +34,8 @@ npm install -g @giovannijecha/jecode
 jecode --version
 ```
 
-The version command should print a line beginning with `jecode 0.1.0` for the
-first release. The package includes the native executables and does not build
+The version command should print a line beginning with `jecode 0.1.1` for this
+release. The package includes the native executables and does not build
 Rust code or download a binary when you first run it. Node.js starts the npm
 command; the standalone executable below needs no Node.js.
 
@@ -122,7 +122,7 @@ build runs offline. The result is
 ./target/release/jecode --version
 ```
 
-The output looks like `jecode 0.1.0 (linux-x86_64-release, exe fnv1a64:…)`: the
+The output looks like `jecode 0.1.1 (linux-x86_64-release, exe fnv1a64:…)`: the
 version, the platform and build profile, and a fingerprint of the executable
 that helps tell builds apart.
 

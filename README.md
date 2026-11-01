@@ -89,7 +89,7 @@ quit, and `/help` or F1 for commands and common shortcuts.
 
 ## Status
 
-Jecode is at version 0.1.0: usable, and still evolving. Commands, settings and
+Jecode is at version 0.1.1: usable, and still evolving. Commands, settings and
 storage formats may change between releases.
 
 - Windows is the primary platform. Linux and macOS are built and tested in CI;
