@@ -12,6 +12,8 @@ Claude subscription by signing in.
 
 ## What it looks like
 
+![Jecode 0.1.0 startup screen in Windows Terminal](docs/images/jecode-startup.png)
+
 Start `jecode` in a project directory and type a request, such as *"The tests in
 `src/parser` fail since the last change. Find out why and fix it."* The agent
 then works through the task in the same window:
