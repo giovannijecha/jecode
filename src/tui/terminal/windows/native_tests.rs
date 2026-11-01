@@ -175,47 +175,64 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
 #[ignore = "requires Windows ConPTY; explicit native input-to-VT latency measurement"]
 fn native_windows_input_to_vt_latency() {
     for scenario in ["latency-idle", "latency-active"] {
-        let directory = Directory::new();
-        let script = format!(
-            "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', '{}')\n",
-            native_pty_source(),
-            std::env::current_exe()
-                .unwrap()
-                .to_string_lossy()
-                .replace('\'', "''"),
-            directory.path().to_string_lossy().replace('\'', "''"),
-            scenario,
-        );
-        let result = process::run_observed(
-            Command::new("powershell.exe")
-                .args([
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    &script,
-                ])
-                .env("TEMP", directory.path())
-                .env("TMP", directory.path())
-                .env_remove("OPENROUTER_API_KEY"),
-            None,
-            Duration::from_secs(120),
-            64 * 1024,
-            &Cancellation::default(),
-            None,
-            &mut |_| Ok(()),
-        )
-        .unwrap();
-        assert_eq!(
-            result.exit_code,
-            Some(0),
-            "{scenario}: {}\n{}",
-            String::from_utf8_lossy(&result.stderr),
-            String::from_utf8_lossy(&result.stdout)
-        );
-        assert!(!result.timed_out, "native {scenario} timed out");
-        println!("{}", String::from_utf8_lossy(&result.stdout));
+        measure(scenario, native_pty_source(), "Run");
     }
+}
+
+#[test]
+#[ignore = "requires Windows ConPTY; explicit native wheel-to-VT measurement over a mixed history"]
+fn native_windows_scroll_latency() {
+    for scenario in ["scroll-latency-80x24", "scroll-latency-160x50"] {
+        let source = native_pty_source() + include_str!("native_scroll.cs");
+        measure(scenario, source, "RunScroll");
+    }
+}
+
+/// Runs one ConPTY measurement scenario and prints the host's samples.
+fn measure(scenario: &str, source: String, entry: &str) {
+    let directory = Directory::new();
+    // The combined source exceeds the Windows command-line limit.
+    let path = directory.path().join("harness.cs");
+    std::fs::write(&path, source).unwrap();
+    let script = format!(
+        "Add-Type -TypeDefinition ([IO.File]::ReadAllText('{}'))\n[JecodeTestPty]::{entry}('{}', '{}', '{}')\n",
+        path.to_string_lossy().replace('\'', "''"),
+        std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .replace('\'', "''"),
+        directory.path().to_string_lossy().replace('\'', "''"),
+        scenario,
+    );
+    let result = process::run_observed(
+        Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ])
+            .env("TEMP", directory.path())
+            .env("TMP", directory.path())
+            .env_remove("OPENROUTER_API_KEY"),
+        None,
+        Duration::from_secs(180),
+        64 * 1024,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        result.exit_code,
+        Some(0),
+        "{scenario}: {}\n{}",
+        String::from_utf8_lossy(&result.stderr),
+        String::from_utf8_lossy(&result.stdout)
+    );
+    assert!(!result.timed_out, "native {scenario} timed out");
+    println!("{}", String::from_utf8_lossy(&result.stdout));
 }
 
 fn probe() -> String {
@@ -328,6 +345,12 @@ fn native_console_fixture() {
     if matches!(scenario.as_str(), "background-light" | "background-native") {
         native_background::fixture(&path, &scenario);
         restored(&path);
+        return;
+    }
+    if scenario.starts_with("scroll-latency-") {
+        super::measurement_tests::scroll_fixture(&path);
+        restored(&path);
+        println!("NATIVE_LATENCY_RESTORED");
         return;
     }
     if scenario == "latency-idle" || scenario == "latency-active" {

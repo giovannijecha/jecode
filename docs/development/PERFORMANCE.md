@@ -32,6 +32,10 @@ Run each probe with
 | `sessions::checkpoint_measurements::active_turn_checkpoints` | Conversation saves during an active turn. |
 | `sessions::measurement_tests::windows_command_supervisor` | Supervised versus direct process launch on Windows. Writes `target/measurements/windows-process.csv`. |
 | `checkpoint_bench::matched_tools` | Complete write, edit, Bash and restore workflows with checkpoints. Configured through the variables below. |
+| `tui::measurement_tests::mixed_history_scroll` | Wheel steps over a resumed history of settled turns with prose, code, tables, tool cards with large results and very long answers: the full application step, layout alone, input capture and loop polling. Prints microseconds and VT bytes. |
+| `tui::measurement_tests::own_history_scroll` | The same steps over a copy of one saved conversation, in an isolated home. Prints only timings and byte counts. See [Measuring your own conversation](#measuring-your-own-conversation). |
+| `tui::terminal::windows::native_tests::native_windows_input_to_vt_latency` | One key and a four-character batch through ConPTY to the TUI's VT output, with and without background checkpoint writes. Each sample follows the previous frame, so ConPTY frame pacing dominates single keys. |
+| `tui::terminal::windows::native_tests::native_windows_scroll_latency` | Wheel notches and ten-notch flicks over a resumed mixed history through ConPTY at 80 x 24 and 160 x 50: when the reading counter changes, when output settles, and rows moved per notch. |
 
 `checkpoint_bench::matched_tools` reads `JECODE_BENCH_CASE` (`write4k`,
 `edit1m`, `bash1`, `bash100`, `bash1000`, `restore1`, `restore100`,
@@ -86,6 +90,90 @@ Scrolling showed no change beyond run variation.
 On 2026-10-30, expanding tools with Ctrl+O after a 750,000-byte answer took a
 longest single layout pass of 4.4–6.1 ms, down from 85–148 ms, because the
 rebuild now yields in bounded steps. Total layout work stayed about the same.
+
+### Windows startup, typing and scrolling
+
+The initial implementation was measured on Windows 11 on 2026-11-01, using
+release builds under a ConPTY host in A/B/B/A blocks. Reusing the cryptography
+helper reduced launch-to-first-frame medians from 948–1,077 ms to 147–148 ms
+with one ChatGPT account, one Claude account and an OpenRouter key (10 launches
+per block). With an empty adapter cache, medians were 1.35–1.53 s versus
+0.44–0.49 s (four launches per block). These startup measurements preceded
+the subsequent cancellation and helper-lifetime fixes; they are not final-build
+startup timings. An empty configuration showed little change.
+
+A review microbenchmark on the final C# helper repeated the 16-operation
+sequence with synthetic files: nine file protections, five hashes and two
+directory protections. In A/B/B/A blocks with three warmups and ten samples
+each, median times were 1,141.66 / 82.85 / 81.95 / 1,129.45 ms. The pooled
+medians were 1,130.63 ms for one process per operation and 82.85 ms for the
+reused helper (13.65 times faster for that sequence). The PowerShell driver
+included process startup, shutdown and reply checks. It exercised both modes
+of the same helper; it did not measure Rust request handling, account-file
+reads or the full application launch.
+
+- Account reads protect files and hash identities through the .NET
+  cryptography helper. Each operation started a new process (55–80 ms each,
+  16 before the first frame); one helper now serves the process, with an idle
+  exit and cancellation-aware requests.
+- Unbracketed multi-character input still waits for a 50 ms text gap. A 5 ms
+  quiet-queue experiment split fragmented file drops and oversized pastes, so
+  it was removed. Single keys and completed bracketed pastes remain immediate;
+  the experiment's roughly ninefold batch-input speedup does not describe the
+  shipped behavior.
+- Standard output splits a console write into chunks of a few KB, and ConPTY
+  painted a synchronized frame that arrived in several writes at its next
+  tick. Frames now use `CONOUT$` to avoid that chunking.
+- ConPTY reports a wheel notch as 128 units, so every 15th notch moved six
+  rows. Notches are normalized to the native 120-unit scale while preserving
+  fine-delta remainders across full notches and direction changes.
+
+Native probes observe ConPTY's VT output, not Windows Terminal's pixels.
+Wheel samples use random start offsets to avoid phase lock with frame pacing.
+The input probe deliberately sends the next key immediately after the previous
+frame, so its single-key timings include ConPTY's inter-frame delay.
+
+Final-code release probes on 2026-11-01 passed with these results (one run,
+60 wheel samples per size and 100 input samples per condition):
+
+| Operation | Median | p95 |
+| --- | ---: | ---: |
+| Wheel notch to changed reading counter, 80 x 24 | 1.58 ms | 2.09 ms |
+| Wheel notch to changed reading counter, 160 x 50 | 2.96 ms | 3.98 ms |
+| Ten-notch flick to changed reading counter, 80 x 24, from last notch | 9.45 ms | 14.21 ms |
+| Ten-notch flick to changed reading counter, 160 x 50, from last notch | 10.82 ms | 13.92 ms |
+| Four-character unbracketed batch, idle | 63.18 ms | 65.48 ms |
+| One key sent after the preceding frame, idle | 15.08 ms | 15.98 ms |
+| Four-character unbracketed batch, checkpoint writes active | 63.39 ms | 64.92 ms |
+| One key sent after the preceding frame, checkpoint writes active | 15.04 ms | 15.95 ms |
+
+Every notch moved exactly three rows; every ten-notch flick moved thirty.
+The last output byte after a notch arrived at a median 15.42 ms (80 x 24) or
+15.76 ms (160 x 50). Inspection of three additional 80 x 24 samples found
+only `ESC[m` style resets after the counter update, with no further cell text.
+Do not interpret first-counter timings as time to a completely quiet stream.
+
+For 1,000 settled mixed turns, Jecode's own wheel step took a median 0.15 ms
+at 80 x 24 and 0.56 ms at 160 x 50 (21 samples; maxima 0.29 and 1.11 ms).
+Settled event-loop polling took 0.2–0.3 microseconds at the median.
+
+### Measuring your own conversation
+
+`own_history_scroll` scrolls a copy of one saved conversation, so a slow
+history can be measured without sharing it. It copies the journal into a
+temporary home and accepts only settled conversations with no active turn,
+pending question or queued input. Collaborator auto-resume is disabled for
+the measurement. It prints only timings and byte counts; it does not continue
+agent work or call a provider:
+
+```text
+JECODE_MEASURE_JOURNAL=<path to a session .jsonl>
+JECODE_MEASURE_DIRECTORY=<the folder the session belongs to>
+cargo test --locked --offline --release tui::measurement_tests::own_history_scroll -- --exact --ignored --nocapture --test-threads=1
+```
+
+Journals are under the Jecode home's `sessions/` directory; the folder is the
+one where the conversation was started.
 
 ### Model stream and file edits
 

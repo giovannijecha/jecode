@@ -57,6 +57,7 @@ public sealed partial class JecodeTestPty : IDisposable {
     Thread reader;
     readonly StringBuilder received = new StringBuilder();
     readonly object gate = new object();
+    long lastReceived;
 
     static void Check(bool success) {
         if (!success) throw new IOException("ConPTY fixture error " + Marshal.GetLastWin32Error());
@@ -86,6 +87,7 @@ public sealed partial class JecodeTestPty : IDisposable {
                         lock (gate) {
                             received.Append(characters, 0, length);
                             if (received.Length > 4 * 1024 * 1024) throw new IOException("ConPTY output exceeded fixture limit");
+                            lastReceived = System.Diagnostics.Stopwatch.GetTimestamp();
                             Monitor.PulseAll(gate);
                         }
                     }

@@ -101,6 +101,12 @@ impl Store {
         crate::scratch::Area::new(self.temporary.join(id), self.directory.clone(), id)
     }
 
+    /// Where a session journal belongs, for measurements of copied journals.
+    #[cfg(test)]
+    pub fn fixture_journal(&self, id: &str) -> PathBuf {
+        self.journal_path(id)
+    }
+
     #[cfg(test)]
     pub fn fixture_load(&self, id: &str) -> Result<Document, String> {
         self.read(id)
