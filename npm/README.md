@@ -3,8 +3,7 @@
 Jecode is a terminal coding agent. It runs as a native Rust executable and lets
 you work with an AI model on files and commands in your project.
 
-The first npm release is being prepared and is not yet published. Once it is
-available, install Jecode with Node.js 22 or later and npm:
+Install Jecode with Node.js 22 or later and npm:
 
 ```sh
 npm install -g jecode
