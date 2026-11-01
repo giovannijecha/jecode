@@ -6,7 +6,7 @@ you work with an AI model on files and commands in your project.
 Install Jecode with Node.js 22 or later and npm:
 
 ```sh
-npm install -g jecode
+npm install -g @giovannijecha/jecode
 jecode --version
 ```
 
@@ -19,13 +19,13 @@ build of Jecode does not need Node.js.
 Update the npm installation with:
 
 ```sh
-npm update -g jecode
+npm update -g @giovannijecha/jecode
 ```
 
 Remove it with:
 
 ```sh
-npm uninstall -g jecode
+npm uninstall -g @giovannijecha/jecode
 ```
 
 Removing the package keeps your settings, accounts, conversations, and

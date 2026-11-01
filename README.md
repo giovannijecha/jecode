@@ -46,7 +46,7 @@ Install Jecode with Node.js 22 or later and npm on Windows x64, Linux x64
 has been tested on macOS 15; earlier versions remain unverified.
 
 ```sh
-npm install -g jecode
+npm install -g @giovannijecha/jecode
 jecode --version
 ```
 

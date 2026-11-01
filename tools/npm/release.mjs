@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
-  root, targets, host, version, revision, sourceClean, digest, regularFile,
+  root, packageName, targets, host, version, revision, sourceClean, digest, regularFile,
   freshDirectory, json, npm, command,
 } from './common.mjs';
 import {verifyArchive} from './archive.mjs';
@@ -70,7 +70,7 @@ export async function pack(artifacts, destination, {local = false} = {}) {
   const {releaseVersion, sourceRevision, payloads} = collect(path.resolve(artifacts), {local});
   const expected = new Map();
   const manifest = {
-    name: 'jecode', version: releaseVersion,
+    name: packageName, version: releaseVersion,
     description: 'A terminal coding agent in Rust',
     license: 'MIT', author: 'Giovanni Jecha',
     repository: {type: 'git', url: 'git+https://github.com/giovannijecha/jecode.git'},
@@ -109,7 +109,7 @@ export async function pack(artifacts, destination, {local = false} = {}) {
       ...process.env, npm_config_cache: path.join(root, '.tmp/npm-cache'), npm_config_logs_max: '0',
     }});
   const info = JSON.parse(result.stdout);
-  const filename = `jecode-${releaseVersion}.tgz`;
+  const filename = `${packageName.slice(1).replace('/', '-')}-${releaseVersion}.tgz`;
   if (info.length !== 1 || info[0].filename !== filename) throw new Error('Unexpected npm pack output.');
   const tarball = path.join(output, filename), bytes = regularFile(tarball);
   verifyArchive(bytes, expected);
