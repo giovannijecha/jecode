@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import {root, targets, version, revision, sourceClean, digest, json} from './common.mjs';
+import {root, targets, version, revision, sourceClean, digest, json, command} from './common.mjs';
 import {stage, collect, pack} from './release.mjs';
 import {unpack} from './archive.mjs';
 import {checkVersions} from './linux-abi.mjs';
@@ -70,6 +70,35 @@ test('staging rejects an executable that is not the native Jecode release', asyn
   const directory = fixture(t);
   await assert.rejects(stage(process.execPath, path.join(directory, 'output')), /Expected the native/);
   assert.ok(!fs.existsSync(path.join(directory, 'output')));
+});
+
+test('commands without input tolerate a child exiting immediately', async () => {
+  for (const input of [undefined, '', Buffer.alloc(0)]) {
+    for (let index = 0; index < 10; index++) {
+      const result = await command(process.execPath, ['--version'], {input, timeout: 5000});
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), process.version);
+    }
+  }
+});
+
+test('commands deliver input and collect the child output and status', async () => {
+  const input = 'first line\nsecond λ line\n';
+  const result = await command(process.execPath, ['-e',
+    'process.stdin.pipe(process.stdout); process.exitCode = 7;',
+  ], {input, timeout: 5000});
+  assert.equal(result.stdout, input);
+  assert.equal(result.status, 7);
+});
+
+test('commands reject input delivery failures', async () => {
+  // Unix can close fd 0 while staying alive; Windows closes its inherited
+  // pipe when the process exits. Neither child consumes the buffered input.
+  const script = process.platform === 'win32' ? 'process.exit(0);' :
+    "require('node:fs').closeSync(0); setInterval(() => {}, 1000);";
+  await assert.rejects(command(process.execPath, ['-e', script],
+    {input: Buffer.alloc(8 * 1024 * 1024), timeout: 5000}),
+  error => ['EPIPE', 'ECONNRESET', 'EOF'].includes(error.code));
 });
 
 test('a local package is private and contains only the selected payload and public npm files', async t => {
