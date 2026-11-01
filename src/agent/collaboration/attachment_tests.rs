@@ -10,6 +10,10 @@ use crate::{
 };
 use std::{collections::BTreeSet, fs};
 
+// Check completed, persisted results within the agent tool's normal wait budget.
+// Request setup and journal writes are not attachment latency guarantees.
+const COMPLETION_TIMEOUT: Duration = Duration::from_secs(60);
+
 fn response(output: Value) -> Response {
     let event = Value::object([
         ("type", Value::string("response.completed")),
@@ -107,7 +111,7 @@ fn shared_and_isolated_collaborators_read_parent_images_and_send_exact_bytes() {
             parent.agent_tool(&assignment).unwrap();
             let records = parent
                 .collaboration()
-                .wait(Some("a1"), Duration::from_secs(5), &Cancellation::default())
+                .wait(Some("a1"), COMPLETION_TIMEOUT, &Cancellation::default())
                 .unwrap();
             assert_eq!(
                 records[0].get("state").and_then(Value::as_str),
@@ -150,8 +154,13 @@ fn child_imports_survive_close_resume_and_parent_deletion() {
         parent.agent_tool(&create(mode)).unwrap();
         let records = parent
             .collaboration()
-            .wait(Some("a1"), Duration::from_secs(5), &Cancellation::default())
+            .wait(Some("a1"), COMPLETION_TIMEOUT, &Cancellation::default())
             .unwrap();
+        assert_eq!(
+            records[0].get("state").and_then(Value::as_str),
+            Some("returned"),
+            "{mode}: {records:?}"
+        );
         let result = records[0].get("tools").and_then(Value::as_array).unwrap()[0]
             .get("result")
             .unwrap();

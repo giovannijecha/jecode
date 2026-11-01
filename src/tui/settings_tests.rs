@@ -7,7 +7,6 @@ use crate::{
     test_support::{Directory, HttpFixture, completion},
     tools::Tools,
 };
-use std::{thread, time::Instant};
 
 mod provider_tests;
 
@@ -62,12 +61,7 @@ fn open_key(app: &mut App) {
     app.input(Decoded::Text("1".into())).unwrap();
 }
 fn wait(app: &mut App) {
-    let started = Instant::now();
-    while app.job.is_some() || app.worker.is_some() {
-        app.poll().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(5));
-        thread::sleep(Duration::from_millis(5));
-    }
+    super::tests::wait_until(app, |app| app.job.is_none() && app.worker.is_none());
 }
 
 #[test]

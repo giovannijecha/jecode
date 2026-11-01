@@ -2,8 +2,19 @@ use super::tests::create;
 use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
-    test_support::{Directory, HttpFixture, completion, tool_call},
+    test_support::{Directory, HttpFixture, Response, completion, tool_call},
 };
+
+struct RestoreJournalPermissions {
+    path: std::path::PathBuf,
+    original: std::fs::Permissions,
+}
+
+impl Drop for RestoreJournalPermissions {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.path, self.original.clone());
+    }
+}
 
 #[test]
 fn stop_active_child_and_cancel_parent_wait_promptly() {
@@ -114,40 +125,69 @@ fn observer_and_journal_mask_credentials_in_assignments_and_reports() {
 
 #[test]
 fn failed_parent_receipt_never_claims_a_confirmed_child_return() {
+    // This bounds fixture completion, not the latency of journal writes.
+    let completion_timeout = Duration::from_secs(60);
     let project = Directory::new();
     let home = Directory::new();
-    let fixture = HttpFixture::new(vec![
-        (
-            200,
-            completion(
-                "",
-                vec![tool_call(
-                    "check",
-                    "bash",
-                    Value::object([("command", Value::string("sleep 0.4"))]),
-                )],
+    std::fs::write(project.path().join("source.txt"), "source").unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    let final_response = Value::object([(
+        "choices",
+        Value::Array(vec![Value::object([
+            ("index", Value::number(0)),
+            (
+                "delta",
+                Value::object([("content", Value::string("Completed report"))]),
             ),
-        ),
-        (200, completion("Completed report", vec![])),
-    ]);
+            ("finish_reason", Value::string("stop")),
+        ])]),
+    )]);
+    let fixture = HttpFixture::streaming_with_wait(
+        vec![
+            Response::Json(
+                200,
+                completion(
+                    "",
+                    vec![tool_call(
+                        "check",
+                        "read",
+                        Value::object([("path", Value::string("source.txt"))]),
+                    )],
+                ),
+            ),
+            Response::GatedStream {
+                head: String::new(),
+                tail: format!("data: {}\n\ndata: [DONE]\n\n", final_response.encode()),
+                release: gate,
+            },
+        ],
+        completion_timeout,
+    );
     let mut parent = Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(project.path()).unwrap(),
     );
     parent.enable_sessions(home.path()).unwrap();
-    parent
-        .permissions()
-        .set_level(crate::permissions::Level::Full)
-        .unwrap();
     parent.agent_tool(&create()).unwrap();
     let observer = parent.collaboration();
     let started = std::time::Instant::now();
-    while observer.snapshot()[0]
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_none_or(|tools| tools.is_empty())
-    {
-        assert!(started.elapsed() < Duration::from_secs(5));
+    loop {
+        let snapshot = observer.snapshot();
+        let tool_done = snapshot[0]
+            .get("tools")
+            .and_then(Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("state"))
+            .and_then(Value::as_str)
+            == Some("done");
+        if tool_done {
+            assert_eq!(snapshot[0].get("received_version"), Some(&Value::number(1)));
+            break;
+        }
+        assert!(
+            started.elapsed() < completion_timeout,
+            "collaborator did not finish its read: {snapshot:?}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     let handle = parent.sessions().unwrap();
@@ -156,12 +196,24 @@ fn failed_parent_receipt_never_claims_a_confirmed_child_return() {
         .bucket()
         .join(format!("{}.jsonl", handle.id()));
     let original_permissions = std::fs::metadata(&journal).unwrap().permissions();
-    let mut permissions = original_permissions.clone();
+    let restoration = RestoreJournalPermissions {
+        path: journal.clone(),
+        original: original_permissions.clone(),
+    };
+    let mut permissions = original_permissions;
     permissions.set_readonly(true);
     std::fs::set_permissions(&journal, permissions).unwrap();
+    release.send(()).unwrap();
     let started = std::time::Instant::now();
-    while observer.snapshot()[0].get("state").and_then(Value::as_str) != Some("unknown") {
-        assert!(started.elapsed() < Duration::from_secs(5));
+    loop {
+        let snapshot = observer.snapshot();
+        if snapshot[0].get("state").and_then(Value::as_str) == Some("unknown") {
+            break;
+        }
+        assert!(
+            started.elapsed() < completion_timeout,
+            "collaborator did not record the failed receipt: {snapshot:?}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     let record = &observer.snapshot()[0];
@@ -172,7 +224,20 @@ fn failed_parent_receipt_never_claims_a_confirmed_child_return() {
             .unwrap()
             .contains("Could not save collaborator receipt")
     );
-    std::fs::set_permissions(&journal, original_permissions).unwrap();
+    assert!(
+        !observer
+            .events_since(0)
+            .1
+            .iter()
+            .any(|event| { event.get("kind").and_then(Value::as_str) == Some("returned") })
+    );
+    drop(restoration);
+    assert!(
+        !std::fs::metadata(&journal)
+            .unwrap()
+            .permissions()
+            .readonly()
+    );
     observer.stop_all();
     assert_eq!(fixture.finish().len(), 2);
 }
