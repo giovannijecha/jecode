@@ -29,6 +29,8 @@ fn request_body(stream: &TcpStream) -> Vec<u8> {
 fn cancelling_remote_revocation_still_removes_local_tokens_and_retains_registration() {
     use crate::test_support::server::{Server, accept};
     use std::io::{BufRead, BufReader, Write};
+    // Discovery and local persistence precede the cancellation being tested.
+    let fixture_timeout = std::time::Duration::from_secs(60);
     let _fixture_lock = FIXTURE_SERIAL.lock().unwrap();
     let session = Session::fixture("revoked-access-token");
     session.store.activate(session.client_id()).unwrap();
@@ -74,8 +76,8 @@ fn cancelling_remote_revocation_still_removes_local_tokens_and_retains_registrat
             } else {
                 ready.send(()).unwrap();
                 released
-                    .recv_timeout(std::time::Duration::from_secs(5))
-                    .unwrap();
+                    .recv_timeout(fixture_timeout)
+                    .expect("test did not release the pending revocation request");
             }
         }
     });
@@ -92,8 +94,13 @@ fn cancelling_remote_revocation_still_removes_local_tokens_and_retains_registrat
     let worker_cancel = cancel.clone();
     let worker = std::thread::spawn(move || worker_session.sign_out(&worker_cancel));
     received
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .unwrap();
+        .recv_timeout(fixture_timeout)
+        .unwrap_or_else(|error| {
+            panic!(
+                "sign-out did not reach remote revocation: {error}; worker finished: {}",
+                worker.is_finished()
+            )
+        });
     // A slow revocation must not retain the account lock or local credentials.
     let files = session.store.files();
     let _account_lock = files.lock(&Cancellation::default()).unwrap();

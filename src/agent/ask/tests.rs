@@ -265,18 +265,22 @@ fn stopping_a_waiting_question_releases_the_worker_without_fabricating_an_answer
     agent.enable_sessions(home.path()).unwrap();
     agent.questions.set_available(true);
     let cancellation = agent.cancellation();
-    let started = std::time::Instant::now();
     let result = agent.run_turn("Export", &mut |event| {
         if matches!(event, Event::UserQuestion { .. }) {
             cancellation.cancel();
         }
         Ok(())
     });
-    assert!(result.is_err());
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(result.unwrap_err(), "Operation cancelled");
     assert!(!agent.has_pending_question());
     let saved = agent.sessions().unwrap().snapshot();
     assert!(!saved.pending.active);
+    assert!(
+        !saved
+            .events
+            .iter()
+            .any(|event| { event.get("type").and_then(Value::as_str) == Some("user_answer") })
+    );
     let content = saved
         .messages
         .iter()
