@@ -1,18 +1,26 @@
 //! Global MCP configuration and read-only inspection in the B5 selector.
+mod fields;
 mod flow;
+mod health;
 #[cfg(test)]
 mod integration_tests;
 mod job;
+pub(super) mod menus;
+#[cfg(test)]
+mod navigation_tests;
+mod results;
 mod sign_in;
 #[cfg(test)]
 mod tests;
+
+pub(super) use health::Health;
 
 use super::{
     App,
     selector::{Purpose, Selector},
 };
 use crate::mcp::{AuthMethod, Catalog, Connection, ErrorKind};
-use job::{InventoryResult, Job, ResultValue};
+use job::{Checks, Job, ResultValue};
 use std::{collections::HashMap, path::PathBuf, sync::mpsc::Receiver};
 
 pub(super) const PRESETS: [(&str, &str, &str); 4] = [
@@ -48,7 +56,7 @@ pub(super) enum Field {
 pub(super) enum Panel {
     List,
     Add,
-    Detail,
+    Detail(Health),
     Form,
     Field(Field),
     Methods,
@@ -58,6 +66,17 @@ pub(super) enum Panel {
     Loading,
 }
 
+/// One unsaved connection and everything learned about it, replaced as a whole.
+pub(super) struct Draft {
+    connection: Connection,
+    /// The saved connection being edited; `None` for a new one.
+    original: Option<Connection>,
+    /// Sign-in methods offered by the draft's endpoint, once checked.
+    methods: Vec<AuthMethod>,
+    /// Started by a saved connection's Sign in action, which saves on success.
+    sign_in: bool,
+}
+
 #[derive(Default)]
 pub(super) struct Ui {
     open: bool,
@@ -65,17 +84,17 @@ pub(super) struct Ui {
     from_inspection: bool,
     connections: Vec<Connection>,
     health: HashMap<String, Result<Catalog, ErrorKind>>,
+    checks: Checks,
     selected: Option<String>,
-    draft: Option<Connection>,
-    methods: Vec<AuthMethod>,
+    draft: Option<Draft>,
     method_cache: HashMap<String, Vec<AuthMethod>>,
     tool: usize,
     job: Option<Job>,
+    /// The panel Esc, or a failed worker, returns to from a loading panel.
+    back: Option<Panel>,
     updates: Option<Receiver<crate::mcp::auth::Update>>,
-    inventory_updates: Option<Receiver<InventoryResult>>,
     browser_url: Option<String>,
     device_code: Option<String>,
-    sign_in_saved: bool,
     probe_inspection: bool,
     list_pending: bool,
 }
@@ -95,6 +114,24 @@ impl Ui {
             connection.oauth_client_id.as_deref().unwrap_or("")
         )
     }
+
+    fn connection(&self) -> Option<&Connection> {
+        self.draft.as_ref().map(|draft| &draft.connection)
+    }
+}
+
+/// The display name of the connection an `mcp` call names, by ID or name.
+pub(super) fn label(connections: &[Connection], arguments: &crate::json::Value) -> Option<String> {
+    let target = arguments.get("connection")?.as_str()?;
+    connections
+        .iter()
+        .find(|c| c.id == target)
+        .or_else(|| {
+            connections
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(target))
+        })
+        .map(|c| c.name.clone())
 }
 
 impl App {
@@ -116,55 +153,63 @@ impl App {
         self.mcp.settings = settings;
         self.mcp.from_inspection = false;
         self.mcp.list_pending = true;
-        self.mcp.inventory_updates = None;
         self.mcp.job = Some(Job::list(self.mcp_home()));
-        self.mcp_loading("Loading configured connections…");
+        self.mcp_loading("Loading configured connections…", Panel::List);
+    }
+
+    /// Begin a draft, resetting everything learned about a previous one.
+    fn begin_mcp_draft(&mut self, connection: Connection, saved: bool, sign_in: bool) {
+        let methods = self
+            .mcp
+            .method_cache
+            .get(&Ui::methods_key(&connection))
+            .cloned()
+            .unwrap_or_default();
+        if !saved {
+            self.mcp.selected = None;
+        }
+        self.mcp.draft = Some(Draft {
+            original: saved.then(|| connection.clone()),
+            connection,
+            methods,
+            sign_in,
+        });
+    }
+
+    fn show_mcp_panel(&mut self, panel: Panel) {
+        match panel {
+            Panel::List | Panel::Loading => self.show_mcp_list(),
+            Panel::Add => self.show_mcp_add(),
+            Panel::Detail(_) => self.show_mcp_detail(),
+            Panel::Form => self.show_mcp_form(),
+            Panel::Field(field) => self.show_mcp_field(field),
+            Panel::Methods => self.show_mcp_methods(),
+            Panel::Advanced => self.show_mcp_advanced(),
+            Panel::ConfirmRemove => self.show_mcp_remove(),
+            Panel::Tools => self.show_mcp_tools(),
+        }
     }
 
     fn show_mcp_list(&mut self) {
-        let focus = self.state.selector.as_ref().and_then(|menu| {
-            matches!(menu.purpose, Purpose::Mcp(Panel::List)).then_some(menu.selected)
-        });
-        let available = self
-            .mcp
-            .connections
-            .iter()
-            .filter(|c| c.enabled && self.mcp.health.get(&c.id).is_some_and(Result::is_ok))
-            .count();
-        let total = self.mcp.connections.len();
-        let mut rows = self
-            .mcp
-            .connections
-            .iter()
-            .map(|c| {
-                let status = if !c.enabled {
-                    "suspended".into()
-                } else {
-                    match self.mcp.health.get(&c.id) {
-                        Some(Ok(catalog)) => format!("{} tools", catalog.tools.len()),
-                        Some(Err(ErrorKind::Authentication)) => "sign in again".into(),
-                        Some(Err(_)) => "unreachable".into(),
-                        None => "checking…".into(),
-                    }
-                };
-                (c.name.clone(), status)
-            })
-            .collect::<Vec<_>>();
-        if self.mcp.settings {
-            rows.push(("Add connection".into(), String::new()));
-        }
-        let mut menu = Selector::mcp(
-            Panel::List,
-            "MCP",
-            self.mcp.settings.then_some("Settings"),
-            "all conversations",
-            rows,
-        );
-        menu.message = if total == 0 && !self.mcp.settings {
-            "No configured connections · open Settings › MCP".into()
-        } else {
-            format!("{available} available · {total} configured")
+        let index = |id: &String| self.mcp.connections.iter().position(|c| &c.id == id);
+        // Returning from a connection or the add panel focuses where it came from.
+        let focus = match self
+            .state
+            .selector
+            .as_ref()
+            .map(|m| (&m.purpose, m.selected))
+        {
+            Some((Purpose::Mcp(Panel::List), selected)) => Some(selected),
+            Some((Purpose::Mcp(Panel::Add), _)) => Some(self.mcp.connections.len()),
+            _ => self.mcp.selected.as_ref().and_then(index),
         };
+        let rows = self
+            .mcp
+            .connections
+            .iter()
+            .map(|c| (c.name.clone(), Health::of(c, &self.mcp)))
+            .collect::<Vec<_>>();
+        let mut menu = menus::list(&rows, self.mcp.settings);
         menu.selected = focus
             .unwrap_or(0)
             .min(menu.filtered.len().saturating_sub(1));
@@ -177,18 +222,7 @@ impl App {
     }
 
     fn show_mcp_add(&mut self) {
-        let mut rows = PRESETS
-            .iter()
-            .map(|(name, _, fact)| ((*name).into(), (*fact).into()))
-            .collect::<Vec<_>>();
-        rows.push(("Server URL".into(), "Any HTTP MCP server".into()));
-        self.state.selector = Some(Selector::mcp(
-            Panel::Add,
-            "Add connection",
-            Some("MCP"),
-            "",
-            rows,
-        ));
+        self.state.selector = Some(menus::add());
     }
 
     fn show_mcp_detail(&mut self) {
@@ -196,156 +230,53 @@ impl App {
             self.show_mcp_list();
             return;
         };
-        let name = connection.name.clone();
-        let endpoint = connection.endpoint.clone();
-        let enabled = connection.enabled;
-        let state = if !enabled {
-            "Suspended".into()
-        } else {
-            match self.mcp.health.get(&connection.id) {
-                Some(Ok(catalog)) => format!("Connected · {} tools", catalog.tools.len()),
-                Some(Err(ErrorKind::Authentication)) => "Sign-in expired".into(),
-                Some(Err(_)) => "Not reachable".into(),
-                None => "Not checked".into(),
-            }
-        };
-        let rows = vec![
-            ("Edit".into(), String::new()),
-            ("Sign in".into(), String::new()),
-            ("Reconnect".into(), String::new()),
-            (
-                if enabled { "Suspend" } else { "Resume" }.into(),
-                String::new(),
-            ),
-            ("Remove".into(), String::new()),
-        ];
-        let mut menu = Selector::mcp(Panel::Detail, &name, Some("MCP"), "all conversations", rows);
-        menu.message = format!("{state}\n{endpoint}");
+        let menu = menus::detail(connection, Health::of(connection, &self.mcp));
         self.state.selector = Some(menu);
+    }
+
+    fn show_mcp_remove(&mut self) {
+        let Some(connection) = self.selected_mcp() else {
+            self.show_mcp_list();
+            return;
+        };
+        self.state.selector = Some(Selector::mcp(
+            Panel::ConfirmRemove,
+            "Remove connection?",
+            Some("MCP"),
+            "sign-in removed",
+            vec![("Remove".into(), connection.name.clone())],
+        ));
     }
 
     fn show_mcp_form(&mut self) {
         let Some(draft) = &self.mcp.draft else {
+            self.show_mcp_detail();
             return;
         };
-        let method = match draft.method {
-            AuthMethod::None if self.mcp.methods == [AuthMethod::None] => "Not needed",
-            AuthMethod::None => "Choose Token or OAuth",
-            AuthMethod::Token if draft.token.is_empty() => "Token · not entered",
-            AuthMethod::Token => "Token · entered, hidden",
-            AuthMethod::Browser | AuthMethod::GitHubDevice => "OAuth",
-        };
-        let rows = vec![
-            ("Name".into(), draft.name.clone()),
-            ("Endpoint".into(), draft.endpoint.clone()),
-            ("Sign-in".into(), method.into()),
-            ("Advanced".into(), String::new()),
-            ("Save connection".into(), String::new()),
-        ];
-        self.state.selector = Some(Selector::mcp(
-            Panel::Form,
-            "Connection",
-            Some("MCP"),
-            "all conversations",
-            rows,
-        ));
-    }
-
-    fn show_mcp_field(&mut self, field: Field) {
-        let Some(draft) = &self.mcp.draft else {
-            return;
-        };
-        let (title, value) = match field {
-            Field::Name => ("Name", draft.name.clone()),
-            Field::Endpoint => ("Endpoint", draft.endpoint.clone()),
-            Field::Token => ("Token", draft.token.clone()),
-            Field::Timeout => ("Timeout", draft.timeout_secs.to_string()),
-            Field::Header => ("Extra header", String::new()),
-            Field::ClientId => (
-                "OAuth client ID",
-                draft.oauth_client_id.clone().unwrap_or_default(),
-            ),
-        };
-        let mut menu = Selector::mcp(Panel::Field(field), title, Some("Connection"), "", vec![]);
-        menu.editor.replace(value);
-        self.state.selector = Some(menu);
+        self.state.selector = Some(menus::form(&draft.connection, &draft.methods));
     }
 
     fn show_mcp_advanced(&mut self) {
-        let Some(draft) = &self.mcp.draft else {
+        let Some(connection) = self.mcp.connection() else {
+            self.show_mcp_detail();
             return;
         };
-        let mut rows = vec![
-            ("Timeout".into(), format!("{} seconds", draft.timeout_secs)),
-            (
-                "Extra header".into(),
-                format!("{} configured, hidden", draft.headers.len()),
-            ),
-        ];
-        let endpoint = draft
-            .endpoint
-            .split('?')
-            .next()
-            .unwrap_or(&draft.endpoint)
-            .trim_end_matches('/');
-        if !PRESETS
-            .iter()
-            .any(|(_, url, _)| url.trim_end_matches('/') == endpoint)
-        {
-            rows.push((
-                "Custom OAuth client".into(),
-                draft
-                    .oauth_client_id
-                    .as_ref()
-                    .map_or("Automatic".into(), |_| "Configured".into()),
-            ));
-        }
-        self.state.selector = Some(Selector::mcp(
-            Panel::Advanced,
-            "Advanced",
-            Some("Connection"),
-            "",
-            rows,
-        ));
+        self.state.selector = Some(menus::advanced(connection));
     }
 
     pub(super) fn choose_mcp(&mut self, panel: Panel, index: usize) {
         match panel {
-            Panel::List => {
-                if index == self.mcp.connections.len() && self.mcp.settings {
-                    self.show_mcp_add();
-                    return;
-                }
-                let Some(c) = self.mcp.connections.get(index) else {
-                    return;
-                };
-                self.mcp.selected = Some(c.id.clone());
-                if !self.mcp.settings && c.enabled && !self.mcp.health.contains_key(&c.id) {
-                    self.mcp.probe_inspection = true;
-                    self.start_mcp_probe(c.clone());
-                } else if self.mcp.settings
-                    || !c.enabled
-                    || !self.mcp.health.get(&c.id).is_some_and(Result::is_ok)
-                {
-                    if !self.mcp.settings {
-                        self.mcp.settings = true;
-                        self.mcp.from_inspection = true;
-                    }
-                    self.show_mcp_detail();
-                } else {
-                    self.show_mcp_tools();
-                }
-            }
+            Panel::List => self.choose_mcp_connection(index),
             Panel::Add => {
                 let (name, endpoint, _) = PRESETS.get(index).copied().unwrap_or(("", "", ""));
-                self.mcp.draft = Some(Connection::draft(name, endpoint));
+                self.begin_mcp_draft(Connection::draft(name, endpoint), false, false);
                 if name.is_empty() {
                     self.show_mcp_field(Field::Endpoint);
                 } else {
                     self.show_mcp_form();
                 }
             }
-            Panel::Detail => self.choose_mcp_detail(index),
+            Panel::Detail(_) => self.choose_mcp_detail(index),
             Panel::Form => match index {
                 0 => self.show_mcp_field(Field::Name),
                 1 => self.show_mcp_field(Field::Endpoint),
@@ -370,118 +301,55 @@ impl App {
         }
     }
 
+    fn choose_mcp_connection(&mut self, index: usize) {
+        if index == self.mcp.connections.len() && self.mcp.settings {
+            self.show_mcp_add();
+            return;
+        }
+        let Some(c) = self.mcp.connections.get(index) else {
+            return;
+        };
+        self.mcp.selected = Some(c.id.clone());
+        let healthy = self.mcp.health.get(&c.id).is_some_and(Result::is_ok);
+        if !self.mcp.settings && c.enabled && !self.mcp.health.contains_key(&c.id) {
+            self.mcp.probe_inspection = true;
+            self.start_mcp_probe(c.clone());
+        } else if self.mcp.settings || !c.enabled || !healthy {
+            if !self.mcp.settings {
+                self.mcp.settings = true;
+                self.mcp.from_inspection = true;
+            }
+            self.show_mcp_detail();
+        } else {
+            self.show_mcp_tools();
+        }
+    }
+
     fn choose_mcp_detail(&mut self, index: usize) {
         let Some(c) = self.selected_mcp().cloned() else {
             return;
         };
         match index {
             0 => {
-                self.mcp.sign_in_saved = false;
-                self.mcp.draft = Some(c);
+                self.begin_mcp_draft(c, true, false);
                 self.show_mcp_form();
             }
             1 => {
-                self.mcp.sign_in_saved = true;
-                self.mcp.draft = Some(c);
+                self.begin_mcp_draft(c, true, true);
                 self.start_mcp_methods();
             }
             2 => self.start_mcp_probe(c),
             3 => {
                 self.mcp.job = Some(Job::enabled(self.mcp_home(), c.id, !c.enabled));
-                self.mcp.inventory_updates = None;
-                self.mcp_loading(if c.enabled {
+                let message = if c.enabled {
                     "Suspending connection…"
                 } else {
                     "Resuming connection…"
-                });
-            }
-            4 => {
-                self.state.selector = Some(Selector::mcp(
-                    Panel::ConfirmRemove,
-                    "Remove connection?",
-                    Some("MCP"),
-                    "sign-in removed",
-                    vec![("Remove".into(), c.name)],
-                ))
-            }
-            _ => {}
-        }
-    }
-
-    pub(super) fn save_mcp_field(&mut self) {
-        let Some(menu) = &self.state.selector else {
-            return;
-        };
-        let Purpose::Mcp(Panel::Field(field)) = menu.purpose else {
-            return;
-        };
-        let value = menu.editor.text.trim().to_owned();
-        let Some(draft) = &mut self.mcp.draft else {
-            return;
-        };
-        match field {
-            Field::Name if value.is_empty() => {
-                self.warn("Enter a connection name");
-                return;
-            }
-            Field::Name => draft.name = value,
-            Field::Endpoint => {
-                if !value.starts_with("https://")
-                    && !value.starts_with("http://127.0.0.1")
-                    && !value.starts_with("http://localhost")
-                {
-                    self.warn("Enter an HTTPS endpoint or a localhost HTTP endpoint");
-                    return;
-                }
-                if draft.endpoint != value {
-                    draft.endpoint = value;
-                    draft.method = AuthMethod::None;
-                    draft.token.clear();
-                    draft.oauth = None;
-                    draft.oauth_client_id = None;
-                    draft.headers.clear();
-                    self.mcp.methods.clear();
-                }
-            }
-            Field::Token => {
-                draft.method = AuthMethod::Token;
-                draft.token = value;
-                draft.oauth = None;
-            }
-            Field::Timeout => match value.parse::<u64>() {
-                Ok(seconds @ 1..=600) => draft.timeout_secs = seconds,
-                _ => {
-                    self.warn("Timeout must be 1–600 seconds");
-                    return;
-                }
-            },
-            Field::Header => {
-                let Some((name, value)) = value.split_once(':') else {
-                    self.warn("Use Header-Name: value");
-                    return;
                 };
-                if name.trim().is_empty() {
-                    self.warn("Enter a header name");
-                    return;
-                }
-                draft
-                    .headers
-                    .retain(|(key, _)| !key.eq_ignore_ascii_case(name.trim()));
-                if !value.trim().is_empty() {
-                    draft
-                        .headers
-                        .push((name.trim().into(), value.trim().into()));
-                }
-                self.mcp.methods.clear();
-                self.mcp.method_cache.clear();
+                self.mcp_loading(message, Panel::Detail(Health::Unchecked));
             }
-            Field::ClientId => draft.oauth_client_id = (!value.is_empty()).then_some(value),
-        }
-        draft.protect(&self.archive.redactor);
-        if matches!(field, Field::Timeout | Field::Header | Field::ClientId) {
-            self.show_mcp_advanced();
-        } else {
-            self.show_mcp_form();
+            4 => self.show_mcp_remove(),
+            _ => {}
         }
     }
 }

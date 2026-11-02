@@ -169,6 +169,15 @@ impl Store {
         Ok(())
     }
     pub fn save(&self, connection: &Connection) -> Result<Connection, Error> {
+        self.store(connection, false)
+    }
+    /// Save an edit whose OAuth tokens were loaded with it, not obtained by a
+    /// new sign-in. A refresh may have rotated them on disk meanwhile, so the
+    /// stored tokens of the same sign-in (endpoint, issuer and client) stay.
+    pub fn save_edit(&self, connection: &Connection) -> Result<Connection, Error> {
+        self.store(connection, true)
+    }
+    fn store(&self, connection: &Connection, keep_tokens: bool) -> Result<Connection, Error> {
         config::validate(connection)?;
         let _guard = self.lock()?;
         let mut document = self.document()?;
@@ -189,6 +198,15 @@ impl Store {
             return Err(failure("MCP connection name already exists"));
         }
         if let Some(index) = existing.iter().position(|entry| entry.id == next.id) {
+            if keep_tokens
+                && let (Some(ours), Some(stored)) = (&next.oauth, &existing[index].oauth)
+                && ours.endpoint == stored.endpoint
+                && ours.issuer == stored.issuer
+                && ours.client_id == stored.client_id
+                && ours.token_endpoint == stored.token_endpoint
+            {
+                next.oauth = Some(stored.clone());
+            }
             entries[index] = config::write(&next, Some(entries[index].clone()));
         } else {
             entries.push(config::write(&next, None));

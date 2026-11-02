@@ -109,7 +109,10 @@ fn contents(
             }
         }
     } else {
-        if let Value::Object(fields) = arguments {
+        // A call without arguments has no `│` row.
+        if let Value::Object(fields) = arguments
+            && !fields.is_empty()
+        {
             let text = fields
                 .iter()
                 .map(|(name, value)| format!("{name} {}", value.encode()))

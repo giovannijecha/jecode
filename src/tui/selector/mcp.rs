@@ -12,7 +12,7 @@ impl Selector {
         let options: Vec<OptionRow> = rows
             .into_iter()
             .enumerate()
-            .map(|(index, (name, fact))| row(name, fact, Choice::Mcp(index)))
+            .map(|(index, (name, fact))| row(name, fact, Choice::Mcp(index, None)))
             .collect();
         let mut menu = Self::new(title, Purpose::Mcp(panel), options);
         menu.parent = parent;

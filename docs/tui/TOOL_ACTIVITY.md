@@ -14,13 +14,6 @@ the tool family's color when finished, a moving shimmer while running, red when
 the call failed and amber when it was stopped or timed out. A result line hangs
 below the title:
 
-MCP cards use the quiet badge surface and identify the connection and remote
-operation, such as `GitHub › create_issue`. Arguments use the same `│` row
-and results the same `└` row as other tools. Ctrl+O shows the full arguments
-and result; each MCP call keeps its own row inside a Work chapter. An uncertain
-remote outcome uses amber and **Outcome unknown**: the service may already
-have acted. Check it before retrying; a local checkpoint cannot restore it.
-
 | Call | Result |
 | --- | --- |
 | Read | Lines shown and where, such as `9 lines · from line 33 of 212`. A skill read shows `Loaded skill`. |
@@ -36,6 +29,14 @@ have acted. Check it before retrying; a local checkpoint cannot restore it.
 | Browser | Where it navigated or what it saved, such as `Screenshot 1280×720`. |
 | Checkpoint | A short result; Ctrl+O shows the rest. |
 | Any error | The error message, such as `Not found`. |
+
+MCP cards use the quiet badge surface and identify the connection and remote
+operation, such as `GitHub › create_issue`. Arguments use the same `│` row,
+omitted when a call has none, and results the same `└` row as other tools.
+Ctrl+O shows the full arguments and result; each MCP call keeps its own row
+inside a Work chapter. An uncertain remote outcome uses amber and
+**Outcome unknown**: the service may already have acted. Check it before
+retrying; a local checkpoint cannot restore it.
 
 When the agent supplies a `description` for a command, the card shows it as the
 title and the command beneath it (`$ command` for Bash, `> program args` for

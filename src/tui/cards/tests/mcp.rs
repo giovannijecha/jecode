@@ -162,3 +162,34 @@ fn mcp_remote_text_cannot_emit_terminal_control_sequences() {
         );
     }
 }
+
+#[test]
+fn mcp_call_without_arguments_has_no_argument_row() {
+    let mut args = call();
+    if let Value::Object(fields) = &mut args {
+        fields.insert("arguments".into(), Value::object([]));
+    }
+    let done = Value::object([(
+        "result",
+        Value::object([(
+            "content",
+            Value::Array(vec![Value::object([
+                ("type", Value::string("text")),
+                ("text", Value::string("Signed in as fixture")),
+            ])]),
+        )]),
+    )]);
+    for width in [44, 100] {
+        let rows = draw(
+            "mcp",
+            &args,
+            Some(&done),
+            None,
+            width,
+            &Presentation::default(),
+        );
+        let value = plain(&rows);
+        assert!(!value.contains('│'), "{value}");
+        assert!(value.contains("└ Signed in as fixture"), "{value}");
+    }
+}

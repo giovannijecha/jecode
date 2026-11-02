@@ -140,3 +140,42 @@ fn corrupt_file_and_disabled_connection_cannot_be_silently_replaced() {
     assert!(store.fresh(&saved.id, &Cancellation::default()).is_err());
     fs::remove_dir_all(home).unwrap();
 }
+
+#[test]
+fn edits_keep_rotated_oauth_tokens_and_new_sign_ins_replace_them() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let tokens = |access: &str, refresh: &str| crate::mcp::types::OAuthTokens {
+        endpoint: "https://example.test/mcp".into(),
+        access_token: access.into(),
+        refresh_token: Some(refresh.into()),
+        expires_at: Some(u64::MAX / 2),
+        token_endpoint: "https://auth.example.test/token".into(),
+        client_id: "fixture-client".into(),
+        issuer: "https://auth.example.test".into(),
+        scope: None,
+        resource: Some("https://example.test/mcp".into()),
+        github: false,
+    };
+    let mut connection = draft("OAuth");
+    connection.method = AuthMethod::Browser;
+    connection.oauth = Some(tokens("isolated-old-access", "isolated-old-refresh"));
+    let loaded = store.save(&connection).unwrap();
+    // A refresh elsewhere rotates both tokens after the edit was loaded.
+    let mut rotated = loaded.clone();
+    rotated.oauth = Some(tokens("isolated-new-access", "isolated-new-refresh"));
+    store.save(&rotated).unwrap();
+    let mut renamed = loaded.clone();
+    renamed.name = "OAuth renamed".into();
+    let saved = store.save_edit(&renamed).unwrap();
+    assert!(saved.oauth == rotated.oauth);
+    let listed = store.list().unwrap();
+    assert_eq!(listed[0].name, "OAuth renamed");
+    assert!(listed[0].oauth == rotated.oauth);
+    // A new sign-in replaces the stored tokens.
+    let mut signed = saved.clone();
+    signed.oauth = Some(tokens("isolated-signed-access", "isolated-signed-refresh"));
+    store.save(&signed).unwrap();
+    assert!(store.list().unwrap()[0].oauth == signed.oauth);
+    fs::remove_dir_all(home).unwrap();
+}

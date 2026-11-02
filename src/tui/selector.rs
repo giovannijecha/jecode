@@ -45,7 +45,7 @@ pub enum Choice {
     Level(crate::permissions::Level),
     Remembered,
     Grant(usize),
-    Mcp(usize),
+    Mcp(usize, Option<super::mcp::Health>),
 }
 /// The right-aligned status of an option.
 #[derive(Clone, Debug, PartialEq, Eq)]

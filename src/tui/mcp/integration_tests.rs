@@ -1,3 +1,4 @@
+use super::tests::{panel, rows, type_text};
 use super::*;
 use crate::{
     agent::Agent,
@@ -32,7 +33,7 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
 
 fn settle(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(3);
-    while app.mcp.job.is_some() && Instant::now() < deadline {
+    while (app.mcp.job.is_some() || app.mcp.checks.busy()) && Instant::now() < deadline {
         app.poll_mcp();
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -148,7 +149,7 @@ fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits(
     settle(&mut app);
     assert!(matches!(
         app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::Detail)
+        Purpose::Mcp(Panel::Detail(_))
     ));
     assert_eq!(
         crate::mcp::Store::new(app.mcp_home()).list().unwrap()[0].token,
@@ -181,7 +182,7 @@ fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits(
     app.open_mcp(true);
     settle(&mut app);
     app.choose_mcp(Panel::List, 0);
-    app.choose_mcp(Panel::Detail, 0);
+    app.choose_mcp(Panel::Detail(Health::Unchecked), 0);
     app.choose_mcp(Panel::Form, 0);
     app.state
         .selector
@@ -196,7 +197,7 @@ fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits(
         "Fixture GitHub"
     );
     assert!(app.mcp.health.values().any(Result::is_ok));
-    app.choose_mcp(Panel::Detail, 0);
+    app.choose_mcp(Panel::Detail(Health::Unchecked), 0);
     app.choose_mcp(Panel::Form, 1);
     app.state
         .selector
@@ -205,7 +206,7 @@ fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits(
         .editor
         .replace("http://127.0.0.1:9/other".into());
     app.save_mcp_field();
-    assert!(app.mcp.draft.as_ref().unwrap().token.is_empty());
+    assert!(app.mcp.connection().unwrap().token.is_empty());
     assert!(app.mcp.health.values().any(Result::is_ok));
     app.close_mcp_panel();
     assert_eq!(
@@ -281,10 +282,111 @@ fn healthy_inventory_result_arrives_while_another_server_is_slow() {
             .is_some_and(Result::is_ok)
     );
     assert!(!app.mcp.health.contains_key(&slow_saved.id));
-    assert!(app.mcp.job.is_some());
+    assert!(app.mcp.checks.pending(&slow_saved.id));
     let _ = release.send(());
     app.close_mcp_panel();
     assert_eq!(fast.finish(), 2);
     slow.finish();
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn background_checks_survive_navigation_between_panels() {
+    let (release, waiting) = std::sync::mpsc::channel();
+    let slow = Server::start(move |listener, stop| {
+        if let Ok(mut stream) = accept(&listener, &stop) {
+            let _ = request(&mut stream);
+            let _ = waiting.recv_timeout(Duration::from_secs(3));
+        }
+    });
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let saved = crate::mcp::Store::new(app.mcp_home())
+        .save(&Connection::draft(
+            "Slow",
+            &format!("{}/mcp", slow.endpoint),
+        ))
+        .unwrap();
+    app.open_mcp(true);
+    while app.mcp.job.is_some() {
+        app.poll_mcp();
+    }
+    assert_eq!(rows(&app)[0].1, "checking…");
+    app.choose_mcp(Panel::List, 0);
+    assert_eq!(panel(&app), Panel::Detail(Health::Checking));
+    app.choose_mcp(Panel::Detail(Health::Checking), 0);
+    app.close_mcp_panel();
+    app.close_mcp_panel();
+    app.choose_mcp(Panel::List, 1);
+    app.close_mcp_panel();
+    assert!(app.mcp.checks.pending(&saved.id));
+    let _ = release.send(());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !app.mcp.health.contains_key(&saved.id) && Instant::now() < deadline {
+        app.poll_mcp();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(rows(&app)[0].1, "unreachable");
+    app.close_mcp_panel();
+    slow.finish();
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn saving_an_edit_keeps_oauth_tokens_rotated_since_it_was_loaded() {
+    let server = Server::start(|listener, stop| {
+        while let Ok(mut stream) = accept(&listener, &stop) {
+            let text = request(&mut stream);
+            if !text.contains("Bearer isolated-new-access") {
+                reply(&mut stream, 401, r#"{"error":"unauthorized"}"#);
+            } else if text.contains("\"method\":\"server/discover\"") {
+                reply(
+                    &mut stream,
+                    200,
+                    r#"{"jsonrpc":"2.0","id":1,"result":{"supportedVersions":["2026-07-28"]}}"#,
+                );
+            } else {
+                reply(
+                    &mut stream,
+                    200,
+                    r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"fixture","inputSchema":{"type":"object"}}]}}"#,
+                );
+            }
+        }
+    });
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let store = crate::mcp::Store::new(app.mcp_home());
+    let endpoint = format!("{}/mcp", server.endpoint);
+    std::fs::write(
+        app.mcp_home().join("mcp.json"),
+        format!(
+            r#"{{"connections":[{{"id":"mcp-fixture","name":"OAuth fixture","endpoint":"{endpoint}","enabled":true,"method":"browser","token":"","timeout_secs":5,"headers":{{}},"oauth":{{"access_token":"isolated-old-access","refresh_token":"isolated-old-refresh","expires_at":4000000000,"token_endpoint":"http://127.0.0.1:9/token","endpoint":"{endpoint}","client_id":"fixture-client","issuer":"http://127.0.0.1:9","scope":null,"resource":"{endpoint}","github":false}}}}]}}"#
+        ),
+    )
+    .unwrap();
+    app.open_mcp(true);
+    settle(&mut app);
+    assert_eq!(rows(&app)[0].1, "sign in again");
+    // A refresh elsewhere rotates both tokens while the edit is open.
+    app.choose_mcp(Panel::List, 0);
+    app.choose_mcp(Panel::Detail(Health::Expired), 0);
+    let mut rotated = store.list().unwrap().remove(0);
+    let tokens = rotated.oauth.as_mut().unwrap();
+    tokens.access_token = "isolated-new-access".into();
+    tokens.refresh_token = Some("isolated-new-refresh".into());
+    store.save(&rotated).unwrap();
+    app.choose_mcp(Panel::Form, 0);
+    type_text(&mut app, "OAuth renamed");
+    app.choose_mcp(Panel::Form, 4);
+    settle(&mut app);
+    assert_eq!(panel(&app), Panel::Detail(Health::Available(1)));
+    let stored = store.list().unwrap().remove(0);
+    assert_eq!(stored.name, "OAuth renamed");
+    assert!(stored.oauth == rotated.oauth);
+    assert!(app.selected_mcp().unwrap().oauth == rotated.oauth);
+    server.finish();
     assert!(fixture.finish().is_empty());
 }

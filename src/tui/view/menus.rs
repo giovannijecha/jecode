@@ -8,7 +8,7 @@ use crate::tui::{
     motion,
     selector::{Badge, Choice, Hit, Purpose, Selector},
     text,
-    theme::{ACCENT, BAD, BADGE_IDLE, BODY, DIM, LIT, MUTED, STRONG, Style, WARNING},
+    theme::{ACCENT, BAD, BADGE_IDLE, BODY, LIT, MUTED, STRONG, Style},
 };
 
 /// The ` current ` chip and the gap before it.
@@ -23,25 +23,14 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
         &menu.title
     };
     let head = match &menu.purpose {
-        Purpose::Mcp(McpPanel::Detail) => menu
+        // The state leads in its own ink; the endpoint follows.
+        Purpose::Mcp(McpPanel::Detail(health)) => menu
             .message
             .lines()
-            .map(|value| {
-                panel::indent(
-                    Line::new(
-                        value,
-                        if value == "Suspended" {
-                            DIM
-                        } else if value == "Sign-in expired" {
-                            WARNING
-                        } else if value == "Not reachable" {
-                            BAD
-                        } else {
-                            MUTED
-                        },
-                    ),
-                    columns,
-                )
+            .enumerate()
+            .map(|(index, value)| {
+                let style = if index == 0 { health.style() } else { MUTED };
+                panel::indent(Line::new(value, style), columns)
             })
             .collect(),
         Purpose::Routing { entries, .. } if !menu.filtered.is_empty() => {
@@ -405,9 +394,10 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
     // Saved settings read as values; other facts describe the option.
     let tone = match &menu.purpose {
         Purpose::Settings => BODY,
-        Purpose::Mcp(McpPanel::List) if fact == "suspended" => DIM,
-        Purpose::Mcp(McpPanel::List) if fact == "sign in again" => WARNING,
-        Purpose::Mcp(McpPanel::List) if fact == "unreachable" => BAD,
+        Purpose::Mcp(McpPanel::List) => match value.choice {
+            Choice::Mcp(_, Some(health)) => health.style(),
+            _ => MUTED,
+        },
         _ => MUTED,
     };
     // A fact shows only with room for a few of its cells.

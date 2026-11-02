@@ -3,9 +3,12 @@ use crate::{
     mcp::{self, AuthMethod, Catalog, Connection, Error, ErrorKind},
 };
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, Sender},
+    },
     thread::{self, JoinHandle},
 };
 
@@ -20,7 +23,79 @@ pub(super) enum ResultValue {
     Enabled(String, bool, Result<(), Error>),
 }
 
-pub(super) type InventoryResult = (String, Option<Connection>, Result<Catalog, ErrorKind>);
+/// A connection's current record, read under the store lock, and its catalog.
+pub(super) type Checked = (String, Option<Connection>, Result<Catalog, ErrorKind>);
+type Sent = (String, u64, Option<Connection>, Result<Catalog, ErrorKind>);
+
+/// Background availability checks. They outlive navigation between panels and
+/// end only when the MCP panels close. A newer check or an authoritative result
+/// for the same connection supersedes an older one.
+pub(super) struct Checks {
+    pending: HashMap<String, u64>,
+    generation: u64,
+    sender: Sender<Sent>,
+    receiver: Receiver<Sent>,
+    jobs: Vec<Job>,
+}
+
+impl Default for Checks {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            pending: HashMap::new(),
+            generation: 0,
+            sender,
+            receiver,
+            jobs: Vec::new(),
+        }
+    }
+}
+
+impl Checks {
+    pub(super) fn start(&mut self, home: PathBuf, ids: Vec<String>) {
+        if ids.is_empty() {
+            return;
+        }
+        self.generation += 1;
+        for id in &ids {
+            self.pending.insert(id.clone(), self.generation);
+        }
+        let targets = ids.into_iter().map(|id| (id, self.generation)).collect();
+        self.jobs
+            .push(Job::inventory(home, targets, self.sender.clone()));
+    }
+
+    pub(super) fn pending(&self, id: &str) -> bool {
+        self.pending.contains_key(id)
+    }
+
+    #[cfg(test)]
+    pub(super) fn busy(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    /// A newer authoritative result replaces whatever an in-flight check finds.
+    pub(super) fn forget(&mut self, id: &str) {
+        self.pending.remove(id);
+    }
+
+    /// Current results only; checks whose worker ended without one stop pending.
+    pub(super) fn take(&mut self) -> Vec<Checked> {
+        let idle = self.jobs.iter().all(Job::finished);
+        let mut current = Vec::new();
+        for (id, generation, connection, result) in self.receiver.try_iter() {
+            if self.pending.get(&id) == Some(&generation) {
+                self.pending.remove(&id);
+                current.push((id, connection, result));
+            }
+        }
+        self.jobs.retain(|job| !job.finished());
+        if idle {
+            self.pending.clear();
+        }
+        current
+    }
+}
 
 pub(super) struct Job {
     thread: Option<JoinHandle<ResultValue>>,
@@ -37,19 +112,9 @@ impl Job {
         }
     }
 
-    pub(super) fn inventory(
-        home: PathBuf,
-        connections: Vec<Connection>,
-        updates: Sender<InventoryResult>,
-    ) -> Self {
+    fn inventory(home: PathBuf, targets: Vec<(String, u64)>, updates: Sender<Sent>) -> Self {
         Self::start(move |cancel| {
-            let queue = Arc::new(Mutex::new(
-                connections
-                    .into_iter()
-                    .filter(|c| c.enabled)
-                    .map(|c| c.id)
-                    .collect::<VecDeque<_>>(),
-            ));
+            let queue = Arc::new(Mutex::new(targets.into_iter().collect::<VecDeque<_>>()));
             let count = queue.lock().unwrap().len().min(4);
             let workers = (0..count)
                 .map(|_| {
@@ -62,7 +127,7 @@ impl Job {
                             if cancel.requested() {
                                 break;
                             }
-                            let Some(id) = queue.lock().unwrap().pop_front() else {
+                            let Some((id, generation)) = queue.lock().unwrap().pop_front() else {
                                 break;
                             };
                             let saved = mcp::Store::new(home.clone()).fresh(&id, &cancel);
@@ -75,7 +140,7 @@ impl Job {
                                 }
                                 Err(error) => (None, Err(error.kind)),
                             };
-                            if updates.send((id, connection, result)).is_err() {
+                            if updates.send((id, generation, connection, result)).is_err() {
                                 break;
                             }
                         }
@@ -87,6 +152,11 @@ impl Job {
             }
             ResultValue::Inventory
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn panicking() -> Self {
+        Self::start(|_| panic!("isolated MCP worker failure"))
     }
 
     pub(super) fn list(home: PathBuf) -> Self {
@@ -111,17 +181,30 @@ impl Job {
         })
     }
 
-    pub(super) fn save(home: PathBuf, connection: Connection) -> Self {
+    /// Check and save a draft. `kept` marks OAuth tokens loaded with the saved
+    /// connection rather than obtained by a new sign-in: a refresh may have
+    /// rotated them since, so the check uses the current stored tokens and the
+    /// save keeps them.
+    pub(super) fn save(home: PathBuf, connection: Connection, kept: bool) -> Self {
         Self::start(move |cancel| {
             ResultValue::Saved((|| {
-                let catalog = mcp::Client::new(connection.clone()).catalog(&cancel)?;
+                let store = mcp::Store::new(home);
+                let mut check = connection.clone();
+                if kept && connection.enabled {
+                    check.oauth = store.fresh(&connection.id, &cancel)?.oauth;
+                }
+                let catalog = mcp::Client::new(check).catalog(&cancel)?;
                 if cancel.requested() {
                     return Err(Error::new(
                         ErrorKind::Cancelled,
                         "Connection save cancelled",
                     ));
                 }
-                let saved = mcp::Store::new(home).save(&connection)?;
+                let saved = if kept {
+                    store.save_edit(&connection)?
+                } else {
+                    store.save(&connection)?
+                };
                 Ok((saved, catalog))
             })())
         })

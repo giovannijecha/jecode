@@ -125,7 +125,7 @@ impl App {
                     Setting::Mcp => self.open_mcp(true),
                 }
             }
-            (Choice::Mcp(index), Purpose::Mcp(panel)) => self.choose_mcp(*panel, index),
+            (Choice::Mcp(index, _), Purpose::Mcp(panel)) => self.choose_mcp(*panel, index),
             (
                 _,
                 Purpose::Permissions { .. }

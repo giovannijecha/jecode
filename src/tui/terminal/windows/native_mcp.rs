@@ -5,9 +5,15 @@ use crate::{
     effort::Effort,
     events::Event,
     json::Value,
+    mcp::{AuthMethod, Connection},
     tui::{
-        Kind, information::Information, mcp::Panel, render::Renderer, selector::Selector,
-        state::State, view,
+        Kind,
+        information::Information,
+        mcp::{Health, Panel, menus},
+        render::Renderer,
+        selector::Selector,
+        state::State,
+        view,
     },
 };
 use std::{
@@ -72,44 +78,36 @@ pub(super) fn console() {
             Path::new("C:/fixture/config.json"),
         );
         paint(columns, settings_state(columns, settings), "MCP");
-        let mut guided = crate::tui::mcp::PRESETS
-            .iter()
-            .map(|(name, _, fact)| ((*name).into(), (*fact).into()))
-            .collect::<Vec<_>>();
-        guided.push(("Server URL".into(), "Any HTTP MCP server".into()));
-        let add = Selector::mcp(Panel::Add, "Add connection", Some("MCP"), "", guided);
-        paint(columns, settings_state(columns, add), "Vercel");
-        let signin = Selector::mcp(
-            Panel::Methods,
-            "Sign-in",
-            Some("Connection"),
-            "",
-            vec![
-                ("Token".into(), "Paste an access token".into()),
-                ("OAuth".into(), "Open browser".into()),
-            ],
-        );
+        paint(columns, settings_state(columns, menus::add()), "Vercel");
+        let signin = menus::methods(&[AuthMethod::Token, AuthMethod::Browser]);
         paint(columns, settings_state(columns, signin), "OAuth");
-        let mut empty = Selector::mcp(Panel::List, "MCP", None, "all conversations", vec![]);
-        empty.message = "No configured connections · open Settings › MCP".into();
         paint(
             columns,
-            settings_state(columns, empty),
+            settings_state(columns, menus::list(&[], false)),
             "No configured connections",
         );
-        let configured = Selector::mcp(
-            Panel::List,
-            "MCP",
-            Some("Settings"),
-            "all conversations",
-            vec![
-                ("GitHub".into(), "20 tools".into()),
-                ("GitHub club".into(), "suspended".into()),
-                ("Supabase".into(), "sign in again".into()),
-                ("Add connection".into(), String::new()),
+        let configured = menus::list(
+            &[
+                ("GitHub".into(), Health::Available(20)),
+                ("GitHub club".into(), Health::Suspended),
+                ("Supabase".into(), Health::Expired),
+                ("Cloudflare".into(), Health::Unchecked),
             ],
+            true,
         );
-        paint(columns, settings_state(columns, configured), "GitHub club");
+        paint(columns, settings_state(columns, configured), "not checked");
+        let mut vercel = Connection::draft("Vercel", "https://mcp.vercel.com");
+        vercel.method = AuthMethod::Browser;
+        paint(
+            columns,
+            settings_state(columns, menus::form(&vercel, &[AuthMethod::Browser])),
+            "not signed in",
+        );
+        paint(
+            columns,
+            settings_state(columns, menus::advanced(&vercel)),
+            "Custom OAuth client",
+        );
         let tools = Selector::mcp(
             Panel::Tools,
             "GitHub",

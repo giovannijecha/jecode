@@ -9,7 +9,7 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
-fn app(directory: &Directory, fixture: &HttpFixture) -> App {
+pub(super) fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let store = SettingsStore::new(directory.path().join("config"));
     store.save(&settings).unwrap();
@@ -23,13 +23,47 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     )
 }
 
-fn settle(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while app.mcp.job.is_some() && Instant::now() < deadline {
+/// Wait for the foreground job and every background check.
+pub(super) fn settle(app: &mut App) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while (app.mcp.job.is_some() || app.mcp.checks.busy()) && Instant::now() < deadline {
         app.poll_mcp();
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(app.mcp.job.is_none(), "MCP UI job did not settle");
+    assert!(!app.mcp.checks.busy(), "MCP checks did not settle");
+}
+
+pub(super) fn panel(app: &App) -> Panel {
+    match app.state.selector.as_ref().map(|menu| &menu.purpose) {
+        Some(Purpose::Mcp(panel)) => *panel,
+        _ => panic!("no MCP panel open"),
+    }
+}
+
+pub(super) fn rows(app: &App) -> Vec<(String, String)> {
+    app.state
+        .selector
+        .as_ref()
+        .unwrap()
+        .options
+        .iter()
+        .map(|row| (row.name.clone(), row.fact.clone()))
+        .collect()
+}
+
+pub(super) fn draft(app: &App) -> &Connection {
+    app.mcp.connection().unwrap()
+}
+
+pub(super) fn type_text(app: &mut App, text: &str) {
+    app.state
+        .selector
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace(text.into());
+    app.save_mcp_field();
 }
 
 #[test]
@@ -42,29 +76,17 @@ fn changing_auth_and_extra_headers_changes_only_the_draft() {
     connection.token = "isolated-old-mcp-token".into();
     let store = crate::mcp::Store::new(app.mcp_home());
     let saved = store.save(&connection).unwrap();
-    app.mcp.draft = Some(saved.clone());
-    app.mcp.methods = vec![AuthMethod::None, AuthMethod::Token];
+    app.begin_mcp_draft(saved.clone(), true, false);
+    app.mcp.draft.as_mut().unwrap().methods = vec![AuthMethod::None, AuthMethod::Token];
     app.choose_mcp_method(0);
-    assert!(app.mcp.draft.as_ref().unwrap().token.is_empty());
-    assert_eq!(app.mcp.draft.as_ref().unwrap().method, AuthMethod::None);
+    assert!(draft(&app).token.is_empty());
+    assert_eq!(draft(&app).method, AuthMethod::None);
     app.choose_mcp_method(1);
-    app.state
-        .selector
-        .as_mut()
-        .unwrap()
-        .editor
-        .replace("isolated-new-mcp-token".into());
-    app.save_mcp_field();
+    type_text(&mut app, "isolated-new-mcp-token");
     for value in ["X-Project: old", "x-project: replacement", "X-PROJECT:"] {
         app.show_mcp_field(Field::Header);
-        app.state
-            .selector
-            .as_mut()
-            .unwrap()
-            .editor
-            .replace(value.into());
-        app.save_mcp_field();
-        let headers = &app.mcp.draft.as_ref().unwrap().headers;
+        type_text(&mut app, value);
+        let headers = &draft(&app).headers;
         assert_eq!(headers.len(), usize::from(!value.ends_with(':')));
         if value.contains("replacement") {
             assert_eq!(headers[0].1, "replacement");
@@ -80,39 +102,47 @@ fn sign_in_requires_an_explicit_token_or_oauth_choice() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
-    app.mcp.draft = Some(Connection::draft(
-        "GitHub",
-        "https://api.githubcopilot.com/mcp/",
-    ));
-    app.mcp.methods = vec![AuthMethod::Token, AuthMethod::GitHubDevice];
+    let github = Connection::draft("GitHub", "https://api.githubcopilot.com/mcp/");
+    app.begin_mcp_draft(github, false, false);
+    app.mcp.draft.as_mut().unwrap().methods = vec![AuthMethod::Token, AuthMethod::GitHubDevice];
     app.present_mcp_methods();
-    let menu = app.state.selector.as_ref().unwrap();
-    assert!(matches!(menu.purpose, Purpose::Mcp(Panel::Methods)));
-    assert_eq!(
-        menu.options
-            .iter()
-            .map(|row| row.name.as_str())
-            .collect::<Vec<_>>(),
-        ["Token", "OAuth"]
-    );
-    assert_eq!(menu.options[1].fact, "Open browser");
-    assert_eq!(app.mcp.draft.as_ref().unwrap().method, AuthMethod::None);
+    assert_eq!(panel(&app), Panel::Methods);
+    let names = rows(&app);
+    assert_eq!(names[0].0, "Token");
+    assert_eq!(names[1], ("OAuth".into(), "Open browser".into()));
+    assert_eq!(draft(&app).method, AuthMethod::None);
+    // GitHub's OAuth client is bundled; no client row.
     app.show_mcp_advanced();
-    assert!(
-        app.state
-            .selector
-            .as_ref()
-            .unwrap()
-            .options
-            .iter()
-            .all(|row| !row.name.contains("client"))
-    );
-    app.mcp.methods = vec![AuthMethod::Token];
+    assert!(rows(&app).iter().all(|(name, _)| !name.contains("client")));
+    app.mcp.draft.as_mut().unwrap().methods = vec![AuthMethod::Token];
     app.present_mcp_methods();
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::Methods)
-    ));
+    assert_eq!(panel(&app), Panel::Methods);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn guided_services_without_a_bundled_client_offer_a_custom_client() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    for (name, endpoint, _) in &PRESETS[1..] {
+        app.begin_mcp_draft(Connection::draft(name, endpoint), false, false);
+        app.show_mcp_advanced();
+        assert_eq!(
+            rows(&app)[2],
+            ("Custom OAuth client".into(), "Automatic".into()),
+            "{name}"
+        );
+        app.choose_mcp(Panel::Advanced, 2);
+        assert_eq!(panel(&app), Panel::Field(Field::ClientId));
+        type_text(&mut app, "approved-client");
+        assert_eq!(panel(&app), Panel::Advanced);
+        assert_eq!(rows(&app)[2].1, "Configured");
+        assert_eq!(
+            draft(&app).oauth_client_id.as_deref(),
+            Some("approved-client")
+        );
+    }
     assert!(fixture.finish().is_empty());
 }
 
@@ -121,21 +151,27 @@ fn choosing_oauth_starts_authorization_without_opening_a_client_id_field() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
-    app.mcp.draft = Some(Connection::draft("Local", "http://127.0.0.1:1/mcp"));
-    app.mcp.methods = vec![AuthMethod::Token, AuthMethod::Browser];
+    app.begin_mcp_draft(
+        Connection::draft("Local", "http://127.0.0.1:1/mcp"),
+        false,
+        false,
+    );
+    app.mcp.draft.as_mut().unwrap().methods = vec![AuthMethod::Token, AuthMethod::Browser];
     app.show_mcp_methods();
     app.choose_mcp(Panel::Methods, 1);
-    assert_eq!(app.mcp.draft.as_ref().unwrap().method, AuthMethod::Browser);
+    assert_eq!(draft(&app).method, AuthMethod::Browser);
     assert!(app.mcp.job.is_some());
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::Loading)
-    ));
+    assert_eq!(panel(&app), Panel::Loading);
     assert_eq!(
         app.state.selector.as_ref().unwrap().message,
         "Starting sign-in…"
     );
+    // Cancelling returns to the choice; the form names the unfinished sign-in.
     app.close_mcp_panel();
+    assert_eq!(panel(&app), Panel::Methods);
+    app.close_mcp_panel();
+    assert_eq!(panel(&app), Panel::Form);
+    assert_eq!(rows(&app)[2].1, "OAuth · not signed in");
     assert!(
         crate::mcp::Store::new(app.mcp_home())
             .list()
@@ -151,31 +187,20 @@ fn vercel_guided_setup_prefills_the_generic_form_without_connecting_or_saving() 
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
     app.show_mcp_add();
-    let index = app
-        .state
-        .selector
-        .as_ref()
-        .unwrap()
-        .options
+    let index = rows(&app)
         .iter()
-        .position(|row| row.name == "Vercel")
+        .position(|(name, _)| name == "Vercel")
         .unwrap();
-    assert_eq!(
-        app.state.selector.as_ref().unwrap().options[index].fact,
-        "Client approval required"
-    );
+    assert_eq!(rows(&app)[index].1, "Client approval required");
     app.choose_mcp(Panel::Add, index);
-    let draft = app.mcp.draft.as_ref().unwrap();
-    assert_eq!(draft.name, "Vercel");
-    assert_eq!(draft.endpoint, "https://mcp.vercel.com");
-    assert!(draft.token.is_empty());
-    assert!(draft.oauth.is_none());
-    assert!(app.mcp.methods.is_empty());
+    let connection = draft(&app);
+    assert_eq!(connection.name, "Vercel");
+    assert_eq!(connection.endpoint, "https://mcp.vercel.com");
+    assert!(connection.token.is_empty());
+    assert!(connection.oauth.is_none());
+    assert!(app.mcp.draft.as_ref().unwrap().methods.is_empty());
     assert!(app.mcp.job.is_none());
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::Form)
-    ));
+    assert_eq!(panel(&app), Panel::Form);
     assert!(
         crate::mcp::Store::new(app.mcp_home())
             .list()
@@ -194,10 +219,7 @@ fn empty_inspection_navigates_to_settings_and_restores_the_chat_draft() {
     let before = app.state.editor.clone();
     app.open_mcp(false);
     settle(&mut app);
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::List)
-    ));
+    assert_eq!(panel(&app), Panel::List);
     assert!(app.state.selector.as_ref().unwrap().options.is_empty());
     assert!(app.mcp_empty_enter());
     assert!(app.mcp.settings);
@@ -225,17 +247,12 @@ fn suspended_connection_from_inspection_opens_settings_and_esc_returns() {
     settle(&mut app);
     assert_eq!(app.mcp.connections.len(), 2);
     app.choose_mcp(Panel::List, 1);
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::Detail)
-    ));
+    assert_eq!(panel(&app), Panel::Detail(Health::Suspended));
     assert!(app.mcp.from_inspection);
     assert_eq!(app.selected_mcp().unwrap().name, "GitHub club");
     assert!(app.close_mcp_panel());
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::List)
-    ));
+    assert_eq!(panel(&app), Panel::List);
+    assert_eq!(app.state.selector.as_ref().unwrap().selected, 1);
     assert!(!app.mcp.settings);
     assert!(fixture.finish().is_empty());
 }
@@ -273,73 +290,42 @@ fn native_token_field_is_masked_at_44_columns() {
     );
 }
 
+/// Panels built by the same code the app uses, with fixture connections.
+fn specimen_menus() -> Vec<Selector> {
+    let list = menus::list(
+        &[
+            ("GitHub".into(), Health::Available(20)),
+            ("GitHub club".into(), Health::Suspended),
+            ("Supabase".into(), Health::Expired),
+            ("Cloudflare".into(), Health::Checking),
+        ],
+        true,
+    );
+    let mut connection = Connection::draft("GitHub club", PRESETS[0].1);
+    connection.method = AuthMethod::Token;
+    connection.token = "isolated-specimen-token".into();
+    vec![
+        list,
+        menus::add(),
+        menus::form(&connection, &[AuthMethod::Token, AuthMethod::GitHubDevice]),
+        menus::methods(&[AuthMethod::Token, AuthMethod::Browser]),
+        menus::detail(&connection, Health::Unreachable),
+    ]
+}
+
 #[test]
 #[ignore = "paints B14 MCP panels in the native terminal renderer"]
 fn native_mcp_panels_specimen() {
     use crate::tui::{state::State, view};
-    let menus = [
-        Selector::mcp(
-            Panel::List,
-            "MCP",
-            Some("Settings"),
-            "all conversations",
-            vec![
-                ("GitHub".into(), "20 tools".into()),
-                ("GitHub club".into(), "suspended".into()),
-                ("Supabase".into(), "sign in again".into()),
-                ("Add connection".into(), String::new()),
-            ],
-        ),
-        Selector::mcp(
-            Panel::Add,
-            "Add connection",
-            Some("MCP"),
-            "",
-            vec![
-                ("GitHub".into(), "api.githubcopilot.com".into()),
-                ("Supabase".into(), "supabase.com".into()),
-                ("Cloudflare".into(), "mcp.cloudflare.com".into()),
-                ("Server URL".into(), "Any HTTP MCP server".into()),
-            ],
-        ),
-        Selector::mcp(
-            Panel::Form,
-            "Connection",
-            Some("MCP"),
-            "all conversations",
-            vec![
-                ("Name".into(), "GitHub club".into()),
-                (
-                    "Endpoint".into(),
-                    "https://api.githubcopilot.com/mcp/".into(),
-                ),
-                ("Sign-in".into(), "Token · entered, hidden".into()),
-                ("Advanced".into(), String::new()),
-                ("Save connection".into(), String::new()),
-            ],
-        ),
-    ];
     for columns in [80, 44] {
-        for menu in &menus {
+        for menu in specimen_menus() {
+            println!("{} · {} columns", menu.title, columns);
             let state = State {
                 width: columns,
                 height: 30,
-                selector: Some(Selector::mcp(
-                    match &menu.purpose {
-                        Purpose::Mcp(panel) => *panel,
-                        _ => unreachable!(),
-                    },
-                    &menu.title,
-                    menu.parent,
-                    &menu.context,
-                    menu.options
-                        .iter()
-                        .map(|option| (option.name.clone(), option.fact.clone()))
-                        .collect(),
-                )),
+                selector: Some(menu),
                 ..State::default()
             };
-            println!("{} · {} columns", menu.title, columns);
             for line in view::composer_frame(&state, "fixture/model", "fixture").live {
                 println!("{}", line.paint(columns));
             }
