@@ -9,28 +9,24 @@ const ISSUER: &str = "https://github.com";
 // Public identifier of the maintainer-owned App, shared by every Jecode user.
 const CLIENT_ID: &str = "Iv23liTdak2Sf8VpPtLw";
 
-pub(super) fn client_id(connection: &Connection) -> Option<String> {
+/// An explicit override, then the maintainer variable, then the bundled App.
+fn client_id(connection: &Connection) -> String {
+    let valid =
+        |s: &String| !s.is_empty() && s.len() <= 2048 && s.bytes().all(|b| b.is_ascii_graphic());
     connection
         .oauth_client_id
         .clone()
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            std::env::var("JECODE_GITHUB_CLIENT_ID")
-                .ok()
-                .filter(|s| !s.is_empty())
-        })
+        .filter(valid)
+        .or_else(|| std::env::var("JECODE_GITHUB_CLIENT_ID").ok().filter(valid))
         .or_else(|| {
             option_env!("JECODE_GITHUB_CLIENT_ID")
                 .map(str::to_owned)
-                .filter(|s| !s.is_empty())
+                .filter(valid)
         })
-        .or_else(|| Some(CLIENT_ID.to_owned()))
-        .filter(|s| s.len() <= 2048 && s.bytes().all(|b| b.is_ascii_graphic()))
+        .unwrap_or_else(|| CLIENT_ID.to_owned())
 }
 pub(super) fn eligible(connection: &Connection) -> bool {
-    connection
-        .endpoint
-        .starts_with("https://api.githubcopilot.com/mcp/")
+    super::super::config::github_endpoint(&connection.endpoint)
 }
 pub(super) fn sign_in(
     mut connection: Connection,
@@ -42,13 +38,9 @@ pub(super) fn sign_in(
             "GitHub device flow requires the GitHub MCP endpoint",
         ));
     }
-    let id = client_id(&connection)
-        .ok_or_else(|| wire::failure("GitHub OAuth is not enabled in this Jecode build yet"))?;
-    let value = wire::post_form(
-        DEVICE,
-        &[("client_id", &id), ("scope", "offline_access")],
-        cancel,
-    )?;
+    // GitHub App permissions, not OAuth scopes, bound the token.
+    let id = client_id(&connection);
+    let value = wire::post_form(DEVICE, &[("client_id", &id)], cancel)?;
     let device = wire::required(&value, "device_code")?;
     let code = wire::required(&value, "user_code")?;
     let url = wire::required(&value, "verification_uri")?;
@@ -111,12 +103,41 @@ pub(super) fn sign_in(
                     },
                     None,
                 )?);
-                connection.oauth_client_id = Some(id);
                 connection.method = AuthMethod::GitHubDevice;
                 connection.token.clear();
                 super::super::config::validate(&connection)?;
                 return Ok(connection);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_matches_with_or_without_trailing_slash_and_keeps_overrides_explicit() {
+        for (url, expected) in [
+            ("https://api.githubcopilot.com/mcp/", true),
+            ("https://api.githubcopilot.com/mcp", true),
+            ("https://api.githubcopilot.com/mcp/readonly", true),
+            ("https://api.githubcopilot.com/mcpx", false),
+            ("https://api.githubcopilot.com.evil.test/mcp", false),
+        ] {
+            assert_eq!(
+                eligible(&Connection::draft("GitHub", url)),
+                expected,
+                "{url}"
+            );
+        }
+        let mut connection = Connection::draft("GitHub", "https://api.githubcopilot.com/mcp");
+        if std::env::var_os("JECODE_GITHUB_CLIENT_ID").is_none()
+            && option_env!("JECODE_GITHUB_CLIENT_ID").is_none()
+        {
+            assert_eq!(client_id(&connection), CLIENT_ID);
+        }
+        connection.oauth_client_id = Some("Iv1.override".into());
+        assert_eq!(client_id(&connection), "Iv1.override");
     }
 }

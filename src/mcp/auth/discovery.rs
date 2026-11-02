@@ -44,27 +44,11 @@ pub(super) fn discover_optional(
             format!("{base}/.well-known/oauth-protected-resource"),
         ]
     };
-    if let Some(url) = challenge
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("WWW-Authenticate"))
-        .find_map(|(_, value)| {
-            value
-                .split("resource_metadata=\"")
-                .nth(1)
-                .and_then(|tail| tail.split('"').next())
-        })
-    {
-        config::validate_url(url)?;
-        candidates.insert(0, url.to_owned());
+    if let Some(url) = wire::challenge_param(challenge, "resource_metadata") {
+        config::validate_url(&url)?;
+        candidates.insert(0, url);
     }
-    let mut resource = None;
-    for url in candidates {
-        if let Some(value) = wire::get_json(&url, cancel)? {
-            resource = Some(value);
-            break;
-        }
-    }
-    let Some(metadata) = resource else {
+    let Some(metadata) = wire::first_json(&candidates, cancel)? else {
         return Ok(None);
     };
     let announced = required(&metadata, "resource")?;
@@ -94,20 +78,14 @@ pub(super) fn discover_optional(
     if !suffix.is_empty() {
         urls.push(format!("{issuer}/.well-known/openid-configuration"));
     }
-    let mut authorization = None;
-    for url in urls {
-        if let Some(value) = wire::get_json(&url, cancel)? {
-            authorization = Some(value);
-            break;
-        }
-    }
-    let authorization = authorization
+    let authorization = wire::first_json(&urls, cancel)?
         .ok_or_else(|| failure("OAuth authorization server metadata was not found"))?;
     if required(&authorization, "issuer")? != issuer {
         return Err(failure(
             "OAuth issuer metadata does not match the announced issuer",
         ));
     }
+    pkce(&authorization)?;
     let authorize = required(&authorization, "authorization_endpoint")?.to_owned();
     let token = required(&authorization, "token_endpoint")?.to_owned();
     trusted_endpoint(&authorize, issuer)?;
@@ -119,16 +97,8 @@ pub(super) fn discover_optional(
     if let Some(url) = &registration {
         trusted_endpoint(url, issuer)?;
     }
-    let scope = challenge
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("WWW-Authenticate"))
-        .find_map(|(_, value)| {
-            value
-                .split("scope=\"")
-                .nth(1)
-                .and_then(|tail| tail.split('"').next())
-                .map(str::to_owned)
-        })
+    let scope = wire::challenge_param(challenge, "scope")
+        .filter(|s| !s.is_empty())
         .or_else(|| {
             metadata
                 .get("scopes_supported")
@@ -160,6 +130,22 @@ pub(super) fn discover_optional(
     }))
 }
 
+/// Servers often omit the method list; only an explicit list without S256 is refused.
+pub(super) fn pkce(authorization: &Value) -> Result<(), Error> {
+    match authorization.get("code_challenge_methods_supported") {
+        Some(methods)
+            if !methods
+                .as_array()
+                .is_some_and(|list| list.iter().any(|m| m.as_str() == Some("S256"))) =>
+        {
+            Err(failure(
+                "OAuth authorization server does not support PKCE S256",
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 pub(super) fn trusted_endpoint(url: &str, issuer: &str) -> Result<(), Error> {
     config::validate_url(url)?;
     if issuer.starts_with("https://") && !url.starts_with("https://") {
@@ -174,11 +160,8 @@ pub(super) fn client_id(
     redirect: &str,
     cancel: &Cancellation,
 ) -> Result<String, Error> {
-    let configured = connection
-        .oauth_client_id
-        .as_deref()
-        .or_else(|| connection.oauth.as_ref().map(|o| o.client_id.as_str()));
-    if let Some(id) = configured {
+    // A registered client is bound to this sign-in's redirect; only refresh reuses it.
+    if let Some(id) = connection.oauth_client_id.as_deref() {
         if id.starts_with("https://") {
             if !server.cimd {
                 return Err(failure(
@@ -258,7 +241,27 @@ fn callback_matches(registered: &str, actual: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::callback_matches;
+    use super::{callback_matches, pkce};
+    use crate::json;
+
+    #[test]
+    fn pkce_is_refused_only_when_metadata_lists_methods_without_s256() {
+        for (metadata, ok) in [
+            (r#"{}"#, true),
+            (
+                r#"{"code_challenge_methods_supported":["plain","S256"]}"#,
+                true,
+            ),
+            (r#"{"code_challenge_methods_supported":["plain"]}"#, false),
+            (r#"{"code_challenge_methods_supported":"S256"}"#, false),
+        ] {
+            assert_eq!(
+                pkce(&json::parse(metadata).unwrap()).is_ok(),
+                ok,
+                "{metadata}"
+            );
+        }
+    }
 
     #[test]
     fn native_oauth_metadata_accepts_ephemeral_ports_only_for_the_same_loopback_path() {

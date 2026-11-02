@@ -45,13 +45,7 @@ pub fn methods(connection: &Connection, cancel: &Cancellation) -> Result<Vec<Aut
             if !result.contains(&AuthMethod::Token) {
                 result.push(AuthMethod::Token);
             }
-            let configured = connection.oauth_client_id.as_deref().or_else(|| {
-                connection
-                    .oauth
-                    .as_ref()
-                    .map(|tokens| tokens.client_id.as_str())
-            });
-            let available = match configured {
+            let available = match connection.oauth_client_id.as_deref() {
                 Some(id) if id.starts_with("https://") => server.cimd,
                 Some(_) => true,
                 None => server.registration.is_some(),
@@ -63,11 +57,8 @@ pub fn methods(connection: &Connection, cancel: &Cancellation) -> Result<Vec<Aut
                 result.push(AuthMethod::Browser);
             }
         }
-        Err(error)
-            if error.kind == super::types::ErrorKind::Cancelled || probe.challenge.is_none() =>
-        {
-            return Err(error);
-        }
+        // Without usable OAuth metadata the server still offers None or Token.
+        Err(error) if error.kind == super::types::ErrorKind::Cancelled => return Err(error),
         _ => {}
     }
     Ok(result)
@@ -271,6 +262,13 @@ fn token_record(
     ctx: TokenContext<'_>,
     previous: Option<&OAuthTokens>,
 ) -> Result<OAuthTokens, Error> {
+    // GitHub answers some token errors with HTTP 200.
+    if value
+        .get("error")
+        .is_some_and(|e| !matches!(e, Value::Null))
+    {
+        return Err(wire::rejection(200, Some(value)));
+    }
     if value
         .get("token_type")
         .and_then(Value::as_str)

@@ -2,8 +2,9 @@
 
 Jecode uses one maintainer-owned public GitHub App for every user's GitHub
 OAuth login. Users choose **Token** or **OAuth** in Settings > MCP. OAuth opens
-GitHub in the browser and displays a device code when required. Users do not
-register an App, enter a client ID or handle a client secret.
+GitHub's device page in the browser and displays the one-time code to enter
+there. Users do not register an App, enter a client ID or handle a client
+secret.
 
 ## Registered identity
 
@@ -24,6 +25,9 @@ permissions were verified through GitHub's API. The public client ID is bundled
 in `src/mcp/auth/github.rs`, so source, CI and release builds share the same
 identity without a release-environment variable. Maintainer overrides through
 `JECODE_GITHUB_CLIENT_ID` remain available; end users need no setup variable.
+Sign-in does not copy the bundled ID into the connection, so a later bundled or
+maintainer ID applies to the next sign-in. Refresh keeps the client ID that
+issued the session. GitHub App permissions, not OAuth scopes, bound the tokens.
 
 ## User authorization and installation
 

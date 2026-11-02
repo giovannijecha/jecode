@@ -29,6 +29,9 @@ fn failure(message: &str) -> Error {
 fn io(_: std::io::Error) -> Error {
     failure("Could not access MCP configuration")
 }
+fn cancelled() -> Error {
+    Error::new(ErrorKind::Cancelled, "Operation cancelled")
+}
 
 #[derive(Clone)]
 pub struct Store {
@@ -96,6 +99,10 @@ impl Store {
         Ok(values)
     }
     fn lock(&self) -> Result<disk::lock::Exclusive, Error> {
+        self.acquire(None)
+    }
+    /// Waiters stay cancellable while another caller refreshes under the lock.
+    fn acquire(&self, cancel: Option<&Cancellation>) -> Result<disk::lock::Exclusive, Error> {
         disk::ensure_private_directory(self.path.parent().expect("MCP home")).map_err(io)?;
         #[cfg(windows)]
         crate::auth::openai::native::protect(self.path.parent().expect("MCP home"), true)
@@ -107,7 +114,17 @@ impl Store {
         {
             return Err(failure("MCP lock path is invalid"));
         }
-        let lock = disk::lock::Exclusive::acquire(&self.lock).map_err(io)?;
+        let lock = match cancel {
+            Some(cancel) => disk::lock::Exclusive::acquire_cancellable(&self.lock, cancel)
+                .map_err(|e| {
+                    if cancel.requested() {
+                        cancelled()
+                    } else {
+                        io(e)
+                    }
+                })?,
+            None => disk::lock::Exclusive::acquire(&self.lock).map_err(io)?,
+        };
         #[cfg(windows)]
         crate::auth::openai::native::protect(&self.lock, false)
             .map_err(|_| failure("Could not protect MCP lock file"))?;
@@ -207,9 +224,9 @@ impl Store {
     /// Read and renew only the current record while holding the mutation lock.
     pub fn fresh(&self, id: &str, cancel: &Cancellation) -> Result<Connection, Error> {
         if cancel.requested() {
-            return Err(Error::new(ErrorKind::Cancelled, "Operation cancelled"));
+            return Err(cancelled());
         }
-        let _guard = self.lock()?;
+        let _guard = self.acquire(Some(cancel))?;
         let mut document = self.document()?;
         let entries = Self::entries(&mut document)?;
         let index = entries

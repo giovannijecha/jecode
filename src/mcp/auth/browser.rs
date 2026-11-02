@@ -103,7 +103,6 @@ pub(super) fn sign_in(
         },
         None,
     )?);
-    connection.oauth_client_id = Some(client);
     connection.method = super::super::types::AuthMethod::Browser;
     connection.token.clear();
     super::super::config::validate(&connection)?;
@@ -125,6 +124,10 @@ fn wait(
         }
         match listener.accept() {
             Ok((mut stream, peer)) if peer.ip().is_loopback() => {
+                // Windows sockets inherit non-blocking mode, which would void the read timeout.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
                 if let Some(code) =
                     callback(&mut stream, port, state, issuer, iss_required, cancel)?
                 {
@@ -206,16 +209,21 @@ fn callback(
         respond(stream, false);
         return Ok(None);
     }
-    let values = wire::query(query)?;
+    // Any local process can reach the listener: only a request carrying this
+    // sign-in's state may end it.
+    let Ok(values) = wire::query(query) else {
+        respond(stream, false);
+        return Ok(None);
+    };
+    if values.get("state").map(String::as_str) != Some(state) {
+        respond(stream, false);
+        return Ok(None);
+    }
     if values.get("iss").is_some_and(|iss| iss != issuer)
         || (iss_required && !values.contains_key("iss"))
     {
         respond(stream, false);
         return Err(wire::failure("OAuth authorization issuer did not match"));
-    }
-    if values.get("state").map(String::as_str) != Some(state) {
-        respond(stream, false);
-        return Ok(None);
     }
     if values.contains_key("error") {
         respond(stream, true);
@@ -243,4 +251,80 @@ fn respond(stream: &mut TcpStream, ok: bool) {
         body.len()
     );
     let _ = stream.write_all(response.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn send(port: u16, target: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+        let (head, tail) = request.split_at(12);
+        stream.write_all(head.as_bytes()).unwrap();
+        // Longer than the callback read timeout, which must hold on accepted sockets.
+        std::thread::sleep(Duration::from_millis(250));
+        stream.write_all(tail.as_bytes()).unwrap();
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).unwrap();
+        reply
+    }
+
+    fn listen() -> (TcpListener, u16) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        (listener, port)
+    }
+
+    #[test]
+    fn stray_callbacks_are_ignored_until_the_matching_state_arrives() {
+        let (listener, port) = listen();
+        let client = std::thread::spawn(move || {
+            for target in [
+                "/callback?%zz",
+                "/callback?flag",
+                "/callback?state=other&iss=https%3A%2F%2Fevil.test&code=x",
+            ] {
+                assert!(send(port, target).starts_with("HTTP/1.1 400"), "{target}");
+            }
+            let good = "/callback?state=right&code=good&iss=https%3A%2F%2Fissuer.test";
+            assert!(send(port, good).starts_with("HTTP/1.1 200"));
+        });
+        let cancel = Cancellation::default();
+        let code = wait(
+            &listener,
+            port,
+            "right",
+            "https://issuer.test",
+            true,
+            &cancel,
+        );
+        assert_eq!(code.unwrap(), "good");
+        client.join().unwrap();
+    }
+
+    #[test]
+    fn matching_state_from_another_issuer_ends_sign_in() {
+        let (listener, port) = listen();
+        let client = std::thread::spawn(move || {
+            send(
+                port,
+                "/callback?state=right&code=x&iss=https%3A%2F%2Fevil.test",
+            );
+        });
+        let cancel = Cancellation::default();
+        assert!(
+            wait(
+                &listener,
+                port,
+                "right",
+                "https://issuer.test",
+                false,
+                &cancel
+            )
+            .is_err()
+        );
+        client.join().unwrap();
+    }
 }

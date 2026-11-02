@@ -173,6 +173,104 @@ fn public_discovery_with_protected_catalog_requires_token_or_browser() {
     worker.join().unwrap();
 }
 
+type Route = fn(&str, &str) -> (&'static str, String, String);
+
+fn serve(count: usize, route: Route) -> crate::test_support::server::Server<()> {
+    use crate::test_support::server::{Server, accept};
+    Server::start(move |listener, stop| {
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        for _ in 0..count {
+            let mut stream = accept(&listener, &stop).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let text = request(&mut stream);
+            let (status, body, extra) = route(&origin, text.split_whitespace().nth(1).unwrap());
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}", body.len()).unwrap();
+        }
+    })
+}
+
+fn checked(server: &crate::test_support::server::Server<()>) -> Vec<AuthMethod> {
+    let mut connection = Connection::draft("fixture", &format!("{}/mcp", server.endpoint));
+    connection.timeout_secs = 2;
+    methods(&connection, &Cancellation::default()).unwrap()
+}
+
+#[test]
+fn unusable_metadata_on_a_public_server_still_offers_none() {
+    let server = serve(4, |_, path| match path {
+        "/mcp" => ("200 OK", "{}".into(), String::new()),
+        "/.well-known/oauth-protected-resource/mcp" => {
+            ("200 OK", "<html>login</html>".into(), String::new())
+        }
+        "/.well-known/oauth-protected-resource" => {
+            ("500 Internal Server Error", "{}".into(), String::new())
+        }
+        _ => panic!("unexpected fixture path {path}"),
+    });
+    assert_eq!(checked(&server), vec![AuthMethod::None]);
+    server.finish();
+}
+
+#[test]
+fn metadata_discovery_falls_back_past_unusable_candidates() {
+    let server = serve(4, |origin, path| match path {
+        "/mcp" => (
+            "401 Unauthorized",
+            "{}".into(),
+            "WWW-Authenticate: Bearer realm=mcp\r\n".into(),
+        ),
+        "/.well-known/oauth-protected-resource/mcp" => {
+            ("200 OK", "<html>login</html>".into(), String::new())
+        }
+        "/.well-known/oauth-protected-resource" => (
+            "200 OK",
+            format!(r#"{{"resource":"{origin}/mcp","authorization_servers":["{origin}"]}}"#),
+            String::new(),
+        ),
+        "/.well-known/oauth-authorization-server" => (
+            "200 OK",
+            format!(
+                r#"{{"issuer":"{origin}","authorization_endpoint":"{origin}/authorize","token_endpoint":"{origin}/token","registration_endpoint":"{origin}/register"}}"#
+            ),
+            String::new(),
+        ),
+        _ => panic!("unexpected fixture path {path}"),
+    });
+    assert_eq!(
+        checked(&server),
+        vec![AuthMethod::Token, AuthMethod::Browser]
+    );
+    server.finish();
+}
+
+#[test]
+fn token_lifetimes_and_in_body_errors_are_understood() {
+    let context = TokenContext {
+        endpoint: "https://issuer.test/token",
+        bound_endpoint: "https://example.test/mcp",
+        client: "client",
+        issuer: "https://issuer.test",
+        resource: None,
+        github: false,
+        now: 10,
+    };
+    for lifetime in [Value::number("120.0"), Value::string("120")] {
+        let value = Value::object([
+            ("access_token", Value::string("synthetic")),
+            ("expires_in", lifetime),
+        ]);
+        assert_eq!(
+            token_record(&value, context, None).unwrap().expires_at,
+            Some(130)
+        );
+    }
+    let revoked = Value::object([("error", Value::string("bad_refresh_token"))]);
+    let error = token_record(&revoked, context, None).map(drop).unwrap_err();
+    assert_eq!(error.kind, super::super::types::ErrorKind::Authentication);
+}
+
 #[test]
 fn token_record_rejects_expired_or_wrong_type() {
     let context = TokenContext {
@@ -350,6 +448,9 @@ fn browser_pkce_and_refresh_stay_on_discovered_issuer_and_resource() {
         Ok(())
     }).unwrap();
     assert_eq!(signed.oauth.as_ref().unwrap().access_token, "access-one");
+    // The registered client belongs to this sign-in's redirect, not the user override.
+    assert_eq!(signed.oauth.as_ref().unwrap().client_id, "synthetic-client");
+    assert_eq!(signed.oauth_client_id, None);
     assert_eq!(
         signed.oauth.as_ref().unwrap().resource.as_deref(),
         Some(expected_resource.as_str())

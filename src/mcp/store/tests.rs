@@ -63,6 +63,71 @@ fn duplicate_names_and_invalid_headers_leave_existing_file_unchanged() {
 }
 
 #[test]
+fn oauth_session_without_expiry_round_trips() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let mut connection = draft("OAuth");
+    connection.method = AuthMethod::Browser;
+    connection.oauth = Some(crate::mcp::types::OAuthTokens {
+        endpoint: connection.endpoint.clone(),
+        access_token: "synthetic-access".into(),
+        refresh_token: None,
+        expires_at: None,
+        token_endpoint: "https://issuer.test/token".into(),
+        client_id: "synthetic-client".into(),
+        issuer: "https://issuer.test".into(),
+        scope: None,
+        resource: Some(connection.endpoint.clone()),
+        github: false,
+    });
+    let saved = store.save(&connection).unwrap();
+    assert!(
+        fs::read_to_string(store.path())
+            .unwrap()
+            .contains("\"expires_at\": null")
+    );
+    assert!(store.list().unwrap() == vec![saved.clone()]);
+    assert_eq!(store.save(&draft("Other")).unwrap().name, "Other");
+    assert!(store.fresh(&saved.id, &Cancellation::default()).unwrap() == saved);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn fresh_waits_for_the_store_lock_cancellably() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let guard = store.lock().unwrap();
+    let cancel = Cancellation::default();
+    let trigger = cancel.clone();
+    let canceller = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        trigger.cancel();
+    });
+    let error = store.fresh("mcp-any", &cancel).map(drop).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Cancelled);
+    canceller.join().unwrap();
+    drop(guard);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn hop_by_hop_and_proxy_headers_are_reserved() {
+    for name in [
+        "Transfer-Encoding",
+        "TE",
+        "Upgrade",
+        "Expect",
+        "Proxy-Authorization",
+        "Connection",
+        "Content-Length",
+    ] {
+        let mut connection = draft("Headers");
+        connection.headers.push((name.into(), "value".into()));
+        assert!(config::validate(&connection).is_err(), "{name}");
+    }
+}
+
+#[test]
 fn corrupt_file_and_disabled_connection_cannot_be_silently_replaced() {
     let home = fixture();
     let store = Store::new(home.clone());

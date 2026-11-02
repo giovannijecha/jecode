@@ -17,15 +17,17 @@ real Vercel account. The Add connection row states this requirement.
 | Source and homepage | `https://github.com/giovannijecha/jecode` |
 | Client type | Native terminal application; public OAuth client |
 | Authorization | Authorization code with PKCE S256, protected-resource and issuer discovery |
-| Callback | `http://127.0.0.1:<ephemeral-port>/callback` |
+| Callback | `http://127.0.0.1:<ephemeral-port>/callback`; a fixed client ID must accept any loopback port ([RFC 8252](https://www.rfc-editor.org/rfc/rfc8252#section-7.3)) |
 | Client registration | Public client ID, Client ID Metadata Document URL, or dynamic registration when offered |
 | Identity | Jecode; no credentials or client identity from another approved coding tool |
 | Permissions | Teams and resources authorized by the user, independently of local file/command levels |
 
 Submit this information through the client review form linked by Vercel.
 No review request has been submitted by this implementation. If approval
-requires a public client ID or metadata URL, enter it in the connection's
-Advanced > OAuth client ID field. Follow Vercel's registration instructions;
+requires a public client ID or metadata URL, open the connection's
+**Advanced > Custom OAuth client** and enter it as the OAuth client ID. Without
+one, sign-in uses dynamic registration when Vercel offers it. Follow Vercel's
+registration instructions;
 Jecode does not embed a client secret or an invented default ID.
 
 After approval, complete browser sign-in from Settings > MCP and grant the

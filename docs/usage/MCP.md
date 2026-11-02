@@ -15,9 +15,10 @@ service use distinct names. They apply to every conversation and collaborator.
 4. Save. Jecode checks the connection and loads the tools before saving it.
 
 The form includes Name, Endpoint and Sign-in. Advanced contains the request
-timeout (1–600 seconds, default 60) and masked custom headers. Custom servers
-can override their OAuth client in Advanced; guided services supply the client
-identity internally and do not ask users for a client ID.
+timeout (1–600 seconds, default 60) and masked custom headers. Only GitHub
+supplies its client identity internally. Other services and custom servers use
+dynamic registration when the server offers it; **Advanced > Custom OAuth
+client** accepts a pre-registered client ID or metadata URL instead.
 Entering `Name: value` adds or replaces that header; `Name:` removes it.
 Esc discards unsaved edits. Saving a changed endpoint replaces the old server
 identity and authentication; it never forwards the old token to a new URL.
@@ -57,9 +58,11 @@ tool is read-only. Local checkpoints cannot undo remote changes.
 
 [OAuth](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 uses protected-resource and authorization-server metadata, a public client,
-PKCE and a loopback callback. It supports a configured client ID or client
-metadata URL, with dynamic registration when offered. Refresh remains bound to
-the original endpoint and issuer. Query options such as
+PKCE S256 and a loopback callback on an ephemeral port. It supports a configured
+client ID or client metadata URL, with dynamic registration when offered. A
+dynamically registered client serves only the sign-in that registered it and
+that session's refreshes; the next sign-in registers again. Refresh remains
+bound to the original endpoint, issuer and client. Query options such as
 [Supabase's `project_ref`](https://supabase.com/docs/guides/ai-tools/mcp) remain
 part of the connection identity even when the OAuth resource URI omits the
 query. Reconnect from Settings when sign-in has expired or access was revoked.

@@ -68,6 +68,12 @@ pub fn validate_url(url: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// The GitHub MCP endpoint, with or without its trailing slash.
+pub fn github_endpoint(url: &str) -> bool {
+    url.strip_prefix("https://api.githubcopilot.com/mcp")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?']))
+}
+
 pub fn validate(connection: &Connection) -> Result<(), Error> {
     if connection.name.trim().is_empty()
         || connection.name.trim() != connection.name
@@ -123,9 +129,14 @@ pub fn validate(connection: &Connection) -> Result<(), Error> {
             || matches!(
                 name.to_ascii_lowercase().as_str(),
                 "authorization"
+                    | "proxy-authorization"
                     | "host"
                     | "content-length"
+                    | "transfer-encoding"
+                    | "te"
                     | "connection"
+                    | "upgrade"
+                    | "expect"
                     | "accept"
                     | "content-type"
                     | "last-event-id"
@@ -153,9 +164,7 @@ pub fn validate(connection: &Connection) -> Result<(), Error> {
         if tokens.github
             && (tokens.issuer != "https://github.com"
                 || tokens.token_endpoint != "https://github.com/login/oauth/access_token"
-                || !connection
-                    .endpoint
-                    .starts_with("https://api.githubcopilot.com/mcp/"))
+                || !github_endpoint(&connection.endpoint))
         {
             return Err(invalid("GitHub OAuth endpoint is invalid"));
         }
@@ -211,7 +220,7 @@ fn optional(value: &Value, key: &str) -> Result<Option<String>, Error> {
 }
 fn number(value: &Value, key: &str) -> Result<Option<u64>, Error> {
     match value.get(key) {
-        None => Ok(None),
+        None | Some(Value::Null) => Ok(None),
         Some(Value::Number(s)) => s
             .parse()
             .map(Some)
