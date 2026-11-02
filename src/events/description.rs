@@ -3,7 +3,16 @@ use crate::json::Value;
 pub fn description(name: &str, arguments: &Value) -> String {
     if matches!(
         name,
-        "read" | "list" | "search" | "map" | "bash" | "exec" | "process" | "web" | "browser"
+        "read"
+            | "list"
+            | "search"
+            | "map"
+            | "bash"
+            | "exec"
+            | "process"
+            | "web"
+            | "browser"
+            | "mcp"
     ) && let Some(label) = arguments.get("description").and_then(Value::as_str)
         && !label.trim().is_empty()
     {
@@ -14,6 +23,19 @@ pub fn description(name: &str, arguments: &Value) -> String {
 
 /// The invocation target, independently of an optional display description.
 pub fn target(name: &str, arguments: &Value) -> String {
+    if name == "mcp" {
+        let connection = arguments
+            .get("connection_name")
+            .or_else(|| arguments.get("connection"))
+            .and_then(Value::as_str)
+            .unwrap_or("MCP");
+        let action = arguments
+            .get("tool")
+            .or_else(|| arguments.get("action"))
+            .and_then(Value::as_str)
+            .unwrap_or("list");
+        return format!("{connection} › {action}");
+    }
     if name == "ask_user"
         && let Ok(request) = crate::ask::Request::parse("", arguments)
     {

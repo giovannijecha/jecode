@@ -3,7 +3,7 @@
 
 mod flow;
 mod jwt;
-pub(super) mod native;
+pub(crate) mod native;
 mod storage;
 mod wire;
 

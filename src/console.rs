@@ -77,7 +77,7 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                     .remove(&id)
                     .filter(|call| call.distinguish && !call.target.is_empty())
                     .map_or_else(String::new, |call| format!(" {}", call.target));
-                format!("[{name}: {summary}]{suffix}")
+                format!("[{name}: {}]{suffix}", clean(&summary))
             }
             Event::Preparing => {
                 self.active.clear();
@@ -145,7 +145,21 @@ pub(crate) fn collaboration_line(event: &crate::json::Value) -> String {
 mod tests {
     use super::*;
     use crate::json::Value;
-
+    #[test]
+    fn mcp_results_cannot_emit_control_sequences_in_plain_status() {
+        let mut output = Vec::new();
+        let mut status = Vec::new();
+        Console::new(&mut output, &mut status)
+            .emit(Event::ToolFinished {
+                id: "mcp-result".into(),
+                name: "mcp".into(),
+                summary: "Done\x1b]52;fixture\x07".into(),
+                result: crate::json::Value::object([]),
+            })
+            .unwrap();
+        assert!(!status.contains(&0x1b));
+        assert!(!status.contains(&7));
+    }
     #[test]
     fn collaborator_calls_show_actions_and_numbered_identity() {
         let (mut output, mut status) = (Vec::new(), Vec::new());

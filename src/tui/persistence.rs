@@ -252,11 +252,21 @@ impl App {
                         Record::Tool {
                             id,
                             name,
-                            arguments,
+                            mut arguments,
                             summary,
                             result,
                             change,
                         } => {
+                            if name == "mcp"
+                                && let Some(label) =
+                                    crate::mcp::label(self.config.store.path().parent(), &arguments)
+                                && let crate::json::Value::Object(fields) = &mut arguments
+                            {
+                                fields.insert(
+                                    "connection_name".into(),
+                                    crate::json::Value::string(self.archive.redactor.text(&label)),
+                                );
+                            }
                             if name == "agent" && super::agents::receipt_replaces_tool(&arguments) {
                                 let work = arguments
                                     .get("work")

@@ -40,6 +40,7 @@ impl Selector {
                     Setting::AutoCompact,
                 ),
                 setting("Providers", String::new(), Setting::Providers),
+                setting("MCP", String::new(), Setting::Mcp),
             ],
         );
         "saved defaults".clone_into(&mut menu.context);

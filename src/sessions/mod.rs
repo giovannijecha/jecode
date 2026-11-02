@@ -68,6 +68,8 @@ mod checkpoint_measurements;
 mod crash_tests;
 #[cfg(test)]
 mod journal_tests;
+#[cfg(test)]
+mod mcp_tests;
 #[cfg(all(test, windows))]
 mod measurement_tests;
 #[cfg(test)]

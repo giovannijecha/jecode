@@ -8,7 +8,7 @@ writing [skills](SKILLS.md).
 ## Arguments
 
 Every tool accepts an optional boolean `parallel`. The routine tools `read`,
-`list`, `search`, `map`, `bash`, `exec`, `process`, `web` and `browser` also
+`list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser` and `mcp` also
 accept two display-only strings: `work`, a short label that groups related calls
 into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
 `description`, a caption for the call's card. `agent` accepts `work` too.
@@ -28,11 +28,20 @@ Neither changes what the call does.
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` |
 | `web` | `action`; `url` for `fetch` and `download`; `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` |
 | `browser` | `action`; `url` for `navigate`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
+| `mcp` | `action`: `list`, `tools` or `call`; `connection` for `tools` and `call`; `tool` for `call` | `arguments` (JSON object), `query`, `offset`, `limit` |
 | `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
 | `ask_user` | `questions` | See [Questions and plans](QUESTIONS_AND_PLANS.md#question-format). |
 | `todo_list` | `action` | See [Questions and plans](QUESTIONS_AND_PLANS.md#plan-format). |
 
 ## Scheduling
+
+`mcp list` shows configured connections and their stable IDs. `mcp tools`
+discovers remote tool names and exact input schemas, optionally filtered by
+`query`; `offset` defaults to 0 and `limit` to 8 (1–50). `mcp call` forwards
+`tool` and `arguments` (default `{}`) to the selected enabled connection.
+Structured and other MCP result blocks remain in the JSON result. A remote
+`isError` is a tool failure; `outcome: unknown` means the service may already
+have acted. Never infer rollback from local checkpoints. See [MCP](MCP.md).
 
 These calls run in parallel automatically when adjacent, up to four at a time:
 `list`, `search`, `read` (except `history:` and `skill:` references), `map`

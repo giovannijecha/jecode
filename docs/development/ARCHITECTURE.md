@@ -26,6 +26,7 @@ Paths are relative to `src/`.
 | File discovery and path filtering | `tools/discovery/`, `path_filter.rs`, `path_filter/` |
 | Project map | `project_map/` |
 | Web and browser | `http.rs`, `http/`, `web/`, `browser/` |
+| Remote MCP tools | `mcp/`, `agent/mcp.rs`, `tools/schema/mcp.rs`, `tui/mcp/` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |

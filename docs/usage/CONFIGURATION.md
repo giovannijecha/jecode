@@ -159,6 +159,7 @@ error.
 | Path | Contents |
 | --- | --- |
 | `config.json` | Settings and saved provider API keys. |
+| `mcp.json`, `mcp.lock` | Global [MCP connections](MCP.md), credentials and the shared configuration lock. |
 | `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
 | `skills/` | Your [personal skills](SKILLS.md). |
 | `sessions/<project>/` | [Saved conversations](SESSIONS.md), their complete command output, [attachments](ATTACHMENTS.md) and collaborator data, grouped by project directory. |

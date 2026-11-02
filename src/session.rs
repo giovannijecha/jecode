@@ -18,6 +18,7 @@ use crate::attachments::{Attachment, Prompt};
 use crate::console::Console;
 use crate::events::{Event, EventSink};
 use crate::input::read_line;
+use crate::json::Value;
 use std::io::{BufRead, Write};
 
 /// A line-based chat whose first message carries `staged` attachments.
@@ -177,6 +178,22 @@ fn chat_inner(
                 )?;
                 agent.record_local("/new", "New conversation · saved defaults applied");
                 writeln!(output, "Conversation cleared.").map_err(|error| error.to_string())
+            }
+            ("/mcp", "") => {
+                let home = config
+                    .store
+                    .path()
+                    .parent()
+                    .ok_or("Missing configuration directory")?;
+                let result = crate::mcp::execute(
+                    Some(home),
+                    &Value::object([("action", Value::string("list"))]),
+                    &crate::cancel::Cancellation::default(),
+                    &agent.redactor(),
+                );
+                let summary = crate::mcp::summary(&result);
+                agent.record_local("/mcp", &summary);
+                writeln!(output, "{}", result.pretty()).map_err(|error| error.to_string())
             }
             ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");

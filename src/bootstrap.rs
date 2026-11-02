@@ -209,6 +209,7 @@ fn account_redactor(
     status: &mut impl Write,
 ) -> Result<crate::redact::Redactor, String> {
     let mut redactor = crate::redact::Redactor::empty();
+    crate::mcp::include_credentials(home, &redactor)?;
     for backend in crate::backend::available()
         .iter()
         .filter(|backend| crate::auth::account_backend(backend.id))

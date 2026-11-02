@@ -361,7 +361,11 @@ impl Document {
                         (
                             "error",
                             Value::string(if unknown {
-                                "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
+                                if ToolCall::parse(&call).is_ok_and(|call| call.name == "mcp") {
+                                    "Tool outcome is unknown: Jecode closed after the remote call may have started. Check the service before deciding whether to run it again; local checkpoints cannot undo remote changes."
+                                } else {
+                                    "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
+                                }
                             } else {
                                 "Tool was not executed: Jecode closed before execution started."
                             }),

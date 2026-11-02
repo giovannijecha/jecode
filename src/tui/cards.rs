@@ -14,6 +14,7 @@ mod discovery;
 mod edit_fallback;
 mod failure;
 mod map;
+mod mcp;
 mod presentation;
 mod rhythm;
 mod streams;
@@ -62,6 +63,9 @@ impl Status {
         };
         if tool.name == "collaboration" {
             return agents::status(result);
+        }
+        if tool.name == "mcp" && result.get("outcome").and_then(Value::as_str) == Some("unknown") {
+            return Self::Unknown;
         }
         let process = crate::events::process_status(result);
         if matches!(process, Some("running" | "stopping")) {
@@ -133,6 +137,8 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         work::todo(tool, columns)
     } else if tool.name == "collaboration" {
         agents::card(tool, columns, keycap)
+    } else if tool.name == "mcp" {
+        mcp::card(tool, columns, keycap)
     } else if matches!(tool.name, "read" | "write" | "edit") {
         file_card(tool, columns, keycap)
     } else {
@@ -261,7 +267,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
         "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
-        | "agent" => crate::events::target(tool.name, tool.arguments),
+        | "agent" | "mcp" => crate::events::target(tool.name, tool.arguments),
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
     (name, target)
@@ -282,6 +288,7 @@ fn title_name(tool: &str) -> &str {
         "web" => "Web",
         "browser" => "Browser",
         "agent" => "Agents",
+        "mcp" => "MCP",
         other => other,
     }
 }

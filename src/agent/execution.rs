@@ -223,6 +223,12 @@ impl Agent {
     fn started_event(&self, call: &ToolCall) -> Event {
         let mut arguments =
             json::parse(&call.arguments).unwrap_or_else(|_| Value::string(&call.arguments));
+        if call.name == "mcp"
+            && let Some(label) = self.tools.mcp_label(&arguments)
+            && let Value::Object(fields) = &mut arguments
+        {
+            fields.insert("connection_name".into(), Value::string(label));
+        }
         if call.name == "agent"
             && let Value::Object(fields) = &mut arguments
         {

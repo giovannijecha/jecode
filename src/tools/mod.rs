@@ -5,6 +5,7 @@ pub(crate) mod edit;
 mod exec;
 mod files;
 mod interactive;
+mod mcp;
 mod network;
 pub mod processes;
 pub(crate) mod schema;
@@ -76,6 +77,8 @@ pub struct Tools {
     browsers: crate::browser::Registry,
     browser_profiles: Option<PathBuf>,
     session_home: Option<PathBuf>,
+    mcp_redactor: crate::redact::Redactor,
+    mcp_runtime: crate::mcp::Runtime,
     project_map: crate::project_map::Map,
 }
 
@@ -100,6 +103,8 @@ impl Tools {
             browsers: crate::browser::Registry::default(),
             browser_profiles: None,
             session_home: None,
+            mcp_redactor: crate::redact::Redactor::empty(),
+            mcp_runtime: crate::mcp::Runtime::default(),
         })
     }
 
@@ -422,6 +427,16 @@ impl Tools {
                         }
                         Ok((result, None))
                     }
+                    "mcp" => Ok((
+                        crate::mcp::execute_with(
+                            &self.mcp_runtime,
+                            self.session_home.as_deref(),
+                            &arguments,
+                            cancellation,
+                            &self.mcp_redactor,
+                        ),
+                        None,
+                    )),
                     "checkpoint" => self
                         .checkpoint(&arguments, cancellation)
                         .map(|value| (value, None)),

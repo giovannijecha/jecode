@@ -15,7 +15,7 @@ impl Command {
                 GROUPS[0]
             }
             "/model" | "/effort" | "/routing" | "/permissions" => GROUPS[1],
-            "/settings" | "/help" => GROUPS[3],
+            "/settings" | "/mcp" | "/help" => GROUPS[3],
             _ => GROUPS[2],
         }
     }
@@ -29,7 +29,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 19] = [
+pub const COMMANDS: [Command; 20] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -71,6 +71,12 @@ pub const COMMANDS: [Command; 19] = [
         description: "Change saved defaults and account credentials",
         tui_usage: "/settings",
         plain_usage: Some("/settings"),
+    },
+    Command {
+        name: "/mcp",
+        description: "Inspect globally configured MCP connections and tools",
+        tui_usage: "/mcp",
+        plain_usage: Some("/mcp"),
     },
     Command {
         name: "/init",

@@ -24,6 +24,7 @@ impl Agent {
                 store.share_attachments(parent);
             }
             self.tools.configure_session_home(home);
+            self.configure_mcp(home)?;
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
                 if self.has_model() {

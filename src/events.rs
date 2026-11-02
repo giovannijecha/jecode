@@ -152,6 +152,9 @@ fn counted(count: usize, noun: &str) -> String {
 }
 
 fn outcome_summary(name: &str, result: &Value) -> String {
+    if name == "mcp" {
+        return crate::mcp::summary(result);
+    }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return format!("error: {error}");
     }

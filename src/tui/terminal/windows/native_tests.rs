@@ -35,6 +35,9 @@ mod native_background;
 #[path = "native_auth_panels.rs"]
 mod native_auth_panels;
 
+#[path = "native_mcp.rs"]
+mod native_mcp;
+
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
@@ -340,6 +343,12 @@ fn native_console_fixture() {
         native_auth_panels::console();
         restored(&path);
         println!("NATIVE_AUTH_PANELS_VERIFIED");
+        return;
+    }
+    if scenario == "mcp-panels" {
+        native_mcp::console();
+        restored(&path);
+        println!("NATIVE_MCP_RESTORED");
         return;
     }
     if matches!(scenario.as_str(), "background-light" | "background-native") {

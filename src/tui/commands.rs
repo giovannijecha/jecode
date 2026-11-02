@@ -412,6 +412,12 @@ impl App {
             } else {
                 self.warn("Usage: /todo");
             }
+        } else if name.eq_ignore_ascii_case("/mcp") {
+            if arguments.is_empty() {
+                self.open_mcp(false);
+            } else {
+                self.warn("Usage: /mcp");
+            }
         } else {
             return self.copy_command(text);
         }
@@ -428,6 +434,7 @@ pub(super) fn immediate(name: &str) -> bool {
         "/ask",
         "/todo",
         "/permissions",
+        "/mcp",
     ]
     .iter()
     .any(|command| name.eq_ignore_ascii_case(command))
