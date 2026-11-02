@@ -138,12 +138,19 @@ impl App {
         self.mcp_loading("Checking server sign-in options…");
     }
 
-    fn present_mcp_methods(&mut self) {
-        if self.mcp.methods.len() == 1 {
-            self.choose_mcp_method(0);
-        } else {
-            self.show_mcp_methods();
+    pub(super) fn present_mcp_methods(&mut self) {
+        if self.mcp.methods == [AuthMethod::None] {
+            if let Some(draft) = &mut self.mcp.draft {
+                draft.method = AuthMethod::None;
+            }
+            self.show_mcp_form();
+            self.mcp_notice("This server does not require sign-in");
+            return;
         }
+        self.mcp
+            .methods
+            .retain(|method| *method != AuthMethod::None);
+        self.show_mcp_methods();
     }
 
     pub(super) fn start_mcp_probe(&mut self, connection: Connection) {
@@ -162,6 +169,10 @@ impl App {
         }
         if draft.endpoint.trim().is_empty() {
             self.show_mcp_field(Field::Endpoint);
+            return;
+        }
+        if draft.method == AuthMethod::None && self.mcp.methods != [AuthMethod::None] {
+            self.start_mcp_methods();
             return;
         }
         if draft.method == AuthMethod::Token && draft.token.is_empty() {

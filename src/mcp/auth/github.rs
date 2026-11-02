@@ -6,6 +6,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const DEVICE: &str = "https://github.com/login/device/code";
 const TOKEN: &str = "https://github.com/login/oauth/access_token";
 const ISSUER: &str = "https://github.com";
+// Public identifier of the maintainer-owned App, shared by every Jecode user.
+const CLIENT_ID: &str = "Iv23liTdak2Sf8VpPtLw";
 
 pub(super) fn client_id(connection: &Connection) -> Option<String> {
     connection
@@ -22,6 +24,7 @@ pub(super) fn client_id(connection: &Connection) -> Option<String> {
                 .map(str::to_owned)
                 .filter(|s| !s.is_empty())
         })
+        .or_else(|| Some(CLIENT_ID.to_owned()))
         .filter(|s| s.len() <= 2048 && s.bytes().all(|b| b.is_ascii_graphic()))
 }
 pub(super) fn eligible(connection: &Connection) -> bool {
@@ -40,7 +43,7 @@ pub(super) fn sign_in(
         ));
     }
     let id = client_id(&connection)
-        .ok_or_else(|| wire::failure("GitHub App client ID is not configured"))?;
+        .ok_or_else(|| wire::failure("GitHub OAuth is not enabled in this Jecode build yet"))?;
     let value = wire::post_form(
         DEVICE,
         &[("client_id", &id), ("scope", "offline_access")],

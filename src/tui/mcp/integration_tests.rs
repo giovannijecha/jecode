@@ -130,6 +130,11 @@ fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits(
     settle(&mut app);
     assert!(matches!(
         app.state.selector.as_ref().unwrap().purpose,
+        Purpose::Mcp(Panel::Methods)
+    ));
+    app.choose_mcp(Panel::Methods, 0); // Explicit Token choice, even for a token-only server.
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
         Purpose::Mcp(Panel::Field(Field::Token))
     ));
     app.state

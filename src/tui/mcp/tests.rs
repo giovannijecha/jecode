@@ -76,6 +76,76 @@ fn changing_auth_and_extra_headers_changes_only_the_draft() {
 }
 
 #[test]
+fn sign_in_requires_an_explicit_token_or_oauth_choice() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.mcp.draft = Some(Connection::draft(
+        "GitHub",
+        "https://api.githubcopilot.com/mcp/",
+    ));
+    app.mcp.methods = vec![AuthMethod::Token, AuthMethod::GitHubDevice];
+    app.present_mcp_methods();
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(menu.purpose, Purpose::Mcp(Panel::Methods)));
+    assert_eq!(
+        menu.options
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Token", "OAuth"]
+    );
+    assert_eq!(menu.options[1].fact, "Open browser");
+    assert_eq!(app.mcp.draft.as_ref().unwrap().method, AuthMethod::None);
+    app.show_mcp_advanced();
+    assert!(
+        app.state
+            .selector
+            .as_ref()
+            .unwrap()
+            .options
+            .iter()
+            .all(|row| !row.name.contains("client"))
+    );
+    app.mcp.methods = vec![AuthMethod::Token];
+    app.present_mcp_methods();
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        Purpose::Mcp(Panel::Methods)
+    ));
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn choosing_oauth_starts_authorization_without_opening_a_client_id_field() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.mcp.draft = Some(Connection::draft("Local", "http://127.0.0.1:1/mcp"));
+    app.mcp.methods = vec![AuthMethod::Token, AuthMethod::Browser];
+    app.show_mcp_methods();
+    app.choose_mcp(Panel::Methods, 1);
+    assert_eq!(app.mcp.draft.as_ref().unwrap().method, AuthMethod::Browser);
+    assert!(app.mcp.job.is_some());
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        Purpose::Mcp(Panel::Loading)
+    ));
+    assert_eq!(
+        app.state.selector.as_ref().unwrap().message,
+        "Starting sign-in…"
+    );
+    app.close_mcp_panel();
+    assert!(
+        crate::mcp::Store::new(app.mcp_home())
+            .list()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn vercel_guided_setup_prefills_the_generic_form_without_connecting_or_saving() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);

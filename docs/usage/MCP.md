@@ -9,19 +9,22 @@ service use distinct names. They apply to every conversation and collaborator.
 1. Open `/settings`, choose **MCP**, then **Add connection**.
 2. Choose GitHub, Supabase, Cloudflare, Vercel or **Server URL**. Guided entries only
    prefill the common form; every service uses the same protocol client.
-3. Check the endpoint and choose an authentication method offered for it.
-   Paste a bearer token into the masked field, or complete browser sign-in.
+3. Open **Sign-in** and explicitly choose **Token** or **OAuth** from the
+   methods offered by the server. Token opens the masked field. OAuth opens
+   browser authorization directly and shows a one-time code only when needed.
 4. Save. Jecode checks the connection and loads the tools before saving it.
 
 The form includes Name, Endpoint and Sign-in. Advanced contains the request
-timeout (1–600 seconds, default 60), masked custom headers and OAuth client ID.
+timeout (1–600 seconds, default 60) and masked custom headers. Custom servers
+can override their OAuth client in Advanced; guided services supply the client
+identity internally and do not ask users for a client ID.
 Entering `Name: value` adds or replaces that header; `Name:` removes it.
 Esc discards unsaved edits. Saving a changed endpoint replaces the old server
 identity and authentication; it never forwards the old token to a new URL.
 
 | Service | HTTP endpoint | Authentication |
 | --- | --- | --- |
-| GitHub | `https://api.githubcopilot.com/mcp/` | GitHub token; device sign-in after registering a Jecode GitHub App. |
+| GitHub | `https://api.githubcopilot.com/mcp/` | Token or OAuth with the registered Jecode App and a browser/device code. |
 | Supabase | `https://mcp.supabase.com/mcp` | Token or OAuth discovered from the server. |
 | Cloudflare | `https://mcp.cloudflare.com/mcp` | API token or OAuth discovered from the server. |
 | Vercel | `https://mcp.vercel.com` | OAuth; authenticated access requires Vercel's client approval. |
@@ -31,6 +34,10 @@ client and UI are tested with isolated synthetic servers. Vercel controls its
 [client approval](https://vercel.com/docs/agent-resources/vercel-mcp); Jecode
 does not bypass it. See the [GitHub App setup](../development/GITHUB_MCP_APP.md)
 for browser sign-in, which is optional for token connections.
+Jecode ships its public GitHub client ID; users do not register an App or
+configure an identifier. They authorize Jecode and choose the repositories
+they grant it access to. A public server with no authentication reads
+**Not needed**; a token-only server still asks for the explicit Token choice.
 The [Vercel client setup](../development/VERCEL_MCP_CLIENT.md) records the
 approval requirement and registration details. Vercel CLI/API tokens are not
 assumed to authorize the MCP endpoint; access follows its OAuth grants.

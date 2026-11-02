@@ -33,9 +33,7 @@ pub fn methods(connection: &Connection, cancel: &Cancellation) -> Result<Vec<Aut
         if !result.contains(&AuthMethod::Token) {
             result.push(AuthMethod::Token);
         }
-        if github::client_id(connection).is_some() {
-            result.push(AuthMethod::GitHubDevice);
-        }
+        result.push(AuthMethod::GitHubDevice);
         return Ok(result);
     }
     match discovery::discover_optional(

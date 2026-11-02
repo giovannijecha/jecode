@@ -3,6 +3,7 @@ mod flow;
 #[cfg(test)]
 mod integration_tests;
 mod job;
+mod sign_in;
 #[cfg(test)]
 mod tests;
 
@@ -228,11 +229,11 @@ impl App {
             return;
         };
         let method = match draft.method {
-            AuthMethod::None => "Not needed",
+            AuthMethod::None if self.mcp.methods == [AuthMethod::None] => "Not needed",
+            AuthMethod::None => "Choose Token or OAuth",
             AuthMethod::Token if draft.token.is_empty() => "Token · not entered",
             AuthMethod::Token => "Token · entered, hidden",
-            AuthMethod::Browser => "Browser",
-            AuthMethod::GitHubDevice => "Device code",
+            AuthMethod::Browser | AuthMethod::GitHubDevice => "OAuth",
         };
         let rows = vec![
             ("Name".into(), draft.name.clone()),
@@ -274,54 +275,38 @@ impl App {
         let Some(draft) = &self.mcp.draft else {
             return;
         };
+        let mut rows = vec![
+            ("Timeout".into(), format!("{} seconds", draft.timeout_secs)),
+            (
+                "Extra header".into(),
+                format!("{} configured, hidden", draft.headers.len()),
+            ),
+        ];
+        let endpoint = draft
+            .endpoint
+            .split('?')
+            .next()
+            .unwrap_or(&draft.endpoint)
+            .trim_end_matches('/');
+        if !PRESETS
+            .iter()
+            .any(|(_, url, _)| url.trim_end_matches('/') == endpoint)
+        {
+            rows.push((
+                "Custom OAuth client".into(),
+                draft
+                    .oauth_client_id
+                    .as_ref()
+                    .map_or("Automatic".into(), |_| "Configured".into()),
+            ));
+        }
         self.state.selector = Some(Selector::mcp(
             Panel::Advanced,
             "Advanced",
             Some("Connection"),
             "",
-            vec![
-                ("Timeout".into(), format!("{} seconds", draft.timeout_secs)),
-                (
-                    "Extra header".into(),
-                    format!("{} configured, hidden", draft.headers.len()),
-                ),
-                (
-                    "OAuth client ID".into(),
-                    draft
-                        .oauth_client_id
-                        .as_ref()
-                        .map_or("Not configured".into(), |_| "Configured".into()),
-                ),
-            ],
-        ));
-    }
-
-    fn show_mcp_methods(&mut self) {
-        let rows = self
-            .mcp
-            .methods
-            .iter()
-            .map(|method| {
-                let name = match method {
-                    AuthMethod::None => "Not needed",
-                    AuthMethod::Token => "Token",
-                    AuthMethod::Browser => "Browser",
-                    AuthMethod::GitHubDevice => "Device code",
-                };
-                (name.into(), String::new())
-            })
-            .collect();
-        let mut menu = Selector::mcp(
-            Panel::Methods,
-            "Sign-in",
-            Some("Connection"),
-            "server options",
             rows,
-        );
-        if self.mcp.methods.is_empty() {
-            menu.message = "No available sign-in method · check OAuth client ID in Advanced".into();
-        }
-        self.state.selector = Some(menu);
+        ));
     }
 
     pub(super) fn choose_mcp(&mut self, panel: Panel, index: usize) {
@@ -420,24 +405,6 @@ impl App {
                 ))
             }
             _ => {}
-        }
-    }
-
-    fn choose_mcp_method(&mut self, index: usize) {
-        let Some(method) = self.mcp.methods.get(index).copied() else {
-            return;
-        };
-        if let Some(draft) = &mut self.mcp.draft {
-            if draft.method != method {
-                draft.token.clear();
-                draft.oauth = None;
-            }
-            draft.method = method;
-        }
-        match method {
-            AuthMethod::Token => self.show_mcp_field(Field::Token),
-            AuthMethod::Browser | AuthMethod::GitHubDevice => self.start_mcp_sign_in(),
-            AuthMethod::None => self.show_mcp_form(),
         }
     }
 

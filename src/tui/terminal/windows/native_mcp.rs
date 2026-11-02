@@ -79,6 +79,17 @@ pub(super) fn console() {
         guided.push(("Server URL".into(), "Any HTTP MCP server".into()));
         let add = Selector::mcp(Panel::Add, "Add connection", Some("MCP"), "", guided);
         paint(columns, settings_state(columns, add), "Vercel");
+        let signin = Selector::mcp(
+            Panel::Methods,
+            "Sign-in",
+            Some("Connection"),
+            "",
+            vec![
+                ("Token".into(), "Paste an access token".into()),
+                ("OAuth".into(), "Open browser".into()),
+            ],
+        );
+        paint(columns, settings_state(columns, signin), "OAuth");
         let mut empty = Selector::mcp(Panel::List, "MCP", None, "all conversations", vec![]);
         empty.message = "No configured connections · open Settings › MCP".into();
         paint(

@@ -1,14 +1,63 @@
-# GitHub MCP App registration
+# Jecode GitHub MCP App
 
-GitHub token authentication works immediately: add the [remote GitHub MCP endpoint](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md), `https://api.githubcopilot.com/mcp/`, in Settings > MCP, choose Token, and paste a GitHub token whose permissions are appropriate for the intended tools. Keep the token in the local MCP connection store. Jecode does not create a GitHub App or infer permissions from a connection name.
+Jecode uses one maintainer-owned public GitHub App for every user's GitHub
+OAuth login. Users choose **Token** or **OAuth** in Settings > MCP. OAuth opens
+GitHub in the browser and displays a device code when required. Users do not
+register an App, enter a client ID or handle a client secret.
 
-Browser-based device sign-in requires an App client ID. The maintainer has not registered this App yet. To enable it later:
+## Registered identity
 
-1. [Register a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) under the intended owner. Set a homepage URL and choose the minimum repository and organization permissions needed by the intended MCP tools. Keep user authorization token expiration enabled.
-2. Enable Device Flow in the App settings. GitHub ignores the callback URL for device flow. Installation and user authorization still determine the repositories and operations a resulting token can access.
-3. Copy the **Client ID**, not the App ID or client secret, into the connection's OAuth client ID field or set `JECODE_GITHUB_CLIENT_ID` when starting Jecode. Do not commit it as a hardcoded default. The device flow uses `offline_access` so expiring tokens include a refresh token.
-4. Connect from Settings > MCP. Jecode shows GitHub's verification URL and user code, then polls at GitHub's required interval. A refresh of a device-generated token needs the client ID and refresh token, not a client secret.
+| Field | Value |
+| --- | --- |
+| App | [Jecode GitHub MCP](https://github.com/apps/jecode-github-mcp) |
+| Owner | `giovannijecha` |
+| App ID | `5580672` |
+| Public client ID | `Iv23liTdak2Sf8VpPtLw` |
+| Homepage | `https://github.com/giovannijecha/jecode` |
+| Availability | Any GitHub user or organization |
+| Authorization | Device Flow enabled; expiring user tokens; authorization during installation disabled |
+| Repository permissions | Contents, Issues and Pull requests: read/write; Metadata: read |
+| Webhooks | Inactive |
 
-GitHub documents the [device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token) and [refresh requirements](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens#refreshing-a-user-access-token-with-a-refresh-token). The App's permissions and the user's access bound the token; the OAuth scope does not grant additional GitHub App permissions.
+The maintainer registered this App on 2026-11-02 and its public identity and
+permissions were verified through GitHub's API. The public client ID is bundled
+in `src/mcp/auth/github.rs`, so source, CI and release builds share the same
+identity without a release-environment variable. Maintainer overrides through
+`JECODE_GITHUB_CLIENT_ID` remain available; end users need no setup variable.
 
-No GitHub registration or credentials are part of the repository build. Do not test this flow against a personal account in automated tests; use a synthetic loopback server.
+## User authorization and installation
+
+An installation selects which repositories Jecode may access. Every user or
+organization makes its own selection. The user's access, the App's permissions
+and the installation's repository selection together bound its tokens.
+Organizations may require administrator approval. A public App is available
+to other accounts; it is not automatically installed everywhere.
+
+GitHub's [device flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app#using-the-device-flow-to-generate-a-user-access-token)
+uses the public client ID, a verification page and a one-time user code. Neither
+initial device authorization nor [device-token refresh](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)
+needs a client secret. Jecode stores the resulting user tokens in the private
+MCP connection store; no token is part of the build.
+
+## Maintainer controls
+
+The App owner manages Device Flow, installability and permission changes in
+GitHub's App settings. [Permission increases require approval](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration#changing-the-permissions-of-a-github-app)
+before existing installations gain them. The current permissions support code,
+branch, issue and pull-request work; organization administration, Actions and
+secrets are outside the initial grant.
+
+GitHub's registration UI required a private key before installation. The owner
+keeps that key privately. Jecode's user/device OAuth flow does not use it: never
+put an App private key or client secret in source, builds, logs or release
+artifacts. [GitHub documents private-key handling](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps).
+
+[GITHUB_MCP_APP_MANIFEST.json](GITHUB_MCP_APP_MANIFEST.json) records the initial
+registration fields for maintenance. It contains no credentials. GitHub's
+manifest creation flow still requires owner browser consent; `GH_TOKEN` alone
+does not provide a direct create-App request. Device Flow is configured in
+GitHub's registration UI.
+
+Automated tests use isolated loopback fixtures. The App registration and
+installation are complete; a real end-user OAuth login through Jecode remains
+part of manual account validation.
