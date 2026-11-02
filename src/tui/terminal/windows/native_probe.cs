@@ -4,6 +4,12 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 public static class JecodeConsoleProbe {
+    public static void Main() {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(Snapshot());
+        using (var output = Console.OpenStandardOutput()) {
+            output.Write(bytes, 0, bytes.Length);
+        }
+    }
     [StructLayout(LayoutKind.Sequential)]
     struct Coord { public short X, Y; public Coord(short x, short y) { X = x; Y = y; } }
     [StructLayout(LayoutKind.Sequential)]

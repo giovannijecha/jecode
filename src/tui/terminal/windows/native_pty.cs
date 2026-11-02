@@ -158,17 +158,7 @@ public sealed partial class JecodeTestPty : IDisposable {
             if (!received.ToString().Contains(text)) throw new IOException("ConPTY missing " + label + ": " + text);
         }
     }
-    public void Wait(string text, int after = 0) {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        while (clock.ElapsedMilliseconds < 20000) {
-            lock (gate) {
-                string plain = System.Text.RegularExpressions.Regex.Replace(received.ToString(after, received.Length - after), "\x1b\\[[0-?]*[ -/]*[@-~]", "");
-                if (plain.Contains(text)) return;
-            }
-            Thread.Sleep(10);
-        }
-        lock (gate) { throw new IOException("ConPTY did not show " + text + ": " + received); }
-    }
+    public void Wait(string text, int after = 0) { WaitFast(text, after); }
 
     // Reader wakeups locate the first matching VT bytes without a 10 ms
     // polling floor. This observes the stream, not terminal pixels or keys.
