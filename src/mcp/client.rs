@@ -391,32 +391,11 @@ fn reply(response: &transport::Response, id: u64) -> Result<Value, Error> {
     ))
 }
 
-/// A 403 Bearer challenge (such as `insufficient_scope`) needs a new sign-in.
-fn challenge(response: &transport::Response) -> Option<Error> {
-    let headers: Vec<_> = response
-        .headers
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("WWW-Authenticate"))
-        .cloned()
-        .collect();
-    (response.status == 403 && !headers.is_empty()).then(|| {
-        let mut error = Error::new(
-            ErrorKind::Authentication,
-            "MCP authorization is insufficient",
-        );
-        error.status = Some(403);
-        error.headers = headers;
-        error
-    })
-}
-
-/// Maps a non-2xx response. Challenges need sign-in, a JSON-RPC error keeps
-/// the server's reason, other 4xx responses are definite rejections and the
-/// remaining statuses leave the server's state unknown.
+/// Maps a non-2xx response. The transport already turned sign-in challenges
+/// into errors; a JSON-RPC error keeps the server's reason, other 4xx
+/// responses are definite rejections and the remaining statuses leave the
+/// server's state unknown.
 fn rejection(response: &transport::Response, error: Option<wire::RpcError>) -> Error {
-    if let Some(error) = challenge(response) {
-        return error;
-    }
     let status = response.status;
     let mut error = match error {
         Some(error) => error.into_error(),

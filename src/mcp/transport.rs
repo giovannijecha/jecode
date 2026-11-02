@@ -192,14 +192,24 @@ fn request_inner(
     let status = decoder
         .status
         .ok_or_else(|| Error::new(ErrorKind::Protocol, "MCP response had no HTTP status"))?;
-    if status == 401 {
-        let mut error = Error::new(ErrorKind::Authentication, "MCP authentication required");
+    // 401, and a 403 Bearer challenge such as `insufficient_scope`, need sign-in.
+    let challenge: Vec<_> = decoder
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("WWW-Authenticate"))
+        .cloned()
+        .collect();
+    if status == 401 || (status == 403 && !challenge.is_empty()) {
+        let mut error = Error::new(
+            ErrorKind::Authentication,
+            if status == 401 {
+                "MCP authentication required"
+            } else {
+                "MCP authorization is insufficient"
+            },
+        );
         error.status = Some(status);
-        error.headers = decoder
-            .headers
-            .into_iter()
-            .filter(|(name, _)| name.eq_ignore_ascii_case("WWW-Authenticate"))
-            .collect();
+        error.headers = challenge;
         return Err(error);
     }
     Ok(Response {

@@ -1,6 +1,6 @@
 //! Protocol selection: a modern `server/discover` probe, else `initialize`.
 
-use super::{Client, Mode, challenge, content_type, rejection, server_info};
+use super::{Client, Mode, content_type, rejection, server_info};
 use crate::cancel::Cancellation;
 use crate::json::Value;
 use crate::mcp::transport;
@@ -32,9 +32,6 @@ impl Client {
             cancel,
         )?;
         let success = (200..300).contains(&response.status);
-        if !success && let Some(error) = challenge(&response) {
-            return Err(error);
-        }
         match wire::decode(&response.body, content_type(&response), id) {
             Ok(wire::Reply::Result(result)) if success => {
                 let modern = result

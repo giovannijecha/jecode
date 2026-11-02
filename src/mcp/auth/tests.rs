@@ -213,14 +213,9 @@ fn unusable_metadata_on_a_public_server_still_offers_none() {
     server.finish();
 }
 
-#[test]
-fn metadata_discovery_falls_back_past_unusable_candidates() {
-    let server = serve(4, |origin, path| match path {
-        "/mcp" => (
-            "401 Unauthorized",
-            "{}".into(),
-            "WWW-Authenticate: Bearer realm=mcp\r\n".into(),
-        ),
+/// Protected-resource and server metadata behind an unusable first candidate.
+fn discoverable(origin: &str, path: &str) -> (&'static str, String, String) {
+    match path {
         "/.well-known/oauth-protected-resource/mcp" => {
             ("200 OK", "<html>login</html>".into(), String::new())
         }
@@ -237,6 +232,35 @@ fn metadata_discovery_falls_back_past_unusable_candidates() {
             String::new(),
         ),
         _ => panic!("unexpected fixture path {path}"),
+    }
+}
+
+#[test]
+fn metadata_discovery_falls_back_past_unusable_candidates() {
+    let server = serve(4, |origin, path| match path {
+        "/mcp" => (
+            "401 Unauthorized",
+            "{}".into(),
+            "WWW-Authenticate: Bearer realm=mcp\r\n".into(),
+        ),
+        _ => discoverable(origin, path),
+    });
+    assert_eq!(
+        checked(&server),
+        vec![AuthMethod::Token, AuthMethod::Browser]
+    );
+    server.finish();
+}
+
+#[test]
+fn scope_challenge_is_checked_like_an_authentication_challenge() {
+    let server = serve(4, |origin, path| match path {
+        "/mcp" => (
+            "403 Forbidden",
+            "{}".into(),
+            "WWW-Authenticate: Bearer error=\"insufficient_scope\", scope=\"repo\"\r\n".into(),
+        ),
+        _ => discoverable(origin, path),
     });
     assert_eq!(
         checked(&server),
