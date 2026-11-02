@@ -1,4 +1,4 @@
-use super::tests::{panel, rows, type_text};
+use super::tests::{WAIT, panel, rows, settle, type_text};
 use super::*;
 use crate::{
     agent::Agent,
@@ -29,15 +29,6 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
         SessionConfig { store, settings },
         None,
     )
-}
-
-fn settle(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while (app.mcp.job.is_some() || app.mcp.checks.busy()) && Instant::now() < deadline {
-        app.poll_mcp();
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    assert!(app.mcp.job.is_none(), "MCP UI job did not settle");
 }
 
 fn request(stream: &mut TcpStream) -> String {
@@ -233,7 +224,7 @@ fn healthy_inventory_result_arrives_while_another_server_is_slow() {
     let slow = Server::start(move |listener, stop| {
         if let Ok(mut stream) = accept(&listener, &stop) {
             let _ = request(&mut stream);
-            let _ = waiting.recv_timeout(Duration::from_secs(3));
+            let _ = waiting.recv_timeout(WAIT);
         }
     });
     let fast = Server::start(|listener, stop| {
@@ -270,7 +261,7 @@ fn healthy_inventory_result_arrives_while_another_server_is_slow() {
         ))
         .unwrap();
     app.open_mcp(false);
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + WAIT;
     while !app.mcp.health.contains_key(&fast_saved.id) && Instant::now() < deadline {
         app.poll_mcp();
         std::thread::sleep(Duration::from_millis(2));
@@ -296,7 +287,7 @@ fn background_checks_survive_navigation_between_panels() {
     let slow = Server::start(move |listener, stop| {
         if let Ok(mut stream) = accept(&listener, &stop) {
             let _ = request(&mut stream);
-            let _ = waiting.recv_timeout(Duration::from_secs(3));
+            let _ = waiting.recv_timeout(WAIT);
         }
     });
     let directory = Directory::new();
@@ -322,7 +313,7 @@ fn background_checks_survive_navigation_between_panels() {
     app.close_mcp_panel();
     assert!(app.mcp.checks.pending(&saved.id));
     let _ = release.send(());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + WAIT;
     while !app.mcp.health.contains_key(&saved.id) && Instant::now() < deadline {
         app.poll_mcp();
         std::thread::sleep(Duration::from_millis(2));

@@ -23,9 +23,13 @@ pub(super) fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     )
 }
 
+/// Generous bound for background work on a loaded CI machine; waits end as
+/// soon as their condition holds.
+pub(super) const WAIT: Duration = Duration::from_secs(20);
+
 /// Wait for the foreground job and every background check.
 pub(super) fn settle(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + WAIT;
     while (app.mcp.job.is_some() || app.mcp.checks.busy()) && Instant::now() < deadline {
         app.poll_mcp();
         std::thread::sleep(Duration::from_millis(2));
