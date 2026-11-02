@@ -3,6 +3,37 @@ use crate::test_support::Directory;
 use std::io::{BufRead, BufReader, Read};
 use std::net::TcpStream;
 
+#[test]
+fn cleared_active_account_is_not_available_for_inference() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let account =
+        Store::fixture_account(directory.path().to_path_buf(), "fixture-access-token").unwrap();
+    let files = store.files();
+    let mut record = files
+        .record(
+            &account.client_id,
+            &account.subject,
+            &Cancellation::default(),
+        )
+        .unwrap();
+    record.access_token.clear();
+    record.refresh_token.clear();
+    files
+        .save_record(&record, &Cancellation::default())
+        .unwrap();
+
+    assert!(
+        !store
+            .session(&account.client_id)
+            .unwrap()
+            .account()
+            .unwrap()
+            .enabled
+    );
+    assert!(store.active().unwrap().is_none());
+}
+
 fn request_body(stream: &TcpStream) -> Vec<u8> {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut length = None;

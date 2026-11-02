@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn cleared_active_account_is_not_available_for_inference() {
+    let directory = crate::test_support::Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let account =
+        Store::fixture_account(directory.path().to_path_buf(), "fixture-access-token").unwrap();
+    let files = store.files();
+    let mut record = files.record(&account.id).unwrap();
+    record.clear();
+    files.save_record(&record).unwrap();
+
+    assert!(
+        !store
+            .session(&account.id)
+            .unwrap()
+            .account()
+            .unwrap()
+            .enabled
+    );
+    assert!(store.active().unwrap().is_none());
+}
+
+#[test]
 fn credentials_persist_and_sign_out_removes_local_tokens() {
     let directory = crate::test_support::Directory::new();
     let store = Store::new(directory.path().to_path_buf());

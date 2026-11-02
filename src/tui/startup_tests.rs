@@ -112,7 +112,10 @@ fn adding_a_key_after_removing_chatgpt_requests_an_appropriate_model() {
     let mut app = app(&directory, "saved-model", None);
     let fixture = crate::test_support::HttpFixture::new(vec![(
         200,
-        crate::json::Value::object([("data", crate::json::Value::Array(vec![]))]),
+        crate::json::parse(
+            r#"{"data":[{"id":"fixture/chosen","supported_parameters":["tools"]}]}"#,
+        )
+        .unwrap(),
     )]);
     app.finish_key(
         "isolated-fixture-key".into(),
@@ -124,7 +127,9 @@ fn adding_a_key_after_removing_chatgpt_requests_an_appropriate_model() {
         "Connecting a provider must offer its models"
     );
     tests::wait_until(&mut app, |app| app.job.is_none());
-    app.apply_selection("fixture/chosen".into(), Effort::Default, false);
+    app.choose(selector::Choice::Model(0)).unwrap();
+    app.choose(selector::Choice::Effort(Effort::Default))
+        .unwrap();
     assert!(!app.agent.as_ref().unwrap().needs_configuration());
     assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openrouter");
     assert_eq!(

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_resize() {
-    let mut key = Selector::key();
+    let mut key = Selector::key("openrouter");
     key.editor.insert("fixture🙂key");
     let mut search = Selector::sessions(&sessions(), "1234-56-0");
     search.editor.insert("request");
@@ -42,7 +42,7 @@ fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_res
                     "{width}x{height}"
                 );
                 if state.selector.as_ref().is_none_or(|menu| {
-                    menu.searchable || matches!(menu.purpose, crate::tui::selector::Purpose::Key)
+                    menu.searchable || matches!(menu.purpose, crate::tui::selector::Purpose::Key(_))
                 }) {
                     let (row, column) = frame.cursor.unwrap();
                     assert!(row < frame.live.len());
@@ -79,7 +79,7 @@ fn narrow_selector_fields_show_typed_text_when_a_cell_can_hold_it() {
             );
         }
     }
-    let mut key = Selector::key();
+    let mut key = Selector::key("openrouter");
     key.editor.insert("fixture-secret");
     state.width = 2;
     state.selector = Some(key);

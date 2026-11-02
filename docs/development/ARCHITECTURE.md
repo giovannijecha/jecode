@@ -328,8 +328,8 @@ credential environment variables of every available backend before launch.
 | Adapter | Route | Reference |
 | --- | --- | --- |
 | `backend/openrouter/` | OpenRouter chat completions with an API key, endpoint routing and PDF parsing | [Configuration](../usage/CONFIGURATION.md#openrouter-endpoint-routing) |
-| `backend/openai/` | Stateless Responses requests with a ChatGPT account | [OpenAI backend](OPENAI.md) |
-| `backend/anthropic/` | Streamed Messages requests with a Claude account | [Anthropic backend](ANTHROPIC.md) |
+| `backend/openai/` | Stateless Responses requests with an API key (`openai-api`) or ChatGPT account (`openai`) | [OpenAI backend](OPENAI.md) |
+| `backend/anthropic/` | Streamed Messages requests with an API key (`anthropic-api`) or Claude compatibility account (`anthropic`) | [Anthropic backend](ANTHROPIC.md) |
 
 Caching follows each provider's model. Anthropic requests mark the stable system
 block and recent durable user-message boundaries. Through OpenRouter, requests

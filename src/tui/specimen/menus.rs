@@ -168,7 +168,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     search.refresh();
     let mut delete = Selector::sessions(&sessions(), "current");
     delete.toggle_delete();
-    let mut key = Selector::key();
+    let mut key = Selector::key("openrouter");
     key.editor.insert("example-key-input");
 
     let listing = endpoints();
@@ -199,16 +199,9 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             selecting(
                 columns,
                 Selector::providers(
-                    &[
-                        crate::backend::Services::fixture("http://127.0.0.1:1"),
-                        crate::backend::Services::from_service(
-                            crate::backend::openai::Api::fixture(
-                                crate::auth::openai::Session::fixture("fixture-token"),
-                                "http://127.0.0.1:1",
-                            ),
-                        ),
-                    ],
+                    &[crate::backend::Services::fixture("http://127.0.0.1:1")],
                     false,
+                    crate::tui::selector::ProviderGroup::ApiKeys,
                     "openrouter",
                     "openai",
                 ),
@@ -244,7 +237,17 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             "Credentials",
             selecting(columns, Selector::credentials(true, true)),
         ),
-        ("API keys", selecting(columns, Selector::api_keys(true))),
+        (
+            "API keys",
+            selecting(
+                columns,
+                Selector::api_keys(&[
+                    ("openrouter", true),
+                    ("openai-api", true),
+                    ("anthropic-api", false),
+                ]),
+            ),
+        ),
         (
             "OpenAI accounts",
             selecting(

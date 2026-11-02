@@ -347,7 +347,7 @@ impl App {
         match key.code {
             38 | 40 => menu.move_selection(key.code == 38),
             13 if !key.shift() && !key.alt() && !key.ctrl() => {
-                if matches!(menu.purpose, Purpose::Key) {
+                if matches!(menu.purpose, Purpose::Key(_)) {
                     self.save_key();
                 } else if matches!(menu.purpose, Purpose::AutoCompact) {
                     self.save_auto_compact();
@@ -433,10 +433,6 @@ impl App {
             return;
         }
         self.state.selector = None;
-        self.local_finish_quiet(
-            Kind::Warning,
-            "Selection cancelled · previous settings kept",
-            vec![],
-        );
+        self.cancel_setting();
     }
 }

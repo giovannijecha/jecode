@@ -54,8 +54,8 @@ impl App {
             ),
         };
         let mut menu = Selector::loading(title, "Loading model catalog…", defaults);
-        if self.provider_parent.is_some() {
-            menu.parent = Some("Provider");
+        if let Some((_, group)) = self.provider_parent {
+            menu.parent = Some(group.label());
         }
         context.clone_into(&mut menu.context);
         self.state.selector = Some(menu);

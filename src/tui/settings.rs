@@ -31,8 +31,11 @@ impl App {
                 };
                 self.show_efforts(model, *defaults, current);
             }
-            (Choice::Provider(id), Purpose::Providers { defaults }) => {
-                self.provider_parent = Some(*defaults);
+            (Choice::ProviderGroup(group), Purpose::ProviderGroups { defaults }) => {
+                self.open_model_provider_group(*defaults, group);
+            }
+            (Choice::Provider(id), Purpose::Providers { defaults, group }) => {
+                self.provider_parent = Some((*defaults, *group));
                 let home = self
                     .config
                     .store
@@ -41,8 +44,7 @@ impl App {
                     .expect("configuration directory");
                 let configured = self.config.settings.services(home, id);
                 let facts = self.facts();
-                let services = if !defaults
-                    && !facts.needs_configuration
+                let services = if !facts.needs_configuration
                     && facts.backend_id == id
                     && configured
                         .as_ref()
@@ -71,9 +73,7 @@ impl App {
             (Choice::Provider(provider @ ("openai" | "anthropic")), Purpose::Credentials) => {
                 self.open_accounts_for(provider)
             }
-            (Choice::OpenRouterKey, Purpose::ApiKeys) => {
-                self.state.selector = Some(Selector::key())
-            }
+            (Choice::ApiKey(id), Purpose::ApiKeys) => self.state.selector = Some(Selector::key(id)),
             (Choice::Account(index), Purpose::Accounts) => self.open_account(index),
             (Choice::Account(_), Purpose::Account { .. }) => self.activate_account(),
             (Choice::AddAccount, Purpose::Accounts) => self.start_sign_in(None),
@@ -162,6 +162,9 @@ impl App {
         details: Vec<(String, String)>,
         change: bool,
     ) {
+        // A finished setting ends any provider-scoped model selection.
+        self.provider_parent = None;
+        self.catalog_services = None;
         if self.settings_parent.is_some() && self.pending_command.is_none() {
             self.local_start("/settings");
         }
@@ -182,6 +185,8 @@ impl App {
     }
 
     pub(super) fn cancel_setting(&mut self) {
+        self.provider_parent = None;
+        self.catalog_services = None;
         self.local_finish_quiet(
             Kind::Warning,
             "Selection cancelled · previous settings kept",
@@ -353,97 +358,96 @@ impl App {
         let result = self.job.take().unwrap().finish()?;
         self.state.selector = None;
         match result {
-            ResultValue::Catalog(purpose, result) => {
-                match result {
-                    Err(error) => match purpose {
+            ResultValue::Catalog(purpose, result) => match result {
+                Err(error) => match purpose {
+                    CatalogPurpose::Models {
+                        defaults,
+                        id: Some(id),
+                    } => {
+                        self.apply_selection(id, Effort::Default, defaults);
+                    }
+                    _ if self.auth_model_switch => {
+                        self.auth_model_switch = false;
+                        self.open_accounts();
+                        self.warn(&error);
+                    }
+                    _ => self.finish_setting(Kind::Error, &error, vec![]),
+                },
+                Ok(models) => {
+                    self.catalog = models;
+                    self.state.clear_progress();
+                    match purpose {
+                        CatalogPurpose::Models { defaults, id: None } => {
+                            if self.catalog.is_empty() {
+                                if self.auth_model_switch {
+                                    self.auth_model_switch = false;
+                                    self.open_accounts();
+                                    self.warn("No models available");
+                                } else {
+                                    self.finish_setting(Kind::Error, "No models available", vec![]);
+                                }
+                            } else {
+                                self.state.selector = Some(self.models_menu(defaults));
+                            }
+                        }
                         CatalogPurpose::Models {
                             defaults,
                             id: Some(id),
                         } => {
-                            self.apply_selection(id, Effort::Default, defaults);
+                            if let Some(model) =
+                                self.catalog.iter().find(|model| model.id == id).cloned()
+                            {
+                                self.show_efforts(model, defaults, Effort::Default);
+                            } else {
+                                self.apply_selection(id, Effort::Default, defaults);
+                            }
                         }
-                        _ if self.auth_model_switch => {
-                            self.auth_model_switch = false;
-                            self.open_accounts();
-                            self.warn(&error);
-                        }
-                        _ => self.finish_setting(Kind::Error, &error, vec![]),
-                    },
-                    Ok(models) => {
-                        self.catalog = models;
-                        self.state.clear_progress();
-                        match purpose {
-                            CatalogPurpose::Models { defaults, id: None } => {
-                                if self.catalog.is_empty() {
-                                    if self.auth_model_switch {
-                                        self.auth_model_switch = false;
-                                        self.open_accounts();
-                                        self.warn("No tool-capable models available");
+                        CatalogPurpose::Effort {
+                            defaults,
+                            model,
+                            effort,
+                        } => {
+                            if let Some(model) =
+                                self.catalog.iter().find(|value| value.id == model).cloned()
+                            {
+                                if let Some(effort) = effort {
+                                    if model.efforts.contains(&effort)
+                                        || self
+                                            .catalog_services
+                                            .as_ref()
+                                            .is_some_and(|services| !services.validates_effort())
+                                    {
+                                        self.apply_selection(model.id, effort, defaults);
                                     } else {
                                         self.finish_setting(
                                             Kind::Error,
-                                            "No tool-capable models available",
+                                            &format!(
+                                                "{} does not support effort {}",
+                                                model.id,
+                                                effort.name()
+                                            ),
                                             vec![],
                                         );
                                     }
                                 } else {
-                                    self.state.selector = Some(self.models_menu(defaults));
-                                }
-                            }
-                            CatalogPurpose::Models {
-                                defaults,
-                                id: Some(id),
-                            } => {
-                                if let Some(model) =
-                                    self.catalog.iter().find(|model| model.id == id).cloned()
-                                {
-                                    self.show_efforts(model, defaults, Effort::Default);
-                                } else {
-                                    self.apply_selection(id, Effort::Default, defaults);
-                                }
-                            }
-                            CatalogPurpose::Effort {
-                                defaults,
-                                model,
-                                effort,
-                            } => {
-                                if let Some(model) =
-                                    self.catalog.iter().find(|value| value.id == model).cloned()
-                                {
-                                    if let Some(effort) = effort {
-                                        if model.efforts.contains(&effort)
-                                            || self.catalog_services.as_ref().is_some_and(
-                                                |services| !services.validates_effort(),
-                                            )
-                                        {
-                                            self.apply_selection(model.id, effort, defaults);
-                                        } else {
-                                            self.finish_setting(
-                                                Kind::Error,
-                                                &format!(
-                                                    "{} does not support effort {}",
-                                                    model.id,
-                                                    effort.name()
-                                                ),
-                                                vec![],
-                                            );
-                                        }
+                                    let current = if defaults {
+                                        self.config.settings.effort
                                     } else {
-                                        let current = if defaults {
-                                            self.config.settings.effort
-                                        } else {
-                                            self.facts().effort
-                                        };
-                                        self.show_efforts(model, defaults, current);
-                                    }
-                                } else {
-                                    self.finish_setting(Kind::Error, "Current model is not available in the tool-capable catalog", vec![]);
+                                        self.facts().effort
+                                    };
+                                    self.show_efforts(model, defaults, current);
                                 }
+                            } else {
+                                self.finish_setting(
+                                    Kind::Error,
+                                    "Current model is not available in this catalog",
+                                    vec![],
+                                );
                             }
                         }
                     }
                 }
-            }
+            },
             ResultValue::Endpoints(purpose, result) => self.show_routing(purpose, result),
             ResultValue::SignIn(provider, result) => self.finish_sign_in(provider, result),
             ResultValue::SignOut(result) => self.finish_sign_out(result),

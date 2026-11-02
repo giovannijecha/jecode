@@ -173,10 +173,10 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
             pending.quoted(at);
             continue;
         }
+        if ch == '`' {
+            return Err(format!("unsupported shell syntax: {ch}"));
+        }
         if quote.is_none() {
-            if ch == '`' {
-                return Err(format!("unsupported shell syntax: {ch}"));
-            }
             if ch == '#' && !pending.started {
                 for c in chars.by_ref() {
                     if c == '\n' {
@@ -294,7 +294,10 @@ fn variable(next: char, chars: &mut Cursor<'_>) -> Result<Option<Part>, String> 
         }
         '(' => {
             chars.next();
-            Part::Command(substitution(chars)?)
+            let script = substitution(chars)?;
+            let tokens = tokenize(&script)?;
+            super::parser::parse(&script, &tokens)?;
+            Part::Command(script)
         }
         '{' => {
             chars.next();
@@ -334,7 +337,18 @@ fn substitution(chars: &mut Cursor<'_>) -> Result<String, String> {
     let mut script = String::new();
     let mut depth = 1;
     let mut inner_quote = None;
+    let mut escaped = false;
     for c in chars.by_ref() {
+        if escaped {
+            script.push(c);
+            escaped = false;
+            continue;
+        }
+        if c == '\\' && inner_quote != Some('\'') {
+            script.push(c);
+            escaped = true;
+            continue;
+        }
         if c == '\'' || c == '"' {
             if inner_quote == Some(c) {
                 inner_quote = None;

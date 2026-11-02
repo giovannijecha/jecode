@@ -86,7 +86,7 @@ struct App {
     job: Option<Job>,
     catalog: Vec<Model>,
     catalog_services: Option<crate::backend::Services>,
-    provider_parent: Option<bool>,
+    provider_parent: Option<(bool, selector::ProviderGroup)>,
     auth_accounts: Vec<crate::auth::Account>,
     auth_provider: &'static str,
     auth_account_index: Option<usize>,

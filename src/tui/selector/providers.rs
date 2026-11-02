@@ -1,13 +1,100 @@
-use super::{Badge, Choice, OptionRow, Purpose, SETTINGS, Selector, row};
+use super::{Badge, Choice, OptionRow, ProviderGroup, Purpose, SETTINGS, Selector, row};
+
+impl ProviderGroup {
+    pub fn for_id(id: &str) -> Self {
+        if crate::backend::info(id).is_some_and(|info| info.uses_api_key()) {
+            Self::ApiKeys
+        } else {
+            Self::Credentials
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ApiKeys => "API keys",
+            Self::Credentials => "Credentials",
+        }
+    }
+}
 
 impl Selector {
+    pub fn provider_groups(
+        services: &[crate::backend::Services],
+        defaults: bool,
+        current: &str,
+        saved: &str,
+        focus: Option<ProviderGroup>,
+    ) -> Self {
+        let options = [ProviderGroup::ApiKeys, ProviderGroup::Credentials]
+            .into_iter()
+            .filter_map(|group| {
+                let members = services
+                    .iter()
+                    .filter(|service| ProviderGroup::for_id(service.id()) == group)
+                    .collect::<Vec<_>>();
+                (!members.is_empty()).then(|| OptionRow {
+                    badge: if defaults && members.iter().any(|service| service.id() == saved) {
+                        Some(Badge::Default)
+                    } else if members.iter().any(|service| service.id() == current) {
+                        Some(Badge::Current)
+                    } else if members.iter().any(|service| service.id() == saved) {
+                        Some(Badge::Default)
+                    } else {
+                        None
+                    },
+                    ..row(
+                        group.label(),
+                        members
+                            .iter()
+                            .filter_map(|service| crate::backend::info(service.id()))
+                            .map(|info| info.name)
+                            .collect::<Vec<_>>()
+                            .join(" · "),
+                        Choice::ProviderGroup(group),
+                    )
+                })
+            })
+            .collect();
+        let mut menu = Self::new(
+            if defaults {
+                "Default provider"
+            } else {
+                "Provider"
+            },
+            Purpose::ProviderGroups { defaults },
+            options,
+        )
+        .under_settings(defaults);
+        menu.context = if defaults {
+            "new conversations"
+        } else {
+            "this conversation"
+        }
+        .into();
+        let focus =
+            focus.unwrap_or_else(|| ProviderGroup::for_id(if defaults { saved } else { current }));
+        menu.selected = menu
+            .options
+            .iter()
+            .position(
+                |option| matches!(option.choice, Choice::ProviderGroup(group) if group == focus),
+            )
+            .unwrap_or(0);
+        menu
+    }
     pub fn providers_settings() -> Self {
+        let keys = crate::backend::available()
+            .iter()
+            .filter(|provider| provider.uses_api_key())
+            .map(|provider| provider.name)
+            .collect::<Vec<_>>()
+            .join(" · ");
         let mut menu = Self::new(
             "Providers",
             Purpose::ProviderSettings,
             vec![
+                row("API keys", keys, Choice::ApiKeys),
                 row("Credentials", "OpenAI · Anthropic", Choice::Credentials),
-                row("API keys", "OpenRouter", Choice::ApiKeys),
             ],
         );
         menu.parent = Some(SETTINGS);
@@ -31,14 +118,21 @@ impl Selector {
         menu.parent = Some("Providers");
         menu
     }
-    pub fn api_keys(configured: bool) -> Self {
+    pub fn api_keys(configured: &[(&'static str, bool)]) -> Self {
         let mut menu = Self::new(
             "API keys",
             Purpose::ApiKeys,
-            vec![OptionRow {
-                badge: configured.then_some(Badge::Note("configured".into())),
-                ..row("OpenRouter", "API key", Choice::OpenRouterKey)
-            }],
+            configured
+                .iter()
+                .filter_map(|(id, saved)| {
+                    crate::backend::info(id)
+                        .filter(|provider| provider.uses_api_key())
+                        .map(|provider| OptionRow {
+                            badge: saved.then_some(Badge::Note("configured".into())),
+                            ..row(provider.name, "API key", Choice::ApiKey(provider.id))
+                        })
+                })
+                .collect(),
         );
         menu.parent = Some("Providers");
         menu
@@ -83,9 +177,7 @@ impl Selector {
             badge: active.then_some(Badge::Current),
             ..row("Use account", &account.detail, Choice::Account(0))
         }];
-        if provider == "openai" {
-            options.push(row("Manage usage", "", Choice::ManageUsage));
-        }
+        options.push(row("Manage usage", "", Choice::ManageUsage));
         options.push(row("Sign out", "", Choice::SignOut));
         let mut menu = Self::new(
             "Account",
@@ -101,6 +193,7 @@ impl Selector {
     pub fn providers(
         services: &[crate::backend::Services],
         defaults: bool,
+        group: ProviderGroup,
         current: &str,
         saved: &str,
     ) -> Self {
@@ -108,14 +201,21 @@ impl Selector {
             .iter()
             .map(|service| {
                 let id = service.id();
-                let (name, fact) = match id {
-                    "openrouter" => ("OpenRouter", "API key"),
-                    "openai" => ("OpenAI", "ChatGPT plan"),
-                    "anthropic" => ("Anthropic", "Claude plan"),
-                    _ => (id, ""),
+                let registered = crate::backend::info(id);
+                let name = registered.map_or(id, |entry| entry.name);
+                let fact = if registered.is_some_and(|entry| entry.uses_api_key()) {
+                    "API key"
+                } else {
+                    match id {
+                        "openai" => "ChatGPT plan",
+                        "anthropic" => "Claude plan",
+                        _ => "",
+                    }
                 };
                 OptionRow {
-                    badge: if id == current {
+                    badge: if defaults && id == saved {
+                        Some(Badge::Default)
+                    } else if id == current {
                         Some(Badge::Current)
                     } else if id == saved {
                         Some(Badge::Default)
@@ -127,15 +227,15 @@ impl Selector {
             })
             .collect();
         let mut menu = Self::new(
-            if defaults {
-                "Default provider"
-            } else {
-                "Provider"
-            },
-            Purpose::Providers { defaults },
+            group.label(),
+            Purpose::Providers { defaults, group },
             options,
-        )
-        .under_settings(defaults);
+        );
+        menu.parent = Some(if defaults {
+            "Default provider"
+        } else {
+            "Provider"
+        });
         menu.context = if defaults {
             "new conversations"
         } else {

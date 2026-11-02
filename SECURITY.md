@@ -26,9 +26,9 @@ instructions and supported attachments.
 
 - **OpenRouter** forwards requests to the model provider it selects.
 - **OpenAI** receives requests directly through the Responses API, using your
-  ChatGPT account.
+  API key or ChatGPT account, according to the selected connection.
 - **Anthropic** receives requests directly through the Messages API, using your
-  Claude account through a compatibility route; see
+  API key or a Claude account through a compatibility route; see
   [Providers](docs/usage/PROVIDERS.md#claude-account).
 
 Known credentials are masked in conversation text, tool output, saved
@@ -37,7 +37,7 @@ content; Jecode does not inspect or redact secrets inside them.
 
 ## Credentials
 
-- The **OpenRouter API key** is stored in plain text in
+- **OpenRouter, OpenAI and Anthropic API keys** are stored in plain text in
   `~/.jecode/config.json`.
 - **ChatGPT and Claude tokens** are stored in plain JSON account records under
   `~/.jecode/accounts/`, readable only by your user: owner-only permissions on
@@ -45,8 +45,9 @@ content; Jecode does not inspect or redact secrets inside them.
   authenticate requests; refresh tokens are sent only to the issuing provider
   to renew them, and for ChatGPT to revoke them at sign-out. The verified
   ChatGPT ID token stays in the local record.
-- Commands the agent runs do not inherit provider credentials from Jecode's
-  environment.
+- Commands the agent runs do not inherit Jecode's registered provider credential
+  environment variables. Credentials supplied to Jecode's HTTP adapter travel
+  on stdin, not in process arguments.
 
 ## Local data
 

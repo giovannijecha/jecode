@@ -21,6 +21,9 @@ pub(super) fn configure(
         "anthropic" => ("Claude", "Claude account"),
         _ => return Err(format!("Unknown account provider: {provider}")),
     };
+    if provider == "anthropic" {
+        ui.message("Anthropic reserves Claude login for its native apps. Use an Anthropic API key for Jecode.")?;
+    }
     let home = config.path().parent().expect("configuration directory");
     let accounts = AccountStore::new(home.to_path_buf(), provider);
     let saved = accounts.accounts()?;

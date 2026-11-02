@@ -29,7 +29,7 @@ from the next turn, *waits* queues it until the turn ends.
 
 | Command | Purpose | During a turn |
 | --- | --- | --- |
-| `/model [ID]` | Choose the provider, model and effort for this conversation. | Opens |
+| `/model [ID]` | Choose API keys or Credentials, then provider, model and effort for this conversation. An ID switches the current provider's model directly. | Opens |
 | `/effort [NAME]` | Choose the reasoning effort for this conversation. | Opens |
 | `/routing` | Choose an OpenRouter endpoint for this conversation. See [Configuration](../usage/CONFIGURATION.md#openrouter-endpoint-routing). | Opens |
 | `/permissions [LEVEL]` | Choose Read, Workspace or Full for this conversation, or review remembered approvals. See [Permissions](../usage/PERMISSIONS.md). | Now |

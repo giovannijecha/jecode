@@ -18,7 +18,7 @@ Most settings have two scopes:
 
 | `/settings` item | What it sets |
 | --- | --- |
-| **Default model** | Provider, model and effort for new conversations. |
+| **Default model** | API keys or Credentials, then provider, model and effort for new conversations. |
 | **Default effort** | Reasoning effort for the default model. |
 | **Default routing** | OpenRouter endpoint choice for the default model. |
 | **Default permissions** | The [permission level](PERMISSIONS.md) new conversations start at. |
@@ -31,14 +31,16 @@ In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 
 | Action | Effect |
 | --- | --- |
-| `/model` | Choose a provider (when several are configured), then a model and effort, for this conversation. |
+| `/model` | Choose API keys or Credentials and a configured provider (when several are available), then a model and effort, for this conversation. |
 | `/model ID` | Switch this conversation to model `ID` on the current provider, without a catalog lookup. |
 | `/effort` or `/effort NAME` | Change this conversation's reasoning effort. |
 | `jecode --model ID "task"` | Use model `ID` for one launch without changing defaults. A different model starts at `default` effort. |
 
-The effort selector lists the levels the model's catalog reports. `default`
+The effort selector uses the model's catalog or documented API capabilities.
+For known OpenAI API models, Jecode supplies the levels documented by OpenAI
+because its API catalog omits them. Unknown model IDs retain `default`, which
 leaves the choice to the provider. `/effort NAME` can request a level the
-catalog does not list; the provider may reject it.
+selector does not list; the provider may reject it.
 
 Switching model or provider keeps the conversation, its history, attachments,
 processes and browser. Provider-specific data, such as encrypted reasoning, is
@@ -122,9 +124,9 @@ the default:
 
 | Field | Meaning |
 | --- | --- |
-| `selection` | The default `backend` (`openrouter`, `openai` or `anthropic`), `model` and `effort` for new conversations. |
+| `selection` | The default `backend`, `model` and `effort` for new conversations. API-key IDs are `openrouter`, `openai-api` and `anthropic-api`; subscription IDs remain `openai` and `anthropic`. |
 | `backends.<id>.model` | The last saved model for each provider, used when Jecode falls back to that provider. |
-| `backends.openrouter.api_key` | The OpenRouter key, in plain text. Account tokens are never stored here. |
+| `backends.<id>.api_key` | The API key for `openrouter`, `openai-api` or `anthropic-api`, in plain text. Account tokens are never stored here. |
 | `backends.<id>.routing` | Saved routing per model ID. |
 | `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
@@ -156,7 +158,7 @@ error.
 
 | Path | Contents |
 | --- | --- |
-| `config.json` | Settings and the OpenRouter key. |
+| `config.json` | Settings and saved provider API keys. |
 | `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
 | `skills/` | Your [personal skills](SKILLS.md). |
 | `sessions/<project>/` | [Saved conversations](SESSIONS.md), their complete command output, [attachments](ATTACHMENTS.md) and collaborator data, grouped by project directory. |

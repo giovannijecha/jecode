@@ -28,7 +28,8 @@ impl Prompter for Prompts {
         self.messages.push('\n');
         Ok(())
     }
-    fn input(&mut self, _: &str) -> Result<Option<String>, String> {
+    fn input(&mut self, prompt: &str) -> Result<Option<String>, String> {
+        self.messages.push_str(prompt);
         Ok(self.inputs.pop_front())
     }
     fn secret(&mut self, prompt: &str) -> Result<Option<String>, String> {
@@ -63,13 +64,89 @@ fn a_missing_saved_key_is_not_offered_as_reusable() {
 }
 
 #[test]
+fn direct_api_setup_checks_models_and_saves_the_selected_route_without_inference() {
+    for provider in ["openai-api", "anthropic-api"] {
+        let directory = Directory::new();
+        let store = Store::new(directory.path().to_path_buf());
+        let catalog = crate::json::parse(
+            r#"{"data":[{"id":"fixture-model","display_name":"Fixture model"}],"has_more":false}"#,
+        )
+        .unwrap();
+        let fixture = HttpFixture::new(vec![(200, catalog.clone()), (200, catalog)]);
+        let endpoint = fixture.endpoint.trim_end_matches("/chat/completions");
+        let key = "isolated-api-setup-key";
+        let mut ui = Prompts::new(&["fixture", "1"], &[key]);
+        let saved = configure_with(&store, None, &mut ui, provider, |id, entered| {
+            Ok(match id {
+                "openai-api" => Services::from_service(
+                    crate::backend::openai::Api::fixture_api_key(entered, endpoint),
+                ),
+                "anthropic-api" => Services::from_service(
+                    crate::backend::anthropic::Api::fixture_api_key(entered, endpoint),
+                ),
+                _ => unreachable!(),
+            })
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(saved.backend_id, provider);
+        assert_eq!(saved.model, "fixture-model");
+        assert_eq!(saved.credential_for(provider), Some(key));
+        assert_eq!(store.load().unwrap().unwrap().backend_id, provider);
+        assert!(!ui.messages.contains(key));
+        let requests = fixture.finish();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.headers[0].starts_with("GET "))
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.headers.iter().any(|header| {
+                    header.eq_ignore_ascii_case("authorization: Bearer isolated-api-setup-key")
+                }))
+        );
+    }
+}
+
+#[test]
+fn direct_api_setup_uses_one_api_label_and_keeps_keys_hidden() {
+    for (provider, label) in [
+        ("openai-api", "OpenAI API key"),
+        ("anthropic-api", "Anthropic API key"),
+    ] {
+        let directory = Directory::new();
+        let store = Store::new(directory.path().to_path_buf());
+        let mut ui = Prompts::new(&[], &["/cancel"]);
+        assert!(
+            configure_with(&store, None, &mut ui, provider, |_, _| {
+                panic!("no provider request after cancellation")
+            })
+            .unwrap()
+            .is_none()
+        );
+        assert!(ui.messages.contains(&format!("{label} (hidden):")));
+        assert!(!ui.messages.contains("API API key"));
+        assert!(!store.path().exists());
+    }
+}
+
+#[test]
 fn cancelled_chatgpt_sign_in_returns_to_provider_selection_and_preserves_settings() {
     let directory = Directory::new();
     let store = Store::new(directory.path().join("config.json"));
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/original".into()).unwrap();
     store.save(&settings).unwrap();
     let original = fs::read(store.path()).unwrap();
-    let mut ui = Prompts::new(&["2", "", "/cancel"], &[]);
+    let index = backend::available()
+        .iter()
+        .position(|provider| provider.id == "openai")
+        .unwrap()
+        .saturating_add(1)
+        .to_string();
+    let mut ui = Prompts::new(&[&index, "", "/cancel"], &[]);
     ui.cancel_sign_in = true;
 
     assert!(
@@ -85,15 +162,43 @@ fn cancelled_chatgpt_sign_in_returns_to_provider_selection_and_preserves_setting
 
 #[test]
 fn provider_selection_explains_auth_methods_and_cancels_without_storage() {
-    let mut ui = Prompts::new(&["9", "2"], &[]);
+    let index = |id| {
+        backend::available()
+            .iter()
+            .position(|provider| provider.id == id)
+            .unwrap()
+            .saturating_add(1)
+            .to_string()
+    };
+    let openai = index("openai");
+    let anthropic = index("anthropic");
+    let mut ui = Prompts::new(&["9", &openai], &[]);
     assert_eq!(choose_provider(&mut ui).unwrap(), Some("openai"));
     assert!(ui.messages.contains("OpenAI · Continue with ChatGPT"));
     assert!(ui.messages.contains("OpenRouter · API key"));
+    assert!(ui.messages.contains("OpenAI API · API key"));
+    assert!(ui.messages.contains("Anthropic API · API key"));
     assert!(ui.messages.contains("Anthropic · Continue with Claude"));
-    let mut claude = Prompts::new(&["3"], &[]);
+    let mut claude = Prompts::new(&[&anthropic], &[]);
     assert_eq!(choose_provider(&mut claude).unwrap(), Some("anthropic"));
     let mut cancelled = Prompts::new(&["/cancel"], &[]);
     assert_eq!(choose_provider(&mut cancelled).unwrap(), None);
+}
+
+#[test]
+fn claude_account_setup_warns_before_browser_prompt_and_cancellation_preserves_config() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().join("config"));
+    let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    store.save(&settings).unwrap();
+    let original = fs::read(store.path()).unwrap();
+    let mut ui = Prompts::new(&["/cancel"], &[]);
+    let result = accounts::configure(&store, Some(&settings), &mut ui, "anthropic").unwrap();
+    assert!(matches!(result, accounts::Outcome::Finished(None)));
+    let warning = ui.messages.find("Anthropic reserves Claude login").unwrap();
+    let prompt = ui.messages.find("Continue with Claude").unwrap();
+    assert!(warning < prompt);
+    assert_eq!(fs::read(store.path()).unwrap(), original);
 }
 
 fn key_response() -> Value {

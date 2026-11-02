@@ -241,7 +241,7 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
     }
     app.dispatch("/settings".into()).unwrap();
     app.input(Decoded::Text("6".into())).unwrap();
-    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
     app.input(Decoded::Text("1".into())).unwrap();
     key(&mut app, 27, 0);
     assert!(matches!(
@@ -368,7 +368,7 @@ fn catalog_and_key_validation_use_one_correct_loading_title() {
         .replace_client(OpenRouter::fixture(fixture.endpoint.clone()));
     app.dispatch("/settings".into()).unwrap();
     app.input(Decoded::Text("6".into())).unwrap();
-    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
     app.input(Decoded::Text("1".into())).unwrap();
     app.input(Decoded::Text("isolated-key".into())).unwrap();
     key(&mut app, 13, 0);

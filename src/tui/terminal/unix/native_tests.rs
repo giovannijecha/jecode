@@ -88,7 +88,7 @@ fn controls_and_terminal_lifetime() {
     terminal.wait_after("Providers", settings);
     terminal.send(b"6");
     let providers = terminal.wait_after("Credentials", settings);
-    terminal.send(b"2");
+    terminal.send(b"1");
     let api_keys = terminal.wait_after("Providers › API keys", providers);
     terminal.send(b"1");
     let key = terminal.wait_after("Enter  validate and save", api_keys);

@@ -10,7 +10,7 @@ pub fn choose_model(
     if let Some(model) = current {
         ui.message(&services.redact(&format!("Current model: {model}. Enter keeps it.")))?;
     }
-    ui.message("Search tool-capable models by name. Use =model-id to enter an ID directly.")?;
+    ui.message("Search models by name. Use =model-id to enter an ID directly.")?;
     loop {
         let Some(query) = answer(ui.input("Model search: ")?) else {
             return Ok(None);
@@ -42,7 +42,7 @@ pub fn choose_model(
             }
         };
         if models.is_empty() {
-            ui.message("No tool-capable models matched. Try a different name.")?;
+            ui.message("No models matched. Try a different name.")?;
             continue;
         }
         for (index, model) in models.iter().enumerate() {

@@ -1,6 +1,6 @@
 //! Native HTTPS boundary for OpenAI requests.
 
-use super::Api;
+use super::{Api, Credential};
 use crate::backend::{Failure, FailureKind, FailureReason};
 use crate::json::{self, Value};
 use crate::redact::Redactor;
@@ -41,10 +41,12 @@ impl Api {
         session: Option<&str>,
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<Response, Failure> {
-        let token = self
-            .session
-            .access_token(&self.cancellation)
-            .map_err(Failure::from)?;
+        let token = match &self.credential {
+            Credential::Account(session) => session
+                .access_token(&self.cancellation)
+                .map_err(Failure::from)?,
+            Credential::ApiKey { key, .. } => key.clone(),
+        };
         let url = format!("{}{path}", self.base_url);
         let authorization = format!("Bearer {token}");
         let mut headers = vec![("Authorization", authorization.as_str())];
@@ -55,7 +57,7 @@ impl Api {
             ]);
         }
         // The ChatGPT route derives prompt cache affinity from this header.
-        if let Some(session) = session {
+        if let (Credential::Account(_), Some(session)) = (&self.credential, session) {
             headers.push(("session-id", session));
         }
         let mut decoder = Headers {

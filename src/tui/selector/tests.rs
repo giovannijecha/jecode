@@ -31,7 +31,7 @@ fn provider_settings_have_two_sections_and_account_choices_distinguish_active_fr
             .iter()
             .map(|row| row.name.as_str())
             .collect::<Vec<_>>(),
-        ["Credentials", "API keys"]
+        ["API keys", "Credentials"]
     );
     let credentials = Selector::credentials(false, true);
     assert_eq!(credentials.options[0].name, "OpenAI");
@@ -41,8 +41,23 @@ fn provider_settings_have_two_sections_and_account_choices_distinguish_active_fr
         credentials.options[1].badge,
         Some(Badge::Note("configured".into()))
     );
-    let keys = Selector::api_keys(true);
+    let keys = Selector::api_keys(&[
+        ("openrouter", true),
+        ("openai-api", false),
+        ("anthropic-api", false),
+    ]);
     assert_eq!(keys.options[0].name, "OpenRouter");
+    assert_eq!(keys.options.len(), 3);
+    assert!(matches!(
+        keys.options[1].choice,
+        Choice::ApiKey("openai-api")
+    ));
+    assert!(matches!(
+        keys.options[2].choice,
+        Choice::ApiKey("anthropic-api")
+    ));
+    assert_eq!(Selector::key("openai-api").title, "OpenAI API key");
+    assert_eq!(Selector::key("anthropic-api").title, "Anthropic API key");
     assert_eq!(
         keys.options[0].badge,
         Some(Badge::Note("configured".into()))
@@ -83,12 +98,9 @@ fn provider_settings_have_two_sections_and_account_choices_distinguish_active_fr
             .any(|row| matches!(row.choice, Choice::ManageUsage))
     );
     let claude = Selector::account("anthropic", &accounts[0], false);
-    assert!(
-        claude
-            .options
-            .iter()
-            .all(|row| !matches!(row.choice, Choice::ManageUsage))
-    );
+    assert!(matches!(claude.options[0].choice, Choice::Account(0)));
+    assert!(matches!(claude.options[1].choice, Choice::ManageUsage));
+    assert!(matches!(claude.options[2].choice, Choice::SignOut));
 }
 
 #[test]
@@ -100,10 +112,25 @@ fn provider_choice_marks_conversation_and_saved_default_separately() {
             "http://127.0.0.1:1",
         )),
     ];
-    let menu = Selector::providers(&services, false, "openrouter", "openai");
+    let menu = Selector::providers(
+        &services[..1],
+        false,
+        ProviderGroup::ApiKeys,
+        "openrouter",
+        "openai",
+    );
     assert_eq!(menu.options[0].badge, Some(Badge::Current));
-    assert_eq!(menu.options[1].badge, Some(Badge::Default));
-    assert!(matches!(menu.options[1].choice, Choice::Provider("openai")));
+    let groups = Selector::provider_groups(&services, false, "openrouter", "openai", None);
+    assert_eq!(groups.options[0].badge, Some(Badge::Current));
+    assert_eq!(groups.options[1].badge, Some(Badge::Default));
+    assert!(matches!(
+        groups.options[1].choice,
+        Choice::ProviderGroup(ProviderGroup::Credentials)
+    ));
+    let defaults = Selector::provider_groups(&services, true, "openrouter", "openai", None);
+    assert_eq!(defaults.selected, 1);
+    assert_eq!(defaults.options[0].badge, Some(Badge::Current));
+    assert_eq!(defaults.options[1].badge, Some(Badge::Default));
 }
 
 #[test]

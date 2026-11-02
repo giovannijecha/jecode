@@ -1,6 +1,81 @@
 use super::*;
 use std::fs;
 
+mod model_groups;
+
+#[test]
+fn claude_account_menu_warns_before_sign_in_and_usage_links_are_provider_scoped() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_accounts_for("anthropic");
+    assert_eq!(
+        app.state.notice.as_ref().unwrap().text,
+        crate::tui::providers::CLAUDE_COMPATIBILITY_WARNING
+    );
+    for width in [44, 80] {
+        app.state.width = width;
+        let frame = view::frame(&app.state, "fixture/model", "directory");
+        assert!(frame.live.iter().any(|line| {
+            let text = line.plain();
+            text.contains("Claude login unapproved") && text.contains("Use API keys")
+        }));
+    }
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::Accounts
+    ));
+    assert_eq!(
+        crate::tui::providers::usage_url("anthropic"),
+        "https://claude.ai/settings/usage"
+    );
+    assert_eq!(
+        crate::tui::providers::usage_url("openai"),
+        "https://chatgpt.com/settings/usage"
+    );
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn api_keys_save_to_the_chosen_provider_without_switching_the_current_conversation() {
+    for provider in ["openai-api", "anthropic-api"] {
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![]);
+        let mut app = app(&directory, &fixture);
+        let key = format!("isolated-{provider}-key");
+        app.state.selector = Some(selector::Selector::key(provider));
+        app.state.selector.as_mut().unwrap().editor.insert(&key);
+        let frame = view::frame(&app.state, "fixture/model", "directory");
+        assert!(frame.live.iter().all(|line| !line.plain().contains(&key)));
+
+        let services = crate::backend::Services::for_backend(provider, key.clone()).unwrap();
+        app.finish_key(key.clone(), Ok(services)).unwrap();
+        assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openrouter");
+        assert_eq!(app.config.settings.backend_id, "openrouter");
+        assert_eq!(
+            app.config
+                .store
+                .load()
+                .unwrap()
+                .unwrap()
+                .credential_for(provider),
+            Some(key.as_str())
+        );
+        app.open_api_keys();
+        let row = app
+            .state
+            .selector
+            .as_ref()
+            .unwrap()
+            .options
+            .iter()
+            .find(|row| matches!(row.choice, selector::Choice::ApiKey(id) if id == provider))
+            .unwrap();
+        assert_eq!(row.badge, Some(selector::Badge::Note("configured".into())));
+        assert!(fixture.finish().is_empty());
+    }
+}
+
 #[test]
 fn account_selection_ignores_an_unrelated_corrupt_active_account() {
     for provider in ["openai", "anthropic"] {
@@ -190,7 +265,21 @@ fn two_configured_providers_choose_provider_then_model_and_effort_for_this_conve
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(
         menu.purpose,
-        selector::Purpose::Providers { defaults: false }
+        selector::Purpose::ProviderGroups { defaults: false }
+    ));
+    assert_eq!(menu.options[0].badge, Some(selector::Badge::Default));
+    assert_eq!(menu.options[1].badge, Some(selector::Badge::Current));
+    app.choose(selector::Choice::ProviderGroup(
+        selector::ProviderGroup::Credentials,
+    ))
+    .unwrap();
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(
+        menu.purpose,
+        selector::Purpose::Providers {
+            defaults: false,
+            group: selector::ProviderGroup::Credentials
+        }
     ));
     let index = menu
         .options
@@ -221,7 +310,7 @@ fn two_configured_providers_choose_provider_then_model_and_effort_for_this_conve
             .live
             .iter()
             .map(|row| row.plain())
-            .find(|row| row.starts_with("─ Provider › Model"))
+            .find(|row| row.starts_with("─ Credentials › Model"))
             .unwrap()
     };
     assert!(!rule(&app).contains("fixture@example.test"));
