@@ -223,7 +223,7 @@ fn request_inner(
 mod tests {
     use super::*;
     use crate::test_support::server::{Server, accept};
-    use std::io::Write;
+    use std::io::{Read, Write};
 
     #[test]
     fn rejects_ambiguous_or_credentialed_endpoints() {
@@ -245,6 +245,13 @@ mod tests {
     fn authentication_challenge_is_returned_without_response_body() {
         let server = Server::start(|listener, stop| {
             let mut stream = accept(&listener, &stop).unwrap();
+            // Read the request first: closing a socket with unread input
+            // resets it on macOS before the client reads the reply.
+            let mut head = Vec::new();
+            let mut byte = [0];
+            while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
+                head.push(byte[0]);
+            }
             write!(stream, "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer resource_metadata=\"https://example.test/auth\"\r\nContent-Length: 6\r\n\r\nsecret").unwrap();
         });
         let error = request(
