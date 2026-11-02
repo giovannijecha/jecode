@@ -11,7 +11,7 @@ mod providers;
 mod retry;
 pub(crate) mod unconfigured;
 pub(crate) use charges::{price, quantity};
-pub use providers::available;
+pub use providers::{available, info};
 
 use crate::attachments::{Inputs, Pool};
 use crate::cancel::Cancellation;

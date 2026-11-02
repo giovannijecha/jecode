@@ -106,7 +106,7 @@ impl App {
     pub(super) fn open_api_keys(&mut self) {
         let configured = crate::backend::available()
             .iter()
-            .filter(|provider| provider.key_url.is_some())
+            .filter(|provider| provider.uses_api_key())
             .map(|provider| {
                 (
                     provider.id,

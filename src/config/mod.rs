@@ -354,11 +354,7 @@ pub fn validate_key(key: &str) -> Result<(), String> {
 }
 
 fn validate_saved_key(backend_id: &str, key: &str) -> Result<(), String> {
-    if !key.is_empty()
-        && crate::backend::available()
-            .iter()
-            .any(|provider| provider.id == backend_id && provider.key_url.is_some())
-    {
+    if !key.is_empty() && crate::backend::info(backend_id).is_some_and(|info| info.uses_api_key()) {
         crate::backend::validate_credential(backend_id, key)?;
     }
     Ok(())

@@ -334,15 +334,8 @@ impl Selector {
         menu
     }
     pub fn key(backend: &'static str) -> Self {
-        let name = crate::backend::available()
-            .iter()
-            .find(|entry| entry.id == backend)
-            .map_or(backend, |entry| entry.name);
-        let title = if name.ends_with(" API") {
-            format!("{name} key")
-        } else {
-            format!("{name} API key")
-        };
+        let title = crate::backend::info(backend)
+            .map_or_else(|| format!("{backend} API key"), |info| info.key_label());
         let mut menu = Self::new(&title, Purpose::Key(backend), vec![]);
         menu.parent = Some("Providers");
         menu

@@ -36,3 +36,24 @@ static AVAILABLE: [BackendInfo; 5] = [
 pub fn available() -> &'static [BackendInfo] {
     &AVAILABLE
 }
+
+/// The registered provider with this backend ID.
+pub fn info(id: &str) -> Option<&'static BackendInfo> {
+    AVAILABLE.iter().find(|provider| provider.id == id)
+}
+
+impl BackendInfo {
+    /// API-key providers publish a key page; account providers sign in.
+    pub fn uses_api_key(&self) -> bool {
+        self.key_url.is_some()
+    }
+
+    /// The key's display name, without repeating "API" for API connections.
+    pub fn key_label(&self) -> String {
+        if self.name.ends_with(" API") {
+            format!("{} key", self.name)
+        } else {
+            format!("{} API key", self.name)
+        }
+    }
+}

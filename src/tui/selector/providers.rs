@@ -2,10 +2,7 @@ use super::{Badge, Choice, OptionRow, ProviderGroup, Purpose, SETTINGS, Selector
 
 impl ProviderGroup {
     pub fn for_id(id: &str) -> Self {
-        if crate::backend::available()
-            .iter()
-            .any(|provider| provider.id == id && provider.key_url.is_some())
-        {
+        if crate::backend::info(id).is_some_and(|info| info.uses_api_key()) {
             Self::ApiKeys
         } else {
             Self::Credentials
@@ -49,12 +46,8 @@ impl Selector {
                         group.label(),
                         members
                             .iter()
-                            .filter_map(|service| {
-                                crate::backend::available()
-                                    .iter()
-                                    .find(|entry| entry.id == service.id())
-                                    .map(|entry| entry.name)
-                            })
+                            .filter_map(|service| crate::backend::info(service.id()))
+                            .map(|info| info.name)
                             .collect::<Vec<_>>()
                             .join(" · "),
                         Choice::ProviderGroup(group),
@@ -92,7 +85,7 @@ impl Selector {
     pub fn providers_settings() -> Self {
         let keys = crate::backend::available()
             .iter()
-            .filter(|provider| provider.key_url.is_some())
+            .filter(|provider| provider.uses_api_key())
             .map(|provider| provider.name)
             .collect::<Vec<_>>()
             .join(" · ");
@@ -132,9 +125,8 @@ impl Selector {
             configured
                 .iter()
                 .filter_map(|(id, saved)| {
-                    crate::backend::available()
-                        .iter()
-                        .find(|provider| provider.id == *id && provider.key_url.is_some())
+                    crate::backend::info(id)
+                        .filter(|provider| provider.uses_api_key())
                         .map(|provider| OptionRow {
                             badge: saved.then_some(Badge::Note("configured".into())),
                             ..row(provider.name, "API key", Choice::ApiKey(provider.id))
@@ -209,11 +201,9 @@ impl Selector {
             .iter()
             .map(|service| {
                 let id = service.id();
-                let registered = crate::backend::available()
-                    .iter()
-                    .find(|entry| entry.id == id);
+                let registered = crate::backend::info(id);
                 let name = registered.map_or(id, |entry| entry.name);
-                let fact = if registered.is_some_and(|entry| entry.key_url.is_some()) {
+                let fact = if registered.is_some_and(|entry| entry.uses_api_key()) {
                     "API key"
                 } else {
                     match id {

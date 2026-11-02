@@ -19,7 +19,9 @@ own recoverable conversation.
 The API-key route honors an explicit internal output-token allowance with
 `max_output_tokens`; the subscription route continues to omit that field.
 
-Catalog entries do not supply context or effort metadata. Context stays unknown;
+The catalog's order is unspecified, so the selector lists models newest first by
+their `created` time. Catalog entries do not supply context or effort metadata.
+Context stays unknown;
 `metadata.rs` supplies reasoning levels for exact model IDs documented by OpenAI
 (checked 2026-11-02):
 

@@ -59,7 +59,7 @@ fn choose_provider(ui: &mut impl Prompter) -> Result<Option<&'static str>, Strin
     loop {
         ui.message("Providers:")?;
         for (index, backend) in available.iter().enumerate() {
-            let method = if backend.key_url.is_some() {
+            let method = if backend.uses_api_key() {
                 "API key"
             } else if backend.id == "openai" {
                 "Continue with ChatGPT"
@@ -92,16 +92,9 @@ fn configure_with(
     backend_id: &str,
     make_services: impl Fn(&str, &str) -> Result<Services, String>,
 ) -> Result<Option<Settings>, String> {
-    let selected = backend::available()
-        .iter()
-        .find(|backend| backend.id == backend_id)
-        .unwrap();
+    let selected = backend::info(backend_id).unwrap();
     let name = selected.name;
-    let key_name = if name.ends_with(" API") {
-        format!("{name} key")
-    } else {
-        format!("{name} API key")
-    };
+    let key_name = selected.key_label();
     let note = selected
         .key_url
         .map_or(String::new(), |url| format!("Get a key at {url}. "));

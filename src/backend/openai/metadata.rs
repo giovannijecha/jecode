@@ -55,14 +55,15 @@ pub(super) fn parse(response: &Value) -> Result<Catalog, String> {
     Ok(Catalog { models, limits })
 }
 
-/// The public Models API supplies IDs but no context or reasoning capability data.
+/// The public Models API supplies IDs and creation times but no context or
+/// reasoning capability data. Its order is unspecified, so newest come first.
 pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
     let rows = response
         .get("data")
         .and_then(Value::as_array)
         .ok_or("OpenAI returned an invalid API model list")?;
     let mut seen = BTreeSet::new();
-    let mut models = Vec::new();
+    let mut dated = Vec::new();
     for row in rows {
         let Some(id) = row.get("id").and_then(Value::as_str) else {
             continue;
@@ -70,16 +71,21 @@ pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
         if validate_model(id).is_err() || !seen.insert(id.to_owned()) {
             continue;
         }
-        models.push(Model {
-            id: id.into(),
-            name: id.into(),
-            prompt_price: None,
-            completion_price: None,
-            efforts: api_efforts(id),
-        });
+        let created = row.get("created").and_then(Value::as_usize).unwrap_or(0);
+        dated.push((
+            created,
+            Model {
+                id: id.into(),
+                name: id.into(),
+                prompt_price: None,
+                completion_price: None,
+                efforts: api_efforts(id),
+            },
+        ));
     }
+    dated.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
     Ok(Catalog {
-        models,
+        models: dated.into_iter().map(|(_, model)| model).collect(),
         limits: BTreeMap::new(),
     })
 }
@@ -169,6 +175,21 @@ mod tests {
         }
         assert_eq!(models[5].efforts, [Effort::Default]);
         assert_eq!(models[6].efforts, [Effort::Default]);
+    }
+
+    #[test]
+    fn api_catalog_lists_newest_models_first_and_keeps_ties_in_order() {
+        let response = crate::json::parse(
+            r#"{"data":[{"id":"undated"},{"id":"older","created":100},{"id":"newest","created":300},{"id":"tie-a","created":200},{"id":"tie-b","created":200}]}"#,
+        )
+        .unwrap();
+        let ids = parse_api(&response)
+            .unwrap()
+            .models
+            .into_iter()
+            .map(|model| model.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["newest", "tie-a", "tie-b", "older", "undated"]);
     }
 
     #[test]
