@@ -142,7 +142,7 @@ impl Store {
         let record = self
             .files()
             .record(&client_id, &subject, &Cancellation::default())?;
-        Ok(Some(self.make_session(&record)))
+        Ok(record.enabled().then(|| self.make_session(&record)))
     }
 
     pub fn activate(&self, client_id: &str) -> Result<(), String> {

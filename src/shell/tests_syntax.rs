@@ -106,6 +106,24 @@ fn literal_braces_are_words_but_groups_and_expansion_fail() {
 }
 
 #[test]
+fn unsupported_substitution_syntax_fails_before_prior_commands_run() {
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("touch made; echo $(echo {a,b})"), 2);
+    assert!(!directory.path().join("made").exists());
+    assert_eq!(shell.run("touch made; echo \"`pwd`\""), 2);
+    assert!(!directory.path().join("made").exists());
+    assert_eq!(shell.run("echo '`literal`' > quoted"), 0);
+    assert_eq!(read(&directory, "quoted"), "`literal`\n");
+}
+
+#[test]
+fn escaped_closing_parenthesis_stays_inside_command_substitution() {
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run(r#"echo $(printf \)) > result"#), 0);
+    assert_eq!(read(&directory, "result"), ")\n");
+}
+
+#[test]
 fn set_e_stops_only_on_unhandled_failures() {
     let (directory, mut shell) = shell();
     let script = "set -e; false || true; false && true; if false; then :; fi; echo ok > ok; false; echo no > no";

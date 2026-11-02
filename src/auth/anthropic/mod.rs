@@ -69,10 +69,12 @@ impl Store {
     }
 
     pub fn active(&self) -> Result<Option<Session>, String> {
-        self.files()
-            .active()?
-            .map(|id| self.session(&id))
-            .transpose()
+        let files = self.files();
+        let Some(id) = files.active()? else {
+            return Ok(None);
+        };
+        let record = files.record(&id)?;
+        Ok(record.enabled().then(|| self.make_session(&record)))
     }
 
     pub fn activate(&self, id: &str) -> Result<(), String> {
