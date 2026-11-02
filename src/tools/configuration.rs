@@ -1,0 +1,82 @@
+//! Session-scoped stores, areas and homes that configure the tools.
+
+use super::{Tools, processes};
+use std::path::{Path, PathBuf};
+
+impl Tools {
+    #[cfg(test)]
+    pub fn configure_output(&mut self, directory: PathBuf, redactor: crate::redact::Redactor) {
+        self.outputs = crate::output::Store::new(directory, redactor);
+    }
+    pub fn configure_session_output(
+        &mut self,
+        directory: PathBuf,
+        session: &str,
+        redactor: crate::redact::Redactor,
+    ) -> Result<(), String> {
+        self.outputs =
+            crate::output::Store::for_session(directory, self.root.clone(), session, redactor)?;
+        Ok(())
+    }
+    pub(crate) fn configure_output_store(&mut self, outputs: crate::output::Store) {
+        self.outputs = outputs;
+    }
+    pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
+        self.project_map.include_credentials(redactor.clone());
+        self.outputs.include(redactor);
+    }
+
+    pub fn configure_project_map(&mut self, home: &Path) {
+        self.project_map.configure(home);
+    }
+    pub fn share_project_map_notes(&mut self, home: &Path, project_root: &Path) {
+        self.project_map.share_notes(home, project_root);
+    }
+
+    pub fn configure_attachments(&mut self, pool: crate::attachments::Pool) {
+        self.attachments = Some(pool);
+    }
+
+    pub fn attachments(&self) -> Option<&crate::attachments::Pool> {
+        self.attachments.as_ref()
+    }
+
+    /// Stops the persistent processes of the conversation that is ending.
+    pub fn stop_processes(&self) {
+        self.processes.stop_all();
+        self.stop_browsers();
+    }
+
+    pub fn stop_browsers(&self) {
+        self.browsers.stop_all();
+    }
+
+    pub fn configure_browser_profiles(&mut self, home: &Path) {
+        self.browser_profiles = Some(home.join("browser/profiles"));
+    }
+
+    pub fn configure_session_home(&mut self, home: &Path) {
+        self.session_home = Some(home.to_path_buf());
+    }
+
+    /// Local inspection and stop control for the current conversation's processes.
+    pub fn observe_processes(&self, redactor: crate::redact::Redactor) -> processes::Observer {
+        self.processes.observer(redactor)
+    }
+
+    pub fn configure_temporary(&mut self, area: crate::scratch::Area) {
+        self.temporary = Some(area);
+    }
+
+    pub fn temporary(&self) -> Result<&crate::scratch::Area, String> {
+        self.temporary
+            .as_ref()
+            .ok_or("Session temporary storage is unavailable".into())
+    }
+
+    pub fn temporary_instructions(&self) -> String {
+        self.temporary
+            .as_ref()
+            .map_or(String::new(), |area| area.instructions())
+    }
+}

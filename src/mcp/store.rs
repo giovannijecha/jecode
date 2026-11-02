@@ -105,7 +105,7 @@ impl Store {
     fn acquire(&self, cancel: Option<&Cancellation>) -> Result<disk::lock::Exclusive, Error> {
         disk::ensure_private_directory(self.path.parent().expect("MCP home")).map_err(io)?;
         #[cfg(windows)]
-        crate::auth::openai::native::protect(self.path.parent().expect("MCP home"), true)
+        disk::protect_owner_only(self.path.parent().expect("MCP home"), true)
             .map_err(|_| failure("Could not protect MCP directory"))?;
         if disk::metadata_if_present(&self.lock)
             .map_err(io)?
@@ -126,7 +126,7 @@ impl Store {
             None => disk::lock::Exclusive::acquire(&self.lock).map_err(io)?,
         };
         #[cfg(windows)]
-        crate::auth::openai::native::protect(&self.lock, false)
+        disk::protect_owner_only(&self.lock, false)
             .map_err(|_| failure("Could not protect MCP lock file"))?;
         Ok(lock)
     }
@@ -144,7 +144,7 @@ impl Store {
         }
         disk::atomic_write(&self.path, bytes.as_bytes()).map_err(io)?;
         #[cfg(windows)]
-        crate::auth::openai::native::protect(&self.path, false)
+        disk::protect_owner_only(&self.path, false)
             .map_err(|_| failure("Could not protect MCP configuration"))?;
         Ok(())
     }

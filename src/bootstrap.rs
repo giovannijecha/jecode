@@ -209,7 +209,11 @@ fn account_redactor(
     status: &mut impl Write,
 ) -> Result<crate::redact::Redactor, String> {
     let mut redactor = crate::redact::Redactor::empty();
-    crate::mcp::include_credentials(home, &redactor)?;
+    if let Err(error) = crate::mcp::include_credentials(home, &redactor) {
+        // Optional remote tools must not prevent ordinary work.
+        writeln!(status, "{error}; continuing without MCP.")
+            .map_err(|error| format!("Could not report MCP configuration: {error}"))?;
+    }
     for backend in crate::backend::available()
         .iter()
         .filter(|backend| crate::auth::account_backend(backend.id))
@@ -307,6 +311,21 @@ mod tests {
                 .unwrap()
                 .contains("Skipped 1 invalid OpenAI account")
         );
+    }
+
+    #[test]
+    fn startup_reports_corrupt_mcp_configuration_and_continues() {
+        let directory = Directory::new();
+        let home = directory.path();
+        fs::write(home.join("mcp.json"), "{broken").unwrap();
+        let mut status = Vec::new();
+        assert!(account_redactor(home, &mut status).is_ok());
+        let status = String::from_utf8(status).unwrap();
+        assert!(
+            status.contains(&home.join("mcp.json").display().to_string()),
+            "{status}"
+        );
+        assert!(status.contains("continuing without MCP"), "{status}");
     }
 
     #[test]

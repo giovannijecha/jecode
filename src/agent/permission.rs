@@ -197,7 +197,7 @@ impl Agent {
 
     pub(super) fn permission_instructions(&self) -> String {
         match self.permissions.level() {
-            Level::Read => "Permissions: Read. Edits, commands, outside paths and browser control are unavailable; web GET/HEAD is available. The user can change /permissions.\n",
+            Level::Read => "Permissions: Read. Edits, commands, outside paths and browser control are unavailable; web GET/HEAD and enabled MCP connections are available. The user can change /permissions.\n",
             Level::Workspace => "Permissions: Workspace. Bash and exec run confined to the folder where the system supports it, otherwise they need Full; browser control is unavailable, so use web for HTTP retrieval. Outside paths and exec cwd ask the user. A local server that needs host access requires the user to choose /permissions full first.\n",
             Level::Full => "Permissions: Full. Bash and exec may work outside the folder.\n",
         }

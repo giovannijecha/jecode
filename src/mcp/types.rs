@@ -66,8 +66,26 @@ impl Connection {
 
     pub fn protect(&self, redactor: &crate::redact::Redactor) {
         redactor.add_secret(self.token.clone());
-        for (_, value) in &self.headers {
-            redactor.add_secret(value.clone());
+        // Redaction replaces plain substrings, so a short ordinary value such
+        // as `true` must not become a secret everywhere.
+        for (name, value) in &self.headers {
+            let name = name.to_ascii_lowercase();
+            if value.len() >= 20
+                || name == "cookie"
+                || [
+                    "key",
+                    "token",
+                    "secret",
+                    "password",
+                    "auth",
+                    "session",
+                    "signature",
+                ]
+                .iter()
+                .any(|part| name.contains(part))
+            {
+                redactor.add_secret(value.clone());
+            }
         }
         if let Some(tokens) = &self.oauth {
             redactor.add_secret(tokens.access_token.clone());

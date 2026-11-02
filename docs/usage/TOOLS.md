@@ -45,10 +45,11 @@ of them. Exact arguments and limits are in the
 Collaborators get every tool except `agent` and `ask_user`.
 
 MCP connections have separate remote permissions. Enable and manage them in
-`/settings` → **MCP**; `/mcp` inspects configured connections and their tools.
-Read, Workspace and Full govern local files and commands. An enabled MCP
-connection follows the permissions granted at its service, including in Read.
-Local checkpoints cannot undo remote changes.
+Settings → **MCP** in the TUI, or in `~/.jecode/mcp.json`; `/mcp` inspects the
+configured connections. Read, Workspace and Full do not govern MCP calls: an
+enabled connection follows the permissions granted at its service, including
+in Read. Collaborators use the same connections. Local checkpoints cannot undo
+remote changes.
 
 ## Files
 

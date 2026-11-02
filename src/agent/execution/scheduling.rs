@@ -40,6 +40,7 @@ fn automatic(call: &ToolCall, arguments: &Value) -> bool {
         "read" => arguments.get("path").and_then(Value::as_str).is_some(),
         "checkpoint" => matches!(action, Some("list" | "inspect")),
         "process" => action == Some("list"),
+        "mcp" => matches!(action, None | Some("list" | "tools")),
         "web" => {
             let method = arguments
                 .get("method")
@@ -102,5 +103,17 @@ mod tests {
                 Mode::Serial
             );
         }
+    }
+
+    #[test]
+    fn mcp_discovery_runs_in_parallel_and_remote_calls_in_order() {
+        let mcp = |action: &str| ToolCall {
+            id: "one".into(),
+            name: "mcp".into(),
+            arguments: Value::object([("action", Value::string(action))]).encode(),
+        };
+        assert_eq!(mode(&mcp("list")), Mode::Automatic);
+        assert_eq!(mode(&mcp("tools")), Mode::Automatic);
+        assert_eq!(mode(&mcp("call")), Mode::Serial);
     }
 }

@@ -18,7 +18,6 @@ use crate::attachments::{Attachment, Prompt};
 use crate::console::Console;
 use crate::events::{Event, EventSink};
 use crate::input::read_line;
-use crate::json::Value;
 use std::io::{BufRead, Write};
 
 /// A line-based chat whose first message carries `staged` attachments.
@@ -185,15 +184,10 @@ fn chat_inner(
                     .path()
                     .parent()
                     .ok_or("Missing configuration directory")?;
-                let result = crate::mcp::execute(
-                    Some(home),
-                    &Value::object([("action", Value::string("list"))]),
-                    &crate::cancel::Cancellation::default(),
-                    &agent.redactor(),
-                );
-                let summary = crate::mcp::summary(&result);
+                let (summary, text) = mcp_overview(home);
                 agent.record_local("/mcp", &summary);
-                writeln!(output, "{}", result.pretty()).map_err(|error| error.to_string())
+                writeln!(output, "{}", agent.redactor().text(&text))
+                    .map_err(|error| error.to_string())
             }
             ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
@@ -313,6 +307,37 @@ fn run_plain(
     questions.set_available(false);
     permissions.set_surface(crate::permissions::Surface::None);
     result
+}
+
+/// The plain `/mcp` listing: a recorded summary and the user's own view.
+fn mcp_overview(home: &std::path::Path) -> (String, String) {
+    let connections = match crate::mcp::Store::new(home.to_path_buf()).list() {
+        Ok(connections) => connections,
+        Err(error) => {
+            let error = format!("Could not read MCP connections: {error}");
+            return (error.clone(), error);
+        }
+    };
+    let mut text = connections
+        .iter()
+        .map(|connection| {
+            format!(
+                "{} · {} · {}\n",
+                connection.name,
+                crate::mcp::without_query(&connection.endpoint),
+                if connection.enabled {
+                    "enabled"
+                } else {
+                    "suspended"
+                }
+            )
+        })
+        .collect::<String>();
+    text.push_str("Manage connections in Settings > MCP in the TUI, or ~/.jecode/mcp.json.");
+    (
+        format!("{} configured connections", connections.len()),
+        text,
+    )
 }
 
 #[cfg(test)]

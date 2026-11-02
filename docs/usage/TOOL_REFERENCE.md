@@ -35,18 +35,10 @@ Neither changes what the call does.
 
 ## Scheduling
 
-`mcp list` shows configured connections and their stable IDs. `mcp tools`
-discovers remote tool names and exact input schemas, optionally filtered by
-`query`; `offset` defaults to 0 and `limit` to 8 (1–50). `mcp call` forwards
-`tool` and `arguments` (default `{}`) to the selected enabled connection.
-Structured and other MCP result blocks remain in the JSON result. A remote
-`isError` is a tool failure; `outcome: unknown` means the service may already
-have acted. Never infer rollback from local checkpoints. See [MCP](MCP.md).
-
 These calls run in parallel automatically when adjacent, up to four at a time:
 `list`, `search`, `read` (except `history:` and `skill:` references), `map`
-overview, `checkpoint list` and `inspect`, `process list`, and `web fetch` or
-`download` using GET or HEAD without a body.
+overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
+`tools`, and `web fetch` or `download` using GET or HEAD without a body.
 
 `parallel: true` on adjacent calls declares them independent, including writes
 and commands; they run in waves of at most four. A call without it ends the
@@ -286,3 +278,20 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`,
   evicted events and a `gap` entry marks a reconnection. A page can hold fewer
   entries than `limit`, even zero, while `more` is true.
 - `close` closes a tab; `stop` ends the browser.
+
+## mcp
+
+`mcp list` shows configured connections with their stable IDs, names, enabled
+state and endpoint origin (scheme and host only). `mcp tools` discovers remote
+tool names and exact input schemas, optionally filtered by `query`; `offset`
+defaults to 0 and `limit` to 8 (1–50). `mcp call` forwards `tool` and
+`arguments` (default `{}`; a JSON string that encodes an object is also
+accepted) to the selected enabled connection.
+
+Structured and other MCP result blocks remain in the JSON result. Image, audio
+and blob data are replaced by a placeholder with the MIME type and size. A
+result that still exceeds 64 KiB keeps a text preview and `truncated: true`;
+in both cases `result_file` is an `output:` reference to the full result,
+readable with `read`. A remote `isError` is a tool failure; `outcome: unknown`
+means the service may already have acted. Never infer rollback from local
+checkpoints. See [MCP](MCP.md).

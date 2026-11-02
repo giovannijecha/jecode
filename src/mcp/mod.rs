@@ -15,4 +15,8 @@ pub use store::Store;
 pub use types::{AuthMethod, Catalog, Connection, Error, ErrorKind, Tool};
 
 mod bridge;
-pub use bridge::{execute, execute_with, include_credentials, label, summary};
+#[cfg(test)]
+pub use bridge::execute;
+pub use bridge::{
+    execute_with, include_credentials, label, protected_label, summary, without_query,
+};

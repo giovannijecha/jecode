@@ -361,10 +361,25 @@ impl Document {
                         (
                             "error",
                             Value::string(if unknown {
-                                if ToolCall::parse(&call).is_ok_and(|call| call.name == "mcp") {
-                                    "Tool outcome is unknown: Jecode closed after the remote call may have started. Check the service before deciding whether to run it again; local checkpoints cannot undo remote changes."
-                                } else {
-                                    "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
+                                let mcp_call = ToolCall::parse(&call)
+                                    .ok()
+                                    .filter(|call| call.name == "mcp")
+                                    .map(|call| {
+                                        crate::json::parse(&call.arguments).is_ok_and(|arguments| {
+                                            arguments.get("action").and_then(Value::as_str)
+                                                == Some("call")
+                                        })
+                                    });
+                                match mcp_call {
+                                    Some(true) => {
+                                        "Tool outcome is unknown: Jecode closed after the remote call may have started. Check the service before deciding whether to run it again; local checkpoints cannot undo remote changes."
+                                    }
+                                    Some(false) => {
+                                        "Tool outcome is unknown: Jecode closed during a read-only MCP request. Run it again if the result is still needed."
+                                    }
+                                    None => {
+                                        "Tool outcome is unknown: Jecode closed after execution may have started. Check the workspace before deciding whether to run it again."
+                                    }
                                 }
                             } else {
                                 "Tool was not executed: Jecode closed before execution started."

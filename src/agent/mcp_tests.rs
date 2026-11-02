@@ -294,3 +294,88 @@ fn mcp_tools_and_call_reuse_the_same_legacy_server_session() {
         Some("tools/call")
     );
 }
+
+#[test]
+fn mcp_call_accepts_encoded_arguments_and_bounds_large_results() {
+    let workspace = Directory::new();
+    let home = Directory::new();
+    let image = "QUJD".repeat(4096);
+    let remote = HttpFixture::new(vec![
+        discovery(),
+        tools(),
+        rpc(
+            3,
+            Value::object([(
+                "content",
+                Value::Array(vec![
+                    Value::object([
+                        ("type", Value::string("text")),
+                        ("text", Value::string("fixture line\n".repeat(10_000))),
+                    ]),
+                    Value::object([
+                        ("type", Value::string("image")),
+                        ("mimeType", Value::string("image/png")),
+                        ("data", Value::string(&image)),
+                    ]),
+                ]),
+            )]),
+        ),
+    ]);
+    let connection = Store::new(home.path().to_path_buf())
+        .save(&Connection::draft("Large", &remote.endpoint))
+        .unwrap();
+    let mut tools = Tools::new(workspace.path()).unwrap();
+    tools.configure_mcp(home.path(), crate::redact::Redactor::empty());
+    let result = tools.execute(
+        "mcp",
+        &Value::object([
+            ("action", Value::string("call")),
+            ("connection", Value::string(&connection.id)),
+            ("tool", Value::string("create_issue")),
+            ("arguments", Value::string(r#"{"owner":"example"}"#)),
+        ])
+        .encode(),
+    );
+    assert!(result.get("error").is_none(), "{result:?}");
+    assert_eq!(result.get("truncated"), Some(&Value::Bool(true)));
+    let inline = result.encode();
+    assert!(inline.len() <= 64 * 1024);
+    assert!(!inline.contains(&image));
+    let reference = result.get("result_file").and_then(Value::as_str).unwrap();
+    let saved = tools.execute(
+        "read",
+        &Value::object([("path", Value::string(reference))]).encode(),
+    );
+    assert!(saved.encode().contains("fixture line"), "{saved:?}");
+    let requests = remote.finish();
+    assert_eq!(
+        requests[2]
+            .body
+            .get("params")
+            .and_then(|params| params.get("arguments")),
+        Some(&Value::object([("owner", Value::string("example"))]))
+    );
+}
+
+#[test]
+fn corrupt_mcp_configuration_leaves_sessions_working_and_reaches_the_model() {
+    let workspace = Directory::new();
+    let home = Directory::new();
+    std::fs::write(home.path().join("mcp.json"), "{broken").unwrap();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:9/chat/completions".into()),
+        Tools::new(workspace.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let error = agent.configure_mcp(home.path()).unwrap_err();
+    assert!(error.contains("mcp.json"), "{error}");
+    let result = agent.tools.execute(
+        "mcp",
+        &Value::object([("action", Value::string("list"))]).encode(),
+    );
+    assert_eq!(
+        result.get("outcome").and_then(Value::as_str),
+        Some("failed")
+    );
+    assert!(result.get("error").and_then(Value::as_str).is_some());
+}

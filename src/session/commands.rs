@@ -74,7 +74,7 @@ pub const COMMANDS: [Command; 20] = [
     },
     Command {
         name: "/mcp",
-        description: "Inspect globally configured MCP connections and tools",
+        description: "Inspect globally configured MCP connections",
         tui_usage: "/mcp",
         plain_usage: Some("/mcp"),
     },

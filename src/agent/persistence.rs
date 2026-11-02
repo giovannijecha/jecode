@@ -24,7 +24,9 @@ impl Agent {
                 store.share_attachments(parent);
             }
             self.tools.configure_session_home(home);
-            self.configure_mcp(home)?;
+            // Startup and the TUI report an unreadable mcp.json; ordinary
+            // work continues and the mcp tool returns the error when called.
+            let _ = self.configure_mcp(home);
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
                 if self.has_model() {

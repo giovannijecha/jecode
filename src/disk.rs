@@ -9,6 +9,13 @@ pub mod owned;
 
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
+/// Restricts a private file or directory to its owner. The ACL change runs in
+/// the native Windows helper that also serves account storage.
+#[cfg(windows)]
+pub fn protect_owner_only(path: &Path, directory: bool) -> Result<(), String> {
+    crate::auth::openai::native::protect(path, directory)
+}
+
 /// A fresh hidden name beside `path` for staging its replacement. One
 /// process-wide counter keeps concurrent writers in a directory apart.
 pub fn temporary_beside(path: &Path) -> PathBuf {

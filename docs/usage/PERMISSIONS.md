@@ -2,13 +2,16 @@
 
 Every conversation has a permission level that decides what the agent's tools
 may do. You choose the level; the model cannot raise it or approve its own
-requests. Jecode enforces the level on local file and command tool calls.
+requests. Jecode enforces the level on file and command calls, web requests
+other than GET or HEAD, browser control, checkpoint restores and collaborator
+integration.
 
-[MCP connections](MCP.md) have separate remote permissions: the connection's
-global enabled state and permissions granted at the service govern its calls,
-including while the local level is Read. Suspend a connection in
-`/settings` → **MCP** to block future calls globally. Server hints do not grant
-permissions, and local checkpoints cannot undo a remote operation.
+[MCP](MCP.md) calls are not governed by Read, Workspace or Full. Each
+connection's global enabled or suspended state, and the permissions granted at
+the service, govern its calls at every level, including Read. Suspend a
+connection in Settings → **MCP** in the TUI, or in `~/.jecode/mcp.json`, to
+block future calls globally. Server hints do not grant permissions, and local
+checkpoints cannot undo a remote operation.
 
 ## Levels
 

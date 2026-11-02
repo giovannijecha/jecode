@@ -52,6 +52,28 @@ impl Runtime {
         }
         Ok(Arc::clone(&entry.client))
     }
+
+    /// Binds a locked client to the current record; a changed record, such as
+    /// renewed tokens, starts a new server session in place.
+    pub(super) fn bind(
+        &self,
+        home: &Path,
+        shared: &Arc<Mutex<Client>>,
+        client: &mut Client,
+        connection: &Connection,
+    ) -> Result<(), Error> {
+        let mut clients = self.clients.lock().map_err(|_| poisoned())?;
+        match clients.get_mut(&(home.to_path_buf(), connection.id.clone())) {
+            Some(entry) if Arc::ptr_eq(&entry.client, shared) => {
+                if entry.connection != *connection {
+                    *client = Client::new(connection.clone());
+                    entry.connection = connection.clone();
+                }
+            }
+            _ => *client = Client::new(connection.clone()),
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn poisoned() -> Error {

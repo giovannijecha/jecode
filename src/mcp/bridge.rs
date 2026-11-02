@@ -1,32 +1,73 @@
 //! One neutral tool bridge; remote schemas are discovered only when needed.
 
 use super::{Client, Connection, Error, ErrorKind, Runtime, Store, Tool};
-use crate::{cancel::Cancellation, json::Value, redact::Redactor};
-use std::path::Path;
+use crate::{cancel::Cancellation, json::Value, output, redact::Redactor};
+use std::{
+    path::Path,
+    sync::{Mutex, MutexGuard, TryLockError},
+    time::Duration,
+};
+
+mod bounded;
+#[cfg(test)]
+mod tests;
+
+const CONFIGURATION: &str = "Settings > MCP in the TUI, or ~/.jecode/mcp.json";
 
 pub fn include_credentials(home: &Path, redactor: &Redactor) -> Result<(), String> {
-    for connection in Store::new(home.to_path_buf())
-        .list()
-        .map_err(|e| e.to_string())?
-    {
+    for connection in Store::new(home.to_path_buf()).list().map_err(|error| {
+        format!(
+            "Could not read MCP connections from {}: {error}",
+            home.join("mcp.json").display()
+        )
+    })? {
         connection.protect(redactor);
     }
     Ok(())
 }
 
 pub fn label(home: Option<&Path>, arguments: &Value) -> Option<String> {
+    protected_label(home?, arguments, &Redactor::empty())
+}
+
+/// The connection's display name; registers saved credentials from the same read.
+pub fn protected_label(home: &Path, arguments: &Value, redactor: &Redactor) -> Option<String> {
+    let connections = Store::new(home.to_path_buf()).list().ok()?;
+    for connection in &connections {
+        connection.protect(redactor);
+    }
     let target = arguments.get("connection")?.as_str()?;
-    let connections = Store::new(home?.to_path_buf()).list().ok()?;
     find(&connections, target).map(|connection| connection.name.clone())
 }
 
+/// Scheme and host only: hosted endpoints often embed credentials in the
+/// user information, path or query.
+pub fn origin(endpoint: &str) -> String {
+    let (scheme, rest) = endpoint
+        .split_once("://")
+        .map_or(("", endpoint), |(scheme, rest)| (scheme, rest));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or("");
+    if scheme.is_empty() {
+        host.into()
+    } else {
+        format!("{scheme}://{host}")
+    }
+}
+
+/// The endpoint without its query or fragment, for the user's own output.
+pub fn without_query(endpoint: &str) -> &str {
+    endpoint.split(['?', '#']).next().unwrap_or(endpoint)
+}
+
+#[cfg(test)]
 pub fn execute(
     home: Option<&Path>,
     arguments: &Value,
     cancel: &Cancellation,
     redactor: &Redactor,
 ) -> Value {
-    execute_with(&Runtime::default(), home, arguments, cancel, redactor)
+    execute_with(&Runtime::default(), home, arguments, cancel, redactor, None)
 }
 
 pub fn execute_with(
@@ -35,25 +76,29 @@ pub fn execute_with(
     arguments: &Value,
     cancel: &Cancellation,
     redactor: &Redactor,
+    outputs: Option<&output::Store>,
 ) -> Value {
     let result = run(runtime, home, arguments, cancel, redactor);
-    redactor.value(&result.unwrap_or_else(|error| {
-        Value::object([
-            ("error", Value::string(error.message)),
-            (
-                "outcome",
-                Value::string(match error.kind {
-                    ErrorKind::UnknownOutcome => "unknown",
-                    ErrorKind::Cancelled => "not_executed",
-                    _ => "failed",
-                }),
-            ),
-            (
-                "sign_in_required",
-                Value::Bool(error.kind == ErrorKind::Authentication),
-            ),
-        ])
-    }))
+    bounded::bound(
+        redactor.value(&result.unwrap_or_else(|error| {
+            Value::object([
+                ("error", Value::string(error.message)),
+                (
+                    "outcome",
+                    Value::string(match error.kind {
+                        ErrorKind::UnknownOutcome => "unknown",
+                        ErrorKind::Cancelled => "not_executed",
+                        _ => "failed",
+                    }),
+                ),
+                (
+                    "sign_in_required",
+                    Value::Bool(error.kind == ErrorKind::Authentication),
+                ),
+            ])
+        })),
+        outputs,
+    )
 }
 
 fn run(
@@ -90,7 +135,7 @@ fn run(
                             Value::object([
                                 ("id", Value::string(&c.id)),
                                 ("name", Value::string(&c.name)),
-                                ("endpoint", Value::string(&c.endpoint)),
+                                ("origin", Value::string(origin(&c.endpoint))),
                                 ("enabled", Value::Bool(c.enabled)),
                             ])
                         })
@@ -99,7 +144,7 @@ fn run(
             ),
             (
                 "configuration",
-                Value::string("Global connections are managed in /settings > MCP"),
+                Value::string(format!("Global connections are managed in {CONFIGURATION}")),
             ),
         ]));
     }
@@ -120,30 +165,30 @@ fn run(
         return Err(Error::new(
             ErrorKind::Configuration,
             format!(
-                "{} is suspended globally; resume it in /settings > MCP",
+                "{} is suspended globally; resume it in {CONFIGURATION}",
                 saved.name
             ),
         ));
     }
+    let not_sent = || Error::new(ErrorKind::Cancelled, "MCP call was not sent");
     if cancel.requested() {
-        return Err(Error::new(ErrorKind::Cancelled, "MCP call was not sent"));
+        return Err(not_sent());
     }
+    // Refresh under the client lock, so a queued call never dispatches a token
+    // that expired while it waited.
+    let shared = runtime.client(home, saved)?;
+    let mut client = acquire(&shared, cancel).map_err(|error| error.unwrap_or_else(not_sent))?;
     let connection = store.fresh(&saved.id, cancel)?;
     connection.protect(redactor);
-    let shared = runtime.client(home, &connection)?;
-    let mut client = shared.lock().map_err(|_| super::runtime::poisoned())?;
-    if cancel.requested() {
-        return Err(Error::new(ErrorKind::Cancelled, "MCP call was not sent"));
-    }
-    if !store
-        .list()?
-        .iter()
-        .any(|current| current == &connection && current.enabled)
-    {
+    if !same_target(saved, &connection) {
         return Err(Error::new(
             ErrorKind::Configuration,
             "MCP connection changed or was suspended before dispatch; inspect it again",
         ));
+    }
+    runtime.bind(home, &shared, &mut client, &connection)?;
+    if cancel.requested() {
+        return Err(not_sent());
     }
     if action == "tools" {
         let catalog = match client.catalog(cancel) {
@@ -153,69 +198,18 @@ fn run(
                 return Err(error);
             }
         };
-        let query = arguments
-            .get("query")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_lowercase();
-        let matching = catalog
-            .tools
-            .iter()
-            .filter(|tool| {
-                tool.name.to_lowercase().contains(&query)
-                    || tool.description.to_lowercase().contains(&query)
-            })
-            .collect::<Vec<_>>();
-        let offset = arguments
-            .get("offset")
-            .and_then(Value::as_usize)
-            .unwrap_or(0);
-        let limit = arguments
-            .get("limit")
-            .and_then(Value::as_usize)
-            .unwrap_or(8)
-            .clamp(1, 50);
-        let tools = matching
-            .iter()
-            .skip(offset)
-            .take(limit)
-            .map(|tool| definition(tool))
-            .collect::<Vec<_>>();
-        let end = offset.saturating_add(tools.len());
-        return Ok(Value::object([
-            ("connection", identity(&connection)),
-            (
-                "server",
-                Value::object([
-                    ("name", Value::string(&catalog.server.name)),
-                    ("version", Value::string(&catalog.server.version)),
-                    (
-                        "instructions",
-                        catalog
-                            .server
-                            .instructions
-                            .as_deref()
-                            .map_or(Value::Null, Value::string),
-                    ),
-                ]),
-            ),
-            ("tools", Value::Array(tools)),
-            ("total", Value::number(matching.len())),
-            (
-                "next_offset",
-                if end < matching.len() {
-                    Value::number(end)
-                } else {
-                    Value::Null
-                },
-            ),
-        ]));
+        return Ok(discovered(&connection, &catalog, arguments));
     }
     let name = text(arguments, "tool")?;
-    let input = arguments
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| Value::object([]));
+    let input = match arguments.get("arguments") {
+        None => Value::object([]),
+        // Some models encode the object as a JSON string.
+        Some(Value::String(encoded)) => crate::json::parse(encoded)
+            .ok()
+            .filter(|value| matches!(value, Value::Object(_)))
+            .unwrap_or_else(|| Value::string(encoded)),
+        Some(value) => value.clone(),
+    };
     if !matches!(input, Value::Object(_)) {
         return Err(Error::new(
             ErrorKind::Configuration,
@@ -246,6 +240,90 @@ fn run(
         );
     }
     Ok(value)
+}
+
+/// Waits for the connection's session without ignoring cancellation;
+/// `Err(None)` means the wait was cancelled.
+fn acquire<'a>(
+    shared: &'a Mutex<Client>,
+    cancel: &Cancellation,
+) -> Result<MutexGuard<'a, Client>, Option<Error>> {
+    loop {
+        match shared.try_lock() {
+            Ok(client) => return Ok(client),
+            Err(TryLockError::Poisoned(_)) => return Err(Some(super::runtime::poisoned())),
+            Err(TryLockError::WouldBlock) => {
+                cancel.wait(Duration::from_millis(20)).map_err(|_| None)?
+            }
+        }
+    }
+}
+
+/// Token renewal changes only the OAuth record; anything else changed the target.
+fn same_target(saved: &Connection, current: &Connection) -> bool {
+    let mut saved = saved.clone();
+    saved.oauth.clone_from(&current.oauth);
+    saved == *current
+}
+
+fn discovered(connection: &Connection, catalog: &super::Catalog, arguments: &Value) -> Value {
+    let query = arguments
+        .get("query")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase();
+    let matching = catalog
+        .tools
+        .iter()
+        .filter(|tool| {
+            tool.name.to_lowercase().contains(&query)
+                || tool.description.to_lowercase().contains(&query)
+        })
+        .collect::<Vec<_>>();
+    let offset = arguments
+        .get("offset")
+        .and_then(Value::as_usize)
+        .unwrap_or(0);
+    let limit = arguments
+        .get("limit")
+        .and_then(Value::as_usize)
+        .unwrap_or(8)
+        .clamp(1, 50);
+    let tools = matching
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(|tool| definition(tool))
+        .collect::<Vec<_>>();
+    let end = offset.saturating_add(tools.len());
+    Value::object([
+        ("connection", identity(connection)),
+        (
+            "server",
+            Value::object([
+                ("name", Value::string(&catalog.server.name)),
+                ("version", Value::string(&catalog.server.version)),
+                (
+                    "instructions",
+                    catalog
+                        .server
+                        .instructions
+                        .as_deref()
+                        .map_or(Value::Null, Value::string),
+                ),
+            ]),
+        ),
+        ("tools", Value::Array(tools)),
+        ("total", Value::number(matching.len())),
+        (
+            "next_offset",
+            if end < matching.len() {
+                Value::number(end)
+            } else {
+                Value::Null
+            },
+        ),
+    ])
 }
 
 fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str, Error> {
@@ -322,7 +400,15 @@ pub fn summary(result: &Value) -> String {
         return format!("{} configured connections", connections.len());
     }
     if let Some(tools) = result.get("tools").and_then(Value::as_array) {
-        return format!("{} tools", tools.len());
+        let total = result
+            .get("total")
+            .and_then(Value::as_usize)
+            .unwrap_or(tools.len());
+        return if total > tools.len() {
+            format!("{} of {total} tools", tools.len())
+        } else {
+            format!("{total} tools")
+        };
     }
     if let Some(text) = content {
         return text.chars().take(240).collect();

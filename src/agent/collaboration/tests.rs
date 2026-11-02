@@ -21,6 +21,35 @@ pub(super) fn create() -> Value {
 }
 
 #[test]
+fn collaborator_uses_the_global_mcp_connections() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let mut connection = crate::mcp::Connection::draft("Shared", "http://127.0.0.1:9/mcp");
+    connection.enabled = false;
+    crate::mcp::Store::new(home.path().to_path_buf())
+        .save(&connection)
+        .unwrap();
+    let mut parent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:9/chat/completions".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    parent.enable_sessions(home.path()).unwrap();
+    let child = parent
+        .new_child("a1", project.path(), Mode::Shared)
+        .unwrap();
+    let result = child.tools.execute(
+        "mcp",
+        &Value::object([("action", Value::string("list"))]).encode(),
+    );
+    let connections = result.get("connections").and_then(Value::as_array).unwrap();
+    assert_eq!(connections.len(), 1, "{result:?}");
+    assert_eq!(
+        connections[0].get("name").and_then(Value::as_str),
+        Some("Shared")
+    );
+}
+
+#[test]
 fn existing_collaborator_uses_updated_auto_compact_for_later_requests() {
     let project = Directory::new();
     let home = Directory::new();

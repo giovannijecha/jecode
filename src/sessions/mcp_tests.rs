@@ -3,8 +3,8 @@ use crate::{
     test_support::{Directory, tool_call},
 };
 
-#[test]
-fn recovered_remote_call_reports_uncertainty_without_replaying_it() {
+/// The recovered result of an MCP request interrupted by a crash.
+fn recovered(action: &str) -> Value {
     let workspace = Directory::new();
     let home = Directory::new();
     let store = crate::sessions::Store::new(home.path().to_path_buf(), workspace.path()).unwrap();
@@ -31,7 +31,7 @@ fn recovered_remote_call_reports_uncertainty_without_replaying_it() {
                     "remote-started",
                     "mcp",
                     Value::object([
-                        ("action", Value::string("call")),
+                        ("action", Value::string(action)),
                         ("connection", Value::string("missing-connection")),
                         ("tool", Value::string("create_issue")),
                     ]),
@@ -51,6 +51,7 @@ fn recovered_remote_call_reports_uncertainty_without_replaying_it() {
         crate::sessions::Handle::open(store, &document.id, crate::redact::Redactor::empty())
             .unwrap();
     let recovered = handle.snapshot();
+    assert!(!recovered.pending.active);
     let result = recovered
         .messages
         .last()
@@ -63,19 +64,21 @@ fn recovered_remote_call_reports_uncertainty_without_replaying_it() {
         result.get("outcome").and_then(Value::as_str),
         Some("unknown")
     );
-    assert!(
-        result
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap()
-            .contains("Check the service")
-    );
-    assert!(
-        result
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap()
-            .contains("cannot undo remote changes")
-    );
-    assert!(!recovered.pending.active);
+    result
+}
+
+#[test]
+fn recovered_remote_call_reports_uncertainty_without_replaying_it() {
+    let result = recovered("call");
+    let error = result.get("error").and_then(Value::as_str).unwrap();
+    assert!(error.contains("Check the service"));
+    assert!(error.contains("cannot undo remote changes"));
+}
+
+#[test]
+fn recovered_discovery_is_reported_as_read_only() {
+    let result = recovered("tools");
+    let error = result.get("error").and_then(Value::as_str).unwrap();
+    assert!(error.contains("read-only MCP request"), "{error}");
+    assert!(!error.contains("remote changes"));
 }
