@@ -26,8 +26,10 @@ pub fn include_credentials(home: &Path, redactor: &Redactor) -> Result<(), Strin
     Ok(())
 }
 
-pub fn label(home: Option<&Path>, arguments: &Value) -> Option<String> {
-    protected_label(home?, arguments, &Redactor::empty())
+/// The display name of the connection an `mcp` call targets.
+pub fn connection_name(connections: &[Connection], arguments: &Value) -> Option<String> {
+    let target = arguments.get("connection")?.as_str()?;
+    find(connections, target).map(|connection| connection.name.clone())
 }
 
 /// The connection's display name; registers saved credentials from the same read.
@@ -36,8 +38,7 @@ pub fn protected_label(home: &Path, arguments: &Value, redactor: &Redactor) -> O
     for connection in &connections {
         connection.protect(redactor);
     }
-    let target = arguments.get("connection")?.as_str()?;
-    find(&connections, target).map(|connection| connection.name.clone())
+    connection_name(&connections, arguments)
 }
 
 /// Scheme and host only: hosted endpoints often embed credentials in the

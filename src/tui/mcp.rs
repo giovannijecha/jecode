@@ -120,20 +120,6 @@ impl Ui {
     }
 }
 
-/// The display name of the connection an `mcp` call names, by ID or name.
-pub(super) fn label(connections: &[Connection], arguments: &crate::json::Value) -> Option<String> {
-    let target = arguments.get("connection")?.as_str()?;
-    connections
-        .iter()
-        .find(|c| c.id == target)
-        .or_else(|| {
-            connections
-                .iter()
-                .find(|c| c.name.eq_ignore_ascii_case(target))
-        })
-        .map(|c| c.name.clone())
-}
-
 impl App {
     fn mcp_home(&self) -> PathBuf {
         self.config

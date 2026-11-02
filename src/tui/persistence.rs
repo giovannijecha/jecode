@@ -260,7 +260,7 @@ impl App {
                             change,
                         } => {
                             if name == "mcp"
-                                && let Some(label) = super::mcp::label(
+                                && let Some(label) = crate::mcp::connection_name(
                                     connections.get_or_insert_with(|| {
                                         self.config
                                             .store

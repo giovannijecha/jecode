@@ -18,5 +18,5 @@ mod bridge;
 #[cfg(test)]
 pub use bridge::execute;
 pub use bridge::{
-    execute_with, include_credentials, label, protected_label, summary, without_query,
+    connection_name, execute_with, include_credentials, protected_label, summary, without_query,
 };

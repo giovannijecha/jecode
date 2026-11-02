@@ -93,7 +93,8 @@ Windows fixtures cover permission requests
 terminal backgrounds (`native_tests::native_background::`).
 
 The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
-panels, successful calls and uncertain remote outcomes:
+the list, add, form and Advanced panels (including unchecked and signed-out
+states), successful calls and uncertain remote outcomes:
 
 ```text
 cargo test --locked --offline tui::terminal::windows::native_tests::native_mcp::native_windows_mcp_panels -- --exact --ignored --nocapture --test-threads=1
