@@ -32,7 +32,44 @@ fn read_request(stream: &mut TcpStream) -> String {
 }
 
 fn reply(stream: &mut TcpStream, status: u16, headers: &str, body: &str) {
-    write!(stream, "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{headers}\r\n{body}", body.len()).unwrap();
+    let kind = if headers.contains("Content-Type") {
+        ""
+    } else {
+        "Content-Type: application/json\r\n"
+    };
+    write!(
+        stream,
+        "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\n{kind}{headers}\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+}
+
+type Script = Vec<(u16, &'static str, String)>;
+
+/// Answers one connection per scripted reply and returns the requests.
+fn scripted(replies: Script) -> Server<Vec<String>> {
+    Server::start(move |listener, stop| {
+        replies
+            .into_iter()
+            .map(|(status, headers, body)| {
+                let mut stream = accept(&listener, &stop).unwrap();
+                let request = read_request(&mut stream);
+                reply(&mut stream, status, headers, &body);
+                request
+            })
+            .collect()
+    })
+}
+
+/// A Legacy `initialize` answer with request `id`, then the initialized ack.
+fn initialized(id: usize, headers: &'static str, version: &str) -> Script {
+    let result =
+        format!(r#"{{"protocolVersion":"{version}","serverInfo":{{"name":"old","version":"1"}}}}"#);
+    vec![
+        (200, headers, fixture_response(id, &result)),
+        (202, "", String::new()),
+    ]
 }
 
 fn fixture_response(id: usize, result: &str) -> String {
@@ -249,7 +286,7 @@ fn confirmed_rpc_rejection_is_failed_rather_than_an_unknown_dispatch() {
             &mut stream,
             200,
             "",
-            r#"{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"untrusted-secret"}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"title is required"}}"#,
         );
         requests
     });
@@ -258,8 +295,7 @@ fn confirmed_rpc_rejection_is_failed_rather_than_an_unknown_dispatch() {
         .call("create_issue", &Value::object([]), &Cancellation::default())
         .unwrap_err();
     assert_eq!(error.kind, ErrorKind::Remote);
-    assert!(error.message.contains("-32602"));
-    assert!(!error.message.contains("untrusted-secret"));
+    assert!(error.message.contains("-32602: title is required"));
     assert_eq!(server.finish().len(), 3);
 }
 
@@ -302,4 +338,117 @@ fn sse_response_completes_while_server_keeps_stream_open() {
     );
     assert!(started.elapsed() < std::time::Duration::from_secs(3));
     server.finish();
+}
+
+#[test]
+fn any_discovery_rejection_except_authentication_falls_back_to_initialize() {
+    for (status, body) in [
+        (405, String::new()),
+        (500, "failure".into()),
+        (
+            400,
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"No session"}}"#.into(),
+        ),
+        (
+            200,
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Bad params"}}"#.into(),
+        ),
+    ] {
+        let mut replies = vec![(status, "", body)];
+        replies.extend(initialized(2, "", "2025-11-25"));
+        replies.push((200, "", fixture_response(3, r#"{"tools":[]}"#)));
+        let server = scripted(replies);
+        let mut client = Client::new(Connection::draft("old", &server.endpoint));
+        let catalog = client.catalog(&Cancellation::default());
+        assert_eq!(catalog.unwrap().server.name, "old", "{status}");
+        assert_eq!(server.finish().len(), 4);
+    }
+}
+
+#[test]
+fn scope_challenge_requires_sign_in_instead_of_fallback() {
+    let server = scripted(vec![(
+        403,
+        "WWW-Authenticate: Bearer error=\"insufficient_scope\", scope=\"repo\"\r\n",
+        String::new(),
+    )]);
+    let mut client = Client::new(Connection::draft("scoped", &server.endpoint));
+    let error = client.catalog(&Cancellation::default()).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Authentication);
+    assert_eq!(error.status, Some(403));
+    assert_eq!(error.headers.len(), 1);
+    assert_eq!(server.finish().len(), 1);
+}
+
+#[test]
+fn expired_legacy_session_is_renewed_once_for_catalog_and_call() {
+    let mut replies = vec![(400, "", String::new())];
+    replies.extend(initialized(2, "Mcp-Session-Id: first\r\n", "2025-11-25"));
+    replies.push((404, "", String::new()));
+    replies.extend(initialized(4, "Mcp-Session-Id: second\r\n", "2025-11-25"));
+    replies.push((200, "", fixture_response(5, r#"{"tools":[]}"#)));
+    replies.push((404, "", String::new()));
+    replies.extend(initialized(7, "Mcp-Session-Id: third\r\n", "2025-11-25"));
+    replies.push((200, "", fixture_response(8, r#"{"content":[]}"#)));
+    let server = scripted(replies);
+    let mut client = Client::new(Connection::draft("old", &server.endpoint));
+    let cancel = Cancellation::default();
+    assert!(client.catalog(&cancel).unwrap().tools.is_empty());
+    assert!(client.call("write", &Value::object([]), &cancel).is_ok());
+    let requests = server.finish();
+    assert_eq!(requests.len(), 11);
+    assert!(requests[3].contains("Mcp-Session-Id: first"));
+    assert!(requests[4].contains("\"method\":\"initialize\""));
+    assert!(requests[6].contains("Mcp-Session-Id: second"));
+    assert!(requests[10].contains("Mcp-Session-Id: third"));
+    assert!(requests[10].contains("\"method\":\"tools/call\""));
+}
+
+#[test]
+fn definite_http_rejections_fail_while_server_errors_stay_unknown() {
+    let mut replies = vec![(400, "", String::new())];
+    replies.extend(initialized(2, "", "2025-11-25"));
+    replies.push((429, "", String::new()));
+    replies.push((
+        403,
+        "WWW-Authenticate: Bearer error=\"insufficient_scope\"\r\n",
+        String::new(),
+    ));
+    replies.push((503, "", String::new()));
+    let server = scripted(replies);
+    let mut client = Client::new(Connection::draft("old", &server.endpoint));
+    let cancel = Cancellation::default();
+    let mut call = || {
+        client
+            .call("write", &Value::object([]), &cancel)
+            .unwrap_err()
+    };
+    let rejected = call();
+    assert_eq!(
+        (rejected.kind, rejected.status),
+        (ErrorKind::Remote, Some(429))
+    );
+    let scope = call();
+    assert_eq!(scope.kind, ErrorKind::Authentication);
+    assert_eq!(scope.headers.len(), 1);
+    assert_eq!(call().kind, ErrorKind::UnknownOutcome);
+    assert_eq!(server.finish().len(), 6);
+}
+
+#[test]
+fn legacy_catalog_keeps_valid_tools_through_sse_noise() {
+    let tools = r#"{"tools":[{"name":"kept","inputSchema":{"type":"object","properties":{"r":{"type":"object","x-mcp-header":"R"}}}},{"name":""},{"name":"bad","inputSchema":3}],"nextCursor":""}"#;
+    let event = format!(
+        "id: a\ndata: \n\ndata: {{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}}\n\ndata: {}\n\n",
+        fixture_response(3, tools)
+    );
+    let mut replies = vec![(400, "", String::new())];
+    replies.extend(initialized(2, "", "2025-03-26"));
+    replies.push((200, "Content-Type: text/event-stream\r\n", event));
+    let server = scripted(replies);
+    let mut client = Client::new(Connection::draft("old", &server.endpoint));
+    let catalog = client.catalog(&Cancellation::default()).unwrap();
+    assert_eq!(catalog.tools.len(), 1);
+    assert_eq!(catalog.tools[0].name, "kept");
+    assert!(server.finish()[3].contains("MCP-Protocol-Version: 2025-03-26"));
 }

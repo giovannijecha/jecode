@@ -4,9 +4,13 @@ use crate::json::{self, Value};
 use crate::mcp::types::{Error, ErrorKind};
 use std::collections::HashSet;
 
+mod sse;
+pub use sse::SseScanner;
+
 pub const MODERN: &str = "2026-07-28";
 pub const LEGACY: &str = "2025-11-25";
 pub const OLDER: &str = "2025-06-18";
+pub const OLDEST: &str = "2025-03-26";
 
 pub fn request(id: u64, method: &str, mut params: Value, modern: bool) -> Value {
     if modern && let Value::Object(ref mut entries) = params {
@@ -46,7 +50,83 @@ pub fn notification(method: &str) -> Value {
     ])
 }
 
-pub fn response(body: &[u8], content_type: Option<&str>, id: u64) -> Result<Value, Error> {
+/// A decoded JSON-RPC reply to one request.
+pub enum Reply {
+    Result(Value),
+    Error(RpcError),
+}
+
+pub struct RpcError {
+    pub code: Option<i64>,
+    message: String,
+    data: Option<Value>,
+}
+
+impl RpcError {
+    /// Whether a version error offers a revision the `initialize` handshake speaks.
+    pub fn offers_legacy(&self) -> bool {
+        self.data
+            .as_ref()
+            .and_then(|data| data.get("supported"))
+            .and_then(Value::as_array)
+            .is_some_and(|versions| {
+                versions
+                    .iter()
+                    .any(|version| version.as_str().is_some_and(legacy_version))
+            })
+    }
+
+    pub fn into_error(self) -> Error {
+        let Some(code) = self.code else {
+            return protocol("Invalid MCP JSON-RPC error");
+        };
+        let kind = match code {
+            -32601 | -32022 => ErrorKind::Unsupported,
+            _ => ErrorKind::Remote,
+        };
+        let mut message = match code {
+            -32601 => "MCP method is unsupported".to_owned(),
+            -32022 => "MCP protocol version is unsupported".to_owned(),
+            code => format!("MCP server returned JSON-RPC error {code}"),
+        };
+        let detail = bounded(&self.message);
+        if !detail.is_empty() {
+            message.push_str(": ");
+            message.push_str(&detail);
+        }
+        if let Some(data) = self.data.map(|data| data.encode())
+            && data.len() <= DETAIL_LIMIT
+        {
+            message.push_str(" (data: ");
+            message.push_str(&bounded(&data));
+            message.push(')');
+        }
+        Error::new(kind, message)
+    }
+}
+
+const DETAIL_LIMIT: usize = 500;
+
+/// Server text kept for the model: one line of at most `DETAIL_LIMIT` characters.
+fn bounded(text: &str) -> String {
+    let text = text.trim();
+    let mut out: String = text
+        .chars()
+        .take(DETAIL_LIMIT)
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if text.chars().nth(DETAIL_LIMIT).is_some() {
+        out.push('…');
+    }
+    out
+}
+
+/// Revisions negotiated through `initialize`, whose HTTP framing Legacy mode uses.
+pub fn legacy_version(version: &str) -> bool {
+    matches!(version, LEGACY | OLDER | OLDEST)
+}
+
+pub fn decode(body: &[u8], content_type: Option<&str>, id: u64) -> Result<Reply, Error> {
     let text = std::str::from_utf8(body).map_err(|_| protocol("MCP response is not UTF-8"))?;
     let media = content_type
         .unwrap_or("application/json")
@@ -55,28 +135,22 @@ pub fn response(body: &[u8], content_type: Option<&str>, id: u64) -> Result<Valu
         .unwrap_or_default()
         .trim();
     if media.eq_ignore_ascii_case("text/event-stream") {
+        let mut events = sse::Splitter::default();
         let mut found = None;
-        let mut data = String::new();
-        for line in text.lines().chain(std::iter::once("")) {
-            let line = line.trim_end_matches('\r');
-            if line.is_empty() {
-                if !data.is_empty() {
-                    let value = json::parse(data.trim_end_matches('\n'))
-                        .map_err(|_| protocol("Invalid MCP SSE JSON"))?;
-                    if value.get("id") == Some(&Value::number(id)) {
-                        if found.is_some() {
-                            return Err(protocol("Duplicate MCP response ID"));
-                        }
-                        found = Some(envelope(value, id)?);
-                    }
-                    data.clear();
-                }
-            } else if let Some(part) = line.strip_prefix("data:") {
-                data.push_str(part.strip_prefix(' ').unwrap_or(part));
-                data.push('\n');
-            }
+        let mut accept = |event: &[u8]| match sse::response(event, id) {
+            Some(value) => match found.replace(value) {
+                Some(_) => Err(protocol("Duplicate MCP response ID")),
+                None => Ok(()),
+            },
+            None => Ok(()),
+        };
+        while let Some(event) = events.next(body) {
+            accept(event)?;
         }
-        found.ok_or_else(|| protocol("MCP SSE stream ended without the requested response"))
+        accept(events.rest(body))?;
+        let value =
+            found.ok_or_else(|| protocol("MCP SSE stream ended without the requested response"))?;
+        envelope(value, id)
     } else if media.eq_ignore_ascii_case("application/json") || media.is_empty() {
         let value = json::parse(text).map_err(|_| protocol("Invalid MCP response JSON"))?;
         envelope(value, id)
@@ -85,124 +159,32 @@ pub fn response(body: &[u8], content_type: Option<&str>, id: u64) -> Result<Valu
     }
 }
 
-fn envelope(value: Value, id: u64) -> Result<Value, Error> {
+fn envelope(value: Value, id: u64) -> Result<Reply, Error> {
     if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
         || value.get("id") != Some(&Value::number(id))
     {
         return Err(protocol("Invalid MCP response envelope or ID"));
     }
     match (value.get("result"), value.get("error")) {
-        (Some(result), None) => Ok(result.clone()),
-        (None, Some(error)) => {
-            let code = error.get("code").and_then(|value| match value {
+        (Some(result), None) => Ok(Reply::Result(result.clone())),
+        (None, Some(error)) => Ok(Reply::Error(RpcError {
+            code: error.get("code").and_then(|value| match value {
                 Value::Number(number) => number.parse::<i64>().ok(),
                 _ => None,
-            });
-            let kind = match code {
-                Some(-32601 | -32022) => ErrorKind::Unsupported,
-                Some(_) => ErrorKind::Remote,
-                None => ErrorKind::Protocol,
-            };
-            Err(Error::new(
-                kind,
-                match code {
-                    Some(-32601) => "MCP method is unsupported".into(),
-                    Some(-32022) => "MCP protocol version is unsupported".into(),
-                    Some(code) => format!("MCP server returned JSON-RPC error {code}"),
-                    None => "Invalid MCP JSON-RPC error".into(),
-                },
-            ))
-        }
+            }),
+            message: error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            data: error.get("data").cloned(),
+        })),
         _ => Err(protocol("Invalid MCP response result")),
     }
 }
 
 pub fn protocol(message: &'static str) -> Error {
     Error::new(ErrorKind::Protocol, message)
-}
-
-pub fn error_code(body: &[u8], id: u64) -> Option<i64> {
-    let value = json::parse(std::str::from_utf8(body).ok()?).ok()?;
-    if value.get("jsonrpc")?.as_str()? != "2.0" || value.get("id")? != &Value::number(id) {
-        return None;
-    }
-    match value.get("error")?.get("code")? {
-        Value::Number(number) => number.parse().ok(),
-        _ => None,
-    }
-}
-
-pub fn offered_legacy(body: &[u8], id: u64) -> bool {
-    let Ok(text) = std::str::from_utf8(body) else {
-        return false;
-    };
-    let Ok(value) = json::parse(text) else {
-        return false;
-    };
-    value.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
-        && value.get("id") == Some(&Value::number(id))
-        && value.get("error").and_then(|error| error.get("code")) == Some(&Value::number(-32022))
-        && value
-            .get("error")
-            .and_then(|error| error.get("data"))
-            .and_then(|data| data.get("supported"))
-            .and_then(Value::as_array)
-            .is_some_and(|versions| {
-                versions
-                    .iter()
-                    .any(|version| matches!(version.as_str(), Some(LEGACY | OLDER)))
-            })
-}
-
-#[derive(Default)]
-pub struct SseScanner {
-    scan: usize,
-    line_start: usize,
-    event_start: usize,
-}
-
-impl SseScanner {
-    /// Returns the byte boundary of a complete SSE event with the requested ID.
-    pub fn response_end(&mut self, body: &[u8], id: u64) -> Option<usize> {
-        while let Some(offset) = body
-            .get(self.scan..)?
-            .iter()
-            .position(|byte| *byte == b'\n')
-        {
-            let end = self.scan + offset;
-            let line = body
-                .get(self.line_start..end)?
-                .strip_suffix(b"\r")
-                .unwrap_or(&body[self.line_start..end]);
-            self.scan = end + 1;
-            if line.is_empty() {
-                let event = &body[self.event_start..self.line_start];
-                self.event_start = self.scan;
-                self.line_start = self.scan;
-                let mut data = Vec::new();
-                for line in event.split(|byte| *byte == b'\n') {
-                    let line = line.strip_suffix(b"\r").unwrap_or(line);
-                    if let Some(value) = line.strip_prefix(b"data:") {
-                        let value = value.strip_prefix(b" ").unwrap_or(value);
-                        if !data.is_empty() {
-                            data.push(b'\n');
-                        }
-                        data.extend_from_slice(value);
-                    }
-                }
-                if let Ok(text) = std::str::from_utf8(&data)
-                    && let Ok(value) = json::parse(text)
-                    && value.get("id") == Some(&Value::number(id))
-                {
-                    return Some(self.scan);
-                }
-            } else {
-                self.line_start = self.scan;
-            }
-        }
-        self.scan = body.len();
-        None
-    }
 }
 
 pub fn header_value(value: &str) -> String {
@@ -319,6 +301,13 @@ pub fn parameter_headers(
 mod tests {
     use super::*;
 
+    fn response(body: &[u8], content_type: Option<&str>, id: u64) -> Result<Value, Error> {
+        match decode(body, content_type, id)? {
+            Reply::Result(result) => Ok(result),
+            Reply::Error(error) => Err(error.into_error()),
+        }
+    }
+
     #[test]
     fn decodes_fragmented_sse_event_with_other_messages() {
         let body = b": comment\r\nevent: message\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"x\":1}}\r\n\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"x\":2}}\r\n\r\n";
@@ -331,7 +320,41 @@ mod tests {
     }
 
     #[test]
-    fn rejects_mismatched_id_and_untrusted_error_message() {
+    fn sse_skips_priming_event_server_request_and_noise() {
+        let body = b"id: 1\ndata: \n\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n\ndata: <html>\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"x\":1}}";
+        assert_eq!(
+            response(body, Some("text/event-stream"), 2)
+                .unwrap()
+                .get("x"),
+            Some(&Value::number(1))
+        );
+        assert_eq!(
+            response(b"id: 1\ndata: \n\n", Some("text/event-stream"), 2)
+                .unwrap_err()
+                .kind,
+            ErrorKind::Protocol
+        );
+    }
+
+    #[test]
+    fn server_error_message_is_kept_bounded() {
+        let long = "x".repeat(900);
+        let body = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32602,"message":"bad\nfield {long}","data":{{"field":"title"}}}}}}"#
+        );
+        let error = response(body.as_bytes(), None, 1).unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Remote);
+        assert!(
+            error
+                .message
+                .starts_with("MCP server returned JSON-RPC error -32602: bad field x")
+        );
+        assert!(error.message.contains("(data: {\"field\":\"title\"})"));
+        assert!(error.message.len() < 600);
+    }
+
+    #[test]
+    fn rejects_mismatched_id_and_maps_unsupported_method() {
         assert_eq!(
             response(
                 br#"{"jsonrpc":"2.0","id":2,"result":{}}"#,
@@ -343,13 +366,13 @@ mod tests {
             ErrorKind::Protocol
         );
         let error = response(
-            br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"secret"}}"#,
+            br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no such method"}}"#,
             None,
             1,
         )
         .unwrap_err();
         assert_eq!(error.kind, ErrorKind::Unsupported);
-        assert!(!error.message.contains("secret"));
+        assert_eq!(error.message, "MCP method is unsupported: no such method");
     }
 
     #[test]

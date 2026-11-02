@@ -7,6 +7,8 @@ use crate::cancel::Cancellation;
 use crate::json::Value;
 use std::collections::{HashMap, HashSet};
 
+mod handshake;
+
 const MAX_PAGES: usize = 100;
 const MAX_TOOLS: usize = 10_000;
 
@@ -41,7 +43,18 @@ impl Client {
     }
 
     pub fn catalog(&mut self, cancel: &Cancellation) -> Result<Catalog, Error> {
+        match self.list_tools(cancel) {
+            Err(error) if self.session_expired(&error) => {
+                self.renew(cancel)?;
+                self.list_tools(cancel)
+            }
+            result => result,
+        }
+    }
+
+    fn list_tools(&mut self, cancel: &Cancellation) -> Result<Catalog, Error> {
         self.connect(cancel)?;
+        let modern = matches!(self.mode, Some(Mode::Modern));
         let mut tools = Vec::new();
         let mut cursors = HashSet::new();
         let mut cursor: Option<String> = None;
@@ -52,7 +65,7 @@ impl Client {
             {
                 entries.insert("cursor".into(), Value::string(cursor));
             }
-            let result = self.rpc("tools/list", params, None, cancel)?;
+            let result = self.rpc("tools/list", params, None, &[], cancel)?;
             let page = result
                 .get("tools")
                 .and_then(Value::as_array)
@@ -60,15 +73,17 @@ impl Client {
             if tools.len().saturating_add(page.len()) > MAX_TOOLS {
                 return Err(wire::protocol("MCP tool catalog is too large"));
             }
-            for value in page {
-                let tool = parse_tool(value)?;
-                if wire::header_fields(&tool.input_schema).is_ok() {
-                    tools.push(tool);
-                }
-            }
+            // A malformed entry costs only that tool; header annotations
+            // matter only where Modern mode sends them.
+            tools.extend(
+                page.iter()
+                    .filter_map(parse_tool)
+                    .filter(|tool| !modern || wire::header_fields(&tool.input_schema).is_ok()),
+            );
             cursor = match result.get("nextCursor") {
                 None | Some(Value::Null) => None,
-                Some(Value::String(value)) if !value.is_empty() => Some(value.clone()),
+                Some(Value::String(value)) if value.is_empty() => None,
+                Some(Value::String(value)) => Some(value.clone()),
                 _ => return Err(wire::protocol("Invalid MCP pagination cursor")),
             };
             if let Some(ref cursor) = cursor {
@@ -108,6 +123,22 @@ impl Client {
                 "MCP tool arguments must be an object",
             ));
         }
+        match self.call_once(name, arguments, cancel) {
+            // An expired session's request was not processed, so one retry is safe.
+            Err(error) if self.session_expired(&error) => {
+                self.renew(cancel)?;
+                self.call_once(name, arguments, cancel)
+            }
+            result => result,
+        }
+    }
+
+    fn call_once(
+        &mut self,
+        name: &str,
+        arguments: &Value,
+        cancel: &Cancellation,
+    ) -> Result<Value, Error> {
         if cancel.requested() {
             return Err(Error::new(ErrorKind::Cancelled, "MCP request cancelled"));
         }
@@ -131,156 +162,63 @@ impl Client {
             ("name", Value::string(name)),
             ("arguments", arguments.clone()),
         ]);
-        let mode = self
-            .mode
-            .clone()
-            .ok_or_else(|| wire::protocol("MCP connection is not initialized"))?;
-        self.send(
-            "tools/call",
-            params,
-            Some(name),
-            Some(&mode),
-            &extra_headers,
-            cancel,
-        )
-        .and_then(|(result, _)| {
-            if !matches!(result, Value::Object(_)) {
-                return Err(wire::protocol("MCP tool response is not an object"));
-            }
-            if modern {
-                match result.get("resultType") {
-                    None => {}
-                    Some(Value::String(kind)) if kind == "complete" => {}
-                    Some(Value::String(kind)) if kind == "input_required" => {
-                        return Err(Error::new(
-                            ErrorKind::Unsupported,
-                            "MCP tool requires additional input to complete",
-                        ));
-                    }
-                    Some(Value::String(_)) => {
-                        return Err(Error::new(
-                            ErrorKind::Unsupported,
-                            "MCP tool returned an unsupported result type",
-                        ));
-                    }
-                    _ => return Err(wire::protocol("Invalid MCP tool result type")),
+        self.rpc("tools/call", params, Some(name), &extra_headers, cancel)
+            .and_then(|result| {
+                if !matches!(result, Value::Object(_)) {
+                    return Err(wire::protocol("MCP tool response is not an object"));
                 }
-            }
-            Ok(result)
-        })
-        .map_err(|mut error| {
-            if matches!(
-                error.kind,
-                ErrorKind::Transport | ErrorKind::Cancelled | ErrorKind::Protocol
-            ) {
-                error.kind = ErrorKind::UnknownOutcome;
-                error.message = "MCP tool call outcome is unknown".into();
-            }
-            error
-        })
+                if modern {
+                    match result.get("resultType") {
+                        None => {}
+                        Some(Value::String(kind)) if kind == "complete" => {}
+                        Some(Value::String(kind)) if kind == "input_required" => {
+                            return Err(Error::new(
+                                ErrorKind::Unsupported,
+                                "MCP tool requires additional input to complete",
+                            ));
+                        }
+                        Some(Value::String(_)) => {
+                            return Err(Error::new(
+                                ErrorKind::Unsupported,
+                                "MCP tool returned an unsupported result type",
+                            ));
+                        }
+                        _ => return Err(wire::protocol("Invalid MCP tool result type")),
+                    }
+                }
+                Ok(result)
+            })
+            .map_err(|mut error| {
+                // Definite rejections (4xx, JSON-RPC errors, challenges) keep
+                // their kind; anything that may have run on the server is unknown.
+                if matches!(
+                    error.kind,
+                    ErrorKind::Transport | ErrorKind::Cancelled | ErrorKind::Protocol
+                ) {
+                    error.kind = ErrorKind::UnknownOutcome;
+                    error.message = "MCP tool call outcome is unknown".into();
+                }
+                error
+            })
     }
 
-    fn connect(&mut self, cancel: &Cancellation) -> Result<(), Error> {
-        if self.mode.is_some() {
-            return Ok(());
-        }
-        transport::validate_endpoint(&self.connection.endpoint)?;
-        let probe = self.rpc_with_mode(
-            "server/discover",
-            Value::object([]),
-            None,
-            &Mode::Modern,
-            cancel,
-        );
-        match probe {
-            Ok(result) => {
-                let supported = result
-                    .get("supportedVersions")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| wire::protocol("Invalid MCP discovery versions"))?;
-                if supported
-                    .iter()
-                    .any(|version| version.as_str() == Some(wire::MODERN))
-                {
-                    self.server = server_info(
-                        result
-                            .get("_meta")
-                            .and_then(|meta| meta.get("io.modelcontextprotocol/serverInfo")),
-                    );
-                    self.server.instructions = result
-                        .get("instructions")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    self.mode = Some(Mode::Modern);
-                    return Ok(());
-                }
-            }
-            Err(error)
-                if error.message == "MCP legacy discovery probe rejected"
-                    || error.message == "MCP legacy protocol version offered"
-                    || error.message == "MCP method is unsupported" => {}
-            Err(error) => return Err(error),
-        }
+    /// HTTP 404 on a Legacy session means the server dropped it unprocessed.
+    fn session_expired(&self, error: &Error) -> bool {
+        error.status == Some(404)
+            && matches!(
+                self.mode,
+                Some(Mode::Legacy {
+                    session: Some(_),
+                    ..
+                })
+            )
+    }
+
+    /// Replaces an expired Legacy session with a fresh initialize.
+    fn renew(&mut self, cancel: &Cancellation) -> Result<(), Error> {
+        self.mode = None;
+        self.catalog_loaded = false;
         self.initialize(cancel)
-    }
-
-    fn initialize(&mut self, cancel: &Cancellation) -> Result<(), Error> {
-        let params = Value::object([
-            ("protocolVersion", Value::string(wire::LEGACY)),
-            ("capabilities", Value::object([])),
-            (
-                "clientInfo",
-                Value::object([
-                    ("name", Value::string("jecode")),
-                    ("version", Value::string(env!("CARGO_PKG_VERSION"))),
-                ]),
-            ),
-        ]);
-        let (result, response) = self.send("initialize", params, None, None, &[], cancel)?;
-        let version = result
-            .get("protocolVersion")
-            .and_then(Value::as_str)
-            .ok_or_else(|| wire::protocol("MCP initialize response has no protocol version"))?;
-        if !matches!(version, wire::LEGACY | wire::OLDER) {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "MCP server protocol version is unsupported",
-            ));
-        }
-        let session = response
-            .headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("Mcp-Session-Id"))
-            .map(|(_, value)| value.clone());
-        if session.as_ref().is_some_and(|value| {
-            value.is_empty() || value.bytes().any(|byte| byte < 33 || byte == 127)
-        }) {
-            return Err(wire::protocol("Invalid MCP session ID"));
-        }
-        let mode = Mode::Legacy {
-            version: version.into(),
-            session,
-        };
-        self.server = server_info(result.get("serverInfo"));
-        self.server.instructions = result
-            .get("instructions")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let body = wire::notification("notifications/initialized").encode();
-        let headers = self.headers("notifications/initialized", None, Some(&mode))?;
-        let response = transport::request(
-            &self.connection.endpoint,
-            "POST",
-            &headers,
-            Some(body.as_bytes()),
-            self.connection.timeout_secs,
-            cancel,
-        )?;
-        if !(200..300).contains(&response.status) {
-            return Err(http_error(response.status));
-        }
-        self.mode = Some(mode);
-        Ok(())
     }
 
     fn rpc(
@@ -288,28 +226,18 @@ impl Client {
         method: &str,
         params: Value,
         name: Option<&str>,
+        extra_headers: &[(String, String)],
         cancel: &Cancellation,
     ) -> Result<Value, Error> {
         let mode = self
             .mode
             .clone()
             .ok_or_else(|| wire::protocol("MCP connection is not initialized"))?;
-        self.rpc_with_mode(method, params, name, &mode, cancel)
+        let (id, response) = self.post(method, params, name, Some(&mode), extra_headers, cancel)?;
+        reply(&response, id)
     }
 
-    fn rpc_with_mode(
-        &mut self,
-        method: &str,
-        params: Value,
-        name: Option<&str>,
-        mode: &Mode,
-        cancel: &Cancellation,
-    ) -> Result<Value, Error> {
-        self.send(method, params, name, Some(mode), &[], cancel)
-            .map(|(result, _)| result)
-    }
-
-    fn send(
+    fn post(
         &mut self,
         method: &str,
         params: Value,
@@ -317,7 +245,7 @@ impl Client {
         mode: Option<&Mode>,
         extra_headers: &[(String, String)],
         cancel: &Cancellation,
-    ) -> Result<(Value, transport::Response), Error> {
+    ) -> Result<(u64, transport::Response), Error> {
         let id = self.next_id;
         self.next_id = self
             .next_id
@@ -336,35 +264,7 @@ impl Client {
             cancel,
             id,
         )?;
-        if !(200..300).contains(&response.status) {
-            if response.status == 400 && method == "server/discover" {
-                return match wire::error_code(&response.body, id) {
-                    Some(-32022) if wire::offered_legacy(&response.body, id) => Err(Error::new(
-                        ErrorKind::Unsupported,
-                        "MCP legacy protocol version offered",
-                    )),
-                    Some(-32022) => Err(Error::new(
-                        ErrorKind::Unsupported,
-                        "MCP modern protocol version is unsupported",
-                    )),
-                    Some(-32020 | -32021) => {
-                        Err(wire::protocol("MCP modern discovery request was rejected"))
-                    }
-                    _ => Err(Error::new(
-                        ErrorKind::Unsupported,
-                        "MCP legacy discovery probe rejected",
-                    )),
-                };
-            }
-            return Err(http_error(response.status));
-        }
-        let content_type = response
-            .headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("Content-Type"))
-            .map(|(_, value)| value.as_str());
-        let result = wire::response(&response.body, content_type, id)?;
-        Ok((result, response))
+        Ok((id, response))
     }
 
     fn headers(
@@ -426,31 +326,25 @@ impl Client {
     }
 }
 
-fn parse_tool(value: &Value) -> Result<Tool, Error> {
+fn parse_tool(value: &Value) -> Option<Tool> {
     let name = value
         .get("name")
         .and_then(Value::as_str)
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| wire::protocol("MCP tool has no name"))?;
+        .filter(|name| !name.is_empty())?;
     let schema = value
         .get("inputSchema")
-        .ok_or_else(|| wire::protocol("MCP tool has no input schema"))?;
-    if !matches!(schema, Value::Object(_)) {
-        return Err(wire::protocol("MCP tool input schema is not an object"));
-    }
-    let title = value
-        .get("title")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let description = value
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    Ok(Tool {
+        .filter(|schema| matches!(schema, Value::Object(_)))?;
+    Some(Tool {
         name: name.into(),
-        title,
-        description,
+        title: value
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
         input_schema: schema.clone(),
         annotations: value.get("annotations").cloned(),
     })
@@ -472,8 +366,66 @@ fn server_info(value: Option<&Value>) -> ServerInfo {
     }
 }
 
-fn http_error(status: u16) -> Error {
-    let mut error = Error::new(ErrorKind::Transport, format!("MCP HTTP {status}"));
+fn content_type(response: &transport::Response) -> Option<&str> {
+    response
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Content-Type"))
+        .map(|(_, value)| value.as_str())
+}
+
+fn reply(response: &transport::Response, id: u64) -> Result<Value, Error> {
+    let decoded = wire::decode(&response.body, content_type(response), id);
+    if (200..300).contains(&response.status) {
+        return match decoded? {
+            wire::Reply::Result(result) => Ok(result),
+            wire::Reply::Error(error) => Err(error.into_error()),
+        };
+    }
+    Err(rejection(
+        response,
+        match decoded {
+            Ok(wire::Reply::Error(error)) => Some(error),
+            _ => None,
+        },
+    ))
+}
+
+/// A 403 Bearer challenge (such as `insufficient_scope`) needs a new sign-in.
+fn challenge(response: &transport::Response) -> Option<Error> {
+    let headers: Vec<_> = response
+        .headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("WWW-Authenticate"))
+        .cloned()
+        .collect();
+    (response.status == 403 && !headers.is_empty()).then(|| {
+        let mut error = Error::new(
+            ErrorKind::Authentication,
+            "MCP authorization is insufficient",
+        );
+        error.status = Some(403);
+        error.headers = headers;
+        error
+    })
+}
+
+/// Maps a non-2xx response. Challenges need sign-in, a JSON-RPC error keeps
+/// the server's reason, other 4xx responses are definite rejections and the
+/// remaining statuses leave the server's state unknown.
+fn rejection(response: &transport::Response, error: Option<wire::RpcError>) -> Error {
+    if let Some(error) = challenge(response) {
+        return error;
+    }
+    let status = response.status;
+    let mut error = match error {
+        Some(error) => error.into_error(),
+        None if (400..500).contains(&status) => Error::new(
+            ErrorKind::Remote,
+            format!("MCP server rejected the request with HTTP {status}"),
+        ),
+        None => Error::new(ErrorKind::Transport, format!("MCP HTTP {status}")),
+    };
     error.status = Some(status);
     error
 }

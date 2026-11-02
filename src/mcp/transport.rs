@@ -168,7 +168,9 @@ fn request_inner(
             Ok(())
         },
     );
-    let early_complete = stream_complete && matches!(&output, Err(error) if error == COMPLETE);
+    // The observer's stop wins over any process cleanup detail appended to it,
+    // so a received response stays complete whatever followed it.
+    let early_complete = stream_complete;
     if !early_complete && output.is_err() {
         return Err(Error::new(ErrorKind::Transport, "MCP HTTP request failed"));
     }
