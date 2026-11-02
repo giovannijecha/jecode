@@ -302,3 +302,40 @@ fn openai_api_model_route_shows_supported_efforts_and_applies_high() {
     assert_eq!(app.config.settings.effort, Effort::Default);
     assert_eq!(fixture.finish().len(), 1);
 }
+
+#[test]
+fn failed_provider_catalog_does_not_capture_a_later_sign_in_escape() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        401,
+        crate::json::parse(r#"{"error":{"message":"rejected key"}}"#).unwrap(),
+    )]);
+    let mut app = app(&directory, &fixture);
+    configure_five_providers(&mut app);
+    app.dispatch("/model".into()).unwrap();
+    app.choose(selector::Choice::ProviderGroup(
+        selector::ProviderGroup::ApiKeys,
+    ))
+    .unwrap();
+    app.choose(selector::Choice::Provider("openrouter"))
+        .unwrap();
+    wait(&mut app);
+    assert!(app.provider_parent.is_none());
+
+    // A sign-in started later must still cancel as a sign-in.
+    let (_sender, receiver) = std::sync::mpsc::channel();
+    app.auth_updates = Some(receiver);
+    app.state.selector = Some(selector::Selector::loading(
+        "Continue with ChatGPT",
+        "Waiting for ChatGPT sign-in…",
+        false,
+    ));
+    app.provider_parent = Some((false, selector::ProviderGroup::ApiKeys));
+    app.close_selector();
+    assert!(app.auth_updates.is_none());
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        selector::Purpose::Accounts
+    ));
+    assert_eq!(fixture.finish().len(), 1);
+}

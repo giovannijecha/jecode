@@ -162,6 +162,8 @@ impl App {
         details: Vec<(String, String)>,
         change: bool,
     ) {
+        // A finished setting ends any provider-scoped model selection.
+        self.provider_parent = None;
         if self.settings_parent.is_some() && self.pending_command.is_none() {
             self.local_start("/settings");
         }

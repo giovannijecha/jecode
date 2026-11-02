@@ -457,6 +457,14 @@ impl App {
             Purpose::Providers { defaults, group } => {
                 self.return_to_provider_groups(*defaults, *group);
             }
+            Purpose::Loading if self.auth_updates.is_some() => {
+                self.auth_updates = None;
+                self.auth_browser_url = None;
+                drop(self.job.take());
+                self.open_accounts();
+                self.state
+                    .notify(Feedback::result(Kind::Warning, "Sign-in cancelled"));
+            }
             Purpose::Loading if self.provider_parent.is_some() => {
                 drop(self.job.take());
                 let (defaults, group) = self.provider_parent.take().unwrap();
@@ -475,14 +483,6 @@ impl App {
             Purpose::Models { .. } if self.provider_parent.is_some() => {
                 let (defaults, group) = self.provider_parent.take().unwrap();
                 self.open_model_provider_group(defaults, group);
-            }
-            Purpose::Loading if self.auth_updates.is_some() => {
-                self.auth_updates = None;
-                self.auth_browser_url = None;
-                drop(self.job.take());
-                self.open_accounts();
-                self.state
-                    .notify(Feedback::result(Kind::Warning, "Sign-in cancelled"));
             }
             _ => return false,
         }
