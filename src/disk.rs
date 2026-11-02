@@ -13,7 +13,7 @@ static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 /// the native Windows helper that also serves account storage.
 #[cfg(windows)]
 pub fn protect_owner_only(path: &Path, directory: bool) -> Result<(), String> {
-    crate::auth::openai::native::protect(path, directory)
+    crate::auth::openai::protect(path, directory)
 }
 
 /// A fresh hidden name beside `path` for staging its replacement. One

@@ -34,14 +34,12 @@ pub(super) fn sign_in(
         .port();
     let redirect = format!("http://127.0.0.1:{port}/callback");
     let client = discovery::client_id(&connection, &server, &redirect, cancel)?;
-    let random = |n| {
-        openai::native::random(n, cancel)
-            .map_err(|_| wire::failure("OAuth random generator failed"))
-    };
+    let random =
+        |n| openai::random(n, cancel).map_err(|_| wire::failure("OAuth random generator failed"));
     let state = wire::base64url(&random(32)?);
     let verifier = wire::base64url(&random(48)?);
     let challenge = wire::base64url(
-        &openai::native::sha256(verifier.as_bytes(), cancel)
+        &openai::sha256(verifier.as_bytes(), cancel)
             .map_err(|_| wire::failure("OAuth PKCE generation failed"))?,
     );
     let mut fields = vec![

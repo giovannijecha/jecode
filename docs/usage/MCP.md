@@ -3,6 +3,7 @@
 Manage global HTTP MCP connections in **Settings > MCP**. `/mcp` inspects only
 configured connections and their tools. Multiple connections to the same
 service use distinct names. They apply to every conversation and collaborator.
+Plain mode has no MCP settings; edit `~/.jecode/mcp.json` there or use the TUI.
 
 ## Connect a server
 
@@ -48,7 +49,12 @@ assumed to authorize the MCP endpoint; access follows its OAuth grants.
 Connections are stored in the user-scoped `~/.jecode/mcp.json`, separate from
 model configuration. The file contains plaintext tokens and has owner-only
 operating-system permissions. Credentials stay out of model results, terminal
-output and conversation journals.
+output and conversation journals: tokens, OAuth tokens and credential-like
+header values (names containing key, token, secret, password, auth, session or
+signature, cookies, or values of 20 characters or more) are redacted. `mcp list`
+shows the model only each endpoint's origin, so credentials embedded in a URL
+path or query stay local. An unreadable `mcp.json` is reported at startup;
+Jecode continues without MCP and the `mcp` tool returns the error.
 
 Suspending or removing a connection blocks future calls globally. It does not
 cancel an operation already accepted by the service. Remote permissions follow
@@ -76,22 +82,30 @@ connections can open their Settings entry; Esc returns to inspection.
 
 The model uses `mcp list`, `mcp tools` and `mcp call`; remote schemas are loaded
 on demand rather than appended to every model request. Negotiated sessions
-are reused until configuration changes or an error invalidates the client.
-Tool cards and Work chapters follow the existing design; Ctrl+O expands the
-full arguments and result.
+are reused until configuration changes or an error invalidates the client; a
+session the server expired (HTTP 404) is renewed and the request sent once
+more, because the server did not process it. Tool cards and Work chapters
+follow the existing design; Ctrl+O expands the full arguments and result.
 
-A failed tool returns an error. If a dispatched call loses its response or is
-interrupted, its outcome is **unknown**: the service may already have acted.
-Jecode never automatically replays it, including after a crash. Inspect the
-remote state before choosing to repeat it.
+Results stay within the inline tool-output limit. Image, audio and blob data
+are replaced by a placeholder with their type and size, and an oversized result
+keeps a text preview with `truncated: true`. In both cases the full result is
+saved and returned as `result_file`, which `read` opens.
+
+A failed tool, a JSON-RPC error or an HTTP 4xx rejection returns an error with
+the server's reason. If a dispatched call loses its response, times out, gets
+an HTTP 5xx or is interrupted, its outcome is **unknown**: the service may
+already have acted. Jecode never automatically replays it, including after a
+crash. Inspect the remote state before choosing to repeat it.
 
 ## Protocol scope
 
 The owned HTTP client supports MCP 2026-07-28 and negotiated Streamable HTTP
-2025-11-25 / 2025-06-18, JSON and SSE responses, paginated catalogs, session
-headers and parameter headers. Text, structured content and other result
-blocks remain in the JSON receipt. Embedded image/audio blocks are not
-converted into model attachments.
+2025-11-25 / 2025-06-18 / 2025-03-26, JSON and SSE responses, paginated
+catalogs, session headers and parameter headers. Text and structured content
+remain in the JSON receipt. Embedded image/audio blocks are not converted into
+model attachments. SSE streams the server closes before the response are not
+resumed with `Last-Event-ID`; such calls report an unknown outcome.
 
 This first implementation exposes tools. Stdio executables, the older standalone
 SSE transport, resources, prompts, sampling, tasks and interactive elicitation
