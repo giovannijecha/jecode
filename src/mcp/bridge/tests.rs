@@ -102,6 +102,42 @@ fn oversized_text_keeps_a_bounded_preview() {
 }
 
 #[test]
+fn oversized_discovery_keeps_exact_schemas_in_a_readable_result_file() {
+    let directory = Directory::new();
+    let outputs = output::Store::new(directory.path().join("output"), Redactor::empty());
+    let mut catalog = crate::mcp::Catalog::default();
+    catalog.server.instructions = Some("instructions ".repeat(6000));
+    catalog.tools.push(Tool {
+        name: "large_schema".into(),
+        title: None,
+        description: "A tool with a large schema".into(),
+        input_schema: Value::object([
+            ("type", Value::string("object")),
+            ("description", Value::string("schema ".repeat(12_000))),
+        ]),
+        annotations: None,
+    });
+    let connection = Connection::draft("Large", "https://mcp.example.com/mcp");
+    let full = discovered(&connection, &catalog, &Value::object([]));
+    let inline = bounded::bound(full.clone(), Some(&outputs));
+    assert!(inline.encode().len() <= crate::tools::OUTPUT_LIMIT);
+    assert_eq!(inline.get("truncated"), Some(&Value::Bool(true)));
+    let reference = inline.get("result_file").and_then(Value::as_str).unwrap();
+    let saved = std::fs::read_to_string(outputs.resolve(reference).unwrap()).unwrap();
+    assert_eq!(crate::json::parse(&saved).unwrap(), full);
+    assert!(summary(&inline).contains("result_file"));
+}
+
+#[test]
+fn inline_budget_includes_the_call_envelope() {
+    let full = call_result(Value::string("x".repeat(crate::tools::OUTPUT_LIMIT - 8)));
+    assert!(full.get("result").unwrap().encode().len() < crate::tools::OUTPUT_LIMIT);
+    let inline = bounded::bound(full, None);
+    assert!(inline.encode().len() <= crate::tools::OUTPUT_LIMIT);
+    assert_eq!(inline.get("truncated"), Some(&Value::Bool(true)));
+}
+
+#[test]
 fn summaries_show_the_page_against_the_total_and_plain_failures_say_error() {
     let page = Value::object([
         ("tools", Value::Array(vec![Value::object([]); 8])),
@@ -160,5 +196,9 @@ fn a_call_waiting_for_a_busy_connection_can_be_cancelled() {
     assert_eq!(
         result.get("outcome").and_then(Value::as_str),
         Some("not_executed")
+    );
+    assert_eq!(
+        crate::events::tool_summary("mcp", &result),
+        "Cancelled · call was not sent"
     );
 }

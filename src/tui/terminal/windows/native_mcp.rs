@@ -139,7 +139,7 @@ pub(super) fn console() {
             ..State::default()
         };
         paint(columns, detail, "Inputs");
-        for unknown in [false, true] {
+        for outcome in ["done", "unknown", "not_executed"] {
             let mut state = State {
                 width: columns,
                 height: 30,
@@ -159,13 +159,16 @@ pub(super) fn console() {
                     ),
                 ]),
             });
-            let result = if unknown {
-                Value::object([
+            let result = match outcome {
+                "unknown" => Value::object([
                     ("outcome", Value::string("unknown")),
                     ("error", Value::string("Disconnected after dispatch")),
-                ])
-            } else {
-                Value::object([(
+                ]),
+                "not_executed" => Value::object([
+                    ("outcome", Value::string("not_executed")),
+                    ("error", Value::string("MCP call was not sent")),
+                ]),
+                _ => Value::object([(
                     "result",
                     Value::object([(
                         "content",
@@ -174,7 +177,7 @@ pub(super) fn console() {
                             ("text", Value::string("Created #7")),
                         ])]),
                     )]),
-                )])
+                )]),
             };
             state.event(Event::ToolFinished {
                 id: "remote-issue".into(),
@@ -185,10 +188,10 @@ pub(super) fn console() {
             paint(
                 columns,
                 state,
-                if unknown {
-                    "Outcome unknown"
-                } else {
-                    "Created #7"
+                match outcome {
+                    "unknown" => "Outcome unknown",
+                    "not_executed" => "Cancelled",
+                    _ => "Created #7",
                 },
             );
         }

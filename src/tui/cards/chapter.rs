@@ -281,7 +281,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         line.push(
             &suffix,
             match state {
-                Status::Unknown => WARNING,
+                Status::Unknown | Status::Stopped => WARNING,
                 Status::Failed => BAD,
                 _ => MUTED,
             },

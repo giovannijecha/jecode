@@ -114,6 +114,14 @@ pub fn validate(connection: &Connection) -> Result<(), Error> {
             "MCP bearer token does not match the selected method",
         ));
     }
+    if github_endpoint(&connection.endpoint)
+        && connection
+            .oauth_client_id
+            .as_ref()
+            .is_some_and(|id| !id.bytes().all(|b| b.is_ascii_graphic()))
+    {
+        return Err(invalid("GitHub OAuth client ID must be printable ASCII"));
+    }
     if connection.headers.len() > 32 {
         return Err(invalid("MCP has too many custom headers"));
     }

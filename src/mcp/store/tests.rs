@@ -14,6 +14,24 @@ fn draft(name: &str) -> Connection {
     Connection::draft(name, "https://example.test/mcp")
 }
 
+fn browser_draft(client_id: &str) -> Connection {
+    let mut connection = draft("OAuth");
+    connection.method = AuthMethod::Browser;
+    connection.oauth = Some(crate::mcp::types::OAuthTokens {
+        endpoint: connection.endpoint.clone(),
+        access_token: "isolated-old-access".into(),
+        refresh_token: Some("isolated-old-refresh".into()),
+        expires_at: None,
+        token_endpoint: "https://issuer.test/token".into(),
+        client_id: client_id.into(),
+        issuer: "https://issuer.test".into(),
+        scope: None,
+        resource: Some(connection.endpoint.clone()),
+        github: false,
+    });
+    connection
+}
+
 #[test]
 fn round_trip_preserves_unknown_fields_and_independent_configuration() {
     let home = fixture();
@@ -177,5 +195,52 @@ fn edits_keep_rotated_oauth_tokens_and_new_sign_ins_replace_them() {
     signed.oauth = Some(tokens("isolated-signed-access", "isolated-signed-refresh"));
     store.save(&signed).unwrap();
     assert!(store.list().unwrap()[0].oauth == signed.oauth);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn stale_edit_cannot_restore_a_removed_oauth_session() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let stale = store.save(&browser_draft("fixture-client")).unwrap();
+    let mut signed_out = stale.clone();
+    signed_out.oauth = None;
+    store.save(&signed_out).unwrap();
+
+    let mut edited = stale;
+    edited.name = "Renamed".into();
+    assert!(store.save_edit(&edited).is_err());
+    let current = &store.list().unwrap()[0];
+    assert_eq!(current.name, "OAuth");
+    assert!(current.oauth.is_none());
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn stale_edit_cannot_replace_a_different_oauth_session() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let stale = store.save(&browser_draft("old-client")).unwrap();
+    let mut signed_in = stale.clone();
+    signed_in.oauth.as_mut().unwrap().client_id = "new-client".into();
+    store.save(&signed_in).unwrap();
+
+    let mut edited = stale;
+    edited.name = "Renamed".into();
+    assert!(store.save_edit(&edited).is_err());
+    let current = &store.list().unwrap()[0];
+    assert_eq!(current.name, "OAuth");
+    assert_eq!(current.oauth.as_ref().unwrap().client_id, "new-client");
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn stale_edit_cannot_recreate_a_removed_connection() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let stale = store.save(&draft("OAuth")).unwrap();
+    store.remove(&stale.id).unwrap();
+    assert!(store.save_edit(&stale).is_err());
+    assert!(store.list().unwrap().is_empty());
     fs::remove_dir_all(home).unwrap();
 }

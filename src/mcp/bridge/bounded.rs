@@ -1,5 +1,5 @@
-//! Keeps remote tool results within the inline tool-output budget; the full
-//! result stays readable through the session output store.
+//! Keeps remote tool results and discovery within the inline output budget.
+//! Full responses stay readable through the session output store.
 
 use crate::{json::Value, output};
 
@@ -14,11 +14,15 @@ pub(super) fn bound(value: Value, outputs: Option<&output::Store>) -> Value {
         return value;
     };
     let Some(full) = fields.remove("result") else {
-        return Value::Object(fields);
+        return document(Value::Object(fields), outputs);
     };
     let mut inline = full.clone();
     let omitted = omit_binary(&mut inline);
-    let truncated = inline.encode().len() > LIMIT;
+    let truncated = inline.encode().len()
+        + Value::Object(fields.clone()).encode().len()
+        + 12
+        + if omitted { 512 } else { 0 }
+        > LIMIT;
     if truncated {
         inline = preview(&inline);
     }
@@ -43,6 +47,47 @@ pub(super) fn bound(value: Value, outputs: Option<&output::Store>) -> Value {
         );
     }
     fields.insert("result".into(), inline);
+    document(Value::Object(fields), outputs)
+}
+
+/// Discovery pages keep exact schemas in the file rather than emitting partial
+/// schema objects. This also covers unusually large envelope or error fields.
+fn document(full: Value, outputs: Option<&output::Store>) -> Value {
+    if full.encode().len() <= LIMIT {
+        return full;
+    }
+    let mut fields = std::collections::BTreeMap::new();
+    for key in ["outcome", "sign_in_required", "total", "next_offset"] {
+        if let Some(value) = full.get(key)
+            && value.encode().len() <= 128
+        {
+            fields.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(error) = full.get("error").and_then(Value::as_str) {
+        fields.insert("error".into(), Value::string(excerpt(error, 512)));
+    }
+    fields.insert(
+        "preview".into(),
+        Value::string(excerpt(&full.encode(), PREVIEW)),
+    );
+    fields.insert("truncated".into(), Value::Bool(true));
+    fields.insert(
+        "notice".into(),
+        Value::string("MCP output exceeded the inline limit. Read result_file with offset and limit for the complete response and exact tool schemas."),
+    );
+    match outputs.map(|outputs| save(outputs, &full)) {
+        Some(Ok(reference)) => {
+            fields.insert("result_file".into(), Value::string(reference));
+        }
+        Some(Err(error)) => {
+            fields.insert(
+                "result_file_error".into(),
+                Value::string(excerpt(&error, 512)),
+            );
+        }
+        None => {}
+    }
     Value::Object(fields)
 }
 

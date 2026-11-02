@@ -77,7 +77,7 @@ fn contents(
         }
         if let Some(result) = tool.result {
             let style = match status {
-                Status::Unknown => WARNING,
+                Status::Unknown | Status::Stopped => WARNING,
                 Status::Failed => BAD,
                 _ => MUTED,
             };
@@ -94,6 +94,8 @@ fn contents(
             }
             let text = if status == Status::Unknown {
                 "Outcome unknown. The service may already have acted; check its state before retrying."
+            } else if status == Status::Stopped {
+                "Cancelled before dispatch. The service did not receive this call."
             } else {
                 ""
             };
@@ -125,7 +127,7 @@ fn contents(
         }
         if let Some(result) = tool.result {
             let style = match status {
-                Status::Unknown => WARNING,
+                Status::Unknown | Status::Stopped => WARNING,
                 Status::Failed => BAD,
                 _ => MUTED,
             };

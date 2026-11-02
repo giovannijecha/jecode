@@ -72,6 +72,8 @@ bound to the original endpoint, issuer and client. Query options such as
 [Supabase's `project_ref`](https://supabase.com/docs/guides/ai-tools/mcp) remain
 part of the connection identity even when the OAuth resource URI omits the
 query. Reconnect from Settings when sign-in has expired or access was revoked.
+The authorization server must advertise S256 support in its metadata; otherwise
+browser sign-in is unavailable. A bearer token remains an alternative.
 
 ## Inspect tools and results
 
@@ -91,6 +93,10 @@ Results stay within the inline tool-output limit. Image, audio and blob data
 are replaced by a placeholder with their type and size, and an oversized result
 keeps a text preview with `truncated: true`. In both cases the full result is
 saved and returned as `result_file`, which `read` opens.
+Discovery pages follow the same limit: if descriptions, server instructions or
+input schemas make a page too large, it returns a preview and `result_file`.
+Read that file for the exact definitions; schemas are never cut into partial
+objects. The limit includes the response's identity and outcome fields.
 
 A failed tool, a JSON-RPC error or an HTTP 4xx rejection returns an error with
 the server's reason. If a dispatched call loses its response, times out, gets

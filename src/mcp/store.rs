@@ -198,16 +198,25 @@ impl Store {
             return Err(failure("MCP connection name already exists"));
         }
         if let Some(index) = existing.iter().position(|entry| entry.id == next.id) {
-            if keep_tokens
-                && let (Some(ours), Some(stored)) = (&next.oauth, &existing[index].oauth)
-                && ours.endpoint == stored.endpoint
-                && ours.issuer == stored.issuer
-                && ours.client_id == stored.client_id
-                && ours.token_endpoint == stored.token_endpoint
-            {
+            if keep_tokens && let Some(ours) = &next.oauth {
+                let stored = existing[index]
+                    .oauth
+                    .as_ref()
+                    .ok_or_else(|| failure("MCP OAuth session changed; reload the connection"))?;
+                if ours.endpoint != stored.endpoint
+                    || ours.issuer != stored.issuer
+                    || ours.client_id != stored.client_id
+                    || ours.token_endpoint != stored.token_endpoint
+                    || ours.resource != stored.resource
+                    || ours.github != stored.github
+                {
+                    return Err(failure("MCP OAuth session changed; reload the connection"));
+                }
                 next.oauth = Some(stored.clone());
             }
             entries[index] = config::write(&next, Some(entries[index].clone()));
+        } else if keep_tokens && !next.id.is_empty() {
+            return Err(failure("MCP connection was removed; reload the connection"));
         } else {
             entries.push(config::write(&next, None));
         }

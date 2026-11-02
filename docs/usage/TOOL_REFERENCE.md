@@ -287,6 +287,9 @@ tool names and exact input schemas, optionally filtered by `query`; `offset`
 defaults to 0 and `limit` to 8 (1–50). `mcp call` forwards `tool` and
 `arguments` (default `{}`; a JSON string that encodes an object is also
 accepted) to the selected enabled connection.
+An oversized discovery page returns `truncated: true`, a `preview` and a
+`result_file` containing the complete page and exact schemas. Read that file
+before constructing arguments; the inline preview is not a schema definition.
 
 Structured and other MCP result blocks remain in the JSON result. Image, audio
 and blob data are replaced by a placeholder with the MIME type and size. A
@@ -295,3 +298,5 @@ in both cases `result_file` is an `output:` reference to the full result,
 readable with `read`. A remote `isError` is a tool failure; `outcome: unknown`
 means the service may already have acted. Never infer rollback from local
 checkpoints. See [MCP](MCP.md).
+An interruption before dispatch returns `outcome: not_executed` and is displayed
+as Cancelled; no remote call was sent.

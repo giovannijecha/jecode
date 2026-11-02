@@ -155,7 +155,7 @@ fn outcome_summary(name: &str, result: &Value) -> String {
     if name == "mcp" {
         let summary = crate::mcp::summary(result);
         return match result.get("outcome").and_then(Value::as_str) {
-            Some("failed" | "unknown" | "not_executed") => format!("error: {summary}"),
+            Some("failed" | "unknown") => format!("error: {summary}"),
             _ => summary,
         };
     }

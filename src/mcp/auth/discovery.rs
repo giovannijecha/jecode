@@ -48,55 +48,30 @@ pub(super) fn discover_optional(
         config::validate_url(&url)?;
         candidates.insert(0, url);
     }
-    let Some(metadata) = wire::first_json(&candidates, cancel)? else {
+    let Some((metadata, announced, issuer)) =
+        wire::first_valid_json(&candidates, cancel, |metadata| {
+            let announced = required(&metadata, "resource")?.to_owned();
+            if announced != *endpoint && announced != endpoint.split('?').next().unwrap_or(endpoint)
+            {
+                return Err(failure(
+                    "MCP protected-resource identity does not match the configured endpoint",
+                ));
+            }
+            let issuers = metadata
+                .get("authorization_servers")
+                .and_then(Value::as_array)
+                .ok_or_else(|| failure("MCP server did not announce an authorization server"))?;
+            let issuer = issuers
+                .first()
+                .and_then(Value::as_str)
+                .ok_or_else(|| failure("MCP authorization server is invalid"))?
+                .to_owned();
+            config::validate_url(&issuer)?;
+            Ok((metadata, announced, issuer))
+        })?
+    else {
         return Ok(None);
     };
-    let announced = required(&metadata, "resource")?;
-    if announced != endpoint && announced != endpoint.split('?').next().unwrap_or(endpoint) {
-        return Err(failure(
-            "MCP protected-resource identity does not match the configured endpoint",
-        ));
-    }
-    let issuers = metadata
-        .get("authorization_servers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| failure("MCP server did not announce an authorization server"))?;
-    let issuer = issuers
-        .first()
-        .and_then(Value::as_str)
-        .ok_or_else(|| failure("MCP authorization server is invalid"))?;
-    config::validate_url(issuer)?;
-    let base = wire::origin(issuer)?;
-    let suffix = issuer
-        .strip_prefix(&base)
-        .unwrap_or("")
-        .trim_end_matches('/');
-    let mut urls = vec![
-        format!("{base}/.well-known/oauth-authorization-server{suffix}"),
-        format!("{base}/.well-known/openid-configuration{suffix}"),
-    ];
-    if !suffix.is_empty() {
-        urls.push(format!("{issuer}/.well-known/openid-configuration"));
-    }
-    let authorization = wire::first_json(&urls, cancel)?
-        .ok_or_else(|| failure("OAuth authorization server metadata was not found"))?;
-    if required(&authorization, "issuer")? != issuer {
-        return Err(failure(
-            "OAuth issuer metadata does not match the announced issuer",
-        ));
-    }
-    pkce(&authorization)?;
-    let authorize = required(&authorization, "authorization_endpoint")?.to_owned();
-    let token = required(&authorization, "token_endpoint")?.to_owned();
-    trusted_endpoint(&authorize, issuer)?;
-    trusted_endpoint(&token, issuer)?;
-    let registration = authorization
-        .get("registration_endpoint")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    if let Some(url) = &registration {
-        trusted_endpoint(url, issuer)?;
-    }
     let scope = wire::challenge_param(challenge, "scope")
         .filter(|s| !s.is_empty())
         .or_else(|| {
@@ -112,37 +87,69 @@ pub(super) fn discover_optional(
                 })
                 .filter(|s| !s.is_empty())
         });
-    Ok(Some(Server {
-        issuer: issuer.into(),
-        authorize,
-        token,
-        registration,
-        resource: announced.into(),
-        scope,
-        cimd: matches!(
-            authorization.get("client_id_metadata_document_supported"),
-            Some(Value::Bool(true))
-        ),
-        response_iss_required: matches!(
-            authorization.get("authorization_response_iss_parameter_supported"),
-            Some(Value::Bool(true))
-        ),
-    }))
+    let base = wire::origin(&issuer)?;
+    let suffix = issuer
+        .strip_prefix(&base)
+        .unwrap_or("")
+        .trim_end_matches('/');
+    let mut urls = vec![
+        format!("{base}/.well-known/oauth-authorization-server{suffix}"),
+        format!("{base}/.well-known/openid-configuration{suffix}"),
+    ];
+    if !suffix.is_empty() {
+        urls.push(format!("{issuer}/.well-known/openid-configuration"));
+    }
+    let server = wire::first_valid_json(&urls, cancel, |authorization| {
+        if required(&authorization, "issuer")? != issuer.as_str() {
+            return Err(failure(
+                "OAuth issuer metadata does not match the announced issuer",
+            ));
+        }
+        pkce(&authorization)?;
+        let authorize = required(&authorization, "authorization_endpoint")?.to_owned();
+        let token = required(&authorization, "token_endpoint")?.to_owned();
+        trusted_endpoint(&authorize, &issuer)?;
+        trusted_endpoint(&token, &issuer)?;
+        let registration = authorization
+            .get("registration_endpoint")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if let Some(url) = &registration {
+            trusted_endpoint(url, &issuer)?;
+        }
+        Ok(Server {
+            issuer: issuer.clone(),
+            authorize,
+            token,
+            registration,
+            resource: announced.clone(),
+            scope: scope.clone(),
+            cimd: matches!(
+                authorization.get("client_id_metadata_document_supported"),
+                Some(Value::Bool(true))
+            ),
+            response_iss_required: matches!(
+                authorization.get("authorization_response_iss_parameter_supported"),
+                Some(Value::Bool(true))
+            ),
+        })
+    })?
+    .ok_or_else(|| failure("OAuth authorization server metadata was not found"))?;
+    Ok(Some(server))
 }
 
-/// Servers often omit the method list; only an explicit list without S256 is refused.
+/// MCP authorization requires advertised PKCE S256 support before sign-in.
 pub(super) fn pkce(authorization: &Value) -> Result<(), Error> {
-    match authorization.get("code_challenge_methods_supported") {
-        Some(methods)
-            if !methods
-                .as_array()
-                .is_some_and(|list| list.iter().any(|m| m.as_str() == Some("S256"))) =>
-        {
-            Err(failure(
-                "OAuth authorization server does not support PKCE S256",
-            ))
-        }
-        _ => Ok(()),
+    if authorization
+        .get("code_challenge_methods_supported")
+        .and_then(Value::as_array)
+        .is_some_and(|list| list.iter().any(|m| m.as_str() == Some("S256")))
+    {
+        Ok(())
+    } else {
+        Err(failure(
+            "OAuth authorization server does not advertise PKCE S256 support",
+        ))
     }
 }
 
@@ -245,14 +252,16 @@ mod tests {
     use crate::json;
 
     #[test]
-    fn pkce_is_refused_only_when_metadata_lists_methods_without_s256() {
+    fn pkce_requires_advertised_s256_support() {
         for (metadata, ok) in [
-            (r#"{}"#, true),
+            (r#"{}"#, false),
             (
                 r#"{"code_challenge_methods_supported":["plain","S256"]}"#,
                 true,
             ),
             (r#"{"code_challenge_methods_supported":["plain"]}"#, false),
+            (r#"{"code_challenge_methods_supported":[]}"#, false),
+            (r#"{"code_challenge_methods_supported":null}"#, false),
             (r#"{"code_challenge_methods_supported":"S256"}"#, false),
         ] {
             assert_eq!(

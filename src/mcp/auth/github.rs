@@ -16,7 +16,6 @@ fn client_id(connection: &Connection) -> String {
     connection
         .oauth_client_id
         .clone()
-        .filter(valid)
         .or_else(|| std::env::var("JECODE_GITHUB_CLIENT_ID").ok().filter(valid))
         .or_else(|| {
             option_env!("JECODE_GITHUB_CLIENT_ID")
@@ -38,6 +37,7 @@ pub(super) fn sign_in(
             "GitHub device flow requires the GitHub MCP endpoint",
         ));
     }
+    super::super::config::validate(&connection)?;
     // GitHub App permissions, not OAuth scopes, bound the token.
     let id = client_id(&connection);
     let value = wire::post_form(DEVICE, &[("client_id", &id)], cancel)?;
@@ -139,5 +139,14 @@ mod tests {
         }
         connection.oauth_client_id = Some("Iv1.override".into());
         assert_eq!(client_id(&connection), "Iv1.override");
+    }
+
+    #[test]
+    fn invalid_explicit_github_client_id_never_falls_back_to_another_app() {
+        let mut connection = Connection::draft("GitHub", "https://api.githubcopilot.com/mcp");
+        connection.method = AuthMethod::GitHubDevice;
+        connection.oauth_client_id = Some("Iv1.é".into());
+        assert!(super::super::super::config::validate(&connection).is_err());
+        assert_eq!(client_id(&connection), "Iv1.é");
     }
 }

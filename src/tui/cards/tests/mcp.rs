@@ -82,6 +82,45 @@ fn mcp_cards_follow_the_shared_rhythm_and_preserve_remote_uncertainty() {
 }
 
 #[test]
+fn mcp_cancelled_before_dispatch_uses_stopped_ink_in_cards_and_work() {
+    let args = call();
+    let result = Value::object([
+        ("outcome", Value::string("not_executed")),
+        ("error", Value::string("MCP call was not sent")),
+    ]);
+    for width in [44, 100] {
+        for expanded in [false, true] {
+            let presentation = Presentation {
+                expanded,
+                ..Presentation::default()
+            };
+            let rows = draw("mcp", &args, Some(&result), None, width, &presentation);
+            let value = plain(&rows);
+            assert_eq!(rows[0].spans[0].background, Some(BADGE_WARN));
+            assert!(!value.contains("Outcome unknown"), "{value}");
+            assert!(!value.contains("service may already have acted"), "{value}");
+            if expanded {
+                assert!(value.contains("Cancelled before dispatch"), "{value}");
+            } else {
+                assert!(value.contains("└ Cancelled"), "{value}");
+            }
+            assert!(rows.iter().all(|row| text::cells(&row.plain()) <= width));
+            let tool = Tool {
+                name: "mcp",
+                arguments: &args,
+                result: Some(&result),
+                summary: "MCP call was not sent",
+                change: None,
+                presentation: &presentation,
+            };
+            let member = chapter_exception(&tool, width);
+            assert!(plain(&member).contains("Cancelled"));
+            assert!(member.iter().all(|row| text::cells(&row.plain()) <= width));
+        }
+    }
+}
+
+#[test]
 fn work_keeps_each_mcp_connection_and_result_visible() {
     let mut args = call();
     if let Value::Object(fields) = &mut args {

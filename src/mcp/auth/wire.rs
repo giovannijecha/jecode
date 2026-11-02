@@ -185,13 +185,21 @@ pub(super) fn get_json(url: &str, cancel: &Cancellation) -> Result<Option<Value>
     }
     Ok(Some(value))
 }
-/// The first well-known candidate that serves JSON metadata. Unusable answers fall
-/// through to the next candidate; an error is reported only when none succeeds.
-pub(super) fn first_json(urls: &[String], cancel: &Cancellation) -> Result<Option<Value>, Error> {
+/// Use the first well-known candidate whose JSON satisfies the caller's checks.
+/// Unusable answers fall through; an error is reported only when none succeeds.
+pub(super) fn first_valid_json<T>(
+    urls: &[String],
+    cancel: &Cancellation,
+    mut validate: impl FnMut(Value) -> Result<T, Error>,
+) -> Result<Option<T>, Error> {
     let mut failed = None;
     for url in urls {
         match get_json(url, cancel) {
-            Ok(Some(value)) => return Ok(Some(value)),
+            Ok(Some(value)) => match validate(value) {
+                Ok(valid) => return Ok(Some(valid)),
+                Err(error) if error.kind == ErrorKind::Cancelled => return Err(error),
+                Err(error) => failed = Some(error),
+            },
             Ok(None) => {}
             Err(error) if error.kind == ErrorKind::Cancelled => return Err(error),
             Err(error) => failed = Some(error),

@@ -378,6 +378,9 @@ pub fn summary(result: &Value) -> String {
     if result.get("outcome").and_then(Value::as_str) == Some("unknown") {
         return "Outcome unknown · check the remote state before retrying".into();
     }
+    if result.get("outcome").and_then(Value::as_str) == Some("not_executed") {
+        return "Cancelled · call was not sent".into();
+    }
     let content = result
         .get("result")
         .and_then(|value| value.get("content"))
@@ -396,6 +399,9 @@ pub fn summary(result: &Value) -> String {
             .chars()
             .take(240)
             .collect();
+    }
+    if result.get("preview").is_some() && result.get("truncated") == Some(&Value::Bool(true)) {
+        return "Output truncated · read result_file".into();
     }
     if let Some(connections) = result.get("connections").and_then(Value::as_array) {
         return format!("{} configured connections", connections.len());

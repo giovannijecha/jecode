@@ -5,6 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod metadata;
+
 fn request(stream: &mut TcpStream) -> String {
     let mut bytes = Vec::new();
     loop {
@@ -87,7 +89,7 @@ fn fixture(protected: bool, public_metadata: bool) -> (String, std::thread::Join
                 ),
                 "/.well-known/oauth-authorization-server" => (
                     "200 OK",
-                    r#"{"issuer":"ISSUER","authorization_endpoint":"ISSUER/authorize","token_endpoint":"ISSUER/token","registration_endpoint":"ISSUER/register"}"#,
+                    r#"{"issuer":"ISSUER","authorization_endpoint":"ISSUER/authorize","token_endpoint":"ISSUER/token","registration_endpoint":"ISSUER/register","code_challenge_methods_supported":["S256"]}"#,
                     String::new(),
                 ),
                 "/.well-known/oauth-protected-resource/mcp"
@@ -227,7 +229,7 @@ fn discoverable(origin: &str, path: &str) -> (&'static str, String, String) {
         "/.well-known/oauth-authorization-server" => (
             "200 OK",
             format!(
-                r#"{{"issuer":"{origin}","authorization_endpoint":"{origin}/authorize","token_endpoint":"{origin}/token","registration_endpoint":"{origin}/register"}}"#
+                r#"{{"issuer":"{origin}","authorization_endpoint":"{origin}/authorize","token_endpoint":"{origin}/token","registration_endpoint":"{origin}/register","code_challenge_methods_supported":["S256"]}}"#
             ),
             String::new(),
         ),
@@ -418,7 +420,7 @@ fn browser_pkce_and_refresh_stay_on_discovered_issuer_and_resource() {
                 "/.well-known/oauth-authorization-server" => (
                     "200 OK",
                     format!(
-                        r#"{{"issuer":"{server_issuer}","authorization_endpoint":"{server_issuer}/authorize?audience=fixture","token_endpoint":"{server_issuer}/token","registration_endpoint":"{server_issuer}/register","authorization_response_iss_parameter_supported":true}}"#
+                        r#"{{"issuer":"{server_issuer}","authorization_endpoint":"{server_issuer}/authorize?audience=fixture","token_endpoint":"{server_issuer}/token","registration_endpoint":"{server_issuer}/register","authorization_response_iss_parameter_supported":true,"code_challenge_methods_supported":["S256"]}}"#
                     ),
                     String::new(),
                 ),

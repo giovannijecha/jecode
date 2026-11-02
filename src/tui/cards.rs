@@ -64,8 +64,12 @@ impl Status {
         if tool.name == "collaboration" {
             return agents::status(result);
         }
-        if tool.name == "mcp" && result.get("outcome").and_then(Value::as_str) == Some("unknown") {
-            return Self::Unknown;
+        if tool.name == "mcp" {
+            match result.get("outcome").and_then(Value::as_str) {
+                Some("unknown") => return Self::Unknown,
+                Some("not_executed") => return Self::Stopped,
+                _ => {}
+            }
         }
         let process = crate::events::process_status(result);
         if matches!(process, Some("running" | "stopping")) {
