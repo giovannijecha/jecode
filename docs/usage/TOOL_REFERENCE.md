@@ -8,7 +8,7 @@ writing [skills](SKILLS.md).
 ## Arguments
 
 Every tool accepts an optional boolean `parallel`. The routine tools `read`,
-`list`, `search`, `map`, `bash`, `exec`, `process`, `web` and `browser` also
+`list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser` and `mcp` also
 accept two display-only strings: `work`, a short label that groups related calls
 into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
 `description`, a caption for the call's card. `agent` accepts `work` too.
@@ -28,6 +28,7 @@ Neither changes what the call does.
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` |
 | `web` | `action`; `url` for `fetch` and `download`; `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` |
 | `browser` | `action`; `url` for `navigate`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
+| `mcp` | `action`: `list`, `tools` or `call`; `connection` for `tools` and `call`; `tool` for `call` | `arguments` (JSON object), `query`, `offset`, `limit` |
 | `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
 | `ask_user` | `questions` | See [Questions and plans](QUESTIONS_AND_PLANS.md#question-format). |
 | `todo_list` | `action` | See [Questions and plans](QUESTIONS_AND_PLANS.md#plan-format). |
@@ -36,8 +37,8 @@ Neither changes what the call does.
 
 These calls run in parallel automatically when adjacent, up to four at a time:
 `list`, `search`, `read` (except `history:` and `skill:` references), `map`
-overview, `checkpoint list` and `inspect`, `process list`, and `web fetch` or
-`download` using GET or HEAD without a body.
+overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
+`tools`, and `web fetch` or `download` using GET or HEAD without a body.
 
 `parallel: true` on adjacent calls declares them independent, including writes
 and commands; they run in waves of at most four. A call without it ends the
@@ -277,3 +278,25 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`,
   evicted events and a `gap` entry marks a reconnection. A page can hold fewer
   entries than `limit`, even zero, while `more` is true.
 - `close` closes a tab; `stop` ends the browser.
+
+## mcp
+
+`mcp list` shows configured connections with their stable IDs, names, enabled
+state and endpoint origin (scheme and host only). `mcp tools` discovers remote
+tool names and exact input schemas, optionally filtered by `query`; `offset`
+defaults to 0 and `limit` to 8 (1–50). `mcp call` forwards `tool` and
+`arguments` (default `{}`; a JSON string that encodes an object is also
+accepted) to the selected enabled connection.
+An oversized discovery page returns `truncated: true`, a `preview` and a
+`result_file` containing the complete page and exact schemas. Read that file
+before constructing arguments; the inline preview is not a schema definition.
+
+Structured and other MCP result blocks remain in the JSON result. Image, audio
+and blob data are replaced by a placeholder with the MIME type and size. A
+result that still exceeds 64 KiB keeps a text preview and `truncated: true`;
+in both cases `result_file` is an `output:` reference to the full result,
+readable with `read`. A remote `isError` is a tool failure; `outcome: unknown`
+means the service may already have acted. Never infer rollback from local
+checkpoints. See [MCP](MCP.md).
+An interruption before dispatch returns `outcome: not_executed` and is displayed
+as Cancelled; no remote call was sent.

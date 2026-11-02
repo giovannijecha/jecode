@@ -408,6 +408,7 @@ mod execution;
 mod history;
 mod input;
 mod lifecycle;
+mod mcp;
 mod naming;
 mod permission;
 #[cfg(test)]
@@ -461,6 +462,8 @@ mod local_read_tests;
 mod long_work_tests;
 #[cfg(test)]
 mod map_tests;
+#[cfg(test)]
+mod mcp_tests;
 #[cfg(test)]
 mod naming_tests;
 #[cfg(test)]

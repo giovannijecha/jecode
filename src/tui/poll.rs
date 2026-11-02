@@ -67,6 +67,7 @@ impl App {
     pub(super) fn poll(&mut self) -> Result<bool, String> {
         let mut dirty = self.state.expire_feedback(Instant::now());
         dirty |= self.poll_auth_updates();
+        dirty |= self.poll_mcp();
         dirty |= self.poll_job()?;
         dirty |= self.poll_imports();
         dirty |= self.finish_delete(false)?;

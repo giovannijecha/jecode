@@ -399,6 +399,14 @@ public sealed partial class JecodeTestPty : IDisposable {
             } else if (scenario == "auth-panels") {
                 pty.Wait("NATIVE_AUTH_PANELS_VERIFIED");
                 pty.Finish(true);
+            } else if (scenario == "mcp-panels") {
+                pty.Wait("NATIVE_SHELL_SENTINEL");
+                pty.Resize(44, 30);
+                pty.Wait("MCP_NATIVE_44_VERIFIED");
+                pty.Resize(100, 30);
+                pty.Wait("MCP_NATIVE_100_VERIFIED");
+                pty.Wait("NATIVE_MCP_RESTORED");
+                pty.Finish(true);
             } else if (scenario == "interactive") {
                 // Each renderer phase completes before the TUI startup wait begins.
                 pty.Wait("NATIVE_FULL_WIDTH_VERIFIED");

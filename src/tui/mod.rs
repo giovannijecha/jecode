@@ -27,6 +27,7 @@ mod key_settings;
 mod keys;
 mod line;
 mod markdown;
+mod mcp;
 mod motion;
 mod permission;
 mod persistence;
@@ -107,6 +108,7 @@ struct App {
     checkpoint_job: Option<checkpoints::Job>,
     imports: Vec<attach::Import>,
     settings_parent: Option<selector::Setting>,
+    mcp: mcp::Ui,
     /// Reads the current conversation's processes, including while a worker owns the agent.
     process_observer: crate::tools::processes::Observer,
     collaboration_observer: crate::collaboration::Observer,
@@ -136,6 +138,15 @@ struct App {
 
 impl App {
     fn new(mut agent: Agent, config: SessionConfig, terminal: Option<Terminal>) -> Self {
+        let mcp_error = agent
+            .configure_mcp(
+                config
+                    .store
+                    .path()
+                    .parent()
+                    .expect("configuration directory"),
+            )
+            .err();
         let skills = agent.skills().map_or(0, |skills| skills.len());
         let agents = agent.archive().directory.join("AGENTS.md").is_file();
         let state = State {
@@ -198,6 +209,7 @@ impl App {
             checkpoint_job: None,
             imports: Vec::new(),
             settings_parent: None,
+            mcp: mcp::Ui::default(),
             #[cfg(test)]
             copied_text: None,
             #[cfg(test)]
@@ -212,6 +224,9 @@ impl App {
         app.refresh_permission();
         app.refresh_todo();
         app.refresh_context();
+        if let Some(error) = mcp_error {
+            app.warn(&error);
+        }
         app
     }
 

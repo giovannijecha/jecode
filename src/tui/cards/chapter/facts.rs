@@ -56,6 +56,7 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
     let mut browser = 0;
     let mut commands = 0;
     let mut processes = 0;
+    let mut mcp_calls = 0;
     let mut agent_calls = 0;
     let mut agent_events = 0;
     let mut agents_created = 0;
@@ -96,6 +97,7 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             "search" => searches += 1,
             "map" => maps += 1,
             "process" => processes += 1,
+            "mcp" => mcp_calls += 1,
             "web" => web += 1,
             "agent" => agent_calls += 1,
             "browser" => {
@@ -129,6 +131,7 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
         (browser, "browser action"),
         (commands, "command"),
         (processes, "process call"),
+        (mcp_calls, "MCP call"),
         (agent_calls, "agent call"),
         (agent_events, "agent event"),
     ] {

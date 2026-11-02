@@ -4,6 +4,7 @@ use crate::tui::theme::{
 };
 
 mod files;
+mod mcp;
 mod reads;
 
 fn draw(

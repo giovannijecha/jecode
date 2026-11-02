@@ -1,6 +1,7 @@
 use crate::json::Value;
 use std::sync::OnceLock;
 mod collaboration;
+mod mcp;
 mod web;
 mod work;
 
@@ -78,6 +79,7 @@ fn build_definitions() -> Value {
     let mut tools = base_definitions();
     tools.extend(super::discovery::definitions());
     tools.extend(crate::project_map::definitions());
+    tools.push(mcp::definition());
     tools.push(collaboration::definition());
     tools.push(work::todo());
     tools.push(work::ask_user());

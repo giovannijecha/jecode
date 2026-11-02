@@ -1,0 +1,13 @@
+{
+  "name": "Jecode GitHub MCP",
+  "url": "https://github.com/giovannijecha/jecode",
+  "description": "Connect Jecode to GitHub's remote MCP server with user-authorized access.",
+  "public": true,
+  "default_events": [],
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "pull_requests": "write"
+  },
+  "request_oauth_on_install": false
+}

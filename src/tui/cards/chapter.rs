@@ -6,7 +6,7 @@ use crate::tui::{
     activity as timer,
     line::{Line, Span},
     text,
-    theme::{BAD, BODY, DIM, MUTED, SELECTED_SURFACE, STRONG},
+    theme::{BAD, BODY, DIM, MUTED, SELECTED_SURFACE, STRONG, WARNING},
 };
 mod facts;
 use facts::{Outcomes, facts};
@@ -28,7 +28,16 @@ pub fn groupable(tool: &Tool<'_>) -> bool {
     }
     matches!(
         tool.name,
-        "read" | "list" | "search" | "map" | "bash" | "exec" | "process" | "web" | "browser"
+        "read"
+            | "list"
+            | "search"
+            | "map"
+            | "bash"
+            | "exec"
+            | "process"
+            | "web"
+            | "browser"
+            | "mcp"
     ) && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
         && (tool.name != "map" || matches!(field(tool.arguments, "action"), "" | "overview"))
 }
@@ -258,6 +267,27 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         return agents::member(tool, columns);
     }
     let state = Status::of(tool);
+    if tool.name == "mcp" {
+        let mut line = named(tool);
+        line.push(&format!(" {}", super::mcp::target(tool)), BODY);
+        let detail = tool.result.map(crate::mcp::summary).unwrap_or_else(|| {
+            format!(
+                "Running · {}",
+                timer::duration(tool.presentation.duration().unwrap_or_default())
+            )
+        });
+        let suffix = format!("  {}", text::clean(&detail));
+        line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix).min(columns / 2)));
+        line.push(
+            &suffix,
+            match state {
+                Status::Unknown | Status::Stopped => WARNING,
+                Status::Failed => BAD,
+                _ => MUTED,
+            },
+        );
+        return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
+    }
     if matches!(
         tool.name,
         "read" | "list" | "search" | "map" | "web" | "browser"

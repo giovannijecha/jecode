@@ -178,6 +178,17 @@ fn chat_inner(
                 agent.record_local("/new", "New conversation · saved defaults applied");
                 writeln!(output, "Conversation cleared.").map_err(|error| error.to_string())
             }
+            ("/mcp", "") => {
+                let home = config
+                    .store
+                    .path()
+                    .parent()
+                    .ok_or("Missing configuration directory")?;
+                let (summary, text) = mcp_overview(home);
+                agent.record_local("/mcp", &summary);
+                writeln!(output, "{}", agent.redactor().text(&text))
+                    .map_err(|error| error.to_string())
+            }
             ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
             }),
@@ -296,6 +307,37 @@ fn run_plain(
     questions.set_available(false);
     permissions.set_surface(crate::permissions::Surface::None);
     result
+}
+
+/// The plain `/mcp` listing: a recorded summary and the user's own view.
+fn mcp_overview(home: &std::path::Path) -> (String, String) {
+    let connections = match crate::mcp::Store::new(home.to_path_buf()).list() {
+        Ok(connections) => connections,
+        Err(error) => {
+            let error = format!("Could not read MCP connections: {error}");
+            return (error.clone(), error);
+        }
+    };
+    let mut text = connections
+        .iter()
+        .map(|connection| {
+            format!(
+                "{} · {} · {}\n",
+                connection.name,
+                crate::mcp::without_query(&connection.endpoint),
+                if connection.enabled {
+                    "enabled"
+                } else {
+                    "suspended"
+                }
+            )
+        })
+        .collect::<String>();
+    text.push_str("Manage connections in Settings > MCP in the TUI, or ~/.jecode/mcp.json.");
+    (
+        format!("{} configured connections", connections.len()),
+        text,
+    )
 }
 
 #[cfg(test)]

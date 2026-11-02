@@ -27,6 +27,7 @@ mod identity;
 mod inbox;
 mod input;
 mod json;
+mod mcp;
 mod native;
 mod output;
 mod path_filter;

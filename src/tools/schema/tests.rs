@@ -9,7 +9,7 @@ fn tool_catalog_and_encoded_size_are_reused() {
 #[test]
 fn every_tool_advertises_optional_parallel_boolean() {
     let tools = definitions().as_array().unwrap();
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 16);
     for tool in tools {
         let name = tool.get("name").and_then(Value::as_str).unwrap();
         let parameters = tool.get("parameters").unwrap();
@@ -82,7 +82,16 @@ fn work_and_description_are_optional_only_for_routine_tools() {
         );
         if matches!(
             name,
-            "read" | "bash" | "process" | "web" | "browser" | "exec" | "list" | "search" | "map"
+            "read"
+                | "bash"
+                | "process"
+                | "web"
+                | "browser"
+                | "exec"
+                | "list"
+                | "search"
+                | "map"
+                | "mcp"
         ) {
             let work = properties.get("work").unwrap();
             assert_eq!(work.get("type"), Some(&Value::string("string")), "{name}");
@@ -388,6 +397,7 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             "list",
             "search",
             "map",
+            "mcp",
             "agent",
             "todo_list",
             "ask_user"

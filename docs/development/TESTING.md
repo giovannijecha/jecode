@@ -56,6 +56,7 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | --- | --- |
 | Agent loop, context and backends | `agent::backend_tests` drives two synthetic protocols through tools, compaction, save and resume. `backend::openrouter`, `backend::openai` and `backend::anthropic` use loopback servers for their adapters. |
 | Accounts | `auth::openai`, `auth::anthropic`, `auth::accounts`. |
+| MCP | `mcp::` covers protocol, storage and OAuth with isolated loopback servers; `agent::mcp_tests` checks model-to-server dispatch, session reuse and redaction; `tui::mcp::` covers native panels and async configuration. |
 | Routing | `agent::routing_tests`, `backend::openrouter`. |
 | Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
 | Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
@@ -90,6 +91,14 @@ utilities. Do not run the private `native_pty_fixture` child directly. Other
 Windows fixtures cover permission requests
 (`native_tests::native_permissions::native_windows_permissions`) and light
 terminal backgrounds (`native_tests::native_background::`).
+
+The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
+the list, add, form and Advanced panels (including unchecked and signed-out
+states), successful calls and uncertain remote outcomes:
+
+```text
+cargo test --locked --offline tui::terminal::windows::native_tests::native_mcp::native_windows_mcp_panels -- --exact --ignored --nocapture --test-threads=1
+```
 
 Interactive `exec` tests need `cc` on first use on Unix, plus `/proc` on Linux
 or `/bin/ps` on macOS. The compiled helper is cached under

@@ -1,7 +1,7 @@
 # Tools
 
 The model works in your project by calling tools. Jecode runs each call, checks
-it against the conversation's [permission level](PERMISSIONS.md) and returns
+it against the applicable [permissions](PERMISSIONS.md) and returns
 the result to the model. This page explains what the tools do and what you see
 of them. Exact arguments and limits are in the
 [Tool reference](TOOL_REFERENCE.md).
@@ -37,11 +37,19 @@ of them. Exact arguments and limits are in the
 | `checkpoint` | List, inspect and restore files saved before a modifying call. |
 | `web` | Fetch, download or crawl web pages over HTTP(S). |
 | `browser` | Control an installed Chrome or Edge browser. |
+| `mcp` | Discover and call remote tools from globally configured [MCP connections](MCP.md). |
 | `agent` | Delegate work to [collaborators](COLLABORATION.md). Main agent only. |
 | `ask_user` | Ask you up to four [questions](QUESTIONS_AND_PLANS.md) and wait for answers. Main agent only. |
 | `todo_list` | Keep a [plan](QUESTIONS_AND_PLANS.md#plans) for the conversation. |
 
 Collaborators get every tool except `agent` and `ask_user`.
+
+MCP connections have separate remote permissions. Enable and manage them in
+Settings → **MCP** in the TUI, or in `~/.jecode/mcp.json`; `/mcp` inspects the
+configured connections. Read, Workspace and Full do not govern MCP calls: an
+enabled connection follows the permissions granted at its service, including
+in Read. Collaborators use the same connections. Local checkpoints cannot undo
+remote changes.
 
 ## Files
 

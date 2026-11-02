@@ -4,6 +4,7 @@ use super::{
 };
 use crate::tui::{
     line::Line,
+    mcp::{Field as McpField, Panel as McpPanel},
     motion,
     selector::{Badge, Choice, Hit, Purpose, Selector},
     text,
@@ -22,6 +23,16 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
         &menu.title
     };
     let head = match &menu.purpose {
+        // The state leads in its own ink; the endpoint follows.
+        Purpose::Mcp(McpPanel::Detail(health)) => menu
+            .message
+            .lines()
+            .enumerate()
+            .map(|(index, value)| {
+                let style = if index == 0 { health.style() } else { MUTED };
+                panel::indent(Line::new(value, style), columns)
+            })
+            .collect(),
         Purpose::Routing { entries, .. } if !menu.filtered.is_empty() => {
             let columns = routing::Columns::new(entries, table_width(menu, columns));
             columns
@@ -33,9 +44,11 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
         _ => Vec::new(),
     };
     let body: panel::Body = match menu.purpose {
-        Purpose::Key(_) | Purpose::AutoCompact => Box::new(|_| Vec::new()),
+        Purpose::Key(_) | Purpose::AutoCompact | Purpose::Mcp(McpPanel::Field(_)) => {
+            Box::new(|_| Vec::new())
+        }
         // The message wraps so a sign-in link stays whole.
-        Purpose::Loading => Box::new(move |_| {
+        Purpose::Loading | Purpose::Mcp(McpPanel::Loading) => Box::new(move |_| {
             let frame = motion::frame();
             let mut line = motion::caret(frame, None);
             line.push(" ", MUTED);
@@ -45,6 +58,19 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
                 .map(|row| (panel::indent(row, columns), Part::Keep))
                 .collect()
         }),
+        Purpose::Mcp(McpPanel::List | McpPanel::Methods) if menu.options.is_empty() => {
+            Box::new(move |_| {
+                menu.message
+                    .split('·')
+                    .map(|piece| {
+                        (
+                            panel::indent(Line::new(piece.trim(), MUTED), columns),
+                            Part::Keep,
+                        )
+                    })
+                    .collect()
+            })
+        }
         _ => Box::new(move |room| list(menu, columns, room)),
     };
     Sheet {
@@ -72,6 +98,14 @@ fn field(menu: &Selector, columns: usize) -> Option<Field> {
     let (label, placeholder, suffix) = match &menu.purpose {
         Purpose::Key(_) => ("Paste your key".to_string(), "", ""),
         Purpose::AutoCompact => ("Threshold".into(), "1–99", "% of the context window"),
+        Purpose::Mcp(McpPanel::Field(field)) => match field {
+            McpField::Name => ("Shown in /mcp and tool cards".into(), "", ""),
+            McpField::Endpoint => ("Server address".into(), "https://…", ""),
+            McpField::Token => ("Paste your token".into(), "", ""),
+            McpField::Timeout => ("Per call".into(), "1–600", " seconds"),
+            McpField::Header => ("Name: value · Name: removes".into(), "Name: value", ""),
+            McpField::ClientId => ("Public OAuth client ID".into(), "", ""),
+        },
         _ if menu.searchable => (format!("Filter {}", noun(menu)), "", ""),
         _ => return None,
     };
@@ -80,9 +114,13 @@ fn field(menu: &Selector, columns: usize) -> Option<Field> {
     } else {
         columns.saturating_sub(3 + text::cells(suffix)).max(1)
     };
-    let (value, caret) = menu
-        .editor
-        .viewport(room, matches!(menu.purpose, Purpose::Key(_)));
+    let (value, caret) = menu.editor.viewport(
+        room,
+        matches!(
+            menu.purpose,
+            Purpose::Key(_) | Purpose::Mcp(McpPanel::Field(McpField::Token | McpField::Header))
+        ),
+    );
     Some(Field {
         label,
         value,
@@ -137,6 +175,8 @@ fn aside(menu: &Selector) -> Line {
         Purpose::Remembered { .. } => "this conversation".into(),
         Purpose::Key(_) => "~/.jecode/config.json".into(),
         Purpose::AutoCompact => "this and new conversations".into(),
+        Purpose::Mcp(McpPanel::List) => menu.message.clone(),
+        Purpose::Mcp(McpPanel::Tools) => count("tool"),
         _ => String::new(),
     };
     Line::new(&text, MUTED)
@@ -185,6 +225,19 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
         ],
         Purpose::Key(_) => vec![key("Enter", "validate and save"), close[0]],
         Purpose::AutoCompact => vec![key("Enter", "save"), close[0]],
+        Purpose::Mcp(McpPanel::Field(McpField::Endpoint)) => vec![key("Enter", "check"), close[0]],
+        Purpose::Mcp(McpPanel::Field(_)) => vec![key("Enter", "done"), close[0]],
+        Purpose::Mcp(McpPanel::ConfirmRemove) => {
+            return panel::confirm(
+                "Remove this connection and saved sign-in?",
+                &[key("Enter", "remove"), key("Esc", "cancel")],
+                width,
+            );
+        }
+        Purpose::Mcp(McpPanel::List) if menu.options.is_empty() => {
+            vec![key("Enter", "open settings"), close[0]]
+        }
+        Purpose::Mcp(McpPanel::Loading) => close.to_vec(),
         Purpose::Loading if menu.title == "Sign out" => vec![],
         Purpose::Loading => close.to_vec(),
         Purpose::Settings => vec![
@@ -339,10 +392,13 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
     let fact = text::clean(&value.fact);
     let column = names.max(text::cells(&name) + 2);
     // Saved settings read as values; other facts describe the option.
-    let tone = if matches!(menu.purpose, Purpose::Settings) {
-        BODY
-    } else {
-        MUTED
+    let tone = match &menu.purpose {
+        Purpose::Settings => BODY,
+        Purpose::Mcp(McpPanel::List) => match value.choice {
+            Choice::Mcp(_, Some(health)) => health.style(),
+            _ => MUTED,
+        },
+        _ => MUTED,
     };
     // A fact shows only with room for a few of its cells.
     if !fact.is_empty() && room >= column + 6 {

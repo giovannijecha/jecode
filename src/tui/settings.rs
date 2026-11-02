@@ -122,8 +122,10 @@ impl App {
                     Setting::Providers => {
                         self.state.selector = Some(Selector::providers_settings())
                     }
+                    Setting::Mcp => self.open_mcp(true),
                 }
             }
+            (Choice::Mcp(index, _), Purpose::Mcp(panel)) => self.choose_mcp(*panel, index),
             (
                 _,
                 Purpose::Permissions { .. }

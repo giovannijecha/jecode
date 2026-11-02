@@ -5,6 +5,7 @@ use crate::{
     session::commands::match_text,
 };
 
+mod mcp;
 mod permissions;
 mod providers;
 mod settings;
@@ -17,6 +18,7 @@ pub enum Setting {
     Permissions,
     AutoCompact,
     Providers,
+    Mcp,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderGroup {
@@ -43,6 +45,7 @@ pub enum Choice {
     Level(crate::permissions::Level),
     Remembered,
     Grant(usize),
+    Mcp(usize, Option<super::mcp::Health>),
 }
 /// The right-aligned status of an option.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +121,7 @@ pub enum Purpose {
         display: Vec<crate::permissions::Grant>,
         paused: Option<crate::permissions::Level>,
     },
+    Mcp(super::mcp::Panel),
 }
 
 pub struct Selector {
@@ -164,7 +168,7 @@ fn restates(id: &str, name: &str) -> bool {
 const SETTINGS: &str = "Settings";
 
 impl Selector {
-    fn new(title: &str, purpose: Purpose, options: Vec<OptionRow>) -> Self {
+    pub(in crate::tui) fn new(title: &str, purpose: Purpose, options: Vec<OptionRow>) -> Self {
         let searchable = options.len() > 8;
         let mut selector = Self {
             title: title.into(),
@@ -348,7 +352,11 @@ impl Selector {
     }
     /// Whether typed text goes to this panel's input row.
     pub fn accepts_text(&self) -> bool {
-        self.searchable || matches!(self.purpose, Purpose::Key(_) | Purpose::AutoCompact)
+        self.searchable
+            || matches!(
+                self.purpose,
+                Purpose::Key(_) | Purpose::AutoCompact | Purpose::Mcp(super::mcp::Panel::Field(_))
+            )
     }
     pub fn refresh(&mut self) {
         self.cancel_delete();

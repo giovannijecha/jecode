@@ -209,6 +209,8 @@ impl App {
                 // Events recorded while a call ran followed its row live, so
                 // they follow its record.
                 let mut running = Vec::new();
+                // MCP names come from one read of the connections, on demand.
+                let mut connections: Option<Vec<crate::mcp::Connection>> = None;
                 for record in document.records() {
                     if !matches!(record, Record::Collaboration { .. } | Record::Tool { .. }) {
                         events.clear();
@@ -252,11 +254,32 @@ impl App {
                         Record::Tool {
                             id,
                             name,
-                            arguments,
+                            mut arguments,
                             summary,
                             result,
                             change,
                         } => {
+                            if name == "mcp"
+                                && let Some(label) = crate::mcp::connection_name(
+                                    connections.get_or_insert_with(|| {
+                                        self.config
+                                            .store
+                                            .path()
+                                            .parent()
+                                            .and_then(|home| {
+                                                crate::mcp::Store::new(home.into()).list().ok()
+                                            })
+                                            .unwrap_or_default()
+                                    }),
+                                    &arguments,
+                                )
+                                && let crate::json::Value::Object(fields) = &mut arguments
+                            {
+                                fields.insert(
+                                    "connection_name".into(),
+                                    crate::json::Value::string(self.archive.redactor.text(&label)),
+                                );
+                            }
                             if name == "agent" && super::agents::receipt_replaces_tool(&arguments) {
                                 let work = arguments
                                     .get("work")

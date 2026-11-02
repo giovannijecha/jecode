@@ -8,7 +8,7 @@ what the cards show. The tools themselves are described in
 ## Tool cards
 
 A card starts with a badge naming the tool (READ, UPDATE, WRITE, BASH, EXEC,
-PROCESS, LIST, SEARCH, MAP, CHECKPOINT, WEB, BROWSER, SKILL or AGENTS), then
+PROCESS, LIST, SEARCH, MAP, CHECKPOINT, WEB, BROWSER, MCP, SKILL or AGENTS), then
 its target, such as a file path or a command. The badge color shows the state:
 the tool family's color when finished, a moving shimmer while running, red when
 the call failed and amber when it was stopped or timed out. A result line hangs
@@ -29,6 +29,15 @@ below the title:
 | Browser | Where it navigated or what it saved, such as `Screenshot 1280×720`. |
 | Checkpoint | A short result; Ctrl+O shows the rest. |
 | Any error | The error message, such as `Not found`. |
+
+MCP cards use the quiet badge surface and identify the connection and remote
+operation, such as `GitHub › create_issue`. Arguments use the same `│` row,
+omitted when a call has none, and results the same `└` row as other tools.
+Ctrl+O shows the full arguments and result; each MCP call keeps its own row
+inside a Work chapter. Cancellation before dispatch uses the stopped badge
+and `Cancelled` in amber: the call was not sent. An uncertain remote outcome uses amber and
+**Outcome unknown**: the service may already have acted. Check it before
+retrying; a local checkpoint cannot restore it.
 
 When the agent supplies a `description` for a command, the card shows it as the
 title and the command beneath it (`$ command` for Bash, `> program args` for

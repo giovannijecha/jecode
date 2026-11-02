@@ -14,7 +14,7 @@ pub(super) fn description<'a>(tool: &Tool<'a>) -> &'a str {
     field(tool.arguments, "description").trim()
 }
 
-fn inline(value: &str) -> String {
+pub(super) fn inline(value: &str) -> String {
     text::clean(value)
         .lines()
         .map(str::trim)

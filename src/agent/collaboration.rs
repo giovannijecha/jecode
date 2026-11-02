@@ -256,6 +256,7 @@ impl Agent {
         child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
         child.enable_checkpoints(&child_home);
         child.skills.configure(&home);
+        let _ = child.configure_mcp(&home);
         child
             .tools
             .share_project_map_notes(&home, self.tools.root());

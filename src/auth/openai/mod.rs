@@ -8,6 +8,9 @@ mod storage;
 mod wire;
 
 pub(crate) use flow::open_browser;
+#[cfg(windows)]
+pub(crate) use native::protect;
+pub(crate) use native::{random, sha256};
 
 use crate::cancel::Cancellation;
 use crate::redact::Redactor;
