@@ -209,6 +209,8 @@ fn default_model_categories_keep_saved_scope_and_return_to_settings() {
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Settings
     ));
+    assert!(app.pending_command.is_none());
+    assert!(app.catalog_services.is_none());
     assert_eq!(fixture.finish().len(), 2);
 }
 
@@ -321,6 +323,7 @@ fn failed_provider_catalog_does_not_capture_a_later_sign_in_escape() {
         .unwrap();
     wait(&mut app);
     assert!(app.provider_parent.is_none());
+    assert!(app.catalog_services.is_none());
 
     // A sign-in started later must still cancel as a sign-in.
     let (_sender, receiver) = std::sync::mpsc::channel();
@@ -337,5 +340,55 @@ fn failed_provider_catalog_does_not_capture_a_later_sign_in_escape() {
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Accounts
     ));
+    assert_eq!(fixture.finish().len(), 1);
+}
+
+#[test]
+fn cancelling_model_groups_finishes_the_command() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    configure_five_providers(&mut app);
+    app.dispatch("/model".into()).unwrap();
+    app.close_selector();
+    assert!(app.state.selector.is_none());
+    assert!(app.pending_command.is_none());
+    assert!(app.local_command.is_none());
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn cancelled_catalog_cannot_change_the_provider_of_a_later_effort_command() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        200,
+        crate::json::parse(r#"{"data":[{"id":"fixture/api-model"}]}"#).unwrap(),
+    )]);
+    let mut app = app(&directory, &fixture);
+    configure_five_providers(&mut app);
+    app.dispatch("/model".into()).unwrap();
+    app.choose(selector::Choice::ProviderGroup(
+        selector::ProviderGroup::ApiKeys,
+    ))
+    .unwrap();
+    app.provider_parent = Some((false, selector::ProviderGroup::ApiKeys));
+    app.load_catalog_for(
+        jobs::CatalogPurpose::Models {
+            defaults: false,
+            id: None,
+        },
+        crate::backend::Services::from_service(crate::backend::openai::Api::fixture_api_key(
+            "discarded-api-key",
+            &fixture.endpoint,
+        )),
+    );
+    wait(&mut app);
+    app.close_selector();
+    app.close_selector();
+    app.close_selector();
+    app.dispatch("/effort default".into()).unwrap();
+    assert_eq!(app.agent.as_ref().unwrap().backend_id(), "openrouter");
+    assert_eq!(app.agent.as_ref().unwrap().model(), "fixture/model");
+    assert!(app.catalog_services.is_none());
     assert_eq!(fixture.finish().len(), 1);
 }

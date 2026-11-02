@@ -433,10 +433,6 @@ impl App {
             return;
         }
         self.state.selector = None;
-        self.local_finish_quiet(
-            Kind::Warning,
-            "Selection cancelled · previous settings kept",
-            vec![],
-        );
+        self.cancel_setting();
     }
 }

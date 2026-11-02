@@ -164,6 +164,7 @@ impl App {
     ) {
         // A finished setting ends any provider-scoped model selection.
         self.provider_parent = None;
+        self.catalog_services = None;
         if self.settings_parent.is_some() && self.pending_command.is_none() {
             self.local_start("/settings");
         }
@@ -184,6 +185,8 @@ impl App {
     }
 
     pub(super) fn cancel_setting(&mut self) {
+        self.provider_parent = None;
+        self.catalog_services = None;
         self.local_finish_quiet(
             Kind::Warning,
             "Selection cancelled · previous settings kept",

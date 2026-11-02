@@ -471,11 +471,8 @@ impl App {
                 self.open_model_provider_group(defaults, group);
             }
             Purpose::ProviderGroups { .. } => {
-                if self.settings_parent.is_some() {
-                    self.return_to_settings();
-                } else {
-                    self.state.selector = None;
-                }
+                self.state.selector = None;
+                self.cancel_setting();
             }
             Purpose::Efforts { defaults, .. } if self.provider_parent.is_some() => {
                 self.state.selector = Some(self.models_menu(*defaults));
