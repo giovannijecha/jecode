@@ -76,6 +76,8 @@ OpenAI's Responses API; usage is billed to the API project, separately from
 any ChatGPT subscription.
 
 The API model list does not report context windows or reasoning levels.
+The selector omits known model families for embeddings, images, moderation,
+audio, transcription and realtime endpoints; unknown IDs remain available.
 Jecode leaves context unknown and provides the documented reasoning levels for
 known API models, including `gpt-6.1-sol`. Other model IDs keep `default` in the
 menu; `/effort NAME` can still request a level explicitly. API and subscription
