@@ -33,7 +33,7 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
         _ => Vec::new(),
     };
     let body: panel::Body = match menu.purpose {
-        Purpose::Key | Purpose::AutoCompact => Box::new(|_| Vec::new()),
+        Purpose::Key(_) | Purpose::AutoCompact => Box::new(|_| Vec::new()),
         // The message wraps so a sign-in link stays whole.
         Purpose::Loading => Box::new(move |_| {
             let frame = motion::frame();
@@ -70,7 +70,7 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
 /// field and the title the panel, so a placeholder only adds what neither says.
 fn field(menu: &Selector, columns: usize) -> Option<Field> {
     let (label, placeholder, suffix) = match &menu.purpose {
-        Purpose::Key => ("Paste your key".to_string(), "", ""),
+        Purpose::Key(_) => ("Paste your key".to_string(), "", ""),
         Purpose::AutoCompact => ("Threshold".into(), "1–99", "% of the context window"),
         _ if menu.searchable => (format!("Filter {}", noun(menu)), "", ""),
         _ => return None,
@@ -82,7 +82,7 @@ fn field(menu: &Selector, columns: usize) -> Option<Field> {
     };
     let (value, caret) = menu
         .editor
-        .viewport(room, matches!(menu.purpose, Purpose::Key));
+        .viewport(room, matches!(menu.purpose, Purpose::Key(_)));
     Some(Field {
         label,
         value,
@@ -96,6 +96,7 @@ fn noun(menu: &Selector) -> String {
     match &menu.purpose {
         Purpose::Models { .. } => "models".into(),
         Purpose::Providers { .. } => "providers".into(),
+        Purpose::ProviderGroups { .. } => "provider groups".into(),
         Purpose::Sessions { .. } => "conversations".into(),
         _ => menu.title.to_lowercase(),
     }
@@ -114,6 +115,7 @@ fn aside(menu: &Selector) -> Line {
     let text = match &menu.purpose {
         Purpose::Models { .. } => count("model"),
         Purpose::Providers { .. } => count("provider"),
+        Purpose::ProviderGroups { .. } => count("group"),
         Purpose::Accounts => text::counted(
             menu.options
                 .iter()
@@ -133,7 +135,7 @@ fn aside(menu: &Selector) -> Line {
             ..
         } => format!("paused at {}", level.name()),
         Purpose::Remembered { .. } => "this conversation".into(),
-        Purpose::Key => "~/.jecode/config.json".into(),
+        Purpose::Key(_) => "~/.jecode/config.json".into(),
         Purpose::AutoCompact => "this and new conversations".into(),
         _ => String::new(),
     };
@@ -181,7 +183,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
             key("Ctrl+D", "revoke"),
             close[0],
         ],
-        Purpose::Key => vec![key("Enter", "validate and save"), close[0]],
+        Purpose::Key(_) => vec![key("Enter", "validate and save"), close[0]],
         Purpose::AutoCompact => vec![key("Enter", "save"), close[0]],
         Purpose::Loading if menu.title == "Sign out" => vec![],
         Purpose::Loading => close.to_vec(),

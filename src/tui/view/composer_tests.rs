@@ -346,7 +346,7 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
     assert_eq!(draft[0].plain().trim_end(), "› private draft");
     assert!(!draft[0].spans.iter().any(|span| span.style == CURSOR));
     assert_eq!(selection.cursor, None);
-    state.selector = Some(Selector::key());
+    state.selector = Some(Selector::key("openrouter"));
     // The rule names the empty field once; the field holds only the caret.
     let empty = frame(&state, "model", "directory");
     let named = empty

@@ -58,7 +58,7 @@ fn narrow_panels_keep_the_keyboard_controls_readable_instead_of_cutting_the_foot
     assert!(controls.contains(" Esc  close"), "{controls}");
     assert!(!controls.contains('…'));
     // The key form's keys end the dock whole, wrapping when they must.
-    state.selector = Some(Selector::key());
+    state.selector = Some(Selector::key("openrouter"));
     for width in [30, 40, 60] {
         state.width = width;
         let key = frame(&state, "fixture/model", "directory");

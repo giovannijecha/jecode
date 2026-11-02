@@ -55,6 +55,61 @@ pub(super) fn parse(response: &Value) -> Result<Catalog, String> {
     Ok(Catalog { models, limits })
 }
 
+/// The public Models API supplies IDs but no context or reasoning capability data.
+pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
+    let rows = response
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("OpenAI returned an invalid API model list")?;
+    let mut seen = BTreeSet::new();
+    let mut models = Vec::new();
+    for row in rows {
+        let Some(id) = row.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if validate_model(id).is_err() || !seen.insert(id.to_owned()) {
+            continue;
+        }
+        models.push(Model {
+            id: id.into(),
+            name: id.into(),
+            prompt_price: None,
+            completion_price: None,
+            efforts: api_efforts(id),
+        });
+    }
+    Ok(Catalog {
+        models,
+        limits: BTreeMap::new(),
+    })
+}
+
+/// The public Models API has no effort metadata. Keep only exact model IDs
+/// whose levels are documented on their current OpenAI API model pages.
+fn api_efforts(id: &str) -> Vec<Effort> {
+    let documented: &[Effort] = match id {
+        "gpt-6-astra" | "gpt-6.1-sol" => &[
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
+        "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-terra" => &[
+            Effort::None,
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
+        _ => &[],
+    };
+    let mut efforts = vec![Effort::Default];
+    efforts.extend_from_slice(documented);
+    efforts
+}
+
 fn efforts(row: &Value) -> Vec<Effort> {
     let mut result = vec![Effort::Default];
     if let Some(levels) = row
@@ -76,6 +131,45 @@ fn efforts(row: &Value) -> Vec<Effort> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_catalog_uses_only_documented_exact_model_efforts() {
+        let response = crate::json::parse(
+            r#"{"data":[{"id":"gpt-6-astra"},{"id":"gpt-6.1-sol"},{"id":"gpt-6-sol"},{"id":"gpt-6-luna"},{"id":"gpt-6.1-terra"},{"id":"gpt-6.1-sol-2026-11-01"},{"id":"other"}]}"#,
+        )
+        .unwrap();
+        let models = parse_api(&response).unwrap().models;
+        assert_eq!(models.len(), 7);
+        for model in &models[..2] {
+            assert_eq!(
+                model.efforts,
+                [
+                    Effort::Default,
+                    Effort::Low,
+                    Effort::Medium,
+                    Effort::High,
+                    Effort::Xhigh,
+                    Effort::Max
+                ]
+            );
+        }
+        for model in &models[2..5] {
+            assert_eq!(
+                model.efforts,
+                [
+                    Effort::Default,
+                    Effort::None,
+                    Effort::Low,
+                    Effort::Medium,
+                    Effort::High,
+                    Effort::Xhigh,
+                    Effort::Max
+                ]
+            );
+        }
+        assert_eq!(models[5].efforts, [Effort::Default]);
+        assert_eq!(models[6].efforts, [Effort::Default]);
+    }
 
     #[test]
     fn account_catalog_keeps_order_efforts_and_effective_context() {

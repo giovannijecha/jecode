@@ -1,4 +1,4 @@
-//! Claude subscription inference over the native Messages API.
+//! Claude subscription and API key inference over the native Messages API.
 
 #[cfg(test)]
 mod cache_tests;
@@ -27,10 +27,17 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 pub const CREDENTIAL_ENV: &[&str] = &["JECODE_ANTHROPIC_ACCESS_TOKEN"];
+pub const API_CREDENTIAL_ENV: &[&str] = &["JECODE_ANTHROPIC_API_KEY"];
+
+#[derive(Clone)]
+enum Credential {
+    Session(Session),
+    ApiKey { key: String, account: String },
+}
 
 #[derive(Clone)]
 pub struct Api {
-    session: Session,
+    credential: Credential,
     cancellation: Cancellation,
     base_url: String,
     metadata: Arc<Mutex<Option<metadata::Catalog>>>,
@@ -46,8 +53,22 @@ pub struct Anthropic {
 impl Api {
     pub fn new(session: Session) -> Result<Self, String> {
         Ok(Self {
-            session,
+            credential: Credential::Session(session),
             cancellation: Cancellation::default(),
+            base_url: "https://api.anthropic.com".into(),
+            metadata: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub fn with_api_key(key: String) -> Result<Self, String> {
+        if key.is_empty() || key.len() > 512 || !key.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err("The Anthropic API key must be a nonempty token without whitespace".into());
+        }
+        let cancellation = Cancellation::default();
+        let account = crate::auth::key_scope(&key, &cancellation)?;
+        Ok(Self {
+            credential: Credential::ApiKey { key, account },
+            cancellation,
             base_url: "https://api.anthropic.com".into(),
             metadata: Arc::new(Mutex::new(None)),
         })
@@ -57,11 +78,19 @@ impl Api {
     pub fn fixture(session: Session, endpoint: &str) -> Self {
         assert!(endpoint.starts_with("http://127.0.0.1:"));
         Self {
-            session,
+            credential: Credential::Session(session),
             cancellation: Cancellation::default(),
             base_url: endpoint.into(),
             metadata: Arc::new(Mutex::new(None)),
         }
+    }
+
+    #[cfg(test)]
+    pub fn fixture_api_key(key: &str, endpoint: &str) -> Self {
+        assert!(endpoint.starts_with("http://127.0.0.1:"));
+        let mut api = Self::with_api_key(key.into()).unwrap();
+        api.base_url = endpoint.into();
+        api
     }
 
     fn catalog(&self) -> Result<Vec<backend::Model>, String> {
@@ -149,7 +178,24 @@ impl Api {
     }
 
     fn redactor(&self) -> Redactor {
-        self.session.redactor()
+        match &self.credential {
+            Credential::Session(session) => session.redactor(),
+            Credential::ApiKey { key, .. } => Redactor::new(key.clone()),
+        }
+    }
+
+    fn id(&self) -> &'static str {
+        match self.credential {
+            Credential::Session(_) => "anthropic",
+            Credential::ApiKey { .. } => "anthropic-api",
+        }
+    }
+
+    fn account(&self) -> String {
+        match &self.credential {
+            Credential::Session(session) => session.identity(),
+            Credential::ApiKey { account, .. } => account.clone(),
+        }
     }
 }
 
@@ -167,13 +213,21 @@ fn percent(value: &str) -> String {
 
 impl Service for Api {
     fn id(&self) -> &'static str {
-        "anthropic"
+        self.id()
     }
     fn account(&self) -> Option<String> {
-        Some(self.session.identity())
+        Some(self.account())
     }
-    fn with_credential(&self, _key: String) -> Result<Arc<dyn Service>, String> {
-        Err("Claude subscription access requires Sign in with Claude; an API key cannot replace this account session".into())
+    fn with_credential(&self, key: String) -> Result<Arc<dyn Service>, String> {
+        match self.credential {
+            Credential::Session(_) => Err("Claude subscription access requires Sign in with Claude; an API key cannot replace this account session".into()),
+            Credential::ApiKey { .. } => {
+                let mut api = Self::with_api_key(key)?;
+                api.base_url.clone_from(&self.base_url);
+                api.cancellation = self.cancellation.clone();
+                Ok(Arc::new(api))
+            }
+        }
     }
     fn with_cancellation(&self, cancellation: Cancellation) -> Arc<dyn Service> {
         let mut api = self.clone();
@@ -213,10 +267,10 @@ impl Service for Api {
 
 impl Backend for Anthropic {
     fn id(&self) -> &'static str {
-        "anthropic"
+        self.api.id()
     }
     fn account(&self) -> Option<String> {
-        Some(self.api.session.identity())
+        Some(self.api.account())
     }
     fn model(&self) -> &str {
         &self.model
@@ -281,7 +335,11 @@ impl Backend for Anthropic {
         } else {
             None
         };
-        let request = wire::request(
+        let make_request = match &self.api.credential {
+            Credential::Session(_) => wire::request,
+            Credential::ApiKey { .. } => wire::api_request,
+        };
+        let request = make_request(
             &self.model,
             effort,
             &projected,

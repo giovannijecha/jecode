@@ -57,7 +57,7 @@ fn enter(app: &mut App) {
 }
 fn open_key(app: &mut App) {
     app.input(Decoded::Text("6".into())).unwrap();
-    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
     app.input(Decoded::Text("1".into())).unwrap();
 }
 fn wait(app: &mut App) {
@@ -93,7 +93,7 @@ fn account_menu_keeps_sign_out_confirmation_and_escape_returns_to_account() {
     let home = app.config.store.path().parent().unwrap().to_path_buf();
     crate::auth::openai::Store::fixture_account(home, "fixture-token").unwrap();
     app.dispatch("/settings".into()).unwrap();
-    for number in ["6", "1", "1", "1", "3"] {
+    for number in ["6", "2", "1", "1", "3"] {
         app.input(Decoded::Text(number.into())).unwrap();
     }
     assert!(matches!(

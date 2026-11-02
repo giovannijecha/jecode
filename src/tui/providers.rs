@@ -8,7 +8,17 @@ use crate::auth::{AccountStore, Credential, SignInUpdate};
 use crate::backend::Services;
 use std::{path::PathBuf, sync::mpsc};
 
-const USAGE_URL: &str = "https://chatgpt.com/settings/usage";
+mod models;
+
+pub(super) const CLAUDE_COMPATIBILITY_WARNING: &str = "Claude login unapproved · Use API keys";
+
+pub(super) fn usage_url(provider: &str) -> &'static str {
+    if provider == "anthropic" {
+        "https://claude.ai/settings/usage"
+    } else {
+        "https://chatgpt.com/settings/usage"
+    }
+}
 
 impl App {
     pub(super) fn sync_account_credentials(
@@ -79,91 +89,6 @@ impl App {
             .to_path_buf()
     }
 
-    pub(super) fn settings_menu(&self) -> Selector {
-        let settings = &self.config.settings;
-        Selector::settings(
-            &settings.model,
-            settings.effort,
-            settings.auto_compact,
-            &settings.routing_for(&settings.model),
-            settings.default_permissions,
-            self.config.store.path(),
-        )
-    }
-
-    pub(super) fn models_menu(&self, defaults: bool) -> Selector {
-        let facts = self.facts();
-        let current = if defaults {
-            &self.config.settings.model
-        } else {
-            &facts.model
-        };
-        let mut menu = Selector::models(&self.catalog, defaults, current);
-        // The account the catalog came from rides the rule title.
-        if let Some(detail) = self
-            .catalog_services
-            .as_ref()
-            .and_then(|services| self.provider_account_detail(services))
-        {
-            menu.context = format!("{} · {detail}", menu.context);
-        }
-        if self.provider_parent.is_some() {
-            menu.parent = Some("Provider");
-        }
-        menu
-    }
-
-    pub(super) fn open_settings(&mut self) {
-        self.state.selector = Some(self.settings_menu());
-    }
-
-    pub(super) fn open_model_providers(&mut self, defaults: bool) {
-        self.provider_parent = None;
-        let mut services = self.config.settings.configured_services(&self.home());
-        let facts = self.facts().into_owned();
-        let active = facts.services;
-        match services.len() {
-            0 => self.finish_setting(
-                Kind::Error,
-                "No configured provider. Open Settings › Providers.",
-                vec![],
-            ),
-            1 => self.load_catalog_for(
-                super::jobs::CatalogPurpose::Models { defaults, id: None },
-                if !facts.needs_configuration
-                    && services[0].id() == active.id()
-                    && services[0].account() == active.account()
-                {
-                    active
-                } else {
-                    services.remove(0)
-                },
-            ),
-            _ => {
-                let mut menu = Selector::providers(
-                    &services,
-                    defaults,
-                    facts.backend_id,
-                    &self.config.settings.backend_id,
-                );
-                for (option, service) in menu.options.iter_mut().zip(&services) {
-                    if let Some(detail) = self.provider_account_detail(service) {
-                        option.fact = detail;
-                        if active.id() == service.id()
-                            && active.account() != service.account()
-                            && let Some(current) = self.provider_account_detail(&active)
-                        {
-                            option
-                                .fact
-                                .push_str(&format!(" · this conversation: {current}"));
-                        }
-                    }
-                }
-                self.state.selector = Some(menu);
-            }
-        }
-    }
-
     pub(super) fn open_credentials(&mut self) {
         let openai = self
             .config
@@ -179,12 +104,20 @@ impl App {
     }
 
     pub(super) fn open_api_keys(&mut self) {
-        let configured = self
-            .config
-            .settings
-            .credential_for("openrouter")
-            .is_some_and(|key| !key.is_empty());
-        self.state.selector = Some(Selector::api_keys(configured));
+        let configured = crate::backend::available()
+            .iter()
+            .filter(|provider| provider.key_url.is_some())
+            .map(|provider| {
+                (
+                    provider.id,
+                    self.config
+                        .settings
+                        .credential_for(provider.id)
+                        .is_some_and(|key| !key.is_empty()),
+                )
+            })
+            .collect::<Vec<_>>();
+        self.state.selector = Some(Selector::api_keys(&configured));
     }
 
     pub(super) fn open_accounts(&mut self) {
@@ -216,6 +149,12 @@ impl App {
     pub(super) fn open_accounts_for(&mut self, provider: &'static str) {
         self.auth_provider = provider;
         self.open_accounts();
+        if provider == "anthropic" {
+            self.state.notify(Feedback::result(
+                Kind::Warning,
+                CLAUDE_COMPATIBILITY_WARNING,
+            ));
+        }
     }
 
     pub(super) fn open_account(&mut self, index: usize) {
@@ -272,6 +211,7 @@ impl App {
                 } else {
                     "ChatGPT"
                 };
+                self.state.clear_notice();
                 self.state.notify(Feedback::result(
                     Kind::Notice,
                     format!(
@@ -344,6 +284,12 @@ impl App {
     }
 
     pub(super) fn start_sign_in(&mut self, existing: Option<String>) {
+        if self.auth_provider == "anthropic" {
+            self.state.notify(Feedback::result(
+                Kind::Warning,
+                CLAUDE_COMPATIBILITY_WARNING,
+            ));
+        }
         let (sender, receiver) = mpsc::channel();
         self.auth_updates = Some(receiver);
         self.auth_browser_url = None;
@@ -418,6 +364,7 @@ impl App {
         if self.auth_provider == provider {
             self.open_accounts();
         }
+        self.state.clear_notice();
         match result {
             Ok(true) => {
                 let notice = if provider == "anthropic" {
@@ -463,12 +410,13 @@ impl App {
     }
 
     pub(super) fn manage_usage(&mut self) {
-        match crate::auth::open_browser(USAGE_URL) {
+        let url = usage_url(self.auth_provider);
+        match crate::auth::open_browser(url) {
             Ok(()) => self.state.notify(Feedback::result(
                 Kind::Notice,
-                format!("Manage usage · {USAGE_URL}"),
+                format!("Manage usage · {url}"),
             )),
-            Err(error) => self.warn(&format!("{error}: {USAGE_URL}")),
+            Err(error) => self.warn(&format!("{error}: {url}")),
         }
     }
 
@@ -492,7 +440,7 @@ impl App {
                 self.state.selector = Some(Selector::providers_settings())
             }
             Purpose::ProviderSettings => self.return_to_settings(),
-            Purpose::Key => self.open_api_keys(),
+            Purpose::Key(_) => self.open_api_keys(),
             Purpose::Loading if self.auth_signing_out => return true,
             Purpose::Loading if self.auth_model_switch => {
                 drop(self.job.take());
@@ -506,7 +454,15 @@ impl App {
             Purpose::Efforts { .. } if self.auth_model_switch => {
                 self.state.selector = Some(self.models_menu(false));
             }
-            Purpose::Providers { .. } => {
+            Purpose::Providers { defaults, group } => {
+                self.return_to_provider_groups(*defaults, *group);
+            }
+            Purpose::Loading if self.provider_parent.is_some() => {
+                drop(self.job.take());
+                let (defaults, group) = self.provider_parent.take().unwrap();
+                self.open_model_provider_group(defaults, group);
+            }
+            Purpose::ProviderGroups { .. } => {
                 if self.settings_parent.is_some() {
                     self.return_to_settings();
                 } else {
@@ -517,8 +473,8 @@ impl App {
                 self.state.selector = Some(self.models_menu(*defaults));
             }
             Purpose::Models { .. } if self.provider_parent.is_some() => {
-                let defaults = self.provider_parent.take().unwrap();
-                self.open_model_providers(defaults);
+                let (defaults, group) = self.provider_parent.take().unwrap();
+                self.open_model_provider_group(defaults, group);
             }
             Purpose::Loading if self.auth_updates.is_some() => {
                 self.auth_updates = None;

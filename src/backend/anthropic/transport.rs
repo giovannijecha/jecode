@@ -1,6 +1,6 @@
 //! Native HTTP boundary for account metadata and streamed Messages.
 
-use super::Api;
+use super::{Api, Credential};
 use crate::backend::{Failure, FailureKind, FailureReason};
 use crate::json::{self, Value};
 use crate::redact::Redactor;
@@ -47,7 +47,11 @@ impl Api {
         body: &str,
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<Response, Failure> {
-        self.raw("POST", "/v1/messages?beta=true", Some(body), observer)
+        let path = match self.credential {
+            Credential::Session(_) => "/v1/messages?beta=true",
+            Credential::ApiKey { .. } => "/v1/messages",
+        };
+        self.raw("POST", path, Some(body), observer)
             .map(|(response, _)| response)
     }
 
@@ -58,18 +62,16 @@ impl Api {
         body: Option<&str>,
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(Response, String), Failure> {
-        let token = self
-            .session
-            .access_token(&self.cancellation)
-            .map_err(Failure::from)?;
+        let token = match &self.credential {
+            Credential::Session(session) => session
+                .access_token(&self.cancellation)
+                .map_err(Failure::from)?,
+            Credential::ApiKey { key, .. } => key.clone(),
+        };
         let url = format!("{}{path}", self.base_url);
         let authorization = format!("Bearer {token}");
-        let beta = if body.is_some() {
-            GENERATION_BETA
-        } else {
-            ACCOUNT_BETA
-        };
-        let agent = if body.is_some() {
+        let subscription = matches!(self.credential, Credential::Session(_));
+        let agent = if subscription && body.is_some() {
             GENERATION_AGENT
         } else {
             ACCOUNT_AGENT
@@ -77,16 +79,30 @@ impl Api {
         let mut headers = vec![
             ("authorization", authorization.as_str()),
             ("anthropic-version", VERSION),
-            ("anthropic-beta", beta),
             ("user-agent", agent),
         ];
+        if subscription {
+            headers.push((
+                "anthropic-beta",
+                if body.is_some() {
+                    GENERATION_BETA
+                } else {
+                    ACCOUNT_BETA
+                },
+            ));
+        }
         if body.is_some() {
+            if subscription {
+                headers.push(("x-app", "cli"));
+            }
             headers.extend([
-                ("x-app", "cli"),
                 ("content-type", "application/json"),
                 ("accept", "text/event-stream"),
             ]);
         } else {
+            if !subscription {
+                headers.push(("content-type", "application/json"));
+            }
             headers.push(("accept", "application/json"));
         }
         let mut decoder = Headers {

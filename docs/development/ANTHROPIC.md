@@ -1,12 +1,26 @@
 # Anthropic backend
 
-The Anthropic backend sends requests with a Claude subscription account signed
-in through claude.ai. It has no API-key mode. Authentication and
+The Anthropic adapter sends Messages requests with a direct API key
+(`anthropic-api`) or a Claude subscription account signed in through claude.ai
+(`anthropic`). Authentication and
 Messages translation belong to the adapter in `auth/anthropic/` and
 `backend/anthropic/`; the agent loop, tools, context management, collaboration
 and saved conversations are shared with the other backends.
 
 User setup is described in [Providers](../usage/PROVIDERS.md#claude-account).
+
+## Direct API key
+
+`anthropic-api` uses the [Claude API](https://platform.claude.com/docs/en/api/overview)
+with a Bearer API key and `anthropic-version: 2023-06-01`. Its normal
+`/v1/messages` route sends Jecode's identity, without OAuth beta headers,
+`x-app: cli` or a Claude Code system prefix. It shares model metadata,
+streaming, tool translation and cache accounting with the account adapter.
+
+Keys are stored under `backends.anthropic-api.api_key` and have separate hashed
+identities for provider-owned history. The adapter supports workspace-scoped
+keys; it does not currently configure the workspace header required by unscoped
+keys. An API rejection never causes a retry with subscription credentials.
 
 ## Compatibility status
 

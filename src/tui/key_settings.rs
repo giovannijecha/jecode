@@ -1,29 +1,34 @@
-use super::{App, Kind, held::Deferred, jobs::Job, selector::Selector};
+use super::{
+    App, Kind,
+    held::Deferred,
+    jobs::Job,
+    selector::{Purpose, Selector},
+};
 use crate::backend;
 
 impl App {
     pub(super) fn save_key(&mut self) {
-        let key = self
-            .state
-            .selector
-            .as_ref()
-            .unwrap()
-            .editor
-            .text
-            .trim()
-            .to_string();
+        let Some(menu) = self.state.selector.as_ref() else {
+            return;
+        };
+        let Purpose::Key(id) = &menu.purpose else {
+            return;
+        };
+        let id = *id;
+        let title = menu.title.clone();
+        let key = menu.editor.text.trim().to_string();
         let facts = self.facts();
-        let services = if facts.backend_id == "openrouter" {
+        let services = if facts.backend_id == id {
             facts.services.with_credential(key.clone())
         } else {
-            backend::Services::for_backend("openrouter", key.clone())
+            backend::Services::for_backend(id, key.clone())
         };
         drop(facts);
         match services {
             Err(error) => self.warn(&error),
             Ok(services) => {
                 self.state.clear_notice();
-                self.state.selector = Some(Selector::loading("API key", "Checking API key…", true));
+                self.state.selector = Some(Selector::loading(&title, "Checking API key…", true));
                 self.job = Some(Job::key(services, key));
             }
         }
@@ -44,8 +49,8 @@ impl App {
         let mut settings = self.config.settings.clone();
         settings
             .credentials
-            .insert("openrouter".into(), key.clone());
-        if settings.backend_id == "openrouter" {
+            .insert(services.id().into(), key.clone());
+        if settings.backend_id == services.id() {
             settings.api_key = key.clone();
         }
         let first_setup = !settings.has_model();

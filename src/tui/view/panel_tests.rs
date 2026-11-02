@@ -39,7 +39,7 @@ mod field_tests;
 #[test]
 fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
     let models: Vec<_> = (0..12).map(model).collect();
-    let mut key = Selector::key();
+    let mut key = Selector::key("openrouter");
     key.editor.insert("isolated-fixture-key");
     for menu in [
         Selector::settings(
@@ -65,7 +65,7 @@ fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
         state.editor.insert("kept private draft");
         let draft = state.editor.clone();
         let menu = state.selector.as_ref().unwrap();
-        let form = matches!(menu.purpose, Purpose::Key);
+        let form = matches!(menu.purpose, Purpose::Key(_));
         let typed = menu.searchable || form;
         let title = menu.title.clone();
         let frame = frame(&state, "fixture/model", "directory");

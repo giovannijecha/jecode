@@ -7,8 +7,9 @@ model you choose reads your project, edits files, runs commands and checks the
 result, while you watch each step and keep control of what it may change.
 
 It is a single native executable written in Rust, without third-party Rust
-crates. It connects to OpenRouter with an API key, or to your ChatGPT or
-Claude subscription by signing in.
+crates. Connect an OpenRouter, OpenAI or Anthropic API key, or sign in with
+your ChatGPT account. A Claude subscription compatibility route is also
+available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
 ## What it looks like
 
@@ -61,9 +62,9 @@ covers npm updates, removal, and existing standalone installations.
 
 1. Open a terminal in the project you want to work on and run `jecode`.
 2. Connect a provider: type `/settings`, choose **Providers**, then either
-   **API keys** → **OpenRouter** and paste an
-   [OpenRouter key](https://openrouter.ai/settings/keys), or **Credentials** →
-   **OpenAI** or **Anthropic** → **Add account** and sign in in your browser.
+   **API keys** → **OpenRouter**, **OpenAI API** or **Anthropic API** and paste
+   that provider's key. **Credentials** offers ChatGPT sign-in and the
+   documented Claude compatibility route.
 3. Choose a model when the selector opens. This saves your configuration.
 4. **On Linux and macOS**, type `/permissions full` if the agent should run
    commands. The default level, Workspace, confines commands only on Windows and
@@ -96,12 +97,12 @@ storage formats may change between releases.
   interactive use on macOS has not been verified. See
   [Platform support](docs/development/PLATFORMS.md).
 - Command confinement in the Workspace permission level exists only on Windows.
-- OpenAI and Anthropic API keys are not supported.
+- API keys use the provider's API billing, separately from subscription plans.
 
 ## Privacy and security
 
 Jecode sends your conversation, including file contents and command output the
-agent has read, to the provider you select. Your OpenRouter key, account
+agent has read, to the provider you select. Your API keys, account
 tokens, conversations and checkpoints are stored locally under `~/.jecode/`. See
 [SECURITY.md](SECURITY.md) for details and how to report a vulnerability.
 

@@ -59,10 +59,12 @@ fn choose_provider(ui: &mut impl Prompter) -> Result<Option<&'static str>, Strin
     loop {
         ui.message("Providers:")?;
         for (index, backend) in available.iter().enumerate() {
-            let method = match backend.id {
-                "openai" => "Continue with ChatGPT",
-                "anthropic" => "Continue with Claude",
-                _ => "API key",
+            let method = if backend.key_url.is_some() {
+                "API key"
+            } else if backend.id == "openai" {
+                "Continue with ChatGPT"
+            } else {
+                "Continue with Claude"
             };
             ui.message(&format!("{}. {} · {method}", index + 1, backend.name))?;
         }
@@ -95,6 +97,11 @@ fn configure_with(
         .find(|backend| backend.id == backend_id)
         .unwrap();
     let name = selected.name;
+    let key_name = if name.ends_with(" API") {
+        format!("{name} key")
+    } else {
+        format!("{name} API key")
+    };
     let note = selected
         .key_url
         .map_or(String::new(), |url| format!("Get a key at {url}. "));
@@ -104,9 +111,9 @@ fn configure_with(
             .and_then(|settings| settings.credential_for(backend_id))
             .filter(|key| !key.is_empty());
         let prompt = if saved_key.is_some() {
-            format!("{name} API key (hidden; Enter keeps the saved key): ")
+            format!("{key_name} (hidden; Enter keeps the saved key): ")
         } else {
-            format!("{name} API key (hidden): ")
+            format!("{key_name} (hidden): ")
         };
         let Some(key) = answer(ui.secret(&prompt)?) else {
             return cancelled(ui);

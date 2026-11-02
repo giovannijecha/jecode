@@ -90,7 +90,7 @@ turn's elapsed time.
 
 ### Before sharing an export
 
-Known credentials, including your OpenRouter key and account tokens, are masked.
+Known credentials, including saved API keys and account tokens, are masked.
 Everything else is kept, including file contents the agent read and command
 output previews. Review the file before sharing it. Complete command output and
 attachments are referenced, not embedded, so they stay in your local storage.

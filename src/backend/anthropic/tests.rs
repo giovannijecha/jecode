@@ -65,6 +65,8 @@ fn client(fixture: &HttpFixture) -> Box<dyn Backend> {
         .unwrap()
 }
 
+mod api_key;
+
 #[test]
 fn catalog_reads_account_limits_and_effort_capabilities() {
     let catalog = crate::json::parse(r#"{"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5","max_input_tokens":1000000,"max_tokens":128000,"capabilities":{"effort":{"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true},"xhigh":{"supported":true},"max":{"supported":false}},"thinking":{"types":{"between_tools":{"supported":true},"disabled":{"supported":false}}}}}],"has_more":false}"#).unwrap();

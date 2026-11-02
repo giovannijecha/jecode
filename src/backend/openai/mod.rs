@@ -1,4 +1,4 @@
-//! ChatGPT plan inference over OpenAI's public Responses API.
+//! ChatGPT plan and API-key inference over OpenAI's Responses API.
 
 #[cfg(test)]
 mod agent_tests;
@@ -26,10 +26,17 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 pub const CREDENTIAL_ENV: &[&str] = &["JECODE_OPENAI_ACCESS_TOKEN"];
+pub const API_CREDENTIAL_ENV: &[&str] = &["JECODE_OPENAI_API_KEY"];
+
+#[derive(Clone)]
+enum Credential {
+    Account(Session),
+    ApiKey { key: String, scope: String },
+}
 
 #[derive(Clone)]
 pub struct Api {
-    session: Session,
+    credential: Credential,
     cancellation: Cancellation,
     base_url: String,
     metadata: Arc<Mutex<Option<metadata::Catalog>>>,
@@ -39,7 +46,8 @@ pub struct OpenAi {
     api: Api,
     model: String,
     effort: Effort,
-    /// The saved session, sent as the prompt cache key and `session-id`.
+    /// The saved conversation, used for prompt cache affinity on both routes.
+    /// ChatGPT also sends it as `session-id`.
     conversation: Option<String>,
     delegation: bool,
 }
@@ -47,8 +55,22 @@ pub struct OpenAi {
 impl Api {
     pub fn new(session: Session) -> Result<Self, String> {
         Ok(Self {
-            session,
+            credential: Credential::Account(session),
             cancellation: Cancellation::default(),
+            base_url: "https://api.openai.com/v1".into(),
+            metadata: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub fn with_api_key(key: String) -> Result<Self, String> {
+        if key.is_empty() || key.len() > 512 || !key.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err("The OpenAI API key must be a nonempty token without whitespace".into());
+        }
+        let cancellation = Cancellation::default();
+        let scope = crate::auth::key_scope(&key, &cancellation)?;
+        Ok(Self {
+            credential: Credential::ApiKey { key, scope },
+            cancellation,
             base_url: "https://api.openai.com/v1".into(),
             metadata: Arc::new(Mutex::new(None)),
         })
@@ -58,7 +80,7 @@ impl Api {
     pub fn fixture(session: Session, endpoint: &str) -> Self {
         assert!(endpoint.starts_with("http://127.0.0.1:"));
         Self {
-            session,
+            credential: Credential::Account(session),
             cancellation: Cancellation::default(),
             base_url: endpoint.into(),
             metadata: Arc::new(Mutex::new(Some(metadata::Catalog {
@@ -68,9 +90,20 @@ impl Api {
         }
     }
 
+    #[cfg(test)]
+    pub fn fixture_api_key(key: &str, endpoint: &str) -> Self {
+        assert!(endpoint.starts_with("http://127.0.0.1:"));
+        let mut api = Self::with_api_key(key.into()).unwrap();
+        api.base_url = endpoint.into();
+        api
+    }
+
     fn catalog(&self) -> Result<Vec<backend::Model>, String> {
         let response = self.get("/models")?;
-        let catalog = metadata::parse(&response)?;
+        let catalog = match &self.credential {
+            Credential::Account(_) => metadata::parse(&response)?,
+            Credential::ApiKey { .. } => metadata::parse_api(&response)?,
+        };
         let models = catalog.models.clone();
         *self
             .metadata
@@ -118,10 +151,22 @@ impl Api {
     }
 
     fn redactor(&self) -> Redactor {
-        self.session.redactor()
+        match &self.credential {
+            Credential::Account(session) => session.redactor(),
+            Credential::ApiKey { key, .. } => Redactor::new(key.clone()),
+        }
     }
     fn account(&self) -> String {
-        self.session.identity()
+        match &self.credential {
+            Credential::Account(session) => session.identity(),
+            Credential::ApiKey { scope, .. } => scope.clone(),
+        }
+    }
+    fn route_id(&self) -> &'static str {
+        match &self.credential {
+            Credential::Account(_) => "openai",
+            Credential::ApiKey { .. } => "openai-api",
+        }
     }
 }
 
@@ -143,10 +188,18 @@ impl Service for Api {
         false
     }
     fn id(&self) -> &'static str {
-        "openai"
+        self.route_id()
     }
-    fn with_credential(&self, _key: String) -> Result<Arc<dyn Service>, String> {
-        Err("OpenAI ChatGPT plan access requires Sign in with ChatGPT; an API key cannot replace this account session".into())
+    fn with_credential(&self, key: String) -> Result<Arc<dyn Service>, String> {
+        match &self.credential {
+            Credential::Account(_) => Err("OpenAI ChatGPT plan access requires Sign in with ChatGPT; an API key cannot replace this account session".into()),
+            Credential::ApiKey { .. } => {
+                let mut api = Self::with_api_key(key)?;
+                api.base_url.clone_from(&self.base_url);
+                api.cancellation = self.cancellation.clone();
+                Ok(Arc::new(api))
+            }
+        }
     }
     fn with_cancellation(&self, cancellation: Cancellation) -> Arc<dyn Service> {
         let mut api = self.clone();
@@ -183,7 +236,7 @@ impl Service for Api {
 
 impl Backend for OpenAi {
     fn id(&self) -> &'static str {
-        "openai"
+        self.api.route_id()
     }
     fn model(&self) -> &str {
         &self.model
@@ -218,25 +271,18 @@ impl Backend for OpenAi {
         &self,
         messages: &[Value],
         with_tools: bool,
-        _output_tokens: Option<usize>,
+        output_tokens: Option<usize>,
         pool: Option<&Pool>,
         emit: &mut dyn FnMut(backend::Update) -> Result<(), String>,
     ) -> Result<backend::Completion, backend::Failure> {
-        self.sample_with_effort(
-            self.effort,
-            messages,
-            with_tools,
-            _output_tokens,
-            pool,
-            emit,
-        )
+        self.sample_with_effort(self.effort, messages, with_tools, output_tokens, pool, emit)
     }
     fn sample_with_effort(
         &self,
         effort: Effort,
         messages: &[Value],
         with_tools: bool,
-        _output_tokens: Option<usize>,
+        output_tokens: Option<usize>,
         pool: Option<&Pool>,
         emit: &mut dyn FnMut(backend::Update) -> Result<(), String>,
     ) -> Result<backend::Completion, backend::Failure> {
@@ -253,6 +299,11 @@ impl Backend for OpenAi {
             pool,
         )
         .map_err(backend::Failure::from)?;
+        if let (Credential::ApiKey { .. }, Some(tokens), Value::Object(fields)) =
+            (&self.api.credential, output_tokens, &mut request)
+        {
+            fields.insert("max_output_tokens".into(), Value::number(tokens));
+        }
         // A stable conversation key supports provider prompt-cache affinity.
         if let (Some(id), Value::Object(fields)) = (&self.conversation, &mut request) {
             fields.insert("prompt_cache_key".into(), Value::string(id));
@@ -288,7 +339,7 @@ impl Backend for OpenAi {
         self.api.cancellation = cancellation;
     }
     fn set_conversation(&mut self, id: Option<String>) {
-        // The id also travels as an HTTP header, so only plain tokens qualify.
+        // ChatGPT also sends this as an HTTP header, so only plain tokens qualify.
         self.conversation = id.filter(|id| {
             !id.is_empty()
                 && id.len() <= 128

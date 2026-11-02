@@ -7,6 +7,13 @@ use crate::json::Value;
 
 const COMPATIBILITY_SYSTEM: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
+struct RequestOptions<'a> {
+    effort: Effort,
+    output_tokens: Option<usize>,
+    thinking_mode: Option<&'a str>,
+    subscription: bool,
+}
+
 pub(super) fn request(
     model: &str,
     effort: Effort,
@@ -16,7 +23,61 @@ pub(super) fn request(
     thinking_mode: Option<&str>,
     pool: Option<&Pool>,
 ) -> Result<Value, String> {
-    let mut instructions = vec![COMPATIBILITY_SYSTEM.to_owned()];
+    build_request(
+        model,
+        messages,
+        catalog,
+        pool,
+        RequestOptions {
+            effort,
+            output_tokens,
+            thinking_mode,
+            subscription: true,
+        },
+    )
+}
+
+pub(super) fn api_request(
+    model: &str,
+    effort: Effort,
+    messages: &[Value],
+    catalog: Option<&Value>,
+    output_tokens: Option<usize>,
+    thinking_mode: Option<&str>,
+    pool: Option<&Pool>,
+) -> Result<Value, String> {
+    build_request(
+        model,
+        messages,
+        catalog,
+        pool,
+        RequestOptions {
+            effort,
+            output_tokens,
+            thinking_mode,
+            subscription: false,
+        },
+    )
+}
+
+fn build_request(
+    model: &str,
+    messages: &[Value],
+    catalog: Option<&Value>,
+    pool: Option<&Pool>,
+    options: RequestOptions<'_>,
+) -> Result<Value, String> {
+    let RequestOptions {
+        effort,
+        output_tokens,
+        thinking_mode,
+        subscription,
+    } = options;
+    let mut instructions = if subscription {
+        vec![COMPATIBILITY_SYSTEM.to_owned()]
+    } else {
+        Vec::new()
+    };
     let mut wire = Vec::new();
     let mut results = Vec::new();
     let active_start = attachments::active_view_start(messages);
@@ -48,6 +109,7 @@ pub(super) fn request(
                 }
                 let mut mapped = user(message, pool)?;
                 if request_state
+                    && subscription
                     && supports_mid_system(model)
                     && let Value::Object(fields) = &mut mapped
                 {
@@ -110,6 +172,7 @@ pub(super) fn request(
     if let Some(Value::Object(last)) = system.last_mut() {
         last.insert("cache_control".into(), ephemeral());
     }
+    let empty_system = system.is_empty();
     let mut request = Value::object([
         ("model", Value::string(model)),
         ("system", Value::Array(system)),
@@ -123,6 +186,9 @@ pub(super) fn request(
     let Value::Object(fields) = &mut request else {
         unreachable!()
     };
+    if !subscription && empty_system {
+        fields.remove("system");
+    }
     if volatile_start.is_none() {
         fields.insert("cache_control".into(), ephemeral());
     }

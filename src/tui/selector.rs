@@ -18,6 +18,11 @@ pub enum Setting {
     AutoCompact,
     Providers,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderGroup {
+    ApiKeys,
+    Credentials,
+}
 #[derive(Clone, Copy)]
 pub enum Choice {
     Model(usize),
@@ -27,13 +32,14 @@ pub enum Choice {
     Session(usize),
     Copy(usize),
     Provider(&'static str),
+    ProviderGroup(ProviderGroup),
     Credentials,
     ApiKeys,
     Account(usize),
     AddAccount,
     SignOut,
     ManageUsage,
-    OpenRouterKey,
+    ApiKey(&'static str),
     Level(crate::permissions::Level),
     Remembered,
     Grant(usize),
@@ -61,8 +67,12 @@ pub struct Hit {
 }
 
 pub enum Purpose {
+    ProviderGroups {
+        defaults: bool,
+    },
     Providers {
         defaults: bool,
+        group: ProviderGroup,
     },
     ProviderSettings,
     Credentials,
@@ -87,7 +97,7 @@ pub enum Purpose {
         /// Muted rows after the focused choice's help.
         notes: Vec<String>,
     },
-    Key,
+    Key(&'static str),
     /// Percentage input for the automatic compaction threshold.
     AutoCompact,
     Loading,
@@ -323,8 +333,17 @@ impl Selector {
         menu.selected = focus;
         menu
     }
-    pub fn key() -> Self {
-        let mut menu = Self::new("OpenRouter API key", Purpose::Key, vec![]);
+    pub fn key(backend: &'static str) -> Self {
+        let name = crate::backend::available()
+            .iter()
+            .find(|entry| entry.id == backend)
+            .map_or(backend, |entry| entry.name);
+        let title = if name.ends_with(" API") {
+            format!("{name} key")
+        } else {
+            format!("{name} API key")
+        };
+        let mut menu = Self::new(&title, Purpose::Key(backend), vec![]);
         menu.parent = Some("Providers");
         menu
     }
@@ -336,7 +355,7 @@ impl Selector {
     }
     /// Whether typed text goes to this panel's input row.
     pub fn accepts_text(&self) -> bool {
-        self.searchable || matches!(self.purpose, Purpose::Key | Purpose::AutoCompact)
+        self.searchable || matches!(self.purpose, Purpose::Key(_) | Purpose::AutoCompact)
     }
     pub fn refresh(&mut self) {
         self.cancel_delete();

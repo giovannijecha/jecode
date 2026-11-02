@@ -266,6 +266,8 @@ fn local_transport_lists_models_with_scoped_oauth_token() {
     );
 }
 
+mod api_key;
+
 #[test]
 fn maintenance_effort_uses_only_catalog_supported_levels() {
     let api = Api::fixture(

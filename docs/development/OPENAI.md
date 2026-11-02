@@ -1,11 +1,42 @@
 # OpenAI backend
 
-The OpenAI backend sends requests with a ChatGPT account through Sign in with
-ChatGPT. It has no API-key mode. Authentication, wire format, provider state and
+The OpenAI adapter sends Responses requests with a direct API key (`openai-api`)
+or a ChatGPT account through Sign in with ChatGPT (`openai`). Authentication,
+wire format, provider state and
 caching belong to the adapter in `auth/openai/` and `backend/openai/`; tools,
 canonical history and terminal rendering are shared with the other backends.
 
 User setup is described in [Providers](../usage/PROVIDERS.md#chatgpt-account).
+
+## Direct API key
+
+`openai-api` uses the [OpenAI API](https://developers.openai.com/api/reference/overview)
+with a Bearer API key and the ordinary `data` model catalog. It shares Responses
+translation, streaming and tool execution with the account adapter, but sends
+no ChatGPT `session-id` header. Responses use `store: false`; Jecode keeps its
+own recoverable conversation.
+
+The API-key route honors an explicit internal output-token allowance with
+`max_output_tokens`; the subscription route continues to omit that field.
+
+Catalog entries do not supply context or effort metadata. Context stays unknown;
+`metadata.rs` supplies reasoning levels for exact model IDs documented by OpenAI
+(checked 2026-11-02):
+
+| API model | Explicit reasoning levels, in addition to `default` |
+| --- | --- |
+| [`gpt-6.1-sol`](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [`gpt-6-astra`](https://developers.openai.com/api/docs/models/gpt-6-astra) | `low`, `medium`, `high`, `xhigh`, `max` |
+| [`gpt-6-sol`](https://developers.openai.com/api/docs/models/gpt-6-sol), [`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna), [`gpt-6.1-terra`](https://developers.openai.com/api/docs/models/gpt-6.1-terra) | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
+
+There is no guessed family or snapshot-name match. Other IDs keep `default` in
+the selector, and explicit `/effort NAME` remains available without local
+capability rejection. Automatic title/compaction requests use an explicit effort
+only when supported by known metadata; unknown models keep the provider default.
+
+Keys have separate hashed identities for provider-owned history
+and usage. Key errors never retry with an account, and the existing account
+backend ID keeps saved subscription conversations on their original route.
+Keys are stored under `backends.openai-api.api_key` in the user configuration.
 
 ## Sign in with ChatGPT
 
@@ -64,7 +95,7 @@ cryptographic code is used.
 
 ## Responses route
 
-OpenAI's
+For ChatGPT accounts, OpenAI's
 [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
 define this route; it is narrower than the API-key Responses API.
 

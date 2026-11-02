@@ -7,9 +7,11 @@ mod delegation_tests;
 mod failure;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
+mod providers;
 mod retry;
 pub(crate) mod unconfigured;
 pub(crate) use charges::{price, quantity};
+pub use providers::available;
 
 use crate::attachments::{Inputs, Pool};
 use crate::cancel::Cancellation;
@@ -358,30 +360,6 @@ pub struct BackendInfo {
     pub key_url: Option<&'static str>,
     pub credential_env: &'static [&'static str],
 }
-static AVAILABLE: [BackendInfo; 3] = [
-    BackendInfo {
-        id: "openrouter",
-        name: "OpenRouter",
-        key_url: Some("https://openrouter.ai/settings/keys"),
-        credential_env: openrouter::CREDENTIAL_ENV,
-    },
-    BackendInfo {
-        id: "openai",
-        name: "OpenAI",
-        key_url: None,
-        credential_env: openai::CREDENTIAL_ENV,
-    },
-    BackendInfo {
-        id: "anthropic",
-        name: "Anthropic",
-        key_url: None,
-        credential_env: anthropic::CREDENTIAL_ENV,
-    },
-];
-pub fn available() -> &'static [BackendInfo] {
-    &AVAILABLE
-}
-
 /// Checks credential syntax without contacting the backend.
 pub fn validate_credential(id: &str, key: &str) -> Result<(), String> {
     Services::for_backend(id, key.to_owned()).map(|_| ())
@@ -438,6 +416,18 @@ impl Services {
                 credential
                     .api_key_material()
                     .ok_or("OpenRouter needs an API key")?
+                    .to_owned(),
+            )?)),
+            "openai-api" => Ok(Self::from_service(openai::Api::with_api_key(
+                credential
+                    .api_key_material()
+                    .ok_or("OpenAI API needs an API key")?
+                    .to_owned(),
+            )?)),
+            "anthropic-api" => Ok(Self::from_service(anthropic::Api::with_api_key(
+                credential
+                    .api_key_material()
+                    .ok_or("Anthropic API needs an API key")?
                     .to_owned(),
             )?)),
             "openai" => Ok(Self::from_service(openai::Api::new(

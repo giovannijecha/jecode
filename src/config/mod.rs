@@ -124,9 +124,7 @@ impl Settings {
         let api_key = api_key.trim().to_string();
         let model = model.trim().to_string();
         validate_backend_id(backend_id)?;
-        if backend_id == "openrouter" && !api_key.is_empty() {
-            validate_key(&api_key)?;
-        }
+        validate_saved_key(backend_id, &api_key)?;
         validate_model(&model)?;
         Ok(Self {
             backend_id: backend_id.into(),
@@ -159,6 +157,7 @@ impl Settings {
 
     pub fn select_backend(&mut self, backend_id: &str, key: String) -> Result<(), String> {
         validate_backend_id(backend_id)?;
+        validate_saved_key(backend_id, &key)?;
         if self.backend_id != backend_id {
             self.routing.clear();
         }
@@ -251,9 +250,7 @@ impl Settings {
                 .and_then(Value::as_str)
         }
         .unwrap_or("");
-        if backend_id == "openrouter" && !api_key.is_empty() {
-            validate_key(api_key)?;
-        }
+        validate_saved_key(backend_id, api_key)?;
         let legacy_model = legacy
             .and_then(|value| value.get("model"))
             .and_then(Value::as_str);
@@ -356,6 +353,17 @@ pub fn validate_key(key: &str) -> Result<(), String> {
     crate::backend::validate_credential("openrouter", key)
 }
 
+fn validate_saved_key(backend_id: &str, key: &str) -> Result<(), String> {
+    if !key.is_empty()
+        && crate::backend::available()
+            .iter()
+            .any(|provider| provider.id == backend_id && provider.key_url.is_some())
+    {
+        crate::backend::validate_credential(backend_id, key)?;
+    }
+    Ok(())
+}
+
 pub fn directory(
     override_path: Option<PathBuf>,
     user_home: Option<PathBuf>,
@@ -386,3 +394,6 @@ mod tests;
 
 #[cfg(test)]
 mod recovery_tests;
+
+#[cfg(test)]
+mod api_key_tests;
