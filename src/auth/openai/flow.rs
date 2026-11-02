@@ -316,6 +316,9 @@ fn handle_callback(
     cancel: &Cancellation,
 ) -> Result<Option<std::collections::BTreeMap<String, String>>, String> {
     stream
+        .set_nonblocking(false)
+        .map_err(|_| "Could not configure callback connection")?;
+    stream
         .set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|_| "Could not configure callback connection")?;
     stream

@@ -18,20 +18,19 @@ fn send_callback(port: u16, target: &[u8]) -> String {
 #[test]
 fn callback_accepts_fragmented_headers() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
-    let receiver = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        handle_callback(&mut stream, port, "expected", &Cancellation::default())
-    });
+    let receiver =
+        std::thread::spawn(move || await_callback(&listener, "expected", &Cancellation::default()));
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
     client
         .write_all(b"GET /auth/callback?code=secret&state=expected HTTP/1.1\r\nHo")
         .unwrap();
-    std::thread::sleep(Duration::from_millis(20));
+    std::thread::sleep(Duration::from_millis(250));
     client
         .write_all(format!("st: 127.0.0.1:{port}\r\n\r\n").as_bytes())
         .unwrap();
-    assert_eq!(receiver.join().unwrap().unwrap().unwrap()["code"], "secret");
+    assert_eq!(receiver.join().unwrap().unwrap()["code"], "secret");
 }
 
 #[test]
