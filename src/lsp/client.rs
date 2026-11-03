@@ -94,11 +94,7 @@ impl Client {
             return Err("LSP settings changed before startup".into());
         }
         let executable = super::executable::resolve(profile, root)?;
-        let mut command = Command::new(executable);
-        command.args(&profile.arguments).current_dir(root);
-        for (key, value) in &profile.environment {
-            command.env(key, value);
-        }
+        let mut command = server_command(executable, profile, root);
         let wire = Transport::spawn(&mut command, cancel)?;
         let mut client = Self {
             wire,
@@ -343,6 +339,17 @@ impl Client {
         }
         Ok(())
     }
+}
+
+/// Provider credentials never reach the server; the profile's own variables still apply.
+fn server_command(executable: PathBuf, profile: &Profile, root: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command.args(&profile.arguments).current_dir(root);
+    crate::auth::isolate_environment(&mut command);
+    for (key, value) in &profile.environment {
+        command.env(key, value);
+    }
+    command
 }
 
 fn client_capabilities() -> Value {

@@ -1,5 +1,6 @@
 use super::*;
 use crate::lsp::{Request, Runtime, Store, fixture::Fixture};
+use std::ffi::OsStr;
 
 fn definition(runtime: &Runtime, fixture: &Fixture, name: &str) -> crate::lsp::Outcome {
     runtime.execute(
@@ -140,4 +141,27 @@ fn server_errors_keep_their_code_and_retry_hint() {
 #[test]
 fn capabilities_do_not_request_work_done_progress() {
     assert!(client_capabilities().get("window").is_none());
+}
+
+#[test]
+fn server_command_withholds_provider_credentials_but_keeps_profile_variables() {
+    let names = crate::backend::available()
+        .iter()
+        .flat_map(|backend| backend.credential_env.iter().copied())
+        .collect::<Vec<_>>();
+    let mut profile = Profile::draft_guided_rust();
+    profile
+        .environment
+        .insert(names[0].into(), "profile value".into());
+    let command = server_command(PathBuf::from("server"), &profile, Path::new("."));
+    let value = |name: &str| {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new(name))
+            .map(|(_, value)| value)
+    };
+    assert_eq!(value(names[0]), Some(Some(OsStr::new("profile value"))));
+    for name in names.iter().filter(|name| **name != names[0]) {
+        assert_eq!(value(name), Some(None), "{name} reached the server");
+    }
 }
