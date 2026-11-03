@@ -23,6 +23,74 @@ fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     )
 }
 
+fn press(app: &mut App, code: u16) {
+    app.input(crate::tui::Decoded::Key(crate::tui::terminal::Key {
+        code,
+        modifiers: 0,
+        character: code,
+    }))
+    .unwrap();
+}
+
+fn typed(app: &mut App, text: &str) {
+    app.input(crate::tui::Decoded::Text(text.into())).unwrap();
+}
+
+fn panel(app: &App) -> Panel {
+    match app.state.selector.as_ref().map(|menu| &menu.purpose) {
+        Some(Purpose::Lsp(panel)) => *panel,
+        _ => panic!("no LSP panel is open"),
+    }
+}
+
+#[test]
+fn custom_server_is_created_by_typing_and_pasting_into_fields() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.open_lsp(true);
+    press(&mut app, 13); // Add server
+    typed(&mut app, "3"); // Custom server
+    assert_eq!(panel(&app), Panel::Form);
+    typed(&mut app, "1");
+    assert_eq!(panel(&app), Panel::Field(Field::Name));
+    typed(&mut app, "Fixtur LSPx");
+    press(&mut app, 8); // Backspace
+    for _ in 0..4 {
+        press(&mut app, 37); // Left
+    }
+    typed(&mut app, "e");
+    press(&mut app, 13);
+    assert_eq!(panel(&app), Panel::Form);
+    typed(&mut app, "2");
+    app.input(crate::tui::Decoded::Paste(
+        r"C:\Tools\fixture-lsp.exe".into(),
+    ))
+    .unwrap();
+    press(&mut app, 13);
+    typed(&mut app, "3");
+    typed(&mut app, "fixture: .fx .fxi");
+    press(&mut app, 13);
+    typed(&mut app, "5"); // Advanced
+    typed(&mut app, "1"); // Arguments
+    typed(&mut app, r#""\\srv\share\my dir" --stdio"#);
+    press(&mut app, 13);
+    assert_eq!(panel(&app), Panel::Advanced);
+    press(&mut app, 27);
+    typed(&mut app, "7"); // Save server
+    let profiles = app.lsp_store().load().unwrap();
+    assert_eq!(profiles.len(), 1);
+    let saved = &profiles[0];
+    assert_eq!(saved.name, "Fixture LSP");
+    assert_eq!(saved.executable, r"C:\Tools\fixture-lsp.exe");
+    assert_eq!(saved.languages, vec!["fixture"]);
+    assert_eq!(saved.extensions.len(), 2);
+    assert_eq!(saved.arguments, vec![r"\\srv\share\my dir", "--stdio"]);
+    assert_eq!(panel(&app), Panel::Detail);
+    assert!(app.facts().lsp_runtime.statuses().is_empty());
+    assert!(fixture.finish().is_empty());
+}
+
 #[test]
 fn guided_profile_is_enabled_on_draft_and_starts_nothing_on_save() {
     let directory = Directory::new();

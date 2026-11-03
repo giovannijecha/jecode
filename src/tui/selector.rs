@@ -359,7 +359,10 @@ impl Selector {
         self.searchable
             || matches!(
                 self.purpose,
-                Purpose::Key(_) | Purpose::AutoCompact | Purpose::Mcp(super::mcp::Panel::Field(_))
+                Purpose::Key(_)
+                    | Purpose::AutoCompact
+                    | Purpose::Mcp(super::mcp::Panel::Field(_))
+                    | Purpose::Lsp(super::lsp::Panel::Field(_))
             )
     }
     pub fn refresh(&mut self) {

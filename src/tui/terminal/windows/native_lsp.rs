@@ -105,12 +105,20 @@ pub(super) fn console() {
     );
     app.state.selector.as_mut().unwrap().selected = 2;
     press(&mut app, 13);
-    app.state
+    let prefilled = app
+        .state
         .selector
-        .as_mut()
+        .as_ref()
         .unwrap()
         .editor
-        .replace("c: .c .h; cpp: .cc .cpp .hpp".into());
+        .text
+        .chars()
+        .count();
+    for _ in 0..prefilled {
+        press(&mut app, 8); // Backspace through the guided languages.
+    }
+    app.input(Decoded::Text("c: .c .h; cpp: .cc .cpp .hpp".into()))
+        .unwrap();
     press(&mut app, 13);
     paint_app(&app, "cpp: .cc");
     press(&mut app, 27); // Unsaved form returns to Add.
