@@ -5,7 +5,8 @@ use std::path::Path;
 
 impl Client {
     pub fn reconcile(&mut self, path: &Path, language: &str) -> Result<Document, String> {
-        let canonical = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+        let canonical =
+            std::fs::canonicalize(path).map_err(|e| format!("Cannot read LSP document: {e}"))?;
         let current = Document::read(&canonical, language, 0)?;
         self.synchronize(current)
     }
