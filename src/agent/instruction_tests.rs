@@ -137,7 +137,10 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
         .unwrap()
         .as_array()
         .unwrap()[0];
-    assert_eq!(sent, &projection[0]);
+    // The cache-prefix marker is request-only and never reaches a provider.
+    assert_eq!(sent.get("content"), projection[0].get("content"));
+    assert!(projection[0].get("jecode_cache_prefix").is_some());
+    assert!(sent.get("jecode_cache_prefix").is_none());
     assert!(sent.encode().contains("Environment:"));
     assert!(!sent.encode().contains("Legacy harness instructions"));
     let temporary = resumed.tools.temporary_instructions();

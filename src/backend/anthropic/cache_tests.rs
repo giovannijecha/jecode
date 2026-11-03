@@ -262,3 +262,57 @@ fn mid_system_is_limited_to_documented_model_ids() {
         assert_eq!(message.get("role").and_then(Value::as_str), Some(role));
     }
 }
+
+#[test]
+fn shared_instructions_are_cached_apart_from_the_folder_part() {
+    let shared = "Shared agent prompt.";
+    let content = format!("{shared}\n\nEnvironment:\n{{\"working_directory\":\"/a\"}}");
+    let mut messages = vec![Value::object([
+        ("role", Value::string("system")),
+        ("content", Value::string(&content)),
+        ("jecode_cache_prefix", Value::number(shared.len())),
+    ])];
+    for index in 0..6 {
+        messages.push(Value::object([
+            (
+                "role",
+                Value::string(if index % 2 == 0 { "user" } else { "assistant" }),
+            ),
+            ("content", Value::string(format!("Turn {index}"))),
+        ]));
+    }
+    let request = wire::request(
+        "model-a",
+        Effort::Default,
+        &messages,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let system = request.get("system").and_then(Value::as_array).unwrap();
+    let texts: Vec<_> = system
+        .iter()
+        .map(|block| block.get("text").and_then(Value::as_str).unwrap())
+        .collect();
+    assert_eq!(
+        texts[texts.len() - 2..],
+        [shared, "Environment:\n{\"working_directory\":\"/a\"}"]
+    );
+    let shared_block = &system[system.len() - 2];
+    assert_eq!(
+        shared_block.get("cache_control"),
+        Some(&Value::object([
+            ("type", Value::string("ephemeral")),
+            ("ttl", Value::string("1h")),
+        ]))
+    );
+    assert!(system.last().unwrap().get("cache_control").is_none());
+    let encoded = request.encode();
+    assert!(
+        encoded.matches("\"cache_control\"").count() <= 4,
+        "{encoded}"
+    );
+    assert!(!encoded.contains("jecode_cache_prefix"));
+}

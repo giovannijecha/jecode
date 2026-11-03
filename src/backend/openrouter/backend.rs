@@ -87,6 +87,7 @@ impl Backend for OpenRouter {
                 let mut projected = conversation::project(message, &origin);
                 if let Value::Object(fields) = &mut projected {
                     fields.remove("jecode_request_state");
+                    fields.remove("jecode_cache_prefix");
                 }
                 projected
             })

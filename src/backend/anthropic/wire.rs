@@ -83,6 +83,8 @@ fn build_request(
     let active_start = attachments::active_view_start(messages);
     let mut views = Vec::new();
     let mut latest_state = None;
+    // The system block every conversation shares, cached on its own.
+    let mut shared = None;
     for (index, message) in messages.iter().enumerate() {
         let role = message.get("role").and_then(Value::as_str);
         if role != Some("tool") && !results.is_empty() {
@@ -96,9 +98,20 @@ fn build_request(
         }
         match role {
             Some("system" | "developer") => {
-                if let Some(content) = message.get("content").and_then(Value::as_str)
-                    && !content.is_empty()
-                {
+                let Some(content) = message.get("content").and_then(Value::as_str) else {
+                    continue;
+                };
+                let prefix = message.get("jecode_cache_prefix").and_then(Value::as_usize);
+                if let Some(end) = prefix.filter(|end| {
+                    shared.is_none()
+                        && *end > 0
+                        && *end < content.len()
+                        && content.is_char_boundary(*end)
+                }) {
+                    shared = Some(instructions.len());
+                    instructions.push(content[..end].to_owned());
+                    instructions.push(content[end..].trim_start().to_owned());
+                } else if !content.is_empty() {
                     instructions.push(content.to_owned());
                 }
             }
@@ -176,8 +189,15 @@ fn build_request(
         })
         .collect();
     let mut system = system;
-    if let Some(Value::Object(last)) = system.last_mut() {
-        last.insert("cache_control".into(), ephemeral());
+    // Tools and the shared block are the same for every conversation, so
+    // they stay cached for an hour across folders, sessions and agents. The
+    // folder-specific remainder is covered by the history breakpoints.
+    let marked = match shared {
+        Some(index) => system.get_mut(index).map(|block| (block, long_lived())),
+        None => system.last_mut().map(|block| (block, ephemeral())),
+    };
+    if let Some((Value::Object(block), control)) = marked {
+        block.insert("cache_control".into(), control);
     }
     let empty_system = system.is_empty();
     let mut request = Value::object([
@@ -247,6 +267,13 @@ fn build_request(
 
 fn ephemeral() -> Value {
     Value::object([("type", Value::string("ephemeral"))])
+}
+
+fn long_lived() -> Value {
+    Value::object([
+        ("type", Value::string("ephemeral")),
+        ("ttl", Value::string("1h")),
+    ])
 }
 
 fn supports_mid_system(model: &str) -> bool {

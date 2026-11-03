@@ -81,6 +81,14 @@ impl Agent {
             let content = format!("{native}\n\n{}", self.redact(&skills));
             fields.insert("content".into(), Value::string(content));
         }
+        // The prompt opens every conversation's instructions; adapters with
+        // explicit cache breakpoints keep it apart from the folder's part.
+        if let Value::Object(fields) = &mut message {
+            fields.insert(
+                "jecode_cache_prefix".into(),
+                Value::number(PROMPT.trim().len()),
+            );
+        }
         message
     }
 
