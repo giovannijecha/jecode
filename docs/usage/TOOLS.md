@@ -38,6 +38,7 @@ of them. Exact arguments and limits are in the
 | `web` | Fetch, download or crawl web pages over HTTP(S). |
 | `browser` | Control an installed Chrome or Edge browser. |
 | `mcp` | Discover and call remote tools from globally configured [MCP connections](MCP.md). |
+| `lsp` | Query definitions, references and document diagnostics through enabled [language servers](LSP.md). |
 | `agent` | Delegate work to [collaborators](COLLABORATION.md). Main agent only. |
 | `ask_user` | Ask you up to four [questions](QUESTIONS_AND_PLANS.md) and wait for answers. Main agent only. |
 | `todo_list` | Keep a [plan](QUESTIONS_AND_PLANS.md#plans) for the conversation. |
@@ -50,6 +51,10 @@ configured connections. Read, Workspace and Full do not govern MCP calls: an
 enabled connection follows the permissions granted at its service, including
 in Read. Collaborators use the same connections. Local checkpoints cannot undo
 remote changes.
+
+LSP likewise follows the user's server enablement at all local levels. Its
+selected executable runs as the user, and a root is analysis context rather
+than confinement. Each conversation owns and reuses its own server instances.
 
 ## Files
 

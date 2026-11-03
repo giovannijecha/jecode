@@ -8,7 +8,7 @@ writing [skills](SKILLS.md).
 ## Arguments
 
 Every tool accepts an optional boolean `parallel`. The routine tools `read`,
-`list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser` and `mcp` also
+`list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser`, `mcp` and `lsp` also
 accept two display-only strings: `work`, a short label that groups related calls
 into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
 `description`, a caption for the call's card. `agent` accepts `work` too.
@@ -29,6 +29,7 @@ Neither changes what the call does.
 | `web` | `action`; `url` for `fetch` and `download`; `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` |
 | `browser` | `action`; `url` for `navigate`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
 | `mcp` | `action`: `list`, `tools` or `call`; `connection` for `tools` and `call`; `tool` for `call` | `arguments` (JSON object), `query`, `offset`, `limit` |
+| `lsp` | `action`: `status`, `definition`, `references` or `diagnostics`; `path` except for status; `line` and `column` for positional actions | `server`, `include_declaration` |
 | `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
 | `ask_user` | `questions` | See [Questions and plans](QUESTIONS_AND_PLANS.md#question-format). |
 | `todo_list` | `action` | See [Questions and plans](QUESTIONS_AND_PLANS.md#plan-format). |

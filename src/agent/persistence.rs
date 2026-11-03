@@ -27,6 +27,7 @@ impl Agent {
             // Startup and the TUI report an unreadable mcp.json; ordinary
             // work continues and the mcp tool returns the error when called.
             let _ = self.configure_mcp(home);
+            let _ = self.configure_lsp(home);
             let mut document = Document::new(
                 self.tools.root().to_path_buf(),
                 if self.has_model() {

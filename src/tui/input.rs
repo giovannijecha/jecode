@@ -349,6 +349,8 @@ impl App {
             13 if !key.shift() && !key.alt() && !key.ctrl() => {
                 if matches!(menu.purpose, Purpose::Mcp(super::mcp::Panel::Field(_))) {
                     self.save_mcp_field();
+                } else if matches!(menu.purpose, Purpose::Lsp(super::lsp::Panel::Field(_))) {
+                    self.save_lsp_field();
                 } else if matches!(menu.purpose, Purpose::Key(_)) {
                     self.save_key();
                 } else if matches!(menu.purpose, Purpose::AutoCompact) {
@@ -356,7 +358,9 @@ impl App {
                 } else if let Some(choice) = menu.chosen() {
                     self.choose(choice)?;
                 } else {
-                    self.mcp_empty_enter();
+                    if !self.mcp_empty_enter() {
+                        self.lsp_empty_enter();
+                    }
                 }
             }
             _ if menu.accepts_text() => {
@@ -405,6 +409,9 @@ impl App {
         }
     }
     pub(super) fn close_selector(&mut self) {
+        if self.close_lsp_panel() {
+            return;
+        }
         if self.close_mcp_panel() {
             return;
         }

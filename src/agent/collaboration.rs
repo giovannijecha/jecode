@@ -208,6 +208,7 @@ impl Agent {
                 let mut result = observer
                     .workspace(id()?)?
                     .integrate(&paths, required(arguments, "expected_review_token")?)?;
+                self.tools.invalidate_analysis();
                 if let Value::Object(fields) = &mut result {
                     fields.insert("checkpoint".into(), checkpoint);
                 }
@@ -257,6 +258,7 @@ impl Agent {
         child.enable_checkpoints(&child_home);
         child.skills.configure(&home);
         let _ = child.configure_mcp(&home);
+        let _ = child.configure_lsp(&home);
         child
             .tools
             .share_project_map_notes(&home, self.tools.root());

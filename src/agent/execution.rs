@@ -234,6 +234,12 @@ impl Agent {
         {
             fields.remove("display_number");
         }
+        if call.name == "lsp"
+            && let Some(label) = self.tools.lsp_label(&arguments)
+            && let Value::Object(fields) = &mut arguments
+        {
+            fields.insert("server_name".into(), Value::string(label));
+        }
         if call.name == "agent"
             && let Some(id) = arguments.get("id").and_then(Value::as_str)
             && let Some(number) = self.collaboration.display_number(id)

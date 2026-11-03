@@ -12,6 +12,7 @@ mod unix;
 mod windows;
 
 mod capture;
+pub(crate) mod duplex;
 use capture::{Capture, Events, capture};
 #[cfg(windows)]
 pub(crate) use windows::{CREATE_NO_WINDOW, ordinary_path, sandbox_policy};
@@ -235,6 +236,7 @@ fn start(
         stdout: child_stdout,
         writer,
         owner,
+        stdin: _,
     } = unix::spawn(command, input, cancellation)?;
     #[cfg(windows)]
     let windows::Spawned {
@@ -244,6 +246,7 @@ fn start(
         completion,
         control,
         target_pid,
+        stdin: _,
     } = if options.leaf {
         windows::spawn_leaf(command, input)?
     } else {

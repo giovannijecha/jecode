@@ -41,6 +41,7 @@ impl Selector {
                 ),
                 setting("Providers", String::new(), Setting::Providers),
                 setting("MCP", String::new(), Setting::Mcp),
+                setting("LSP", String::new(), Setting::Lsp),
             ],
         );
         "saved defaults".clone_into(&mut menu.context);

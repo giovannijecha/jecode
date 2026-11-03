@@ -29,6 +29,8 @@ pub(super) struct Facts {
     pub charges: Option<String>,
     /// The user skill library's directory.
     pub skills: Option<PathBuf>,
+    /// Live LSP instances remain observable while a turn owns the agent.
+    pub lsp_runtime: crate::lsp::Runtime,
 }
 
 impl Facts {
@@ -46,6 +48,7 @@ impl Facts {
             endpoints: agent.cached_endpoints(agent.model()),
             charges: agent.charges().describe(),
             skills: agent.skill_directory(),
+            lsp_runtime: agent.lsp_runtime(),
         }
     }
 

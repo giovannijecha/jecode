@@ -61,6 +61,7 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | Agent loop, context and backends | `agent::backend_tests` drives two synthetic protocols through tools, compaction, save and resume. `backend::openrouter`, `backend::openai` and `backend::anthropic` use loopback servers for their adapters. |
 | Accounts | `auth::openai`, `auth::anthropic`, `auth::accounts`. |
 | MCP | `mcp::` covers protocol, storage and OAuth with isolated loopback servers; `agent::mcp_tests` checks model-to-server dispatch, session reuse and redaction; `tui::mcp::` covers native panels and async configuration. |
+| LSP | `lsp::` uses an original child-process server for framing, synchronization, capabilities and lifecycle. `agent::lsp_tests` covers model dispatch at all local permission levels; `process::duplex` covers persistent I/O and descendant cleanup. `tui::lsp` and card tests cover B15. |
 | Routing | `agent::routing_tests`, `backend::openrouter`. |
 | Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
 | Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
@@ -89,6 +90,7 @@ diagnostics retain the end of the terminal output so child failures stay visible
 ```text
 cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::windows::native_tests::native_lsp::native_windows_lsp_panels -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 ```
@@ -128,6 +130,38 @@ Interactive `exec` tests need `cc` on first use on Unix, plus `/proc` on Linux
 or `/bin/ps` on macOS. The compiled helper is cached under
 `target/measurements/pty-cache`. Unix interrupt probes also use the system
 `stty` and `od`, and owner-loss tests use `ps`.
+
+## Opt-in language-server interoperability
+
+Ordinary LSP tests compile an original Rust fixture server and require no
+installed language server. The ignored interoperability tests use executables
+explicitly selected by the developer, never download them and never read the
+user's LSP configuration. They create isolated projects and configuration.
+
+For example, in PowerShell after the normal toolchain setup:
+
+```powershell
+$env:JECODE_LSP_RUST = 'C:\Tools\rust-analyzer.exe'
+$env:JECODE_LSP_CLANGD = 'C:\Tools\clangd.exe'
+cargo test --locked --offline tools::lsp::live_tests -- --ignored --nocapture --test-threads=1
+```
+
+On Unix set the same two environment variables to the selected executables.
+Use rust-analyzer compatible with the pinned Rust 1.95 toolchain. An official
+toolchain component may need its compiler library directory on the server's
+PATH; `JECODE_LSP_RUST_PATH` overrides PATH for that test server only.
+`JECODE_LSP_RUST_TOOLCHAIN` selects the test server's Cargo toolchain, default
+`1.95.0`. These variables do not configure Jecode's application defaults.
+
+The Rust fixture disables sysroot source loading, build scripts and proc macros
+and uses offline Cargo checks; it does not install rust-src. Cargo diagnostics
+and analyzer diagnostics may arrive through different push/pull channels.
+The C++ fixture supplies explicit compile commands and disables background
+indexing. Both tests cover navigation, references, an introduced and updated
+error, a warning, clearing diagnostics, external edits and unopened dependencies,
+spaces, non-BMP text,
+CRLF and instance reuse. Their timings describe these small fixtures only.
+Record actual server versions and executed platforms when reporting results.
 
 ## Windows command confinement
 

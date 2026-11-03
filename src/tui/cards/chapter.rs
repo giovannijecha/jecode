@@ -38,6 +38,7 @@ pub fn groupable(tool: &Tool<'_>) -> bool {
             | "web"
             | "browser"
             | "mcp"
+            | "lsp"
     ) && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
         && (tool.name != "map" || matches!(field(tool.arguments, "action"), "" | "overview"))
 }
@@ -267,15 +268,29 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         return agents::member(tool, columns);
     }
     let state = Status::of(tool);
-    if tool.name == "mcp" {
+    if tool.name == "mcp" || tool.name == "lsp" {
         let mut line = named(tool);
-        line.push(&format!(" {}", super::mcp::target(tool)), BODY);
-        let detail = tool.result.map(crate::mcp::summary).unwrap_or_else(|| {
-            format!(
-                "Running · {}",
-                timer::duration(tool.presentation.duration().unwrap_or_default())
-            )
-        });
+        let target = if tool.name == "lsp" {
+            super::lsp::target(tool, columns.saturating_sub(12))
+        } else {
+            super::mcp::target(tool)
+        };
+        line.push(&format!(" {target}"), BODY);
+        let detail = tool
+            .result
+            .map(|result| {
+                if tool.name == "lsp" {
+                    super::lsp::summary_for(result, field(tool.arguments, "action"))
+                } else {
+                    crate::mcp::summary(result)
+                }
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "Running · {}",
+                    timer::duration(tool.presentation.duration().unwrap_or_default())
+                )
+            });
         let suffix = format!("  {}", text::clean(&detail));
         line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix).min(columns / 2)));
         line.push(

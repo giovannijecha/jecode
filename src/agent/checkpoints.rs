@@ -11,11 +11,16 @@ use std::sync::Arc;
 pub(crate) struct CommandWork {
     store: Arc<Store>,
     words: Vec<String>,
+    lsp: crate::lsp::Runtime,
 }
 
 impl CommandWork {
     pub(crate) fn run(self) -> Result<Output, String> {
-        command::run(&self.store, &self.words)
+        let result = command::run(&self.store, &self.words);
+        if self.words.first().is_some_and(|word| word == "restore") {
+            self.lsp.invalidate_paths(&[]);
+        }
+        result
     }
 }
 
@@ -41,6 +46,7 @@ impl Agent {
         Ok(CommandWork {
             store: Arc::clone(session.store()?),
             words: command::split(arguments)?,
+            lsp: self.tools.lsp_runtime(),
         })
     }
 

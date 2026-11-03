@@ -13,6 +13,12 @@ connection in Settings → **MCP** in the TUI, or in `~/.jecode/mcp.json`, to
 block future calls globally. Server hints do not grant permissions, and local
 checkpoints cannot undo a remote operation.
 
+[LSP](LSP.md) calls likewise follow explicit global server enablement at every
+local level. Enabled language servers run as your user with their configured
+runtime/toolchain behavior. Their root is analysis context, not filesystem or
+network confinement. Turn Off in Settings → LSP blocks new requests and stops
+owned instances. Local file and command tools retain the level's policy.
+
 ## Levels
 
 The working folder is the directory you started Jecode in, with all its

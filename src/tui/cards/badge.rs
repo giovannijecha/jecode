@@ -19,7 +19,7 @@ fn family(name: &str) -> Surface {
         "Bash" | "Exec" | "Process" => BADGE_SHELL,
         "Agents" | "Todo" | "Ask user" => BADGE_COORD,
         name if name.starts_with("AGENT") || name.starts_with("Agent") => BADGE_COORD,
-        "MCP" => BADGE_IDLE,
+        "MCP" | "LSP" => BADGE_IDLE,
         _ => BADGE_READ,
     }
 }
@@ -29,7 +29,7 @@ pub(super) fn ink(name: &str) -> Style {
     match name {
         "Update" | "Write" => KEYWORD,
         "Bash" | "Exec" | "Process" => LIT,
-        "MCP" => crate::tui::theme::MUTED,
+        "MCP" | "LSP" => crate::tui::theme::MUTED,
         _ => ACCENT,
     }
 }

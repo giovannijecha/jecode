@@ -13,6 +13,7 @@ mod diff;
 mod discovery;
 mod edit_fallback;
 mod failure;
+mod lsp;
 mod map;
 mod mcp;
 mod presentation;
@@ -68,6 +69,25 @@ impl Status {
             match result.get("outcome").and_then(Value::as_str) {
                 Some("unknown") => return Self::Unknown,
                 Some("not_executed") => return Self::Stopped,
+                _ => {}
+            }
+        }
+        if tool.name == "lsp" {
+            match result.get("status").and_then(Value::as_str) {
+                Some("cancelled" | "timed_out" | "stopped" | "settings_changed") => {
+                    return Self::Stopped;
+                }
+                Some(
+                    "crashed"
+                    | "restart_suppressed"
+                    | "not_found"
+                    | "failed"
+                    | "configuration_error"
+                    | "invalid_input"
+                    | "protocol_error",
+                ) => {
+                    return Self::Failed;
+                }
                 _ => {}
             }
         }
@@ -143,13 +163,15 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         agents::card(tool, columns, keycap)
     } else if tool.name == "mcp" {
         mcp::card(tool, columns, keycap)
+    } else if tool.name == "lsp" {
+        lsp::card(tool, columns, keycap)
     } else if matches!(tool.name, "read" | "write" | "edit") {
         file_card(tool, columns, keycap)
     } else {
         rhythm::card(tool, columns, keycap)
     };
     // An expanded turn names the way back on its first title row.
-    if keycap && tool.presentation.expanded && !card.rows.is_empty() {
+    if keycap && tool.presentation.expanded && tool.name != "lsp" && !card.rows.is_empty() {
         let title = card.rows.remove(0);
         card.rows.splice(0..0, hint(title, "collapse", columns));
     }
@@ -271,7 +293,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
         "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
-        | "agent" | "mcp" => crate::events::target(tool.name, tool.arguments),
+        | "agent" | "mcp" | "lsp" => crate::events::target(tool.name, tool.arguments),
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
     (name, target)
@@ -293,6 +315,7 @@ fn title_name(tool: &str) -> &str {
         "browser" => "Browser",
         "agent" => "Agents",
         "mcp" => "MCP",
+        "lsp" => "LSP",
         other => other,
     }
 }

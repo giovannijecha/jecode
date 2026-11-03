@@ -4,7 +4,7 @@ use super::*;
 fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     let tools = definitions();
     let functions = tools.as_array().unwrap();
-    assert_eq!(functions.len(), 16);
+    assert_eq!(functions.len(), 17);
     assert!(functions.iter().all(|tool| tool.get("function").is_none()));
     for (name, action) in [("web", "crawl"), ("browser", "cdp")] {
         let function = functions

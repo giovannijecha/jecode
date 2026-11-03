@@ -81,6 +81,9 @@ jobs:
       - name: Verify native Windows interactive input
         if: runner.os == 'Windows'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native Windows LSP panels
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_lsp::native_windows_lsp_panels -- --exact --ignored --nocapture --test-threads=1
       - name: Verify native Linux PTY
         if: runner.os == 'Linux'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1

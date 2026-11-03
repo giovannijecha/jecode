@@ -6,6 +6,7 @@ pub(crate) mod edit;
 mod exec;
 mod files;
 mod interactive;
+mod lsp;
 mod mcp;
 mod network;
 pub mod processes;
@@ -81,6 +82,9 @@ pub struct Tools {
     mcp_home: Option<PathBuf>,
     mcp_redactor: crate::redact::Redactor,
     mcp_runtime: crate::mcp::Runtime,
+    lsp_home: Option<PathBuf>,
+    lsp_runtime: crate::lsp::Runtime,
+    lsp_redactor: crate::redact::Redactor,
     project_map: crate::project_map::Map,
 }
 
@@ -108,6 +112,9 @@ impl Tools {
             mcp_home: None,
             mcp_redactor: crate::redact::Redactor::empty(),
             mcp_runtime: crate::mcp::Runtime::default(),
+            lsp_home: None,
+            lsp_runtime: crate::lsp::Runtime::default(),
+            lsp_redactor: crate::redact::Redactor::empty(),
         })
     }
 
@@ -354,6 +361,7 @@ impl Tools {
                         }
                         Ok((result, None))
                     }
+                    "lsp" => Ok((self.lsp(&arguments, cancellation), None)),
                     "mcp" => Ok((
                         crate::mcp::execute_with(
                             &self.mcp_runtime,
@@ -378,6 +386,21 @@ impl Tools {
             });
         let (result, change) =
             result.unwrap_or_else(|error| (Value::object([("error", Value::string(error))]), None));
+        // Reconcile actual disk state independently of presentation events.
+        // Commands may change files even when they return a failure.
+        let refresh_analysis = matches!(name, "write" | "edit" | "bash" | "exec")
+            || matches!(name, "process" | "checkpoint")
+                && json::parse(arguments).ok().is_some_and(|arguments| {
+                    arguments.get("action").and_then(Value::as_str)
+                        == Some(if name == "process" {
+                            "write"
+                        } else {
+                            "restore"
+                        })
+                });
+        if refresh_analysis {
+            self.lsp_runtime.invalidate_paths(&[]);
+        }
         Execution { result, change }
     }
 

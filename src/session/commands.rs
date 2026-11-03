@@ -15,7 +15,7 @@ impl Command {
                 GROUPS[0]
             }
             "/model" | "/effort" | "/routing" | "/permissions" => GROUPS[1],
-            "/settings" | "/mcp" | "/help" => GROUPS[3],
+            "/settings" | "/mcp" | "/lsp" | "/help" => GROUPS[3],
             _ => GROUPS[2],
         }
     }
@@ -29,7 +29,7 @@ impl Command {
     }
 }
 
-pub const COMMANDS: [Command; 20] = [
+pub const COMMANDS: [Command; 21] = [
     Command {
         name: "/new",
         description: "Start a new conversation",
@@ -77,6 +77,12 @@ pub const COMMANDS: [Command; 20] = [
         description: "Inspect globally configured MCP connections",
         tui_usage: "/mcp",
         plain_usage: Some("/mcp"),
+    },
+    Command {
+        name: "/lsp",
+        description: "Inspect configured language servers and this conversation's instances",
+        tui_usage: "/lsp",
+        plain_usage: Some("/lsp"),
     },
     Command {
         name: "/init",

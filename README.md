@@ -84,6 +84,7 @@ quit, and `/help` or F1 for commands and common shortcuts.
   reading the agent's work.
 - [Permissions](docs/usage/PERMISSIONS.md): what the agent may do, and approvals.
 - [MCP connections](docs/usage/MCP.md): connect remote tools from Settings.
+- [Language servers](docs/usage/LSP.md): query definitions, references and diagnostics.
 - [Project instructions](docs/usage/PROJECT_INSTRUCTIONS.md): give the agent
   your project's rules with `AGENTS.md`.
 - [Checkpoints](docs/usage/CHECKPOINTS.md): undo changes made by a tool call.

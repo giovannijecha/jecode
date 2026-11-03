@@ -5,6 +5,7 @@ mod checkpoints;
 pub mod commands;
 mod copy;
 pub(crate) mod delete;
+mod lsp;
 mod permission;
 mod persistence;
 mod processes;
@@ -188,6 +189,14 @@ fn chat_inner(
                 agent.record_local("/mcp", &summary);
                 writeln!(output, "{}", agent.redactor().text(&text))
                     .map_err(|error| error.to_string())
+            }
+            ("/lsp", "") => {
+                let home = config
+                    .store
+                    .path()
+                    .parent()
+                    .ok_or("Missing configuration directory")?;
+                lsp::print(agent, home, output)
             }
             ("/settings", "") => config.configure(agent, input, output).map(|()| {
                 agent.record_local(line, "Settings closed · current conversation kept");
