@@ -22,7 +22,9 @@ fn run(runtime: &Runtime, fixture: &Fixture, path: PathBuf) -> Outcome {
 }
 
 fn wait_for(fixture: &Fixture, text: &str, failure: &str) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // Shutdown includes the fixture's slow reply and the handshake timeouts;
+    // a loaded parallel run needs headroom beyond their nominal 1.2 s.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !fs::read_to_string(fixture.marker())
         .unwrap_or_default()
         .contains(text)

@@ -443,6 +443,7 @@ pub fn process_status(result: &Value) -> Option<&str> {
 mod description;
 mod lsp;
 pub use description::{description, target};
+pub(crate) use lsp::diagnostic_counts;
 
 #[cfg(test)]
 mod discovery_tests;

@@ -48,7 +48,7 @@ pub(super) fn summary(result: &Value) -> String {
 
 /// Errors, warnings and findings, preferring the totals recorded before inline
 /// truncation; `None` when the result carries neither totals nor findings.
-fn diagnostic_counts(result: &Value) -> Option<(usize, usize, usize)> {
+pub(crate) fn diagnostic_counts(result: &Value) -> Option<(usize, usize, usize)> {
     let total = |key| result.get(key).and_then(Value::as_usize);
     let diagnostics = result.get("diagnostics").and_then(Value::as_array);
     if let (Some(errors), Some(warnings)) = (total("total_errors"), total("total_warnings")) {

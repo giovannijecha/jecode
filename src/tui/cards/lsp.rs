@@ -1,6 +1,7 @@
 //! B15 language-server calls use the existing B2 card grammar.
 use super::{Card, Status, Tool, badge, hint, line_rows};
 use crate::{
+    events::diagnostic_counts,
     json::Value,
     tui::{
         line::Line,
@@ -305,30 +306,6 @@ pub(super) fn summary_for(result: &Value, action: &str) -> String {
         text.push_str(detail);
     }
     text::clean(&text)
-}
-
-/// Errors, warnings and findings, preferring the totals recorded before inline
-/// truncation; `None` when the result carries neither totals nor findings.
-fn diagnostic_counts(result: &Value) -> Option<(usize, usize, usize)> {
-    let total = |key| result.get(key).and_then(Value::as_usize);
-    let diagnostics = result.get("diagnostics").and_then(Value::as_array);
-    if let (Some(errors), Some(warnings)) = (total("total_errors"), total("total_warnings")) {
-        let findings = total("total_diagnostics").or(diagnostics.map(<[_]>::len))?;
-        return Some((errors, warnings, findings));
-    }
-    let diagnostics = diagnostics?;
-    let mut errors = 0;
-    let mut warnings = 0;
-    for finding in diagnostics {
-        match finding.get("severity") {
-            Some(Value::Number(value)) if value == "1" => errors += 1,
-            Some(Value::Number(value)) if value == "2" => warnings += 1,
-            Some(Value::String(value)) if value.eq_ignore_ascii_case("error") => errors += 1,
-            Some(Value::String(value)) if value.eq_ignore_ascii_case("warning") => warnings += 1,
-            _ => {}
-        }
-    }
-    Some((errors, warnings, diagnostics.len()))
 }
 
 #[cfg(test)]
