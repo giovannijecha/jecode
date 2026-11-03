@@ -27,6 +27,7 @@ mod identity;
 mod inbox;
 mod input;
 mod json;
+mod lsp;
 mod mcp;
 mod native;
 mod output;

@@ -23,6 +23,9 @@ impl Tools {
     }
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
         self.project_map.include_credentials(redactor.clone());
+        self.lsp_redactor.include(redactor.clone());
+        self.lsp_runtime
+            .include_credentials(self.lsp_redactor.clone());
         self.outputs.include(redactor);
     }
 
@@ -45,6 +48,7 @@ impl Tools {
     pub fn stop_processes(&self) {
         self.processes.stop_all();
         self.stop_browsers();
+        self.lsp_runtime.shutdown();
     }
 
     pub fn stop_browsers(&self) {

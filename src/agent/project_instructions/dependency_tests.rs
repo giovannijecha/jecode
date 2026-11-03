@@ -85,3 +85,46 @@ fn a_dependency_directory_can_be_the_explicit_launch_root() {
     let root = fs::canonicalize(root).unwrap();
     assert!(load(&root).unwrap().contains("Selected project rules"));
 }
+
+#[test]
+fn temporary_working_directories_do_not_load_nested_instructions() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    fs::write(root.join("AGENTS.md"), "Project rules").unwrap();
+    fs::create_dir_all(root.join("target/cli-isolated/.codex/.tmp/plugins-clone/skill")).unwrap();
+    fs::write(root.join("target/AGENTS.md"), "Build rules").unwrap();
+    fs::write(
+        root.join("target/cli-isolated/.codex/.tmp/plugins-clone/skill/AGENTS.md"),
+        vec![b'x'; BYTE_LIMIT + 1],
+    )
+    .unwrap();
+    let loaded = load(&root).unwrap();
+    assert!(loaded.contains("Project rules"));
+    assert!(loaded.contains("Build rules"));
+    assert!(!loaded.contains("plugins-clone"));
+}
+
+#[test]
+fn root_temporary_working_directory_does_not_load_instructions() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    fs::write(root.join("AGENTS.md"), "Project rules").unwrap();
+    fs::create_dir(root.join(".tmp")).unwrap();
+    fs::write(root.join(".tmp/AGENTS.md"), [0xff, 0xfe]).unwrap();
+    let loaded = load(&root).unwrap();
+    assert!(loaded.contains("Project rules"));
+}
+
+#[test]
+fn a_temporary_directory_can_be_the_explicit_launch_root() {
+    let directory = Directory::new();
+    let root = directory.path().join(".tmp");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("AGENTS.md"), "Selected temporary project rules").unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    assert!(
+        load(&root)
+            .unwrap()
+            .contains("Selected temporary project rules")
+    );
+}

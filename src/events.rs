@@ -152,6 +152,9 @@ fn counted(count: usize, noun: &str) -> String {
 }
 
 fn outcome_summary(name: &str, result: &Value) -> String {
+    if name == "lsp" {
+        return lsp::summary(result);
+    }
     if name == "mcp" {
         let summary = crate::mcp::summary(result);
         return match result.get("outcome").and_then(Value::as_str) {
@@ -438,7 +441,9 @@ pub fn process_status(result: &Value) -> Option<&str> {
 }
 
 mod description;
+mod lsp;
 pub use description::{description, target};
+pub(crate) use lsp::diagnostic_counts;
 
 #[cfg(test)]
 mod discovery_tests;

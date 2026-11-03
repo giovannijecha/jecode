@@ -26,6 +26,7 @@ mod jobs;
 mod key_settings;
 mod keys;
 mod line;
+mod lsp;
 mod markdown;
 mod mcp;
 mod motion;
@@ -109,6 +110,7 @@ struct App {
     imports: Vec<attach::Import>,
     settings_parent: Option<selector::Setting>,
     mcp: mcp::Ui,
+    lsp: lsp::Ui,
     /// Reads the current conversation's processes, including while a worker owns the agent.
     process_observer: crate::tools::processes::Observer,
     collaboration_observer: crate::collaboration::Observer,
@@ -140,6 +142,15 @@ impl App {
     fn new(mut agent: Agent, config: SessionConfig, terminal: Option<Terminal>) -> Self {
         let mcp_error = agent
             .configure_mcp(
+                config
+                    .store
+                    .path()
+                    .parent()
+                    .expect("configuration directory"),
+            )
+            .err();
+        let lsp_error = agent
+            .configure_lsp(
                 config
                     .store
                     .path()
@@ -210,6 +221,7 @@ impl App {
             imports: Vec::new(),
             settings_parent: None,
             mcp: mcp::Ui::default(),
+            lsp: lsp::Ui::default(),
             #[cfg(test)]
             copied_text: None,
             #[cfg(test)]
@@ -225,6 +237,9 @@ impl App {
         app.refresh_todo();
         app.refresh_context();
         if let Some(error) = mcp_error {
+            app.warn(&error);
+        }
+        if let Some(error) = lsp_error {
             app.warn(&error);
         }
         app

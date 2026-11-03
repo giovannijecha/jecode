@@ -418,6 +418,12 @@ impl App {
             } else {
                 self.warn("Usage: /mcp");
             }
+        } else if name.eq_ignore_ascii_case("/lsp") {
+            if arguments.is_empty() {
+                self.open_lsp(false);
+            } else {
+                self.warn("Usage: /lsp");
+            }
         } else {
             return self.copy_command(text);
         }
@@ -435,6 +441,7 @@ pub(super) fn immediate(name: &str) -> bool {
         "/todo",
         "/permissions",
         "/mcp",
+        "/lsp",
     ]
     .iter()
     .any(|command| name.eq_ignore_ascii_case(command))

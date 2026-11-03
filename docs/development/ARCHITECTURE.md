@@ -27,6 +27,7 @@ Paths are relative to `src/`.
 | Project map | `project_map/` |
 | Web and browser | `http.rs`, `http/`, `web/`, `browser/` |
 | Remote MCP tools | `mcp/`, `agent/mcp.rs`, `tools/schema/mcp.rs`, `tui/mcp/` |
+| Language servers | `lsp/`, `process/duplex.rs`, `tools/lsp.rs`, `agent/lsp.rs`, `tui/lsp/` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
 | Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |

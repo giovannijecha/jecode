@@ -22,6 +22,7 @@ from the next turn, *waits* queues it until the turn ends.
 | `/export` | Save the conversation as a JSON file in the working directory. | Waits |
 | `/agents` | Inspect collaborators. See [Collaborating agents](../usage/COLLABORATION.md#watch-in-the-tui). | Now |
 | `/mcp` | Inspect globally configured MCP connections and their tools. Configure them in Settings → MCP. | Now |
+| `/lsp` | Inspect configured language servers and this conversation's observed instances without starting one. Configure in Settings → LSP. | Now |
 | `/ask` | Return to questions the agent is waiting on. | Now |
 | `/todo` | Show the conversation's plan. See [Questions and plans](../usage/QUESTIONS_AND_PLANS.md#plans). | Now |
 | `/exit` | Quit after pending work completes. Alias: `/quit`. | Waits |

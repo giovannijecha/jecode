@@ -4,6 +4,7 @@ use super::{
 };
 use crate::tui::{
     line::Line,
+    lsp::{Field as LspField, Panel as LspPanel},
     mcp::{Field as McpField, Panel as McpPanel},
     motion,
     selector::{Badge, Choice, Hit, Purpose, Selector},
@@ -33,6 +34,22 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
                 panel::indent(Line::new(value, style), columns)
             })
             .collect(),
+        Purpose::Lsp(LspPanel::Detail | LspPanel::Form | LspPanel::Instance) => menu
+            .message
+            .lines()
+            .flat_map(|value| {
+                let value = if columns <= 44 && value.starts_with("Runs as") {
+                    "Runs as · you · not limited by levels"
+                } else {
+                    value
+                };
+                Line::new(value, MUTED)
+                    .wrap(width, true)
+                    .into_iter()
+                    .map(|row| panel::indent(row, columns))
+                    .collect::<Vec<_>>()
+            })
+            .collect(),
         Purpose::Routing { entries, .. } if !menu.filtered.is_empty() => {
             let columns = routing::Columns::new(entries, table_width(menu, columns));
             columns
@@ -44,20 +61,23 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
         _ => Vec::new(),
     };
     let body: panel::Body = match menu.purpose {
-        Purpose::Key(_) | Purpose::AutoCompact | Purpose::Mcp(McpPanel::Field(_)) => {
-            Box::new(|_| Vec::new())
-        }
+        Purpose::Key(_)
+        | Purpose::AutoCompact
+        | Purpose::Mcp(McpPanel::Field(_))
+        | Purpose::Lsp(LspPanel::Field(_)) => Box::new(|_| Vec::new()),
         // The message wraps so a sign-in link stays whole.
-        Purpose::Loading | Purpose::Mcp(McpPanel::Loading) => Box::new(move |_| {
-            let frame = motion::frame();
-            let mut line = motion::caret(frame, None);
-            line.push(" ", MUTED);
-            line = line.append(motion::shimmer(&menu.message, frame, false));
-            line.wrap(width, true)
-                .into_iter()
-                .map(|row| (panel::indent(row, columns), Part::Keep))
-                .collect()
-        }),
+        Purpose::Loading | Purpose::Mcp(McpPanel::Loading) | Purpose::Lsp(LspPanel::Checking) => {
+            Box::new(move |_| {
+                let frame = motion::frame();
+                let mut line = motion::caret(frame, None);
+                line.push(" ", MUTED);
+                line = line.append(motion::shimmer(&menu.message, frame, false));
+                line.wrap(width, true)
+                    .into_iter()
+                    .map(|row| (panel::indent(row, columns), Part::Keep))
+                    .collect()
+            })
+        }
         Purpose::Mcp(McpPanel::List | McpPanel::Methods) if menu.options.is_empty() => {
             Box::new(move |_| {
                 menu.message
@@ -71,6 +91,17 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
                     .collect()
             })
         }
+        Purpose::Lsp(LspPanel::List) if menu.options.is_empty() => Box::new(move |_| {
+            menu.message
+                .split('·')
+                .map(|piece| {
+                    (
+                        panel::indent(Line::new(piece.trim(), MUTED), columns),
+                        Part::Keep,
+                    )
+                })
+                .collect()
+        }),
         _ => Box::new(move |room| list(menu, columns, room)),
     };
     Sheet {
@@ -106,6 +137,33 @@ fn field(menu: &Selector, columns: usize) -> Option<Field> {
             McpField::Header => ("Name: value · Name: removes".into(), "Name: value", ""),
             McpField::ClientId => ("Public OAuth client ID".into(), "", ""),
         },
+        Purpose::Lsp(LspPanel::Field(field)) => match field {
+            LspField::Name => ("Shown in /lsp and tool cards".into(), "", ""),
+            LspField::Executable => ("User-selected executable or absolute path".into(), "", ""),
+            LspField::Languages => (
+                "Language ID and file extensions".into(),
+                "rust: .rs; cpp: .cc .cpp",
+                "",
+            ),
+            LspField::Arguments => (
+                "Quoted arguments keep spaces".into(),
+                "--flag \"two words\"",
+                "",
+            ),
+            LspField::Environment => (
+                "NAME=value · NAME= removes · values hidden".into(),
+                "NAME=value",
+                "",
+            ),
+            LspField::RootMarkers => (
+                "Comma-separated files inside the workspace".into(),
+                "Cargo.toml",
+                "",
+            ),
+            LspField::RootOverride => ("Explicit analysis root".into(), "Automatic", ""),
+            LspField::Initialization | LspField::Settings => ("JSON value".into(), "{}", ""),
+            LspField::Timeout => ("Per request".into(), "100–120000", " ms"),
+        },
         _ if menu.searchable => (format!("Filter {}", noun(menu)), "", ""),
         _ => return None,
     };
@@ -118,7 +176,9 @@ fn field(menu: &Selector, columns: usize) -> Option<Field> {
         room,
         matches!(
             menu.purpose,
-            Purpose::Key(_) | Purpose::Mcp(McpPanel::Field(McpField::Token | McpField::Header))
+            Purpose::Key(_)
+                | Purpose::Mcp(McpPanel::Field(McpField::Token | McpField::Header))
+                | Purpose::Lsp(LspPanel::Field(LspField::Environment))
         ),
     );
     Some(Field {
@@ -177,6 +237,7 @@ fn aside(menu: &Selector) -> Line {
         Purpose::AutoCompact => "this and new conversations".into(),
         Purpose::Mcp(McpPanel::List) => menu.message.clone(),
         Purpose::Mcp(McpPanel::Tools) => count("tool"),
+        Purpose::Lsp(LspPanel::List) => menu.message.clone(),
         _ => String::new(),
     };
     Line::new(&text, MUTED)
@@ -238,6 +299,18 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
             vec![key("Enter", "open settings"), close[0]]
         }
         Purpose::Mcp(McpPanel::Loading) => close.to_vec(),
+        Purpose::Lsp(LspPanel::Field(_)) => vec![key("Enter", "done"), close[0]],
+        Purpose::Lsp(LspPanel::ConfirmRemove) => {
+            return panel::confirm(
+                "Remove this language server?",
+                &[key("Enter", "remove"), key("Esc", "cancel")],
+                width,
+            );
+        }
+        Purpose::Lsp(LspPanel::List) if menu.options.is_empty() => {
+            vec![key("Enter", "open settings"), close[0]]
+        }
+        Purpose::Lsp(LspPanel::Checking) => close.to_vec(),
         Purpose::Loading if menu.title == "Sign out" => vec![],
         Purpose::Loading => close.to_vec(),
         Purpose::Settings => vec![
@@ -396,6 +469,14 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
         Purpose::Settings => BODY,
         Purpose::Mcp(McpPanel::List) => match value.choice {
             Choice::Mcp(_, Some(health)) => health.style(),
+            _ => MUTED,
+        },
+        Purpose::Lsp(LspPanel::List) => match value.fact.as_str() {
+            "Ready" | "Starting" | "Request in progress" => LIT,
+            "Executable not found"
+            | "Check failed"
+            | "Server exited"
+            | "Automatic restart paused" => BAD,
             _ => MUTED,
         },
         _ => MUTED,

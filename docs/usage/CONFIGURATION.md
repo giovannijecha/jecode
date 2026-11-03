@@ -24,6 +24,8 @@ Most settings have two scopes:
 | **Default permissions** | The [permission level](PERMISSIONS.md) new conversations start at. |
 | **Auto-compact at** | When long conversations are compacted; applies immediately, including to the current conversation. |
 | **Providers** | API keys and account sign-in; see [Providers](PROVIDERS.md). |
+| **MCP** | Global remote connections; see [MCP](MCP.md). |
+| **LSP** | Global, explicitly enabled local language servers; see [Language servers](LSP.md). |
 
 In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 
@@ -160,6 +162,7 @@ error.
 | --- | --- |
 | `config.json` | Settings and saved provider API keys. |
 | `mcp.json`, `mcp.lock` | Global [MCP connections](MCP.md), credentials and the shared configuration lock. |
+| `lsp.json`, `lsp.lock` | Global [language servers](LSP.md), environment values and their configuration lock. |
 | `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
 | `skills/` | Your [personal skills](SKILLS.md). |
 | `sessions/<project>/` | [Saved conversations](SESSIONS.md), their complete command output, [attachments](ATTACHMENTS.md) and collaborator data, grouped by project directory. |

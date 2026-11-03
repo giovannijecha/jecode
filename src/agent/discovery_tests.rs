@@ -86,6 +86,7 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
             "search",
             "map",
             "mcp",
+            "lsp",
             "agent",
             "todo_list",
             "ask_user"
@@ -219,6 +220,7 @@ fn openai_namespace_carries_empty_search_receipt_to_the_followup() {
             "search",
             "map",
             "mcp",
+            "lsp",
             "agent",
             "todo_list",
             "ask_user"

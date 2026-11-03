@@ -17,5 +17,6 @@ mod state;
 mod store;
 mod types;
 
+pub(crate) use paths::generated_name;
 pub(crate) use store::Store;
 pub(crate) use types::{Issue, Snapshot, TTL_MILLIS};

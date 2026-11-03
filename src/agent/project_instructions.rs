@@ -79,33 +79,58 @@ fn scan(
     }
 
     let mut children = Vec::<PathBuf>::new();
-    let entries = fs::read_dir(directory).map_err(|error| {
-        format!(
-            "Could not scan {} for {FILE_NAME}: {error}",
-            directory.display()
-        )
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            format!(
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
                 "Could not scan {} for {FILE_NAME}: {error}",
                 directory.display()
-            )
-        })?;
+            ));
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not scan {} for {FILE_NAME}: {error}",
+                    directory.display()
+                ));
+            }
+        };
         if matches!(
             entry.file_name().to_str(),
-            Some(".git" | "node_modules" | ".venv" | "vendor")
+            Some(".git" | ".tmp" | "node_modules" | ".venv" | "vendor")
         ) {
+            // Working files can contain temporary checkouts with unrelated
+            // instructions, including files still being written or removed.
             continue;
         }
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("Could not inspect {}: {error}", entry.path().display()))?;
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect {}: {error}",
+                    entry.path().display()
+                ));
+            }
+        };
         if !file_type.is_dir() {
             continue;
         }
-        let metadata = fs::symlink_metadata(entry.path())
-            .map_err(|error| format!("Could not inspect {}: {error}", entry.path().display()))?;
+        let metadata = match fs::symlink_metadata(entry.path()) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Could not inspect {}: {error}",
+                    entry.path().display()
+                ));
+            }
+        };
         if metadata.is_dir() && !crate::disk::linked(&metadata) {
             children.push(entry.path());
         }
@@ -123,16 +148,22 @@ fn read_instruction(root: &Path, path: &Path) -> Result<Option<String>, String> 
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("Could not inspect {}: {error}", path.display())),
     }
-    let resolved = fs::canonicalize(path)
-        .map_err(|error| format!("Could not resolve {}: {error}", path.display()))?;
+    let resolved = match fs::canonicalize(path) {
+        Ok(resolved) => resolved,
+        Err(error) if error.kind() == ErrorKind::NotFound && vanished(path) => return Ok(None),
+        Err(error) => return Err(format!("Could not resolve {}: {error}", path.display())),
+    };
     if !resolved.starts_with(root) {
         return Err(format!(
             "{} must resolve inside the working directory",
             path.display()
         ));
     }
-    let metadata = fs::metadata(&resolved)
-        .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+    let metadata = match fs::metadata(&resolved) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound && vanished(path) => return Ok(None),
+        Err(error) => return Err(format!("Could not inspect {}: {error}", path.display())),
+    };
     if !metadata.is_file() {
         return Err(format!(
             "{} must be a regular UTF-8 text file",
@@ -145,12 +176,17 @@ fn read_instruction(root: &Path, path: &Path) -> Result<Option<String>, String> 
             path.display()
         ));
     }
-    let file = fs::File::open(&resolved)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let file = match fs::File::open(&resolved) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound && vanished(path) => return Ok(None),
+        Err(error) => return Err(format!("Could not read {}: {error}", path.display())),
+    };
     let mut bytes = Vec::new();
-    file.take(BYTE_LIMIT as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    match file.take(BYTE_LIMIT as u64 + 1).read_to_end(&mut bytes) {
+        Ok(_) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound && vanished(path) => return Ok(None),
+        Err(error) => return Err(format!("Could not read {}: {error}", path.display())),
+    }
     if bytes.len() > BYTE_LIMIT {
         return Err(format!(
             "{} exceeds the 64 KiB instruction limit",
@@ -161,6 +197,10 @@ fn read_instruction(root: &Path, path: &Path) -> Result<Option<String>, String> 
         .map_err(|_| format!("{} must contain valid UTF-8 text", path.display()))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     Ok((!text.trim().is_empty()).then(|| text.to_owned()))
+}
+
+fn vanished(path: &Path) -> bool {
+    matches!(fs::symlink_metadata(path), Err(error) if error.kind() == ErrorKind::NotFound)
 }
 
 #[cfg(test)]

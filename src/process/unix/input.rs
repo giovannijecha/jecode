@@ -89,6 +89,21 @@ impl Pipe {
         &self.path
     }
 
+    /// Keep stdin open after the guardian's handshake. The temporary reader
+    /// makes opening the blocking writer safe even if the target just exited.
+    pub(super) fn into_writer(mut self) -> Result<File, RunError> {
+        let writer = OpenOptions::new()
+            .write(true)
+            .open(&self.path)
+            .map_err(|error| {
+                before_start(format!("Could not retain process input pipe: {error}"))
+            })?;
+        drop(self.reader.take());
+        drop(self.writer.take());
+        self.unlink();
+        Ok(writer)
+    }
+
     pub(super) fn send(
         mut self,
         bytes: Vec<u8>,

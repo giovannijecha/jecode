@@ -39,6 +39,13 @@ and `Cancelled` in amber: the call was not sent. An uncertain remote outcome use
 **Outcome unknown**: the service may already have acted. Check it before
 retrying; a local checkpoint cannot restore it.
 
+LSP calls use the same quiet badge and `server › action` target. Errors and
+warnings found by diagnostics are successful analysis; their counts use the
+existing error/warning colors. Freshness states and document coverage stay
+visible, and a current empty report applies to that file only. Timeout and
+cancellation use stopped; crashes and missing executables use failed. Each
+call keeps one row in a mixed Work chapter; expanding preserves every call.
+
 When the agent supplies a `description` for a command, the card shows it as the
 title and the command beneath it (`$ command` for Bash, `> program args` for
 Exec). Blank output lines are skipped in compact cards. If output was trimmed,
@@ -52,7 +59,7 @@ a background process, use `/terminal`.
 ## Work chapters
 
 Two or more consecutive routine calls (Read, List, Search, Map overview, Bash,
-Exec, Process, Web and Browser) with the same `work` label in the same turn are
+Exec, Process, Web, Browser, MCP and LSP) with the same `work` label in the same turn are
 grouped into a **Work chapter**. The agent chooses the label; calls without one
 are grouped as **Activity**. Assistant text, a different label, a skill read or
 any other tool ends the chapter, and a single call keeps its own card.

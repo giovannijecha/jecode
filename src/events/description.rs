@@ -13,6 +13,7 @@ pub fn description(name: &str, arguments: &Value) -> String {
             | "web"
             | "browser"
             | "mcp"
+            | "lsp"
     ) && let Some(label) = arguments.get("description").and_then(Value::as_str)
         && !label.trim().is_empty()
     {
@@ -23,6 +24,18 @@ pub fn description(name: &str, arguments: &Value) -> String {
 
 /// The invocation target, independently of an optional display description.
 pub fn target(name: &str, arguments: &Value) -> String {
+    if name == "lsp" {
+        let server = arguments
+            .get("server_name")
+            .or_else(|| arguments.get("server"))
+            .and_then(Value::as_str)
+            .unwrap_or("LSP");
+        let action = arguments
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("status");
+        return format!("{server} › {action}");
+    }
     if name == "mcp" {
         let connection = arguments
             .get("connection_name")

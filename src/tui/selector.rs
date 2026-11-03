@@ -5,6 +5,7 @@ use crate::{
     session::commands::match_text,
 };
 
+mod lsp;
 mod mcp;
 mod permissions;
 mod providers;
@@ -19,6 +20,7 @@ pub enum Setting {
     AutoCompact,
     Providers,
     Mcp,
+    Lsp,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderGroup {
@@ -46,6 +48,7 @@ pub enum Choice {
     Remembered,
     Grant(usize),
     Mcp(usize, Option<super::mcp::Health>),
+    Lsp(usize),
 }
 /// The right-aligned status of an option.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +125,7 @@ pub enum Purpose {
         paused: Option<crate::permissions::Level>,
     },
     Mcp(super::mcp::Panel),
+    Lsp(super::lsp::Panel),
 }
 
 pub struct Selector {
@@ -355,7 +359,10 @@ impl Selector {
         self.searchable
             || matches!(
                 self.purpose,
-                Purpose::Key(_) | Purpose::AutoCompact | Purpose::Mcp(super::mcp::Panel::Field(_))
+                Purpose::Key(_)
+                    | Purpose::AutoCompact
+                    | Purpose::Mcp(super::mcp::Panel::Field(_))
+                    | Purpose::Lsp(super::lsp::Panel::Field(_))
             )
     }
     pub fn refresh(&mut self) {

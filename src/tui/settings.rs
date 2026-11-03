@@ -123,9 +123,11 @@ impl App {
                         self.state.selector = Some(Selector::providers_settings())
                     }
                     Setting::Mcp => self.open_mcp(true),
+                    Setting::Lsp => self.open_lsp(true),
                 }
             }
             (Choice::Mcp(index, _), Purpose::Mcp(panel)) => self.choose_mcp(*panel, index),
+            (Choice::Lsp(index), Purpose::Lsp(panel)) => self.choose_lsp(*panel, index),
             (
                 _,
                 Purpose::Permissions { .. }

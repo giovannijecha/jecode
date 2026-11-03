@@ -15,6 +15,7 @@ pub(super) struct Spawned {
     pub stdout: ChildStdout,
     pub writer: Option<JoinHandle<io::Result<()>>>,
     pub owner: Owner,
+    pub stdin: Option<std::fs::File>,
 }
 
 pub(super) struct Owner {
@@ -35,7 +36,25 @@ pub(super) fn spawn(
     bytes: Option<Vec<u8>>,
     cancellation: &Cancellation,
 ) -> Result<Spawned, RunError> {
-    let pipe = bytes.as_ref().map(|_| input::Pipe::open()).transpose()?;
+    spawn_input(command, bytes, cancellation, false)
+}
+
+pub(super) fn spawn_duplex(
+    command: &Command,
+    cancellation: &Cancellation,
+) -> Result<Spawned, RunError> {
+    spawn_input(command, None, cancellation, true)
+}
+
+fn spawn_input(
+    command: &Command,
+    bytes: Option<Vec<u8>>,
+    cancellation: &Cancellation,
+    persistent: bool,
+) -> Result<Spawned, RunError> {
+    let pipe = (bytes.is_some() || persistent)
+        .then(input::Pipe::open)
+        .transpose()?;
     let executable = crate::native::helper("process_unix").map_err(before_start)?;
     let mut helper = Command::new(executable);
     helper
@@ -84,6 +103,18 @@ pub(super) fn spawn(
         match receiver.recv_timeout(Duration::from_millis(10)) {
             Ok((stdout, Ok(header))) if header == *b"READY\n" => {
                 let _ = handshake.join();
+                let (pipe, stdin) = if persistent {
+                    let stdin = match pipe.unwrap().into_writer() {
+                        Ok(stdin) => stdin,
+                        Err(error) => {
+                            let _ = terminate(&mut child);
+                            return Err(error);
+                        }
+                    };
+                    (None, Some(stdin))
+                } else {
+                    (pipe, None)
+                };
                 let writer = pipe.zip(bytes).map(|(pipe, bytes)| {
                     pipe.send(bytes, Arc::clone(&owner.stop), cancellation.clone())
                 });
@@ -92,6 +123,7 @@ pub(super) fn spawn(
                     stdout,
                     writer,
                     owner,
+                    stdin,
                 });
             }
             Ok(_) => {

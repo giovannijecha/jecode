@@ -42,6 +42,9 @@ mod native_auth_panels;
 #[path = "native_mcp.rs"]
 mod native_mcp;
 
+#[path = "native_lsp.rs"]
+mod native_lsp;
+
 #[path = "startup_tests.rs"]
 mod startup_tests;
 
@@ -329,6 +332,12 @@ fn native_console_fixture() {
         native_mcp::console();
         restored(&path);
         println!("NATIVE_MCP_RESTORED");
+        return;
+    }
+    if scenario == "lsp-panels" {
+        native_lsp::console();
+        restored(&path);
+        println!("NATIVE_LSP_RESTORED");
         return;
     }
     if matches!(scenario.as_str(), "background-light" | "background-native") {
