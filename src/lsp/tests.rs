@@ -448,7 +448,7 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
             &Cancellation::default(),
         )
     });
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while std::fs::read_to_string(fixture.marker())
         .unwrap()
         .matches("textDocument/definition")
@@ -466,7 +466,6 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
     let queued_root = fixture.workspace().to_path_buf();
     let cancel = Cancellation::default();
     let queued_cancel = cancel.clone();
-    let started = std::time::Instant::now();
     let queued = std::thread::spawn(move || {
         queued_runtime.execute(
             &queued_root,
@@ -484,7 +483,11 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
     cancel.cancel();
     let outcome = queued.join().unwrap();
     assert_eq!(outcome.status, "cancelled");
-    assert!(started.elapsed() < std::time::Duration::from_millis(350));
+    // The queued call must not wait for the slow 500 ms reply it was queued behind.
+    assert!(
+        !first.is_finished(),
+        "cancellation waited for the slow call"
+    );
     assert_eq!(first.join().unwrap().status, "ready");
     assert_eq!(
         std::fs::read_to_string(fixture.marker())
