@@ -101,6 +101,43 @@ fn diagnostic_eviction_gap_is_scoped_to_evicted_documents() {
 }
 
 #[test]
+fn configuration_resolves_literal_then_dotted_sections_then_all_settings() {
+    let settings = crate::json::parse(
+        r#"{"python":{"analysis":{"typeCheckingMode":"strict"}},"rust-analyzer.cargo":1,"check":{"command":"clippy"}}"#,
+    )
+    .unwrap();
+    let analysis = configuration_section(&settings, Some("python.analysis"));
+    assert_eq!(
+        analysis.get("typeCheckingMode").and_then(Value::as_str),
+        Some("strict")
+    );
+    let literal = configuration_section(&settings, Some("rust-analyzer.cargo"));
+    assert_eq!(literal.as_usize(), Some(1));
+    for section in [Some("rust-analyzer"), Some("python.missing"), None] {
+        assert_eq!(configuration_section(&settings, section), settings);
+    }
+}
+
+#[test]
+fn server_errors_keep_their_code_and_retry_hint() {
+    let failure = |code: &str| {
+        let message = crate::json::parse(&format!(
+            r#"{{"id":1,"error":{{"code":{code},"message":"busy"}}}}"#
+        ))
+        .unwrap();
+        response(message).unwrap_err()
+    };
+    assert_eq!(
+        failure("-32801"),
+        "LSP server error -32801: busy (content modified; retrying may succeed)"
+    );
+    assert!(failure("-32800").contains("retrying may succeed"));
+    assert!(failure("-32802").contains("retrying may succeed"));
+    assert_eq!(failure("-32803"), "LSP server error -32803: busy");
+    assert_eq!(failure("\"x\""), "LSP server error: busy");
+}
+
+#[test]
 fn capabilities_do_not_request_work_done_progress() {
     assert!(client_capabilities().get("window").is_none());
 }

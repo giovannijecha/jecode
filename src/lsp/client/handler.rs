@@ -26,10 +26,7 @@ impl Client {
                             .iter()
                             .map(|item| {
                                 let section = item.get("section").and_then(Value::as_str);
-                                section
-                                    .and_then(|s| self.settings.get(s))
-                                    .cloned()
-                                    .unwrap_or_else(|| self.settings.clone())
+                                super::configuration_section(&self.settings, section)
                             })
                             .collect(),
                     ))

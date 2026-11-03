@@ -380,15 +380,41 @@ fn client_capabilities() -> Value {
     ])
 }
 
+/// A literal key, then a dotted path such as `python.analysis`, then the whole
+/// settings object, which flat settings such as rust-analyzer's rely on.
+fn configuration_section(settings: &Value, section: Option<&str>) -> Value {
+    section
+        .and_then(|section| {
+            settings.get(section).or_else(|| {
+                section
+                    .split('.')
+                    .try_fold(settings, |value, key| value.get(key))
+            })
+        })
+        .cloned()
+        .unwrap_or_else(|| settings.clone())
+}
+
 fn response(message: Value) -> Result<Value, String> {
-    if let Some(error) = message.get("error") {
-        return Err(format!(
-            "LSP server error: {}",
-            error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-        ));
-    }
-    Ok(message)
+    let Some(error) = message.get("error") else {
+        return Ok(message);
+    };
+    let text = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let code = match error.get("code") {
+        Some(Value::Number(code)) => code.parse::<i64>().ok(),
+        _ => None,
+    };
+    let Some(code) = code else {
+        return Err(format!("LSP server error: {text}"));
+    };
+    let note = match code {
+        -32800 => " (request cancelled; retrying may succeed)",
+        -32801 => " (content modified; retrying may succeed)",
+        -32802 => " (server cancelled; retrying may succeed)",
+        _ => "",
+    };
+    Err(format!("LSP server error {code}: {text}{note}"))
 }
