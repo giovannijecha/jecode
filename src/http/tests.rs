@@ -172,6 +172,67 @@ fn ipv6_loopback_connects_without_proxy() {
 
 #[cfg(windows)]
 #[test]
+fn native_http_finishes_framed_responses_before_the_peer_closes() {
+    for length in [0, 2, 65_537] {
+        let expected = vec![b'x'; length];
+        let response = expected.clone();
+        let server = Server::start(move |listener, stop| {
+            let mut stream = server::accept(&listener, &stop).unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n",
+                response.len()
+            )
+            .unwrap();
+            stream.write_all(&response).unwrap();
+            stream.flush().unwrap();
+            // The client must finish before the fixture releases the socket.
+            while stop.wait(Duration::from_millis(20)).is_ok() {}
+        });
+        let mut decoder = Decoder::default();
+        let mut body = Vec::new();
+        let output = run(
+            Request {
+                url: &server.endpoint,
+                method: "GET",
+                headers: &[],
+                body: None,
+                timeout: Some(Duration::from_secs(5)),
+                idle: None,
+                output_limit: 0,
+            },
+            &Cancellation::default(),
+            &mut |bytes| {
+                decoder.feed(bytes, &mut |part| {
+                    body.extend_from_slice(part);
+                    Ok(())
+                })
+            },
+        )
+        .unwrap();
+        server.finish();
+        assert_eq!(
+            output.exit_code,
+            Some(0),
+            "stdout={:?} stderr={:?}",
+            output.stdout,
+            output.stderr
+        );
+        assert_eq!(decoder.status, Some(200));
+        assert_eq!(body, expected);
+    }
+}
+
+#[cfg(windows)]
+#[test]
 fn native_http_rejects_truncated_and_malformed_responses() {
     for reply in [
         &b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhi"[..],

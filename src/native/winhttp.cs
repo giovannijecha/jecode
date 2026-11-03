@@ -118,7 +118,9 @@ public static class JecodeHttp {
                     if (method != "HEAD") {
                         byte[] buffer = new byte[16384];
                         ulong received = 0;
-                        for (;;) {
+                        // A framed response is complete at Content-Length; a
+                        // later connection close must not discard its body.
+                        while (!expected.HasValue || received < expected.Value) {
                             uint available;
                             Check(WinHttpQueryDataAvailable(request, out available), "availability");
                             uint read;

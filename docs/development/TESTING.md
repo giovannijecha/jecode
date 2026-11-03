@@ -29,6 +29,10 @@ cargo clippy --locked --offline --all-targets -- -D warnings
 cargo test --locked --offline
 ```
 
+CI and release preparation run the complete suite with `-- --test-threads=4`
+to bound concurrent native processes. Use the same option for a matching local
+run. Individual native terminal fixtures retain `--test-threads=1`.
+
 All four must succeed before a change is delivered. The test suite uses original
 Rust fixtures, synthetic credentials, isolated directories under `target` and
 loopback HTTP. It exercises the native HTTP adapter and process boundaries
