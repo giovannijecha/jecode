@@ -16,6 +16,11 @@ impl Tools {
         let arguments = json::parse(arguments).ok()?;
         let text = |key| arguments.get(key).and_then(Value::as_str);
         match name {
+            // Each entry of a multi-path read is checked again when it runs;
+            // outside paths are refused there and need a single read.
+            "read" if arguments.get("paths").is_some() => {
+                Some(self.inside(Kind::Reads, "several files".into()))
+            }
             "read" => self.file_access(Kind::Reads, text("path")?, false),
             "list" | "search" => self.file_access(Kind::Reads, text("path").unwrap_or("."), true),
             "write" | "edit" => self.file_access(Kind::Edits, text("path")?, false),

@@ -102,6 +102,11 @@ fn assignments_prefix_pipeline_stages_background_jobs_and_builtins() {
     assert_eq!(read(&directory, "piped"), "piped\n");
     assert_eq!(read(&directory, "bg"), "bg\n");
     assert!(read(&directory, "env").contains("X=scoped\n"));
+    assert_eq!(
+        shell.run("export SEEN=yes; printenv SEEN > printed; printenv MISSING_JECODE_VARIABLE"),
+        1
+    );
+    assert_eq!(read(&directory, "printed"), "yes\n");
     assert_eq!(read(&directory, "after"), "[]\n");
 }
 
@@ -239,6 +244,15 @@ fn closed_pipeline_stops_a_loop_running_an_external_program() {
     );
     assert_eq!(read(&directory, "external_closed"), "yes");
     assert_eq!(read(&directory, "external_after"), "after\n");
+}
+
+#[test]
+fn head_closes_an_endless_producer_after_its_lines() {
+    let directory = crate::test_support::Directory::new();
+    let script = "while true; do echo data; done | head -n 1 > first; echo after > marker";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(read(&directory, "first"), "data\n");
+    assert_eq!(read(&directory, "marker"), "after\n");
 }
 
 #[test]

@@ -5,6 +5,10 @@ mod files;
 #[path = "builtins/format.rs"]
 mod format;
 use format::printf;
+#[path = "builtins/grep.rs"]
+mod grep;
+#[path = "builtins/regex.rs"]
+mod regex;
 #[path = "builtins/text.rs"]
 mod text;
 use files::{copy_move, mktemp, remove};
@@ -12,7 +16,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
-use text::tr;
+use text::{head_tail, tr};
 
 #[cfg(test)]
 pub(super) use files::copy_then_remove;
@@ -41,6 +45,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
             | "["
             | "sleep"
             | "env"
+            | "printenv"
             | "export"
             | "bash"
             | "sh"
@@ -49,8 +54,14 @@ pub(super) fn is_builtin(name: &str) -> bool {
             | "seq"
             | "mktemp"
             | "tr"
+            | "head"
+            | "tail"
+            | "grep"
     )
 }
+
+/// The built-in commands as the model sees them when a program is missing.
+pub(super) const SUMMARY: &str = "cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc";
 
 /// Whether `args` runs in-process; `env COMMAND` runs the external program.
 pub(super) fn handles(args: &[String]) -> bool {
@@ -58,7 +69,7 @@ pub(super) fn handles(args: &[String]) -> bool {
 }
 
 /// Runs a built-in command. Output is either returned or, for commands that
-/// move data (`cat`, `tr`, `wc`), streamed through `io`.
+/// move data (`cat`, `head`, `tail`, `tr`, `wc`), streamed through `io`.
 pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     match args[0].as_str() {
         ":" | "true" => ok(Vec::new()),
@@ -163,6 +174,8 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         }
         "mktemp" => mktemp(shell, args),
         "tr" => tr(shell, args, io),
+        "head" | "tail" => head_tail(shell, args, io),
+        "grep" => grep::grep(shell, args, io),
         "ls" => {
             let paths: Vec<&str> = args[1..]
                 .iter()
@@ -252,6 +265,26 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
                 .map(|(key, value)| format!("{key}={value}\n"))
                 .collect::<String>();
             ok(text.into_bytes())
+        }
+        // Named variables print their values; any missing one fails the call.
+        "printenv" => {
+            let mut text = String::new();
+            let mut missing = false;
+            for name in &args[1..] {
+                match shell.variables.get(name) {
+                    Some(value) => text.push_str(&format!("{value}\n")),
+                    None => missing = true,
+                }
+            }
+            if args.len() == 1 {
+                let mut vars: Vec<_> = shell.variables.iter().collect();
+                vars.sort_by_key(|(key, _)| *key);
+                text = vars
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}={value}\n"))
+                    .collect();
+            }
+            Ok((i32::from(missing), text.into_bytes(), Vec::new()))
         }
         "export" => {
             for arg in &args[1..] {

@@ -122,6 +122,9 @@ pub(super) fn request_with_catalog(
                 ("tools", Value::Array(wrapped)),
             ])]),
         );
+        // Without this the ChatGPT route returns one call per response, so
+        // independent reads and edits each cost a full request.
+        fields.insert("parallel_tool_calls".into(), Value::Bool(true));
     }
     Ok(request)
 }

@@ -38,6 +38,7 @@ pub(super) fn render(
         "list" | "search" => discovery::render(tool.name, result, columns, expanded),
         "map" => map::render(result, columns, expanded),
         "read" if !expanded => Body::new(Vec::new()),
+        "read" if result.get("files").is_some() => Body::new(files(result, columns)),
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
             Body::new(read(arguments, result, columns))
         }
@@ -119,6 +120,22 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
             )
         })
         .collect()
+}
+
+/// Each file of a multi-path read under its path; failures name their cause.
+fn files(result: &Value, columns: usize) -> Vec<Line> {
+    let mut rows = Vec::new();
+    for file in result.get("files").and_then(Value::as_array).unwrap_or(&[]) {
+        let path = field(file, "path");
+        if let Some(error) = file.get("error").and_then(Value::as_str) {
+            rows.push(Line::new(&format!("{path} · {error}"), WARNING));
+            continue;
+        }
+        rows.push(Line::new(path, MUTED));
+        let arguments = Value::object([("path", Value::string(path))]);
+        rows.extend(read(&arguments, file, columns));
+    }
+    rows
 }
 
 fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {

@@ -110,6 +110,15 @@ fn local_web_and_browser_cards_show_actions_and_artifacts() {
 }
 
 #[test]
+fn several_read_paths_are_named_together() {
+    let arguments = Value::object([(
+        "paths",
+        Value::Array(vec![Value::string("src/a.rs"), Value::string("README.md")]),
+    )]);
+    assert_eq!(description("read", &arguments), "src/a.rs, README.md");
+}
+
+#[test]
 fn routine_description_overrides_command_and_blank_falls_back() {
     for (name, key, command, fallback) in [
         (

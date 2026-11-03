@@ -166,14 +166,26 @@ fn base_definitions() -> Vec<Value> {
     vec![
         routine(
             "read",
-            "Read a project file or tmp:relative/path. UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary). Input withdrawn to the composer is excluded from history reads. checkpoint:rc-ID:path reads a saved preimage (expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
+            "Read a project file or tmp:relative/path, or several at once with paths: when a step needs more than one file, read them in one call (each with the default window, results in order, outside paths and media need a single path). UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary). Input withdrawn to the composer is excluded from history reads. checkpoint:rc-ID:path reads a saved preimage (expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
             Value::object([
                 ("path", string()),
+                (
+                    "paths",
+                    Value::object([
+                        ("type", Value::string("array")),
+                        ("minItems", Value::number(1)),
+                        (
+                            "maxItems",
+                            Value::number(crate::agent::read_paths::MAX_PATHS),
+                        ),
+                        ("items", string()),
+                    ]),
+                ),
                 ("offset", integer(1, None)),
                 ("limit", integer(1, Some(2000))),
                 ("byte_offset", integer(0, None)),
             ]),
-            &["path"],
+            &[],
         ),
         tool(
             "write",
@@ -215,7 +227,7 @@ fn base_definitions() -> Vec<Value> {
         ),
         routine(
             "bash",
-            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection, common file/text commands and literal argv for external programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success.",
+            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection including 2>&1 and &>, here-documents, * ? [...] patterns, the built-ins cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc, and literal argv for installed programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success.",
             Value::object([
                 ("command", string()),
                 (

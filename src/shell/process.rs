@@ -109,7 +109,26 @@ impl Shell {
                 io.stdout = io.stderr.try_clone().map_err(|error| error.to_string())?;
                 continue;
             }
+            if redirect.mode == "2>&1" {
+                io.stderr = io.stdout.try_clone().map_err(|error| error.to_string())?;
+                continue;
+            }
             let target = self.expand(&redirect.target, &io)?;
+            if let Some(newline) = match redirect.mode {
+                "<<" => Some(""),
+                "<<<" => Some("\n"),
+                _ => None,
+            } {
+                // A writer thread keeps a long body from filling the pipe
+                // before the command starts reading.
+                let (reader, mut writer) = io::pipe().map_err(|error| error.to_string())?;
+                let text = format!("{target}{newline}");
+                std::thread::spawn(move || {
+                    let _ = io::Write::write_all(&mut writer, text.as_bytes());
+                });
+                io.stdin = Source::Pipe(reader);
+                continue;
+            }
             if redirect.mode == "<" {
                 io.stdin = if target == "/dev/null" {
                     Source::Null
@@ -134,10 +153,13 @@ impl Shell {
                     .map(Sink::File)
                     .map_err(|error| format!("{}: {error}", path.display()))?
             };
-            if redirect.stream == 2 {
-                io.stderr = sink;
-            } else {
-                io.stdout = sink;
+            match redirect.stream {
+                2 => io.stderr = sink,
+                3 => {
+                    io.stderr = sink.try_clone().map_err(|error| error.to_string())?;
+                    io.stdout = sink;
+                }
+                _ => io.stdout = sink,
             }
         }
         Ok(io)
@@ -162,7 +184,7 @@ impl Shell {
         };
         let mut child = command
             .spawn()
-            .map_err(|error| format!("{}: {error}", args[0]))?;
+            .map_err(|error| self.launch_error(&args[0], &error))?;
         drop(command);
         let relay = relay_sink.map(|sink| {
             let mut stdout = child.stdout.take().expect("piped external stdout");
@@ -211,6 +233,28 @@ impl Shell {
             command.env(name, value);
         }
         Ok(())
+    }
+
+    /// A missing program names what does exist, so the next call can use it
+    /// instead of trying further unavailable programs.
+    pub(super) fn launch_error(&self, name: &str, error: &io::Error) -> String {
+        if error.kind() != io::ErrorKind::NotFound {
+            return format!("{name}: {error}");
+        }
+        if cfg!(windows) && Path::new(name).extension().is_none() {
+            let directories = self.variables.get("PATH").unwrap_or_default();
+            for directory in std::env::split_paths(directories) {
+                for script in [format!("{name}.cmd"), format!("{name}.bat")] {
+                    if directory.join(&script).is_file() {
+                        return format!("{name}: {error}; run the script as {script}");
+                    }
+                }
+            }
+        }
+        format!(
+            "{name}: {error}. Shell built-ins: {}; use the read, search and edit tools to view, find and change files",
+            builtins::SUMMARY
+        )
     }
 
     pub(super) fn program(&self, args: &[String]) -> Command {

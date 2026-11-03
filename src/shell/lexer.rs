@@ -1,3 +1,6 @@
+#[path = "heredoc.rs"]
+mod heredoc;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     Word(Word),
@@ -26,6 +29,8 @@ pub enum Part {
     Pid,
     LastBackground,
     Command(String),
+    /// An unquoted `*`, `?`, `[` or `]`, for pathname expansion.
+    Glob(char),
 }
 
 struct Cursor<'a> {
@@ -121,6 +126,7 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
     let mut tokens = Vec::new();
     let mut pending = Pending::default();
     let mut quote = None;
+    let mut documents = Vec::new();
     loop {
         let at = chars.position;
         let Some(ch) = chars.next() else { break };
@@ -184,13 +190,21 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
                     }
                 }
                 separator(&mut tokens, chars.position);
+                heredoc::bodies(&mut chars, &mut tokens, &mut documents)?;
                 continue;
             }
             if ch.is_whitespace() {
                 pending.flush(&mut tokens, at)?;
                 if ch == '\n' {
                     separator(&mut tokens, at);
+                    heredoc::bodies(&mut chars, &mut tokens, &mut documents)?;
                 }
+                continue;
+            }
+            if ch == '<' && chars.peek() == Some('<') {
+                pending.flush(&mut tokens, at)?;
+                chars.next();
+                heredoc::start(&mut chars, &mut tokens, at, &mut documents)?;
                 continue;
             }
             if ";&|<>()".contains(ch) {
@@ -209,6 +223,16 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
                 continue;
             }
             pending.unquoted.push(ch);
+            if matches!(ch, '*' | '?' | '[' | ']') {
+                pending.begin(at);
+                if !pending.literal.is_empty() {
+                    pending
+                        .word
+                        .push(Part::Literal(std::mem::take(&mut pending.literal)));
+                }
+                pending.word.push(Part::Glob(ch));
+                continue;
+            }
         } else {
             pending.unquoted.push('\0');
         }
@@ -217,6 +241,12 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
     }
     if quote.is_some() {
         return Err("unterminated quote".into());
+    }
+    if let Some(document) = documents.first() {
+        return Err(format!(
+            "here-document needs its body on the following lines, ending with a {} line",
+            document.delimiter()
+        ));
     }
     pending.flush(&mut tokens, chars.position)?;
     Ok(tokens)
@@ -245,14 +275,26 @@ fn operator(ch: char, fd: Option<u8>, chars: &mut Cursor<'_>) -> Result<&'static
     Ok(match (ch, chars.peek()) {
         ('>', Some('&')) => {
             chars.next();
-            if chars.next() != Some('2') || errors {
-                return Err("only >&2 descriptor redirection is supported".into());
+            match chars.next() {
+                Some('2') if !errors => ">&2",
+                Some('1') if errors => "2>&1",
+                _ => {
+                    return Err("only 1>&2 and 2>&1 descriptor redirections are supported".into());
+                }
             }
-            ">&2"
         }
         ('&', Some('&')) => {
             chars.next();
             "&&"
+        }
+        ('&', Some('>')) => {
+            chars.next();
+            if chars.peek() == Some('>') {
+                chars.next();
+                "&>>"
+            } else {
+                "&>"
+            }
         }
         ('|', Some('|')) => {
             chars.next();

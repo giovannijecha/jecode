@@ -188,6 +188,12 @@ pub fn target(name: &str, arguments: &Value) -> String {
             _ => executable.into(),
         };
     }
+    if name == "read"
+        && let Some(paths) = arguments.get("paths").and_then(Value::as_array)
+    {
+        let paths: Vec<_> = paths.iter().filter_map(Value::as_str).collect();
+        return paths.join(", ");
+    }
     let path = arguments
         .get("path")
         .and_then(Value::as_str)

@@ -246,15 +246,19 @@ impl Parser<'_> {
         let op = *op;
         self.index += 1;
         let (stream, mode) = match op {
-            ">&2" => {
+            ">&2" | "2>&1" => {
                 return Ok(Redirect {
-                    stream: 1,
-                    mode: ">&2",
+                    stream: if op == ">&2" { 1 } else { 2 },
+                    mode: op,
                     target: Word(Vec::new()),
                 });
             }
             "2>" => (2, ">"),
             "2>>" => (2, ">>"),
+            // Stream 3 stands for stdout and stderr together.
+            "&>" => (3, ">"),
+            "&>>" => (3, ">>"),
+            "<<" | "<<<" => (0, op),
             mode => (if mode == "<" { 0 } else { 1 }, mode),
         };
         let target = self.take_word().ok_or("redirection needs a path")?;
@@ -348,7 +352,10 @@ impl Parser<'_> {
 }
 
 fn redirect_op(op: &str) -> bool {
-    matches!(op, ">" | ">>" | "<" | "2>" | "2>>" | ">&2")
+    matches!(
+        op,
+        ">" | ">>" | "<" | "2>" | "2>>" | ">&2" | "2>&1" | "&>" | "&>>" | "<<" | "<<<"
+    )
 }
 
 fn unexpected(token: &Token) -> String {

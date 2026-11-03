@@ -44,3 +44,107 @@ pub(super) fn tr(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     }
     ok(Vec::new())
 }
+
+/// `head` and `tail` over files or standard input: `-n N`, `-N`, and for
+/// `tail` also `-n +N` (from line N). Lines end at `\n`; bytes pass unchanged.
+pub(super) fn head_tail(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
+    let name = args[0].as_str();
+    let mut count = None;
+    let mut operands = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(arg) = rest.next() {
+        if arg == "-n" {
+            let value = rest.next().ok_or(format!("{name}: -n needs a number"))?;
+            count = Some(value.as_str());
+        } else if let Some(value) = arg.strip_prefix("-n") {
+            count = Some(value);
+        } else if arg.len() > 1
+            && arg.starts_with('-')
+            && arg[1..].bytes().all(|byte| byte.is_ascii_digit())
+        {
+            count = Some(&arg[1..]);
+        } else if arg.starts_with('-') && arg != "-" {
+            return Err(format!(
+                "{name}: only -n N, -N{} and file operands are supported",
+                if name == "tail" { ", -n +N" } else { "" }
+            ));
+        } else {
+            operands.push(arg.as_str());
+        }
+    }
+    let count = count.unwrap_or("10");
+    let (from_line, digits) = match count.strip_prefix('+') {
+        Some(digits) if name == "tail" => (true, digits),
+        _ => (false, count),
+    };
+    let number: usize = digits
+        .parse()
+        .map_err(|_| format!("{name}: invalid line count: {count}"))?;
+    if operands.is_empty() {
+        operands.push("-");
+    }
+    let mut writer = &io.stdout;
+    let mut copy = || -> io::Result<()> {
+        for (index, operand) in operands.iter().enumerate() {
+            if operands.len() > 1 {
+                let gap = if index == 0 { "" } else { "\n" };
+                writeln!(writer, "{gap}==> {operand} <==")?;
+            }
+            let file = match *operand {
+                "-" => None,
+                path => Some(fs::File::open(shell.path(path)).map_err(|error| {
+                    io::Error::new(error.kind(), format!("{operand}: {error}"))
+                })?),
+            };
+            let source: Box<dyn Read + '_> = match &file {
+                Some(file) => Box::new(file),
+                None => Box::new(&io.stdin),
+            };
+            let mut lines = io::BufReader::new(source);
+            select(&mut lines, &mut writer, name == "head", from_line, number)?;
+        }
+        writer.flush()
+    };
+    match copy() {
+        Ok(()) => ok(Vec::new()),
+        Err(error) if closed(&error) => {
+            shell.broken_output = true;
+            Ok((1, Vec::new(), Vec::new()))
+        }
+        Err(error) => Err(format!("{name}: {error}")),
+    }
+}
+
+fn select(
+    lines: &mut dyn io::BufRead,
+    writer: &mut dyn Write,
+    head: bool,
+    from_line: bool,
+    number: usize,
+) -> io::Result<()> {
+    let mut line = Vec::new();
+    let mut kept = std::collections::VecDeque::new();
+    let mut seen = 0usize;
+    loop {
+        if head && seen == number {
+            return Ok(());
+        }
+        line.clear();
+        if lines.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        seen += 1;
+        if head || (from_line && seen >= number.max(1)) {
+            writer.write_all(&line)?;
+        } else if !from_line && number > 0 {
+            if kept.len() == number {
+                kept.pop_front();
+            }
+            kept.push_back(line.clone());
+        }
+    }
+    for line in kept {
+        writer.write_all(&line)?;
+    }
+    Ok(())
+}

@@ -417,6 +417,7 @@ mod permission_tests;
 mod persistence;
 mod project_instructions;
 mod projection;
+pub(crate) mod read_paths;
 mod recovery;
 mod retraction;
 mod routing;

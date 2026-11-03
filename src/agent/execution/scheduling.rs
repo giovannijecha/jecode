@@ -16,11 +16,16 @@ pub(super) fn mode(call: &ToolCall) -> Mode {
         return Mode::Serial;
     };
     // Agent-owned references depend on transcript state or a per-turn cache.
-    if call.name == "read"
-        && arguments
-            .get("path")
-            .and_then(Value::as_str)
+    let agent_owned = |path: &Value| {
+        path.as_str()
             .is_some_and(|path| path.starts_with("history:") || path.starts_with("skill:"))
+    };
+    if call.name == "read"
+        && (arguments.get("path").is_some_and(agent_owned)
+            || arguments
+                .get("paths")
+                .and_then(Value::as_array)
+                .is_some_and(|paths| paths.iter().any(agent_owned)))
     {
         return Mode::Serial;
     }
@@ -37,7 +42,10 @@ fn automatic(call: &ToolCall, arguments: &Value) -> bool {
     match call.name.as_str() {
         "list" | "search" => true,
         "map" => matches!(action, None | Some("overview")),
-        "read" => arguments.get("path").and_then(Value::as_str).is_some(),
+        "read" => {
+            arguments.get("path").and_then(Value::as_str).is_some()
+                || arguments.get("paths").is_some()
+        }
         "checkpoint" => matches!(action, Some("list" | "inspect")),
         "process" => action == Some("list"),
         "mcp" => matches!(action, None | Some("list" | "tools")),

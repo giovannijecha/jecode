@@ -81,6 +81,18 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             continue;
         }
         match tool.name {
+            "read" if tool.arguments.get("paths").is_some() => {
+                for path in tool
+                    .arguments
+                    .get("paths")
+                    .and_then(crate::json::Value::as_array)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(crate::json::Value::as_str)
+                {
+                    files.insert(path);
+                }
+            }
             "read" => {
                 let path = field(tool.arguments, "path");
                 if ["history:", "output:", "attachment:", "checkpoint:"]

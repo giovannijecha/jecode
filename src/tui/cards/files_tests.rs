@@ -311,3 +311,51 @@ fn write_badge_keeps_the_operation_without_a_confirmed_file_change() {
             .starts_with(" WRITE ")
     );
 }
+
+#[test]
+fn multi_path_reads_name_their_files_and_expand_under_each_path() {
+    let args = Value::object([(
+        "paths",
+        Value::Array(vec![
+            Value::string("src/a.rs"),
+            Value::string("src/b.rs"),
+            Value::string("gone.rs"),
+        ]),
+    )]);
+    let file = |path: &str, content: &str| {
+        Value::object([
+            ("path", Value::string(path)),
+            ("content", Value::string(content)),
+            ("offset", Value::number(1)),
+        ])
+    };
+    let result = Value::object([(
+        "files",
+        Value::Array(vec![
+            file("src/a.rs", "1: fn a() {}\n"),
+            file("src/b.rs", "1: fn b() {}\n2: // end\n"),
+            Value::object([
+                ("path", Value::string("gone.rs")),
+                ("error", Value::string("Could not resolve path")),
+            ]),
+        ]),
+    )]);
+    let collapsed = Presentation::default();
+    let rows = plain(&card(tool("read", &args, &result, &collapsed), 80, false).rows);
+    assert!(rows[0].contains("src/a.rs, src/b.rs, gone.rs"));
+    assert!(rows.join("\n").contains("2 files · 3 lines · 1 not read"));
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = plain(&card(tool("read", &args, &result, &expanded), 80, false).rows).join("\n");
+    for expected in [
+        "src/a.rs",
+        "fn a() {}",
+        "src/b.rs",
+        "// end",
+        "gone.rs · Could not resolve path",
+    ] {
+        assert!(rows.contains(expected), "{expected} in {rows}");
+    }
+}
