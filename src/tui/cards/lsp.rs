@@ -214,6 +214,14 @@ fn summary_line(result: &Value, arguments: &Value, status: Status) -> Line {
 }
 
 pub(super) fn summary_for(result: &Value, action: &str) -> String {
+    // A failed call has no partial result, only its error.
+    if let Some(error) = result
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|error| !error.is_empty())
+    {
+        return text::clean(error);
+    }
     let status = result
         .get("status")
         .and_then(Value::as_str)
@@ -244,6 +252,7 @@ pub(super) fn summary_for(result: &Value, action: &str) -> String {
         "invalid_input" => "Invalid request".into(),
         "protocol_error" => "Protocol error".into(),
         "unavailable" => "Server unavailable".into(),
+        "failed" => "Failed".into(),
         _ if freshness == "sync_gap" => "Sync incomplete".into(),
         _ if action == "diagnostics"
             || action.is_empty() && diagnostics.is_some_and(|items| !items.is_empty()) =>

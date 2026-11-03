@@ -136,3 +136,39 @@ fn only_current_empty_diagnostics_claim_zero_findings() {
         }
     }
 }
+
+fn last_row(arguments: &Value, result: &Value) -> Line {
+    let presentation = Presentation::default();
+    let card = card(
+        Tool {
+            name: "lsp",
+            arguments,
+            summary: "",
+            result: Some(result),
+            change: None,
+            presentation: &presentation,
+        },
+        80,
+        false,
+    );
+    card.rows.last().unwrap().clone()
+}
+
+#[test]
+fn failed_call_shows_its_error_instead_of_an_empty_result() {
+    let arguments = Value::object([("action", Value::string("definition"))]);
+    let result = Value::object([
+        ("status", Value::string("failed")),
+        (
+            "error",
+            Value::string("LSP configuration must contain a servers array"),
+        ),
+        ("complete", Value::Bool(false)),
+    ]);
+    let row = last_row(&arguments, &result);
+    assert_eq!(
+        row.plain().trim_start_matches(['└', ' ']),
+        "LSP configuration must contain a servers array"
+    );
+    assert!(row.spans.iter().any(|span| span.style == BAD));
+}
