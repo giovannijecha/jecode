@@ -19,6 +19,8 @@ client and configuration; adding a language requires no language-specific code.
 Advanced contains arguments, masked environment variables, root markers or
 a fixed root, initialization options, settings and the request timeout.
 Arguments are an argv list; quoted spaces remain part of one argument.
+Backslashes stay literal except before a double quote, as in Windows command
+lines: `"\\server\share\my dir"` is one UNC path and `\"` is a literal quote.
 Initialization options and settings are JSON supplied to the server.
 
 New entries visibly default On. **Save** stores the entry and its enablement

@@ -193,27 +193,45 @@ fn parse_json(value: &str, empty: Value) -> Result<Value, String> {
     }
 }
 
+/// The inverse of `parse_arguments`: only backslashes before a quote double.
 fn display_arguments(arguments: &[String]) -> String {
     arguments
         .iter()
         .map(|argument| {
-            if argument.is_empty()
-                || argument.chars().any(char::is_whitespace)
-                || argument.contains(['"', '\''])
+            if !argument.is_empty()
+                && !argument.chars().any(char::is_whitespace)
+                && !argument.contains(['"', '\''])
             {
-                format!(
-                    "\"{}\"",
-                    argument.replace('\\', "\\\\").replace('"', "\\\"")
-                )
-            } else {
-                argument.clone()
+                return argument.clone();
             }
+            let mut quoted = String::from('"');
+            let mut backslashes = 0;
+            for ch in argument.chars() {
+                match ch {
+                    '\\' => backslashes += 1,
+                    '"' => {
+                        quoted.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                        quoted.push('"');
+                        backslashes = 0;
+                    }
+                    _ => {
+                        quoted.extend(std::iter::repeat_n('\\', backslashes));
+                        quoted.push(ch);
+                        backslashes = 0;
+                    }
+                }
+            }
+            quoted.extend(std::iter::repeat_n('\\', backslashes * 2));
+            quoted.push('"');
+            quoted
         })
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-/// Quotes group arguments; unquoted backslashes remain literal for Windows paths.
+/// Windows argv rules: backslashes are literal unless they precede a double
+/// quote, where each pair yields one and an odd one escapes the quote.
+/// Single quotes also group, taking their content literally.
 fn parse_arguments(value: &str) -> Result<Vec<String>, String> {
     let mut output = Vec::new();
     let mut current = String::new();
@@ -222,14 +240,28 @@ fn parse_arguments(value: &str) -> Result<Vec<String>, String> {
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
         match (quote, ch) {
+            (Some('\''), '\'') => quote = None,
+            (Some('\''), ch) => current.push(ch),
+            (_, '\\') => {
+                let mut count = 1;
+                while chars.next_if_eq(&'\\').is_some() {
+                    count += 1;
+                }
+                if chars.peek() == Some(&'"') {
+                    current.extend(std::iter::repeat_n('\\', count / 2));
+                    if count % 2 == 1 {
+                        current.push(chars.next().unwrap());
+                    }
+                } else {
+                    current.extend(std::iter::repeat_n('\\', count));
+                }
+                started = true;
+            }
             (None, '"' | '\'') => {
                 quote = Some(ch);
                 started = true;
             }
-            (Some(mark), ch) if ch == mark => quote = None,
-            (Some('"'), '\\') if matches!(chars.peek(), Some('"' | '\\')) => {
-                current.push(chars.next().unwrap())
-            }
+            (Some(_), '"') => quote = None,
             (None, ch) if ch.is_whitespace() => {
                 if started {
                     output.push(std::mem::take(&mut current));
@@ -264,6 +296,32 @@ mod tests {
         assert_eq!(
             parse_arguments(&display_arguments(&arguments)),
             Ok(arguments)
+        );
+    }
+
+    #[test]
+    fn backslashes_stay_literal_unless_they_precede_a_quote() {
+        for (typed, parsed) in [
+            (r#""\\srv\share\my dir""#, r"\\srv\share\my dir"),
+            (r#""C:\Program Files\x""#, r"C:\Program Files\x"),
+            (r#""say \"hi\"""#, r#"say "hi""#),
+            (r#""C:\My Dir\\""#, r"C:\My Dir\"),
+            (r"\\srv\share", r"\\srv\share"),
+        ] {
+            let arguments = vec![parsed.to_owned()];
+            assert_eq!(parse_arguments(typed), Ok(arguments.clone()), "{typed}");
+            assert_eq!(
+                parse_arguments(&display_arguments(&arguments)),
+                Ok(arguments)
+            );
+        }
+        assert_eq!(
+            display_arguments(&[r"\\srv\share\my dir".into()]),
+            r#""\\srv\share\my dir""#
+        );
+        assert_eq!(
+            parse_arguments(r#"--a "b c" 'd\"e'"#),
+            Ok(vec!["--a".into(), "b c".into(), r#"d\"e"#.into()])
         );
     }
 
