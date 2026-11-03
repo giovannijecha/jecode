@@ -102,6 +102,21 @@ fn changing_auth_and_extra_headers_changes_only_the_draft() {
 }
 
 #[test]
+fn changing_the_endpoint_drops_the_previous_servers_pending_scope() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let mut connection = Connection::draft("Scoped", "https://old.example/mcp");
+    connection.pending_scope = Some("deploy".into());
+    app.begin_mcp_draft(connection, false, false);
+    app.show_mcp_field(Field::Endpoint);
+    type_text(&mut app, "https://new.example/mcp");
+    assert_eq!(draft(&app).endpoint, "https://new.example/mcp");
+    assert_eq!(draft(&app).pending_scope, None);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn sign_in_requires_an_explicit_token_or_oauth_choice() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);

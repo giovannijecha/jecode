@@ -169,7 +169,12 @@ fn authorization_scope(scope: Option<&str>, metadata: &Value) -> Result<Option<S
                 .any(|value| value.as_str() == Some("offline_access"))
         });
     // Refresh permission belongs to the authorization server, not the resource.
-    super::scopes::union(&[scope, offline.then_some("offline_access")])
+    // Without resource scopes the request omits `scope` so the server applies
+    // its defaults; `offline_access` alone could narrow the grant to refresh.
+    super::scopes::union(&[
+        scope,
+        (offline && scope.is_some_and(|s| !s.trim().is_empty())).then_some("offline_access"),
+    ])
 }
 
 /// MCP authorization requires advertised PKCE S256 support before sign-in.
@@ -253,6 +258,14 @@ mod tests {
                 Some(expected.into())
             );
         }
+        assert_eq!(
+            authorization_scope(
+                None,
+                &json::parse(r#"{"scopes_supported":["offline_access"]}"#).unwrap()
+            )
+            .unwrap(),
+            None
+        );
         assert_eq!(
             authorization_scope(
                 Some("openid offline_access"),

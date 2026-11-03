@@ -193,8 +193,11 @@ fn registered(response: &Value, requested: &str) -> Result<Client, Error> {
         }
     };
     let method = match response.get("token_endpoint_auth_method") {
+        // An omitted value is the requested one; a secret issued for a
+        // requested public client implies the RFC 7591 default.
         None if secret.is_none() && requested == "none" => ClientAuthMethod::None,
-        None => ClientAuthMethod::ClientSecretBasic, // RFC 7591 default.
+        None if requested == "client_secret_post" => ClientAuthMethod::ClientSecretPost,
+        None => ClientAuthMethod::ClientSecretBasic,
         Some(Value::String(method)) if method == "none" => ClientAuthMethod::None,
         Some(Value::String(method)) if method == "client_secret_basic" => {
             ClientAuthMethod::ClientSecretBasic
@@ -300,6 +303,15 @@ mod tests {
             .unwrap()
             .method,
             ClientAuthMethod::ClientSecretBasic
+        );
+        assert_eq!(
+            parse(
+                r#"{"client_id":"issued","client_secret":"secret"}"#,
+                "client_secret_post"
+            )
+            .unwrap()
+            .method,
+            ClientAuthMethod::ClientSecretPost
         );
         let public = parse(
             r#"{"client_id":"public","client_secret":"unused-secret","client_secret_expires_at":1,"token_endpoint_auth_method":"none"}"#,

@@ -70,22 +70,25 @@ uses protected-resource and authorization-server metadata, a public client,
 PKCE S256 and a loopback callback on an ephemeral port. It supports a configured
 client ID or client metadata URL, Jecode's public metadata when advertised, and
 dynamic registration as a fallback. A dynamically registered client serves
-only the sign-in that registered it and
-that session's refreshes; the next sign-in registers again. Registration can
-assign `none`, `client_secret_basic` or `client_secret_post`; per-registration
-client secrets are stored and redacted with the session credentials. Refresh remains
-bound to the original endpoint, issuer and client. Query options such as
+only the sign-in that registered it and that session's refreshes; the next
+sign-in registers again. Registration can assign `none`, `client_secret_basic`
+or `client_secret_post`; per-registration client secrets are stored and
+redacted with the session credentials. Refresh remains bound to the original
+endpoint, issuer and client. Query options such as
 [Supabase's `project_ref`](https://supabase.com/docs/guides/ai-tools/mcp) remain
 part of the connection identity even when the OAuth resource URI omits the
 query. Reconnect from Settings when sign-in has expired or access was revoked.
 The authorization server must advertise S256 support in its metadata; otherwise
 browser sign-in is unavailable. A bearer token remains an alternative.
 
-When the authorization server advertises `offline_access`, Jecode includes it
-in the sign-in request so it can issue a refresh token. Issuance remains the
-server's choice. A tool-specific `403 insufficient_scope` retains the required
-scope for the next sign-in in Settings, together with previously granted scopes.
-The failed remote operation is not replayed automatically after authorization.
+When the authorization server advertises `offline_access` and the sign-in
+request names resource scopes, Jecode adds it so the server can issue a refresh
+token. Without resource scopes the request omits `scope` and the server applies
+its defaults. Issuance remains the server's choice. A tool-specific
+`403 insufficient_scope` retains the required scope for the next sign-in in
+Settings, together with scopes previously granted by the same authorization
+server. Changing the endpoint discards a retained scope. The failed remote
+operation is not replayed automatically after authorization.
 
 For the stock GitHub endpoint, Jecode requests the default toolsets and Actions.
 Custom toolset/tool headers and custom endpoint paths retain their selection.

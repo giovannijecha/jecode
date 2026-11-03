@@ -51,14 +51,7 @@ pub(super) fn sign_in(
         ("state", state.as_str()),
         ("resource", server.resource.as_str()),
     ];
-    let requested_scope = scopes::union(&[
-        connection.pending_scope.as_deref(),
-        connection
-            .oauth
-            .as_ref()
-            .and_then(|oauth| oauth.scope.as_deref()),
-        server.scope.as_deref(),
-    ])?;
+    let requested_scope = requested_scope(&connection, &server)?;
     if let Some(scope) = &requested_scope {
         fields.push(("scope", scope));
     }
@@ -263,9 +256,67 @@ fn respond(stream: &mut TcpStream, ok: bool) {
     let _ = stream.write_all(response.as_bytes());
 }
 
+/// Step-up scopes first, then scopes already granted by the same
+/// authorization server, then the resource's own scopes.
+fn requested_scope(
+    connection: &Connection,
+    server: &discovery::Server,
+) -> Result<Option<String>, Error> {
+    scopes::union(&[
+        connection.pending_scope.as_deref(),
+        connection
+            .oauth
+            .as_ref()
+            .filter(|oauth| oauth.issuer == server.issuer)
+            .and_then(|oauth| oauth.scope.as_deref()),
+        server.scope.as_deref(),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn granted_scopes_carry_over_only_from_the_same_issuer() {
+        let mut connection = Connection::draft("Scoped", "https://mcp.test/mcp");
+        connection.pending_scope = Some("deploy".into());
+        connection.oauth = Some(crate::mcp::types::OAuthTokens {
+            endpoint: connection.endpoint.clone(),
+            access_token: "isolated-access".into(),
+            refresh_token: None,
+            expires_at: None,
+            token_endpoint: "https://old.test/token".into(),
+            client_id: "isolated-client".into(),
+            client_auth_method: crate::mcp::types::ClientAuthMethod::None,
+            client_secret: None,
+            client_secret_expires_at: None,
+            issuer: "https://old.test".into(),
+            scope: Some("legacy:read".into()),
+            resource: Some(connection.endpoint.clone()),
+            github: false,
+        });
+        let mut server = discovery::Server {
+            issuer: "https://new.test".into(),
+            authorize: "https://new.test/authorize".into(),
+            token: "https://new.test/token".into(),
+            registration: None,
+            resource: connection.endpoint.clone(),
+            scope: Some("read".into()),
+            cimd: false,
+            response_iss_required: false,
+            auth_methods: None,
+        };
+        assert_eq!(
+            requested_scope(&connection, &server).unwrap().as_deref(),
+            Some("deploy read")
+        );
+        server.issuer = "https://old.test".into();
+        assert_eq!(
+            requested_scope(&connection, &server).unwrap().as_deref(),
+            Some("deploy legacy:read read")
+        );
+    }
 
     fn send(port: u16, target: &str) -> String {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();

@@ -80,6 +80,7 @@ impl App {
                     connection.token.clear();
                     connection.oauth = None;
                     connection.oauth_client_id = None;
+                    connection.pending_scope = None;
                     connection.headers.clear();
                     draft.methods = self
                         .mcp

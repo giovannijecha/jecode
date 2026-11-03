@@ -208,7 +208,7 @@ fn run(
             Ok(catalog) => catalog,
             Err(error) => {
                 *client = Client::new(connection.clone());
-                remember_scope(&store, &connection, &error)?;
+                remember_scope(&store, &connection, &error);
                 return Err(error);
             }
         };
@@ -234,7 +234,7 @@ fn run(
         Ok(result) => result,
         Err(error) => {
             *client = Client::new(connection.clone());
-            remember_scope(&store, &connection, &error)?;
+            remember_scope(&store, &connection, &error);
             return Err(error);
         }
     };
@@ -258,13 +258,14 @@ fn run(
 }
 
 /// A challenged tool is never replayed. Sign-in can request the scope later.
-fn remember_scope(store: &Store, connection: &Connection, error: &Error) -> Result<(), Error> {
+/// The result still reports `required_scope`, so a session that changed
+/// meanwhile skips the record without hiding the challenge itself.
+fn remember_scope(store: &Store, connection: &Connection, error: &Error) {
     if connection.method == super::AuthMethod::Browser
         && let Some(scope) = super::auth::scopes::required(error)
     {
-        store.require_scope(connection, &scope)?;
+        let _ = store.require_scope(connection, &scope);
     }
-    Ok(())
 }
 
 /// Waits for the connection's session without ignoring cancellation;
