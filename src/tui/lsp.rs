@@ -266,9 +266,7 @@ impl App {
                 }) =>
                 {
                     if let Some(id) = self.lsp.selected.clone() {
-                        self.facts().lsp_runtime.reset_restart(&id);
-                        self.lsp.observed = self.facts().lsp_runtime.statuses();
-                        self.show_lsp_detail();
+                        self.allow_lsp_restart(&id);
                     }
                 }
                 3 | 4 => self.show_lsp_remove(),

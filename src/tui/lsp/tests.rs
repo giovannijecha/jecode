@@ -43,6 +43,14 @@ fn panel(app: &App) -> Panel {
     }
 }
 
+/// The latest local command result recorded in the conversation.
+fn local_result(app: &App) -> Option<&str> {
+    app.state.items.iter().rev().find_map(|item| match item {
+        crate::tui::state::Item::Local { result, .. } => result.as_deref(),
+        _ => None,
+    })
+}
+
 #[test]
 fn custom_server_is_created_by_typing_and_pasting_into_fields() {
     let directory = Directory::new();
@@ -88,6 +96,79 @@ fn custom_server_is_created_by_typing_and_pasting_into_fields() {
     assert_eq!(saved.arguments, vec![r"\\srv\share\my dir", "--stdio"]);
     assert_eq!(panel(&app), Panel::Detail);
     assert!(app.facts().lsp_runtime.statuses().is_empty());
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn settings_changes_close_the_settings_row_as_changes() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.dispatch("/settings".into()).unwrap();
+    let menu = app.state.selector.as_mut().unwrap();
+    menu.selected = menu.setting_index(Setting::Lsp);
+    press(&mut app, 13);
+    press(&mut app, 13); // Add server
+    typed(&mut app, "1"); // Guided Rust
+    typed(&mut app, "4"); // Enabled: Off
+    typed(&mut app, "7"); // Save server
+    let notice = app.state.notice.as_ref().unwrap();
+    assert_eq!(notice.text, "Language server saved · off");
+    assert!(notice.change);
+    assert_eq!(local_result(&app), Some("Language server saved · off"));
+    typed(&mut app, "2"); // Turn on: a later change only notifies.
+    assert_eq!(
+        app.state.notice.as_ref().unwrap().text,
+        "Language server turned on · starts when needed"
+    );
+    press(&mut app, 27); // Detail › LSP
+    press(&mut app, 27); // LSP › Settings
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        Purpose::Settings
+    ));
+    press(&mut app, 27);
+    assert_eq!(local_result(&app), Some("Language server saved · off"));
+    assert!(app.lsp_store().load().unwrap()[0].enabled);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
+fn saving_changed_settings_shows_the_cleared_check() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let mut profile = Profile::draft_guided_rust();
+    profile.last_check = Some(CheckObservation {
+        capabilities: crate::json::Value::object([]),
+        root: directory.path().into(),
+        executable: "rust-analyzer".into(),
+        fingerprint: profile.analysis_fingerprint(),
+    });
+    app.lsp_store().save(profile.clone()).unwrap();
+    app.open_lsp(true);
+    press(&mut app, 13);
+    assert!(
+        app.state
+            .selector
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("Checked ·")
+    );
+    typed(&mut app, "1"); // Edit
+    typed(&mut app, "2"); // Executable
+    typed(&mut app, "-next");
+    press(&mut app, 13);
+    typed(&mut app, "7"); // Save server
+    assert_eq!(panel(&app), Panel::Detail);
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(menu.message.contains("Not checked"), "{}", menu.message);
+    assert!(app.lsp.profiles[0].last_check.is_none());
+    assert_eq!(app.lsp.profiles[0].executable, "rust-analyzer-next");
+    press(&mut app, 27);
+    let menu = app.state.selector.as_ref().unwrap();
+    assert_eq!(menu.options[0].fact, "Not checked · not started");
     assert!(fixture.finish().is_empty());
 }
 

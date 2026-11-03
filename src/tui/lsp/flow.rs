@@ -31,17 +31,19 @@ impl App {
         match self.lsp_store().save(profile.clone()) {
             Ok(()) => {
                 self.lsp.selected = Some(profile.id.clone());
-                self.lsp
-                    .profiles
-                    .retain(|existing| existing.id != profile.id);
-                self.lsp.profiles.push(profile.clone());
                 self.lsp.draft = None;
                 self.lsp.original = None;
                 if changed {
                     self.lsp_changed(&profile.id);
                 }
-                self.lsp_notice("Language server saved · starts on first matching model request");
-                self.show_lsp_detail();
+                self.finish_lsp_change(
+                    &profile.id,
+                    if profile.enabled {
+                        "Language server saved · starts on first matching model request"
+                    } else {
+                        "Language server saved · off"
+                    },
+                );
             }
             Err(error) => self.warn(&error),
         }
@@ -53,21 +55,15 @@ impl App {
         };
         match self.lsp_store().set_enabled(&profile.id, !profile.enabled) {
             Ok(()) => {
-                if let Some(saved) = self
-                    .lsp
-                    .profiles
-                    .iter_mut()
-                    .find(|saved| saved.id == profile.id)
-                {
-                    saved.enabled = !profile.enabled;
-                }
                 self.lsp_changed(&profile.id);
-                self.lsp_notice(if profile.enabled {
-                    "Language server turned off"
-                } else {
-                    "Language server turned on · starts when needed"
-                });
-                self.show_lsp_detail();
+                self.finish_lsp_change(
+                    &profile.id,
+                    if profile.enabled {
+                        "Language server turned off"
+                    } else {
+                        "Language server turned on · starts when needed"
+                    },
+                );
             }
             Err(error) => self.warn(&error),
         }
@@ -79,23 +75,35 @@ impl App {
         };
         match self.lsp_store().remove(&id) {
             Ok(()) => {
-                self.lsp.profiles.retain(|p| p.id != id);
-                self.lsp.selected = None;
                 self.lsp_changed(&id);
-                self.lsp_notice("Language server removed");
-                self.show_lsp_list();
+                self.finish_lsp_change(&id, "Language server removed");
             }
             Err(error) => self.warn(&error),
         }
+    }
+
+    pub(super) fn allow_lsp_restart(&mut self, id: &str) {
+        self.facts().lsp_runtime.reset_restart(id);
+        self.finish_lsp_change(id, "Restart allowed · the next request starts it");
     }
 
     fn lsp_changed(&mut self, id: &str) {
         self.facts().lsp_runtime.configuration_changed(id);
     }
 
-    fn lsp_notice(&mut self, message: &str) {
-        self.state
-            .notify(Feedback::result(Kind::Notice, message).change());
+    /// Report a change like MCP does, closing a pending `/settings` row, then
+    /// show the entry as saved: the store clears checks the change invalidated.
+    fn finish_lsp_change(&mut self, id: &str, message: &str) {
+        if self.local_command.as_deref() == Some("/settings") {
+            self.local_finish_change(Kind::Notice, message, vec![]);
+        } else {
+            self.state
+                .notify(Feedback::result(Kind::Notice, message).change());
+        }
+        if self.reload_lsp(id) {
+            // A removed entry is no longer selected, so this shows the list.
+            self.show_lsp_detail();
+        }
     }
 
     pub(super) fn start_lsp_check(&mut self, draft: bool) {
@@ -154,7 +162,7 @@ impl App {
             self.show_lsp_form();
         } else {
             let recorded = self.lsp_store().record_check(id, Ok(observation));
-            if !self.reload_lsp_check(id) {
+            if !self.reload_lsp(id) {
                 return;
             }
             match recorded {
@@ -199,7 +207,7 @@ impl App {
             fingerprint: profile.analysis_fingerprint(),
         };
         let recorded = self.lsp_store().record_check(&profile.id, Err(failure));
-        if !self.reload_lsp_check(&profile.id) {
+        if !self.reload_lsp(&profile.id) {
             return;
         }
         match recorded {
@@ -218,7 +226,7 @@ impl App {
         }
     }
 
-    fn reload_lsp_check(&mut self, id: &str) -> bool {
+    fn reload_lsp(&mut self, id: &str) -> bool {
         match self.lsp_store().load() {
             Ok(profiles) => {
                 for profile in &profiles {
