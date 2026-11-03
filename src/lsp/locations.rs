@@ -1,5 +1,10 @@
 use super::documents::{Document, Encoding, uri_to_path};
 use crate::json::Value;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// Documents observed for this result, read and canonicalized once per path.
+type Observed = HashMap<PathBuf, Option<Document>>;
 
 pub(super) fn normalize(result: &Value, encoding: Encoding, source: &Document) -> Vec<Value> {
     let values = match result {
@@ -7,13 +12,19 @@ pub(super) fn normalize(result: &Value, encoding: Encoding, source: &Document) -
         Value::Null => &[],
         other => std::slice::from_ref(other),
     };
+    let mut observed = Observed::new();
     values
         .iter()
-        .map(|value| location(value, encoding, source))
+        .map(|value| location(value, encoding, source, &mut observed))
         .collect()
 }
 
-fn location(value: &Value, encoding: Encoding, source: &Document) -> Value {
+fn location(
+    value: &Value,
+    encoding: Encoding,
+    source: &Document,
+    observed: &mut Observed,
+) -> Value {
     let (uri, range) = if value.get("targetUri").is_some() {
         (
             value.get("targetUri").and_then(Value::as_str),
@@ -28,17 +39,22 @@ fn location(value: &Value, encoding: Encoding, source: &Document) -> Value {
         return Value::object([("resolved", Value::Bool(false)), ("raw", value.clone())]);
     };
     let path = uri_to_path(uri);
-    let document = path.as_ref().and_then(|path| {
-        if uri == source.uri
-            || std::fs::canonicalize(path).ok().as_deref() == Some(source.path.as_path())
-        {
-            Some(source.clone())
-        } else {
-            Document::read(path, "", 0).ok()
-        }
-    });
-    let start = position(range.get("start"), document.as_ref(), encoding);
-    let end = position(range.get("end"), document.as_ref(), encoding);
+    let document = match &path {
+        None => None,
+        Some(_) if uri == source.uri => Some(source),
+        Some(path) => observed
+            .entry(path.clone())
+            .or_insert_with(|| {
+                if std::fs::canonicalize(path).ok().as_deref() == Some(source.path.as_path()) {
+                    Some(source.clone())
+                } else {
+                    Document::read(path, "", 0).ok()
+                }
+            })
+            .as_ref(),
+    };
+    let start = position(range.get("start"), document, encoding);
+    let end = position(range.get("end"), document, encoding);
     Value::object([
         ("uri", Value::string(uri)),
         (
@@ -163,5 +179,48 @@ mod tests {
             Some("git:/virtual.rs")
         );
         assert_eq!(normalized[0].get("path"), Some(&Value::Null));
+    }
+
+    fn at(uri: &str, line: usize, character: usize) -> Value {
+        let point = || {
+            Value::object([
+                ("line", Value::number(line)),
+                ("character", Value::number(character)),
+            ])
+        };
+        Value::object([
+            ("uri", Value::string(uri)),
+            (
+                "range",
+                Value::object([("start", point()), ("end", point())]),
+            ),
+        ])
+    }
+
+    #[test]
+    fn many_locations_in_one_file_map_from_one_observation() {
+        let directory = crate::test_support::Directory::new();
+        let source_path = directory.path().join("source.rs");
+        std::fs::write(&source_path, "fn source() {}\n").unwrap();
+        let source = Document::read(&source_path, "rust", 1).unwrap();
+        let target = directory.path().join("target.rs");
+        std::fs::write(&target, "a\u{1F980}b\n").unwrap();
+        let uri = Document::read(&target, "", 0).unwrap().uri;
+        let result = Value::Array((0..1000).map(|_| at(&uri, 0, 3)).collect());
+        let normalized = normalize(&result, Encoding::Utf16, &source);
+        assert_eq!(normalized.len(), 1000);
+        for location in &normalized {
+            let start = location.get("start").unwrap();
+            assert_eq!(start.get("column").and_then(Value::as_usize), Some(3));
+            assert_eq!(
+                location.get("mapping").and_then(Value::as_str),
+                Some("observed_disk_or_raw")
+            );
+        }
+        let snapshot = normalize(&at(&source.uri, 0, 1), Encoding::Utf16, &source);
+        assert_eq!(
+            snapshot[0].get("mapping").and_then(Value::as_str),
+            Some("source_snapshot")
+        );
     }
 }
