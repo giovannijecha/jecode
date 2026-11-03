@@ -180,11 +180,9 @@ fn summary_line(result: &Value, arguments: &Value, status: Status) -> Line {
             },
         );
     }
-    let diagnostics = result
-        .get("diagnostics")
-        .and_then(Value::as_array)
-        .unwrap_or(&[]);
-    let (errors, warnings) = diagnostic_counts(diagnostics);
+    let Some((errors, warnings, _)) = diagnostic_counts(result) else {
+        return Line::new(&summary_for(result, action), MUTED);
+    };
     let mut line = Line::new(
         &format!("{errors} errors"),
         if errors > 0 { BAD } else { MUTED },
@@ -232,11 +230,17 @@ pub(super) fn summary_for(result: &Value, action: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or("");
     let complete = result.get("complete") != Some(&Value::Bool(false));
+    // Totals recorded before inline truncation outlive the arrays.
     let locations = result
-        .get("locations")
-        .and_then(Value::as_array)
-        .map_or(0, <[_]>::len);
-    let diagnostics = result.get("diagnostics").and_then(Value::as_array);
+        .get("total_locations")
+        .and_then(Value::as_usize)
+        .or_else(|| {
+            result
+                .get("locations")
+                .and_then(Value::as_array)
+                .map(<[_]>::len)
+        });
+    let diagnostics = diagnostic_counts(result);
     let text = match status {
         "off" => "Server off".into(),
         "not_started" => "Not started".into(),
@@ -255,27 +259,30 @@ pub(super) fn summary_for(result: &Value, action: &str) -> String {
         "failed" => "Failed".into(),
         _ if freshness == "sync_gap" => "Sync incomplete".into(),
         _ if action == "diagnostics"
-            || action.is_empty() && diagnostics.is_some_and(|items| !items.is_empty()) =>
+            || action.is_empty() && diagnostics.is_some_and(|(_, _, total)| total > 0) =>
         {
-            let diagnostics = diagnostics.unwrap_or(&[]);
-            let (errors, warnings) = diagnostic_counts(diagnostics);
-            match freshness {
-                "current" => format!("{errors} errors · {warnings} warnings · current"),
-                "pending" => "Diagnostics pending".into(),
-                "stale" => format!("Stale diagnostics · {} findings", diagnostics.len()),
-                "unverified" => format!("Unverified version · {} findings", diagnostics.len()),
+            match (freshness, diagnostics) {
+                ("current", Some((errors, warnings, _))) => {
+                    format!("{errors} errors · {warnings} warnings · current")
+                }
+                ("current", None) => "Diagnostics current · counts unavailable".into(),
+                ("pending", _) => "Diagnostics pending".into(),
+                ("stale", Some((_, _, total))) => format!("Stale diagnostics · {total} findings"),
+                ("stale", None) => "Stale diagnostics".into(),
+                ("unverified", Some((_, _, total))) => {
+                    format!("Unverified version · {total} findings")
+                }
+                ("unverified", None) => "Unverified version".into(),
                 _ => "Diagnostics unavailable".into(),
             }
         }
-        _ if locations > 0 => format!(
-            "{} {}",
-            locations,
-            if locations == 1 {
-                "location"
-            } else {
-                "locations"
-            }
+        _ if let Some(count @ 1..) = locations => format!(
+            "{count} {}",
+            if count == 1 { "location" } else { "locations" }
         ),
+        _ if matches!(action, "definition" | "references") && locations.is_none() => {
+            "Locations unavailable".into()
+        }
         _ if matches!(action, "definition" | "references") => "No locations".into(),
         _ if action == "status" => format!(
             "{} configured",
@@ -300,7 +307,16 @@ pub(super) fn summary_for(result: &Value, action: &str) -> String {
     text::clean(&text)
 }
 
-fn diagnostic_counts(diagnostics: &[Value]) -> (usize, usize) {
+/// Errors, warnings and findings, preferring the totals recorded before inline
+/// truncation; `None` when the result carries neither totals nor findings.
+fn diagnostic_counts(result: &Value) -> Option<(usize, usize, usize)> {
+    let total = |key| result.get(key).and_then(Value::as_usize);
+    let diagnostics = result.get("diagnostics").and_then(Value::as_array);
+    if let (Some(errors), Some(warnings)) = (total("total_errors"), total("total_warnings")) {
+        let findings = total("total_diagnostics").or(diagnostics.map(<[_]>::len))?;
+        return Some((errors, warnings, findings));
+    }
+    let diagnostics = diagnostics?;
     let mut errors = 0;
     let mut warnings = 0;
     for finding in diagnostics {
@@ -312,7 +328,7 @@ fn diagnostic_counts(diagnostics: &[Value]) -> (usize, usize) {
             _ => {}
         }
     }
-    (errors, warnings)
+    Some((errors, warnings, diagnostics.len()))
 }
 
 #[cfg(test)]

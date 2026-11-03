@@ -172,3 +172,32 @@ fn failed_call_shows_its_error_instead_of_an_empty_result() {
     );
     assert!(row.spans.iter().any(|span| span.style == BAD));
 }
+
+#[test]
+fn truncated_results_count_from_totals_and_never_claim_absent_findings() {
+    let diagnostics = Value::object([("action", Value::string("diagnostics"))]);
+    let envelope = Value::object([
+        ("status", Value::string("ready")),
+        ("freshness", Value::string("current")),
+        ("total_diagnostics", Value::number(100)),
+        ("total_errors", Value::number(25)),
+        ("total_warnings", Value::number(50)),
+        ("truncated", Value::Bool(true)),
+    ]);
+    let row = last_row(&diagnostics, &envelope).plain();
+    assert!(row.contains("25 errors · 50 warnings · current"), "{row}");
+    let references = Value::object([
+        ("status", Value::string("ready")),
+        ("total_locations", Value::number(120)),
+        ("locations", Value::Array(vec![Value::Null; 40])),
+    ]);
+    assert_eq!(summary_for(&references, "references"), "120 locations");
+    let bare = Value::object([
+        ("status", Value::string("ready")),
+        ("freshness", Value::string("current")),
+    ]);
+    let summary = summary_for(&bare, "diagnostics");
+    assert!(!summary.contains("0 errors"), "{summary}");
+    assert!(!last_row(&diagnostics, &bare).plain().contains("0 errors"));
+    assert_eq!(summary_for(&bare, "references"), "Locations unavailable");
+}

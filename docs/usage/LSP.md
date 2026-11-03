@@ -69,7 +69,9 @@ The model has one `lsp` tool with these actions:
 
 An optional `server` ID resolves multiple matching enabled entries. Large
 responses have an inline preview and `result_file`; the model can read the
-retained response. Inline truncation is separate from protocol completeness.
+retained response. The preview keeps the complete response's location,
+diagnostic, error and warning totals. Inline truncation is separate from
+protocol completeness.
 No results, unsupported capabilities, an Off entry and unavailable analysis
 have distinct outcomes.
 

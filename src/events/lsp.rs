@@ -24,22 +24,11 @@ pub(super) fn summary(result: &Value) -> String {
     }
     let mut summary = if text("action") == "diagnostics" {
         let freshness = text("freshness");
-        let diagnostics = result
-            .get("diagnostics")
-            .and_then(Value::as_array)
-            .unwrap_or(&[]);
-        if diagnostics.is_empty() && freshness != "current" {
-            format!("Diagnostics {freshness}; this document only")
-        } else {
-            let errors = diagnostics
-                .iter()
-                .filter(|item| item.get("severity").and_then(Value::as_usize) == Some(1))
-                .count();
-            let warnings = diagnostics
-                .iter()
-                .filter(|item| item.get("severity").and_then(Value::as_usize) == Some(2))
-                .count();
-            format!("{errors} errors, {warnings} warnings; {freshness}; this document only")
+        match diagnostic_counts(result) {
+            Some((errors, warnings, findings)) if findings > 0 || freshness == "current" => {
+                format!("{errors} errors, {warnings} warnings; {freshness}; this document only")
+            }
+            _ => format!("Diagnostics {freshness}; this document only"),
         }
     } else {
         detail.to_owned()
@@ -55,6 +44,25 @@ pub(super) fn summary(result: &Value) -> String {
         });
     }
     summary
+}
+
+/// Errors, warnings and findings, preferring the totals recorded before inline
+/// truncation; `None` when the result carries neither totals nor findings.
+fn diagnostic_counts(result: &Value) -> Option<(usize, usize, usize)> {
+    let total = |key| result.get(key).and_then(Value::as_usize);
+    let diagnostics = result.get("diagnostics").and_then(Value::as_array);
+    if let (Some(errors), Some(warnings)) = (total("total_errors"), total("total_warnings")) {
+        let findings = total("total_diagnostics").or(diagnostics.map(<[_]>::len))?;
+        return Some((errors, warnings, findings));
+    }
+    let diagnostics = diagnostics?;
+    let severity = |level| {
+        diagnostics
+            .iter()
+            .filter(|item| item.get("severity").and_then(Value::as_usize) == Some(level))
+            .count()
+    };
+    Some((severity(1), severity(2), diagnostics.len()))
 }
 
 #[cfg(test)]
@@ -80,6 +88,13 @@ mod tests {
         assert_eq!(
             crate::events::tool_summary("lsp", &current),
             "0 errors, 0 warnings; current; this document only"
+        );
+        if let Value::Object(fields) = &mut current {
+            fields.remove("diagnostics");
+        }
+        assert_eq!(
+            crate::events::tool_summary("lsp", &current),
+            "Diagnostics current; this document only"
         );
     }
 
