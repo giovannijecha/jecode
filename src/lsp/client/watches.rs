@@ -213,6 +213,10 @@ fn hash_path(path: &std::path::Path, bytes: &mut u64, directory: bool) -> Result
 }
 
 #[cfg(test)]
+#[path = "sync_tests.rs"]
+mod sync_tests;
+
+#[cfg(test)]
 fn glob_match(pattern: &str, path: &str) -> bool {
     crate::lsp::glob::Pattern::new(pattern).is_some_and(|pattern| pattern.matches(path))
 }

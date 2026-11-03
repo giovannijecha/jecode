@@ -372,25 +372,6 @@ impl Client {
     }
 }
 
-fn end_position(document: &Document, encoding: Encoding) -> Value {
-    let line = document.text.bytes().filter(|b| *b == b'\n').count();
-    let tail = document
-        .text
-        .rsplit('\n')
-        .next()
-        .unwrap_or("")
-        .trim_end_matches('\r');
-    let character = match encoding {
-        Encoding::Utf8 => tail.len(),
-        Encoding::Utf16 => tail.encode_utf16().count(),
-        Encoding::Utf32 => tail.chars().count(),
-    };
-    Value::object([
-        ("line", Value::number(line)),
-        ("character", Value::number(character)),
-    ])
-}
-
 fn client_capabilities() -> Value {
     Value::object([
         (

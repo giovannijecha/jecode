@@ -20,6 +20,13 @@ fn main() {
         if !method.is_empty() {
             log(&marker, &method);
         }
+        if matches!(
+            method.as_str(),
+            "textDocument/didOpen" | "textDocument/didChange"
+        ) && field(&text, "uri").is_some_and(|uri| uri.contains("mirror"))
+        {
+            mirror(&marker, &method, &text);
+        }
         let id = number(&text, "id");
         match method.as_str() {
             "initialize" => reply(
@@ -126,8 +133,80 @@ fn send(output: &mut impl Write, body: &str) {
 }
 fn log(marker: &str, message: &str) {
     use std::fs::OpenOptions;
-    let mut log = OpenOptions::new().append(true).open(marker).unwrap();
+    let mut log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(marker)
+        .unwrap();
     writeln!(log, "{message}").unwrap();
+}
+/// Rebuild a "mirror" document as a spec-compliant server would: ranges use
+/// UTF-16 offsets and `\r\n`, `\r` or `\n` line breaks. Written to `<marker>-mirror`.
+fn mirror(marker: &str, method: &str, text: &str) {
+    let path = format!("{marker}-mirror");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    let changes = text
+        .split_once("\"contentChanges\":")
+        .map_or(text, |(_, rest)| rest);
+    let (head, body) = changes.split_once("\"text\":").unwrap();
+    let replacement = decode(body);
+    let updated = match head.split_once("\"range\":") {
+        Some((_, range)) if method == "textDocument/didChange" => {
+            let (end, start) = range.split_once("\"start\":").unwrap();
+            let at = |part: &str| {
+                let line = number(part, "line").unwrap();
+                offset(&current, line, number(part, "character").unwrap())
+            };
+            let (from, to) = (at(start), at(end));
+            format!("{}{replacement}{}", &current[..from], &current[to..])
+        }
+        _ => replacement,
+    };
+    std::fs::write(path, updated).unwrap();
+}
+fn decode(body: &str) -> String {
+    let mut chars = body.trim_start().strip_prefix('"').unwrap().chars();
+    let mut text = String::new();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => break,
+            '\\' => text.push(match chars.next().unwrap() {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                'b' => '\u{8}',
+                'f' => '\u{c}',
+                'u' => {
+                    let hex = chars.by_ref().take(4).collect::<String>();
+                    char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap()
+                }
+                other => other,
+            }),
+            ch => text.push(ch),
+        }
+    }
+    text
+}
+fn offset(text: &str, line: usize, character: usize) -> usize {
+    let mut start = 0;
+    for _ in 0..line {
+        let Some(at) = text[start..].find(['\r', '\n']) else {
+            return text.len();
+        };
+        let at = start + at;
+        start = at + if text[at..].starts_with("\r\n") { 2 } else { 1 };
+    }
+    let end = text[start..]
+        .find(['\r', '\n'])
+        .map_or(text.len(), |at| start + at);
+    let mut units = 0;
+    for (index, ch) in text[start..end].char_indices() {
+        if units >= character {
+            return start + index;
+        }
+        units += ch.len_utf16();
+    }
+    end
 }
 fn id_is(text: &str, id: usize) -> bool {
     number(text, "id") == Some(id)

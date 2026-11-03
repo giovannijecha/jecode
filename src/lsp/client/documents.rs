@@ -1,14 +1,19 @@
-use super::{Client, end_position};
+use super::Client;
 use crate::json::Value;
-use crate::lsp::documents::{Document, path_to_uri};
+use crate::lsp::documents::Document;
 use std::path::Path;
 
 impl Client {
     pub fn reconcile(&mut self, path: &Path, language: &str) -> Result<Document, String> {
         let canonical = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
-        let uri = path_to_uri(&canonical);
+        let current = Document::read(&canonical, language, 0)?;
+        self.synchronize(current)
+    }
+
+    /// Send a disk snapshot to the server. Errors here are protocol errors.
+    fn synchronize(&mut self, mut current: Document) -> Result<Document, String> {
+        let uri = current.uri.clone();
         let previous = self.docs.get(&uri).cloned();
-        let mut current = Document::read(&canonical, language, 0)?;
         if let Some(old) = &previous
             && old.text == current.text
         {
@@ -20,80 +25,19 @@ impl Client {
         current.version = self.next_document_version;
         self.next_document_version += 1;
         self.evict_documents(&uri, current.text.len())?;
-        match previous {
-            None => {
-                if self.open_close {
-                    self.notify(
-                        "textDocument/didOpen",
-                        Value::object([(
-                            "textDocument",
-                            Value::object([
-                                ("uri", Value::string(&current.uri)),
-                                ("languageId", Value::string(language)),
-                                ("version", Value::number(current.version)),
-                                ("text", Value::string(&current.text)),
-                            ]),
-                        )]),
-                    )?;
-                }
-                self.docs.insert(uri, current.clone());
-                self.doc_order.push_back(current.uri.clone());
+        if previous.is_none() {
+            if self.open_close {
+                self.send_open(&current)?;
             }
-            Some(old) if old.text != current.text => {
-                let change = if self.sync_kind == 2 {
-                    Value::object([
-                        (
-                            "range",
-                            Value::object([
-                                (
-                                    "start",
-                                    Value::object([
-                                        ("line", Value::number(0)),
-                                        ("character", Value::number(0)),
-                                    ]),
-                                ),
-                                ("end", end_position(&old, self.encoding)),
-                            ]),
-                        ),
-                        ("text", Value::string(&current.text)),
-                    ])
-                } else {
-                    Value::object([("text", Value::string(&current.text))])
-                };
-                if self.sync_kind != 0 {
-                    self.notify(
-                        "textDocument/didChange",
-                        Value::object([
-                            (
-                                "textDocument",
-                                Value::object([
-                                    ("uri", Value::string(&uri)),
-                                    ("version", Value::number(current.version)),
-                                ]),
-                            ),
-                            ("contentChanges", Value::Array(vec![change])),
-                        ]),
-                    )?;
-                }
-                if self.save {
-                    let mut params = std::collections::BTreeMap::from([(
-                        "textDocument".into(),
-                        Value::object([("uri", Value::string(&uri))]),
-                    )]);
-                    if self.save_include_text {
-                        params.insert("text".into(), Value::string(&current.text));
-                    }
-                    self.notify("textDocument/didSave", Value::Object(params))?;
-                }
-                self.docs.insert(uri.clone(), current.clone());
-                for cache in [&mut self.pull_diagnostics, &mut self.push_diagnostics] {
-                    if let Some(report) = cache.get_mut(&uri) {
-                        report.stale = true;
-                    }
-                }
+            self.doc_order.push_back(uri.clone());
+        } else {
+            if self.sync_kind != 0 {
+                self.send_change(&current)?;
             }
-            Some(_) => unreachable!("unchanged document returned above"),
+            self.send_save(&current)?;
+            self.mark_stale(&uri);
         }
+        self.docs.insert(uri, current.clone());
         Ok(current)
     }
 
@@ -108,22 +52,18 @@ impl Client {
             if path.exists() {
                 self.reconcile(&path, &language)?;
             } else {
-                if self.open_close {
-                    self.notify(
-                        "textDocument/didClose",
-                        Value::object([(
-                            "textDocument",
-                            Value::object([("uri", Value::string(&uri))]),
-                        )]),
-                    )?;
-                }
-                self.docs.remove(&uri);
-                self.doc_order.retain(|value| value != &uri);
-                self.pull_diagnostics.remove(&uri);
-                self.push_diagnostics.remove(&uri);
+                self.close_document(&uri)?;
             }
         }
         Ok(())
+    }
+
+    fn close_document(&mut self, uri: &str) -> Result<(), String> {
+        self.docs.remove(uri);
+        self.doc_order.retain(|value| value != uri);
+        self.pull_diagnostics.remove(uri);
+        self.push_diagnostics.remove(uri);
+        self.send_close(uri)
     }
 
     fn evict_documents(&mut self, keep: &str, incoming_bytes: usize) -> Result<(), String> {
@@ -144,20 +84,9 @@ impl Client {
                 self.doc_order.push_back(oldest);
                 break;
             }
-            if self.docs.remove(&oldest).is_none() {
-                continue;
+            if self.docs.contains_key(&oldest) {
+                self.close_document(&oldest)?;
             }
-            if self.open_close {
-                self.notify(
-                    "textDocument/didClose",
-                    Value::object([(
-                        "textDocument",
-                        Value::object([("uri", Value::string(&oldest))]),
-                    )]),
-                )?;
-            }
-            self.pull_diagnostics.remove(&oldest);
-            self.push_diagnostics.remove(&oldest);
         }
         Ok(())
     }
@@ -176,77 +105,86 @@ impl Client {
             document.version = self.next_document_version;
             self.next_document_version += 1;
             if self.open_close {
-                self.notify(
-                    "textDocument/didClose",
-                    Value::object([(
-                        "textDocument",
-                        Value::object([("uri", Value::string(&document.uri))]),
-                    )]),
-                )?;
-                self.notify(
-                    "textDocument/didOpen",
-                    Value::object([(
-                        "textDocument",
-                        Value::object([
-                            ("uri", Value::string(&document.uri)),
-                            ("languageId", Value::string(&document.language)),
-                            ("version", Value::number(document.version)),
-                            ("text", Value::string(&document.text)),
-                        ]),
-                    )]),
-                )?;
+                self.send_close(&document.uri)?;
+                self.send_open(&document)?;
             } else {
-                let change = if self.sync_kind == 2 {
-                    Value::object([
-                        (
-                            "range",
-                            Value::object([
-                                (
-                                    "start",
-                                    Value::object([
-                                        ("line", Value::number(0)),
-                                        ("character", Value::number(0)),
-                                    ]),
-                                ),
-                                ("end", end_position(&document, self.encoding)),
-                            ]),
-                        ),
-                        ("text", Value::string(&document.text)),
-                    ])
-                } else {
-                    Value::object([("text", Value::string(&document.text))])
-                };
-                self.notify(
-                    "textDocument/didChange",
-                    Value::object([
-                        (
-                            "textDocument",
-                            Value::object([
-                                ("uri", Value::string(&document.uri)),
-                                ("version", Value::number(document.version)),
-                            ]),
-                        ),
-                        ("contentChanges", Value::Array(vec![change])),
-                    ]),
-                )?;
+                self.send_change(&document)?;
             }
-            if self.save {
-                let mut params = std::collections::BTreeMap::from([(
-                    "textDocument".into(),
-                    Value::object([("uri", Value::string(&document.uri))]),
-                )]);
-                if self.save_include_text {
-                    params.insert("text".into(), Value::string(&document.text));
-                }
-                self.notify("textDocument/didSave", Value::Object(params))?;
-            }
-            for cache in [&mut self.pull_diagnostics, &mut self.push_diagnostics] {
-                if let Some(report) = cache.get_mut(&document.uri) {
-                    report.stale = true;
-                }
-            }
+            self.send_save(&document)?;
+            self.mark_stale(&document.uri);
             self.docs.insert(document.uri.clone(), document);
         }
         Ok(())
+    }
+
+    fn mark_stale(&mut self, uri: &str) {
+        for cache in [&mut self.pull_diagnostics, &mut self.push_diagnostics] {
+            if let Some(report) = cache.get_mut(uri) {
+                report.stale = true;
+            }
+        }
+    }
+
+    fn send_open(&mut self, document: &Document) -> Result<(), String> {
+        self.notify(
+            "textDocument/didOpen",
+            Value::object([(
+                "textDocument",
+                Value::object([
+                    ("uri", Value::string(&document.uri)),
+                    ("languageId", Value::string(&document.language)),
+                    ("version", Value::number(document.version)),
+                    ("text", Value::string(&document.text)),
+                ]),
+            )]),
+        )
+    }
+
+    fn send_close(&mut self, uri: &str) -> Result<(), String> {
+        if !self.open_close {
+            return Ok(());
+        }
+        self.notify(
+            "textDocument/didClose",
+            Value::object([("textDocument", Value::object([("uri", Value::string(uri))]))]),
+        )
+    }
+
+    /// A rangeless change replaces the whole text. It is valid under Full and
+    /// Incremental sync and leaves line-break interpretation to the server.
+    fn send_change(&mut self, document: &Document) -> Result<(), String> {
+        self.notify(
+            "textDocument/didChange",
+            Value::object([
+                (
+                    "textDocument",
+                    Value::object([
+                        ("uri", Value::string(&document.uri)),
+                        ("version", Value::number(document.version)),
+                    ]),
+                ),
+                (
+                    "contentChanges",
+                    Value::Array(vec![Value::object([(
+                        "text",
+                        Value::string(&document.text),
+                    )])]),
+                ),
+            ]),
+        )
+    }
+
+    fn send_save(&mut self, document: &Document) -> Result<(), String> {
+        if !self.save {
+            return Ok(());
+        }
+        let mut params = std::collections::BTreeMap::from([(
+            "textDocument".into(),
+            Value::object([("uri", Value::string(&document.uri))]),
+        )]);
+        if self.save_include_text {
+            params.insert("text".into(), Value::string(&document.text));
+        }
+        self.notify("textDocument/didSave", Value::Object(params))
     }
 }
