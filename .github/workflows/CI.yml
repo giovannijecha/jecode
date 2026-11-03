@@ -74,7 +74,7 @@ jobs:
       - name: Check all targets
         run: cargo +${{ matrix.toolchain }} clippy --locked --offline --all-targets -- -D warnings
       - name: Run tests
-        run: cargo +${{ matrix.toolchain }} test --locked --offline --quiet
+        run: cargo +${{ matrix.toolchain }} test --locked --offline --quiet -- --test-threads=4
       - name: Verify native Windows ConPTY
         if: runner.os == 'Windows'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1

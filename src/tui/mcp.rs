@@ -35,11 +35,7 @@ pub(super) const PRESETS: [(&str, &str, &str); 4] = [
         "https://mcp.cloudflare.com/mcp",
         "mcp.cloudflare.com",
     ),
-    (
-        "Vercel",
-        "https://mcp.vercel.com",
-        "Client approval required",
-    ),
+    ("Vercel", "https://mcp.vercel.com/", "mcp.vercel.com"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +71,7 @@ pub(super) struct Draft {
     methods: Vec<AuthMethod>,
     /// Started by a saved connection's Sign in action, which saves on success.
     sign_in: bool,
+    sign_in_guard: Option<crate::mcp::SignInGuard>,
 }
 
 #[derive(Default)]
@@ -159,6 +156,7 @@ impl App {
             connection,
             methods,
             sign_in,
+            sign_in_guard: None,
         });
     }
 

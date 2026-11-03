@@ -1,5 +1,6 @@
 use super::super::types::Error;
 use super::super::{config, types::Connection};
+use super::resource;
 use super::wire::{self, failure, required};
 use crate::{cancel::Cancellation, json::Value};
 
@@ -10,8 +11,10 @@ pub(super) struct Server {
     pub registration: Option<String>,
     pub resource: String,
     pub scope: Option<String>,
+    pub offline_access: bool,
     pub cimd: bool,
     pub response_iss_required: bool,
+    pub auth_methods: Option<Vec<String>>,
 }
 
 pub(super) fn discover_challenged(
@@ -51,7 +54,11 @@ pub(super) fn discover_optional(
     let Some((metadata, announced, issuer)) =
         wire::first_valid_json(&candidates, cancel, |metadata| {
             let announced = required(&metadata, "resource")?.to_owned();
-            if announced != *endpoint && announced != endpoint.split('?').next().unwrap_or(endpoint)
+            if !resource::matches_endpoint(&announced, endpoint)
+                && !resource::matches_endpoint(
+                    &announced,
+                    endpoint.split('?').next().unwrap_or(endpoint),
+                )
             {
                 return Err(failure(
                     "MCP protected-resource identity does not match the configured endpoint",
@@ -87,6 +94,7 @@ pub(super) fn discover_optional(
                 })
                 .filter(|s| !s.is_empty())
         });
+    let scope = super::scopes::union(&[scope.as_deref()])?;
     let base = wire::origin(&issuer)?;
     let suffix = issuer
         .strip_prefix(&base)
@@ -117,6 +125,20 @@ pub(super) fn discover_optional(
         if let Some(url) = &registration {
             trusted_endpoint(url, &issuer)?;
         }
+        let auth_methods = match authorization.get("token_endpoint_auth_methods_supported") {
+            None => None,
+            Some(Value::Array(methods)) => Some(
+                methods
+                    .iter()
+                    .map(|method| {
+                        method.as_str().map(str::to_owned).ok_or_else(|| {
+                            failure("OAuth token authentication metadata is invalid")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            _ => return Err(failure("OAuth token authentication metadata is invalid")),
+        };
         Ok(Server {
             issuer: issuer.clone(),
             authorize,
@@ -124,6 +146,7 @@ pub(super) fn discover_optional(
             registration,
             resource: announced.clone(),
             scope: scope.clone(),
+            offline_access: supports_offline_access(&authorization),
             cimd: matches!(
                 authorization.get("client_id_metadata_document_supported"),
                 Some(Value::Bool(true))
@@ -132,10 +155,22 @@ pub(super) fn discover_optional(
                 authorization.get("authorization_response_iss_parameter_supported"),
                 Some(Value::Bool(true))
             ),
+            auth_methods,
         })
     })?
     .ok_or_else(|| failure("OAuth authorization server metadata was not found"))?;
     Ok(Some(server))
+}
+
+fn supports_offline_access(metadata: &Value) -> bool {
+    metadata
+        .get("scopes_supported")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            values
+                .iter()
+                .any(|value| value.as_str() == Some("offline_access"))
+        })
 }
 
 /// MCP authorization requires advertised PKCE S256 support before sign-in.
@@ -161,75 +196,7 @@ pub(super) fn trusted_endpoint(url: &str, issuer: &str) -> Result<(), Error> {
     Ok(())
 }
 
-pub(super) fn client_id(
-    connection: &Connection,
-    server: &Server,
-    redirect: &str,
-    cancel: &Cancellation,
-) -> Result<String, Error> {
-    // A registered client is bound to this sign-in's redirect; only refresh reuses it.
-    if let Some(id) = connection.oauth_client_id.as_deref() {
-        if id.starts_with("https://") {
-            if !server.cimd {
-                return Err(failure(
-                    "OAuth issuer does not support Client ID Metadata Documents",
-                ));
-            }
-            let value = wire::get_json(id, cancel)?
-                .ok_or_else(|| failure("Client ID Metadata Document was not found"))?;
-            if required(&value, "client_id")? != id {
-                return Err(failure("Client ID Metadata Document identity mismatch"));
-            }
-            let redirects = value
-                .get("redirect_uris")
-                .and_then(Value::as_array)
-                .ok_or_else(|| failure("Client ID Metadata Document has no redirect URI"))?;
-            if !redirects
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|uri| callback_matches(uri, redirect))
-            {
-                return Err(failure(
-                    "Client ID Metadata Document does not allow this callback",
-                ));
-            }
-        }
-        return Ok(id.into());
-    }
-    let registration = server
-        .registration
-        .as_ref()
-        .ok_or_else(|| failure("OAuth issuer requires a pre-registered client ID"))?;
-    let body = Value::object([
-        ("client_name", Value::string("Jecode")),
-        ("redirect_uris", Value::Array(vec![Value::string(redirect)])),
-        (
-            "grant_types",
-            Value::Array(vec![
-                Value::string("authorization_code"),
-                Value::string("refresh_token"),
-            ]),
-        ),
-        ("response_types", Value::Array(vec![Value::string("code")])),
-        ("token_endpoint_auth_method", Value::string("none")),
-        ("application_type", Value::string("native")),
-    ]);
-    let response = wire::post_json(registration, &body, cancel)?;
-    let method = response
-        .get("token_endpoint_auth_method")
-        .and_then(Value::as_str);
-    if method.is_some_and(|method| method != "none")
-        || method != Some("none")
-            && response
-                .get("client_secret")
-                .is_some_and(|value| !matches!(value, Value::Null) && value.as_str() != Some(""))
-    {
-        return Err(failure("OAuth registration required a confidential client"));
-    }
-    Ok(required(&response, "client_id")?.into())
-}
-
-fn callback_matches(registered: &str, actual: &str) -> bool {
+pub(super) fn callback_matches(registered: &str, actual: &str) -> bool {
     // Native OAuth loopback redirects may vary only their ephemeral port (RFC 8252).
     fn path(uri: &str) -> Option<&str> {
         let rest = uri.strip_prefix("http://127.0.0.1")?;
@@ -248,7 +215,7 @@ fn callback_matches(registered: &str, actual: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{callback_matches, pkce};
+    use super::{callback_matches, pkce, supports_offline_access};
     use crate::json;
 
     #[test]
@@ -268,6 +235,20 @@ mod tests {
                 pkce(&json::parse(metadata).unwrap()).is_ok(),
                 ok,
                 "{metadata}"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_advertised_offline_access() {
+        for (metadata, expected) in [
+            (r#"{}"#, false),
+            (r#"{"scopes_supported":["openid"]}"#, false),
+            (r#"{"scopes_supported":["openid","offline_access"]}"#, true),
+        ] {
+            assert_eq!(
+                supports_offline_access(&json::parse(metadata).unwrap()),
+                expected
             );
         }
     }

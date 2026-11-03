@@ -102,6 +102,21 @@ fn changing_auth_and_extra_headers_changes_only_the_draft() {
 }
 
 #[test]
+fn changing_the_endpoint_drops_the_previous_servers_pending_scope() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let mut connection = Connection::draft("Scoped", "https://old.example/mcp");
+    connection.pending_scope = Some("deploy".into());
+    app.begin_mcp_draft(connection, false, false);
+    app.show_mcp_field(Field::Endpoint);
+    type_text(&mut app, "https://new.example/mcp");
+    assert_eq!(draft(&app).endpoint, "https://new.example/mcp");
+    assert_eq!(draft(&app).pending_scope, None);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn sign_in_requires_an_explicit_token_or_oauth_choice() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
@@ -195,11 +210,11 @@ fn vercel_guided_setup_prefills_the_generic_form_without_connecting_or_saving() 
         .iter()
         .position(|(name, _)| name == "Vercel")
         .unwrap();
-    assert_eq!(rows(&app)[index].1, "Client approval required");
+    assert_eq!(rows(&app)[index].1, "mcp.vercel.com");
     app.choose_mcp(Panel::Add, index);
     let connection = draft(&app);
     assert_eq!(connection.name, "Vercel");
-    assert_eq!(connection.endpoint, "https://mcp.vercel.com");
+    assert_eq!(connection.endpoint, "https://mcp.vercel.com/");
     assert!(connection.token.is_empty());
     assert!(connection.oauth.is_none());
     assert!(app.mcp.draft.as_ref().unwrap().methods.is_empty());

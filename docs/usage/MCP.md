@@ -17,9 +17,10 @@ Plain mode has no MCP settings; edit `~/.jecode/mcp.json` there or use the TUI.
 
 The form includes Name, Endpoint and Sign-in. Advanced contains the request
 timeout (1–600 seconds, default 60) and masked custom headers. Only GitHub
-supplies its client identity internally. Other services and custom servers use
-dynamic registration when the server offers it; **Advanced > Custom OAuth
-client** accepts a pre-registered client ID or metadata URL instead.
+uses its registered App for device sign-in. Other services and custom servers
+use Jecode's public Client ID Metadata Document when supported, then dynamic
+registration when available; **Advanced > Custom OAuth client** accepts a
+pre-registered client ID or metadata URL instead.
 Entering `Name: value` adds or replaces that header; `Name:` removes it.
 Esc discards unsaved edits. Saving a changed endpoint replaces the old server
 identity and authentication; it never forwards the old token to a new URL.
@@ -29,19 +30,21 @@ identity and authentication; it never forwards the old token to a new URL.
 | GitHub | `https://api.githubcopilot.com/mcp/` | Token or OAuth with the registered Jecode App and a browser/device code. |
 | Supabase | `https://mcp.supabase.com/mcp` | Token or OAuth discovered from the server. |
 | Cloudflare | `https://mcp.cloudflare.com/mcp` | API token or OAuth discovered from the server. |
-| Vercel | `https://mcp.vercel.com` | OAuth; authenticated access requires Vercel's client approval. |
+| Vercel | `https://mcp.vercel.com/` | OAuth with Client ID Metadata Document; you approve access in Vercel. |
 
-These are connection targets, not claims of live account verification. The
-client and UI are tested with isolated synthetic servers. Vercel controls its
-[client approval](https://vercel.com/docs/agent-resources/vercel-mcp); Jecode
-does not bypass it. See the [GitHub App setup](../development/GITHUB_MCP_APP.md)
+The client and UI have isolated synthetic tests. Explicit Windows account checks
+on 2026-11-03 completed OAuth, token refresh and tool discovery with all four
+services. Cloudflare returned four entry-point tools; access to account resources
+was not exercised. These checks do not run remote mutations. Vercel accepts
+[unreviewed clients with public metadata](https://vercel.com/changelog/vercel-mcp-now-supports-client-id-metadata-documents);
+you still approve each connection. See the [GitHub App setup](../development/GITHUB_MCP_APP.md)
 for browser sign-in, which is optional for token connections.
 Jecode ships its public GitHub client ID; users do not register an App or
 configure an identifier. They authorize Jecode and choose the repositories
 they grant it access to. A public server with no authentication reads
 **Not needed**; a token-only server still asks for the explicit Token choice.
 The [Vercel client setup](../development/VERCEL_MCP_CLIENT.md) records the
-approval requirement and registration details. Vercel CLI/API tokens are not
+public metadata URL and publication requirement. Vercel CLI/API tokens are not
 assumed to authorize the MCP endpoint; access follows its OAuth grants.
 
 ## Global configuration and permissions
@@ -63,17 +66,38 @@ Workspace and Full. Server annotations do not grant permission or prove that a
 tool is read-only. Local checkpoints cannot undo remote changes.
 
 [OAuth](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
-uses protected-resource and authorization-server metadata, a public client,
+uses protected-resource and authorization-server metadata, an OAuth client,
 PKCE S256 and a loopback callback on an ephemeral port. It supports a configured
-client ID or client metadata URL, with dynamic registration when offered. A
-dynamically registered client serves only the sign-in that registered it and
-that session's refreshes; the next sign-in registers again. Refresh remains
-bound to the original endpoint, issuer and client. Query options such as
+client ID or client metadata URL, Jecode's public metadata when advertised, and
+dynamic registration as a fallback. A dynamically registered client serves
+only the sign-in that registered it and that session's refreshes; the next
+sign-in registers again. Registration can assign `none`, `client_secret_basic`
+or `client_secret_post`; omitted server authentication methods default to
+`client_secret_basic`. Per-registration client secrets are stored and
+redacted with the session credentials. Refresh remains bound to the original
+endpoint, issuer and client. Query options such as
 [Supabase's `project_ref`](https://supabase.com/docs/guides/ai-tools/mcp) remain
 part of the connection identity even when the OAuth resource URI omits the
 query. Reconnect from Settings when sign-in has expired or access was revoked.
 The authorization server must advertise S256 support in its metadata; otherwise
 browser sign-in is unavailable. A bearer token remains an alternative.
+
+When the authorization server advertises `offline_access` and the sign-in
+request names scopes, Jecode adds it so the server can issue a refresh token.
+Without any requested scopes, Jecode omits `scope` and the server applies its
+defaults. Issuance remains the server's choice. A tool-specific
+`403 insufficient_scope` retains the required scope for the next sign-in in
+Settings, together with scopes previously granted by the same authorization
+server. Changing the endpoint discards a retained scope. The failed remote
+operation is not replayed automatically after authorization.
+Sign-in reloads current credentials and requested permissions before opening
+the browser. Saving a new grant preserves later permission requests for the
+same endpoint and rejects a saved connection removed or changed meanwhile.
+
+For the stock GitHub endpoint, Jecode requests the default toolsets and Actions.
+Custom toolset/tool headers and custom endpoint paths retain their selection.
+The GitHub App and installation must grant the corresponding permissions; each
+installation owner approves permission increases.
 
 ## Inspect tools and results
 

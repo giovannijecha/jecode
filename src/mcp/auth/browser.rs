@@ -1,5 +1,5 @@
 use super::super::types::{Connection, Error, ErrorKind};
-use super::{TokenContext, Update, discovery, token_record, wire};
+use super::{TokenContext, Update, client, discovery, scopes, token_record, wire};
 use crate::{auth::openai, cancel::Cancellation};
 use std::{
     io::{Read, Write},
@@ -33,7 +33,7 @@ pub(super) fn sign_in(
         .map_err(|_| wire::failure("Could not read OAuth callback port"))?
         .port();
     let redirect = format!("http://127.0.0.1:{port}/callback");
-    let client = discovery::client_id(&connection, &server, &redirect, cancel)?;
+    let client = client::resolve(&connection, &server, &redirect, cancel)?;
     let random =
         |n| openai::random(n, cancel).map_err(|_| wire::failure("OAuth random generator failed"));
     let state = wire::base64url(&random(32)?);
@@ -44,14 +44,15 @@ pub(super) fn sign_in(
     );
     let mut fields = vec![
         ("response_type", "code"),
-        ("client_id", client.as_str()),
+        ("client_id", client.id.as_str()),
         ("redirect_uri", redirect.as_str()),
         ("code_challenge_method", "S256"),
         ("code_challenge", challenge.as_str()),
         ("state", state.as_str()),
         ("resource", server.resource.as_str()),
     ];
-    if let Some(scope) = &server.scope {
+    let requested_scope = requested_scope(&connection, &server)?;
+    if let Some(scope) = &requested_scope {
         fields.push(("scope", scope));
     }
     let separator = if server.authorize.contains('?') {
@@ -72,35 +73,45 @@ pub(super) fn sign_in(
         server.response_iss_required,
         cancel,
     )?;
-    let value = wire::post_form(
+    let value = client::token_request(
         &server.token,
         &[
             ("grant_type", "authorization_code"),
-            ("client_id", &client),
             ("code", &code),
             ("code_verifier", &verifier),
             ("redirect_uri", &redirect),
             ("resource", &server.resource),
         ],
+        &client,
         cancel,
     )?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| wire::failure("System clock is invalid"))?
         .as_secs();
-    connection.oauth = Some(token_record(
+    let mut tokens = token_record(
         &value,
         TokenContext {
             endpoint: &server.token,
             bound_endpoint: &connection.endpoint,
-            client: &client,
+            client: &client.id,
+            client_auth_method: client.method,
+            client_secret: client.secret.as_deref(),
+            client_secret_expires_at: client.secret_expires_at,
             issuer: &server.issuer,
             resource: Some(&server.resource),
             github: false,
             now,
         },
         None,
-    )?);
+    )?;
+    // OAuth permits omitting an unchanged scope in the token response.
+    // Keep the authorized request so a later step-up can retain those grants.
+    if tokens.scope.is_none() {
+        tokens.scope = requested_scope;
+    }
+    connection.oauth = Some(tokens);
+    connection.pending_scope = None;
     connection.method = super::super::types::AuthMethod::Browser;
     connection.token.clear();
     super::super::config::validate(&connection)?;
@@ -251,9 +262,97 @@ fn respond(stream: &mut TcpStream, ok: bool) {
     let _ = stream.write_all(response.as_bytes());
 }
 
+/// Step-up scopes first, then scopes already granted by the same
+/// authorization server, then the resource's own scopes.
+fn requested_scope(
+    connection: &Connection,
+    server: &discovery::Server,
+) -> Result<Option<String>, Error> {
+    let scope = scopes::union(&[
+        connection.pending_scope.as_deref(),
+        connection
+            .oauth
+            .as_ref()
+            .filter(|oauth| oauth.issuer == server.issuer)
+            .and_then(|oauth| oauth.scope.as_deref()),
+        server.scope.as_deref(),
+    ])?;
+    // Do not request offline_access alone; an empty request lets the issuer
+    // apply its default scopes. Add it once actual resource scopes are known.
+    scopes::union(&[
+        scope.as_deref(),
+        (server.offline_access && scope.is_some()).then_some("offline_access"),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn granted_scopes_carry_over_only_from_the_same_issuer() {
+        let mut connection = Connection::draft("Scoped", "https://mcp.test/mcp");
+        connection.pending_scope = Some("deploy".into());
+        connection.oauth = Some(crate::mcp::types::OAuthTokens {
+            endpoint: connection.endpoint.clone(),
+            access_token: "isolated-access".into(),
+            refresh_token: None,
+            expires_at: None,
+            token_endpoint: "https://old.test/token".into(),
+            client_id: "isolated-client".into(),
+            client_auth_method: crate::mcp::types::ClientAuthMethod::None,
+            client_secret: None,
+            client_secret_expires_at: None,
+            issuer: "https://old.test".into(),
+            scope: Some("legacy:read".into()),
+            resource: Some(connection.endpoint.clone()),
+            github: false,
+        });
+        let mut server = discovery::Server {
+            issuer: "https://new.test".into(),
+            authorize: "https://new.test/authorize".into(),
+            token: "https://new.test/token".into(),
+            registration: None,
+            resource: connection.endpoint.clone(),
+            scope: Some("read".into()),
+            offline_access: false,
+            cimd: false,
+            response_iss_required: false,
+            auth_methods: None,
+        };
+        assert_eq!(
+            requested_scope(&connection, &server).unwrap().as_deref(),
+            Some("deploy read")
+        );
+        server.issuer = "https://old.test".into();
+        assert_eq!(
+            requested_scope(&connection, &server).unwrap().as_deref(),
+            Some("deploy legacy:read read")
+        );
+    }
+
+    #[test]
+    fn offline_access_waits_for_actual_scopes_even_without_resource_scopes() {
+        let mut connection = Connection::draft("Scoped", "https://mcp.test/mcp");
+        let server = discovery::Server {
+            issuer: "https://issuer.test".into(),
+            authorize: "https://issuer.test/authorize".into(),
+            token: "https://issuer.test/token".into(),
+            registration: None,
+            resource: connection.endpoint.clone(),
+            scope: None,
+            offline_access: true,
+            cimd: false,
+            response_iss_required: false,
+            auth_methods: None,
+        };
+        assert_eq!(requested_scope(&connection, &server).unwrap(), None);
+        connection.pending_scope = Some("deploy".into());
+        assert_eq!(
+            requested_scope(&connection, &server).unwrap().as_deref(),
+            Some("deploy offline_access")
+        );
+    }
 
     fn send(port: u16, target: &str) -> String {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();

@@ -161,12 +161,13 @@ impl App {
             }
             ResultValue::Saved(result) => self.apply_mcp_saved(result),
             ResultValue::SignedIn(result) => match result {
-                Ok(connection) => {
+                Ok((connection, guard)) => {
                     connection.protect(&self.archive.redactor);
                     let Some(draft) = &mut self.mcp.draft else {
                         return;
                     };
                     draft.connection = connection;
+                    draft.sign_in_guard = guard;
                     if draft.sign_in {
                         self.start_mcp_save();
                     } else {

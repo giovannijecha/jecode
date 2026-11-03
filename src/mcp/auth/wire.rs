@@ -228,22 +228,25 @@ pub(super) fn post_form(
     fields: &[(&str, &str)],
     cancel: &Cancellation,
 ) -> Result<Value, Error> {
+    post_form_with_headers(url, fields, &[], cancel)
+}
+pub(super) fn post_form_with_headers(
+    url: &str,
+    fields: &[(&str, &str)],
+    extra_headers: &[(String, String)],
+    cancel: &Cancellation,
+) -> Result<Value, Error> {
     config::validate_url(url)?;
     let data = form(fields);
-    let response = transport::request(
-        url,
-        "POST",
-        &[
-            ("Accept".into(), "application/json".into()),
-            (
-                "Content-Type".into(),
-                "application/x-www-form-urlencoded".into(),
-            ),
-        ],
-        Some(data.as_bytes()),
-        15,
-        cancel,
-    )?;
+    let mut headers = vec![
+        ("Accept".into(), "application/json".into()),
+        (
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ),
+    ];
+    headers.extend_from_slice(extra_headers);
+    let response = transport::request(url, "POST", &headers, Some(data.as_bytes()), 15, cancel)?;
     parse_response(response.status, &response.body)
 }
 fn parse_response(status: u16, body: &[u8]) -> Result<Value, Error> {

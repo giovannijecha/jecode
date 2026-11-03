@@ -188,12 +188,13 @@ impl App {
             return;
         };
         let connection = draft.connection.clone();
+        let sign_in_guard = draft.sign_in_guard.clone();
         let public = draft.methods == [AuthMethod::None];
         // Tokens loaded with the saved connection, not from a new sign-in.
-        let kept = draft
-            .original
-            .as_ref()
-            .is_some_and(|original| original.oauth.is_some() && original.oauth == connection.oauth);
+        let kept = sign_in_guard.is_none()
+            && draft.original.as_ref().is_some_and(|original| {
+                original.oauth.is_some() && original.oauth == connection.oauth
+            });
         let back = if draft.sign_in {
             Panel::Methods
         } else {
@@ -228,19 +229,22 @@ impl App {
             self.warn(&error.message);
             return;
         }
-        self.mcp.job = Some(Job::save(self.mcp_home(), connection, kept));
+        self.mcp.job = Some(Job::save(self.mcp_home(), connection, kept, sign_in_guard));
         self.mcp_loading("Checking connection and loading tools…", back);
     }
 
     pub(super) fn start_mcp_sign_in(&mut self) {
-        let Some(connection) = self.mcp.connection().cloned() else {
+        let Some(draft) = &mut self.mcp.draft else {
             return;
         };
+        draft.sign_in_guard = None;
+        let connection = draft.connection.clone();
+        let original = draft.original.clone();
         let (sender, receiver) = mpsc::channel();
         self.mcp.updates = Some(receiver);
         self.mcp.browser_url = None;
         self.mcp.device_code = None;
-        self.mcp.job = Some(Job::sign_in(connection, sender));
+        self.mcp.job = Some(Job::sign_in(self.mcp_home(), connection, original, sender));
         self.mcp_loading("Starting sign-in…", Panel::Methods);
     }
 

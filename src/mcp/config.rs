@@ -1,7 +1,7 @@
 //! MCP connection validation and its independent on-disk representation.
 use crate::json::Value;
 
-use super::types::{AuthMethod, Connection, Error, ErrorKind, OAuthTokens};
+use super::types::{AuthMethod, ClientAuthMethod, Connection, Error, ErrorKind, OAuthTokens};
 
 fn invalid(message: &str) -> Error {
     Error::new(ErrorKind::Configuration, message)
@@ -114,6 +114,14 @@ pub fn validate(connection: &Connection) -> Result<(), Error> {
             "MCP bearer token does not match the selected method",
         ));
     }
+    if connection.pending_scope.is_some()
+        && !matches!(
+            super::auth::scopes::union(&[connection.pending_scope.as_deref()]),
+            Ok(Some(_))
+        )
+    {
+        return Err(invalid("MCP pending OAuth scope is invalid"));
+    }
     if github_endpoint(&connection.endpoint)
         && connection
             .oauth_client_id
@@ -180,13 +188,15 @@ pub fn validate(connection: &Connection) -> Result<(), Error> {
             return Err(invalid("MCP OAuth session belongs to a different endpoint"));
         }
         if tokens.resource.as_deref().is_none_or(|resource| {
-            resource != connection.endpoint
-                && resource
-                    != connection
+            !super::auth::resource::matches_endpoint(resource, &connection.endpoint)
+                && !super::auth::resource::matches_endpoint(
+                    resource,
+                    connection
                         .endpoint
                         .split('?')
                         .next()
-                        .unwrap_or(&connection.endpoint)
+                        .unwrap_or(&connection.endpoint),
+                )
         }) {
             return Err(invalid("MCP OAuth session belongs to a different endpoint"));
         }
@@ -200,7 +210,23 @@ pub fn validate(connection: &Connection) -> Result<(), Error> {
                 s.len() > 16 * 1024 || s.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0)
             })
             || tokens.client_id.is_empty()
+            || tokens.client_id.len() > 2048
+            || tokens.client_id.bytes().any(|b| b <= 32 || b == 127)
             || tokens.issuer.is_empty()
+            || tokens.client_secret.as_ref().is_some_and(|s| {
+                s.is_empty()
+                    || s.len() > 16 * 1024
+                    || s.bytes().any(|b| b == b'\r' || b == b'\n' || b == 0)
+            })
+            || match tokens.client_auth_method {
+                ClientAuthMethod::None => {
+                    tokens.client_secret.is_some() || tokens.client_secret_expires_at.is_some()
+                }
+                ClientAuthMethod::ClientSecretBasic | ClientAuthMethod::ClientSecretPost => {
+                    tokens.client_secret.is_none()
+                }
+            }
+            || tokens.github && tokens.client_auth_method != ClientAuthMethod::None
         {
             return Err(invalid("MCP OAuth record is invalid"));
         }
@@ -278,6 +304,14 @@ pub fn read(value: &Value) -> Result<Connection, Error> {
             token_endpoint: field(v, "token_endpoint")?.into(),
             endpoint: field(v, "endpoint")?.into(),
             client_id: field(v, "client_id")?.into(),
+            client_auth_method: match optional(v, "client_auth_method")?.as_deref() {
+                None | Some("none") => ClientAuthMethod::None,
+                Some("client_secret_basic") => ClientAuthMethod::ClientSecretBasic,
+                Some("client_secret_post") => ClientAuthMethod::ClientSecretPost,
+                _ => return Err(invalid("MCP OAuth client authentication method is invalid")),
+            },
+            client_secret: optional(v, "client_secret")?,
+            client_secret_expires_at: number(v, "client_secret_expires_at")?,
             issuer: field(v, "issuer")?.into(),
             scope: optional(v, "scope")?,
             resource: optional(v, "resource")?,
@@ -297,6 +331,7 @@ pub fn read(value: &Value) -> Result<Connection, Error> {
         token: optional(value, "token")?.unwrap_or_default(),
         oauth,
         oauth_client_id: optional(value, "oauth_client_id")?,
+        pending_scope: optional(value, "pending_scope")?,
         timeout_secs: number(value, "timeout_secs")?.unwrap_or(60),
         headers,
     };
@@ -338,6 +373,11 @@ pub fn write(connection: &Connection, previous: Option<Value>) -> Value {
     } else {
         map.remove("oauth_client_id");
     }
+    if let Some(scope) = &connection.pending_scope {
+        map.insert("pending_scope".into(), Value::string(scope));
+    } else {
+        map.remove("pending_scope");
+    }
     if let Some(tokens) = &connection.oauth {
         let mut o = map
             .get("oauth")
@@ -365,6 +405,24 @@ pub fn write(connection: &Connection, previous: Option<Value>) -> Value {
         );
         fields.insert("endpoint".into(), Value::string(&tokens.endpoint));
         fields.insert("client_id".into(), Value::string(&tokens.client_id));
+        fields.insert(
+            "client_auth_method".into(),
+            Value::string(match tokens.client_auth_method {
+                ClientAuthMethod::None => "none",
+                ClientAuthMethod::ClientSecretBasic => "client_secret_basic",
+                ClientAuthMethod::ClientSecretPost => "client_secret_post",
+            }),
+        );
+        if let Some(secret) = &tokens.client_secret {
+            fields.insert("client_secret".into(), Value::string(secret));
+        } else {
+            fields.remove("client_secret");
+        }
+        if let Some(expires_at) = tokens.client_secret_expires_at {
+            fields.insert("client_secret_expires_at".into(), Value::number(expires_at));
+        } else {
+            fields.remove("client_secret_expires_at");
+        }
         fields.insert("issuer".into(), Value::string(&tokens.issuer));
         fields.insert(
             "scope".into(),

@@ -54,6 +54,6 @@ repository root.
 | [OpenAI backend](development/OPENAI.md) | Sign in with ChatGPT and the Responses route. |
 | [Anthropic backend](development/ANTHROPIC.md) | The Claude account compatibility route. |
 | [GitHub MCP App](development/GITHUB_MCP_APP.md) | App registration and public client ID for device sign-in. |
-| [Vercel MCP client](development/VERCEL_MCP_CLIENT.md) | Provider review requirements and Jecode client registration details. |
+| [Vercel MCP client](development/VERCEL_MCP_CLIENT.md) | Public OAuth metadata, hosting and Jecode client setup. |
 | [TUI theme](tui/THEME.md) | Colour tokens, grid and drawing rules. |
 | [Performance measurement](development/PERFORMANCE.md) | Probes, method and recorded results. |
