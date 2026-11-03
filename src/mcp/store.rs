@@ -1,7 +1,7 @@
 //! Independent MCP connection store. Every mutation holds the same OS lock.
 use super::{
     config,
-    types::{Connection, Error, ErrorKind},
+    types::{AuthMethod, Connection, Error, ErrorKind, OAuthTokens},
 };
 use crate::{
     cancel::Cancellation,
@@ -37,6 +37,47 @@ fn cancelled() -> Error {
 pub struct Store {
     path: PathBuf,
     lock: PathBuf,
+}
+
+/// The saved record observed just before an interactive authorization.
+/// A new grant may replace rotated tokens, but cannot overwrite another edit.
+#[derive(Clone)]
+pub struct SignInGuard {
+    baseline: Box<Connection>,
+}
+
+fn same_binding(before: &Option<OAuthTokens>, now: &Option<OAuthTokens>) -> bool {
+    match (before, now) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.endpoint == b.endpoint
+                && a.issuer == b.issuer
+                && a.client_id == b.client_id
+                && a.token_endpoint == b.token_endpoint
+                && a.resource == b.resource
+                && a.github == b.github
+                && a.client_auth_method == b.client_auth_method
+                && a.client_secret == b.client_secret
+        }
+        _ => false,
+    }
+}
+
+fn same_source(before: &Connection, now: &Connection) -> bool {
+    let mut expected = before.clone();
+    expected.oauth.clone_from(&now.oauth);
+    expected.pending_scope.clone_from(&now.pending_scope);
+    expected == *now && same_binding(&before.oauth, &now.oauth)
+}
+
+fn unconsumed_scope(consumed: Option<&str>, current: Option<&str>) -> Option<String> {
+    let consumed = consumed.unwrap_or("").split(' ').collect::<Vec<_>>();
+    let remaining = current
+        .unwrap_or("")
+        .split(' ')
+        .filter(|scope| !scope.is_empty() && !consumed.contains(scope))
+        .collect::<Vec<_>>();
+    (!remaining.is_empty()).then(|| remaining.join(" "))
 }
 
 impl Store {
@@ -177,6 +218,92 @@ impl Store {
     pub fn save_edit(&self, connection: &Connection) -> Result<Connection, Error> {
         self.store(connection, true)
     }
+    /// Refresh a saved draft's source before opening the browser. Deliberate
+    /// edits on the draft are retained; a new endpoint has no old scope.
+    pub fn prepare_sign_in(
+        &self,
+        draft: &Connection,
+        original: Option<&Connection>,
+    ) -> Result<(Connection, Option<SignInGuard>), Error> {
+        let Some(original) = original else {
+            return Ok((draft.clone(), None));
+        };
+        let _guard = self.lock()?;
+        let document = self.document()?;
+        let stored = Self::connections(&document)?
+            .iter()
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(original.id.as_str()))
+            .ok_or_else(|| failure("MCP connection was removed; reload it before sign-in"))
+            .and_then(config::read)?;
+        if !same_source(original, &stored) {
+            return Err(failure("MCP connection changed; reload it before sign-in"));
+        }
+        let mut prepared = draft.clone();
+        if prepared.endpoint == stored.endpoint {
+            if prepared.method == AuthMethod::Browser {
+                prepared.pending_scope.clone_from(&stored.pending_scope);
+            }
+            if prepared.oauth == original.oauth {
+                prepared.oauth.clone_from(&stored.oauth);
+            }
+        }
+        Ok((
+            prepared,
+            Some(SignInGuard {
+                baseline: Box::new(stored),
+            }),
+        ))
+    }
+
+    /// Commit a new grant only if its saved source still exists and has not
+    /// changed. A challenge arriving during browser sign-in remains pending.
+    pub fn commit_sign_in(
+        &self,
+        connection: &Connection,
+        guard: &SignInGuard,
+    ) -> Result<Connection, Error> {
+        config::validate(connection)?;
+        if connection.id != guard.baseline.id {
+            return Err(failure("MCP sign-in connection changed; reload it"));
+        }
+        let _lock = self.lock()?;
+        let mut document = self.document()?;
+        let entries = Self::entries(&mut document)?;
+        if entries.iter().any(|entry| {
+            entry.get("id").and_then(Value::as_str) != Some(connection.id.as_str())
+                && entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&connection.name))
+        }) {
+            return Err(failure("MCP connection name already exists"));
+        }
+        let entry = entries
+            .iter_mut()
+            .find(|entry| {
+                entry.get("id").and_then(Value::as_str) == Some(guard.baseline.id.as_str())
+            })
+            .ok_or_else(|| failure("MCP connection was removed during sign-in"))?;
+        let current = config::read(entry)?;
+        if !same_source(&guard.baseline, &current) {
+            return Err(failure("MCP connection changed during sign-in; reload it"));
+        }
+        let mut next = connection.clone();
+        // The authorization consumed the scopes present at preparation. A
+        // later challenge may still need another explicit authorization.
+        next.pending_scope = (next.endpoint == guard.baseline.endpoint)
+            .then(|| {
+                unconsumed_scope(
+                    guard.baseline.pending_scope.as_deref(),
+                    current.pending_scope.as_deref(),
+                )
+            })
+            .flatten();
+        config::validate(&next)?;
+        *entry = config::write(&next, Some(entry.clone()));
+        self.write(&document)?;
+        Ok(next)
+    }
     fn store(&self, connection: &Connection, keep_tokens: bool) -> Result<Connection, Error> {
         config::validate(connection)?;
         let _guard = self.lock()?;
@@ -254,24 +381,24 @@ impl Store {
     }
     /// Remember a tool-specific OAuth challenge only for the exact session
     /// that received it. A late response cannot affect a new sign-in.
-    pub fn require_scope(&self, current: &Connection, scope: &str) -> Result<(), Error> {
+    pub fn require_scope(&self, current: &Connection, scope: &str) -> Result<bool, Error> {
         if current.method != super::types::AuthMethod::Browser {
             return Err(failure("MCP scope step-up requires browser OAuth"));
         }
         let _guard = self.lock()?;
         let mut document = self.document()?;
         let entries = Self::entries(&mut document)?;
-        let entry = entries
+        let Some(entry) = entries
             .iter_mut()
             .find(|entry| entry.get("id").and_then(Value::as_str) == Some(current.id.as_str()))
-            .ok_or_else(|| failure("MCP connection was removed before scope step-up"))?;
+        else {
+            return Ok(false);
+        };
         let stored = config::read(entry)?;
         let mut expected = current.clone();
         expected.pending_scope.clone_from(&stored.pending_scope);
         if stored != expected {
-            return Err(failure(
-                "MCP connection changed before scope step-up; inspect it again",
-            ));
+            return Ok(false);
         }
         let merged = super::auth::scopes::union(&[stored.pending_scope.as_deref(), Some(scope)])?;
         if merged != stored.pending_scope {
@@ -282,7 +409,7 @@ impl Store {
             *entry = config::write(&updated, Some(prior));
             self.write(&document)?;
         }
-        Ok(())
+        Ok(true)
     }
     /// Read and renew only the current record while holding the mutation lock.
     pub fn fresh(&self, id: &str, cancel: &Cancellation) -> Result<Connection, Error> {

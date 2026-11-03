@@ -11,6 +11,7 @@ pub(super) struct Server {
     pub registration: Option<String>,
     pub resource: String,
     pub scope: Option<String>,
+    pub offline_access: bool,
     pub cimd: bool,
     pub response_iss_required: bool,
     pub auth_methods: Option<Vec<String>>,
@@ -93,6 +94,7 @@ pub(super) fn discover_optional(
                 })
                 .filter(|s| !s.is_empty())
         });
+    let scope = super::scopes::union(&[scope.as_deref()])?;
     let base = wire::origin(&issuer)?;
     let suffix = issuer
         .strip_prefix(&base)
@@ -143,7 +145,8 @@ pub(super) fn discover_optional(
             token,
             registration,
             resource: announced.clone(),
-            scope: authorization_scope(scope.as_deref(), &authorization)?,
+            scope: scope.clone(),
+            offline_access: supports_offline_access(&authorization),
             cimd: matches!(
                 authorization.get("client_id_metadata_document_supported"),
                 Some(Value::Bool(true))
@@ -159,22 +162,15 @@ pub(super) fn discover_optional(
     Ok(Some(server))
 }
 
-fn authorization_scope(scope: Option<&str>, metadata: &Value) -> Result<Option<String>, Error> {
-    let offline = metadata
+fn supports_offline_access(metadata: &Value) -> bool {
+    metadata
         .get("scopes_supported")
         .and_then(Value::as_array)
         .is_some_and(|values| {
             values
                 .iter()
                 .any(|value| value.as_str() == Some("offline_access"))
-        });
-    // Refresh permission belongs to the authorization server, not the resource.
-    // Without resource scopes the request omits `scope` so the server applies
-    // its defaults; `offline_access` alone could narrow the grant to refresh.
-    super::scopes::union(&[
-        scope,
-        (offline && scope.is_some_and(|s| !s.trim().is_empty())).then_some("offline_access"),
-    ])
+        })
 }
 
 /// MCP authorization requires advertised PKCE S256 support before sign-in.
@@ -219,7 +215,7 @@ pub(super) fn callback_matches(registered: &str, actual: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{authorization_scope, callback_matches, pkce};
+    use super::{callback_matches, pkce, supports_offline_access};
     use crate::json;
 
     #[test]
@@ -244,36 +240,17 @@ mod tests {
     }
 
     #[test]
-    fn requests_offline_access_only_when_the_authorization_server_advertises_it() {
+    fn detects_advertised_offline_access() {
         for (metadata, expected) in [
-            (r#"{}"#, "account:read"),
-            (r#"{"scopes_supported":["openid"]}"#, "account:read"),
-            (
-                r#"{"scopes_supported":["openid","offline_access"]}"#,
-                "account:read offline_access",
-            ),
+            (r#"{}"#, false),
+            (r#"{"scopes_supported":["openid"]}"#, false),
+            (r#"{"scopes_supported":["openid","offline_access"]}"#, true),
         ] {
             assert_eq!(
-                authorization_scope(Some("account:read"), &json::parse(metadata).unwrap()).unwrap(),
-                Some(expected.into())
+                supports_offline_access(&json::parse(metadata).unwrap()),
+                expected
             );
         }
-        assert_eq!(
-            authorization_scope(
-                None,
-                &json::parse(r#"{"scopes_supported":["offline_access"]}"#).unwrap()
-            )
-            .unwrap(),
-            None
-        );
-        assert_eq!(
-            authorization_scope(
-                Some("openid offline_access"),
-                &json::parse(r#"{"scopes_supported":["offline_access"]}"#).unwrap()
-            )
-            .unwrap(),
-            Some("openid offline_access".into())
-        );
     }
 
     #[test]

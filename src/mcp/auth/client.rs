@@ -92,7 +92,9 @@ fn supports(server: &discovery::Server, method: &str) -> bool {
     server
         .auth_methods
         .as_ref()
-        .is_none_or(|methods| methods.iter().any(|value| value == method))
+        .map_or(method == "client_secret_basic", |methods| {
+            methods.iter().any(|value| value == method)
+        })
 }
 
 fn preferred(server: &discovery::Server) -> Option<&'static str> {
@@ -193,10 +195,9 @@ fn registered(response: &Value, requested: &str) -> Result<Client, Error> {
         }
     };
     let method = match response.get("token_endpoint_auth_method") {
-        // An omitted value is the requested one; a secret issued for a
-        // requested public client implies the RFC 7591 default.
+        // RFC 7591 defaults an omitted method to Basic. Keep a requested
+        // public client public when the response includes no secret.
         None if secret.is_none() && requested == "none" => ClientAuthMethod::None,
-        None if requested == "client_secret_post" => ClientAuthMethod::ClientSecretPost,
         None => ClientAuthMethod::ClientSecretBasic,
         Some(Value::String(method)) if method == "none" => ClientAuthMethod::None,
         Some(Value::String(method)) if method == "client_secret_basic" => {
@@ -280,6 +281,26 @@ mod tests {
     use crate::json;
 
     #[test]
+    fn omitted_auth_methods_support_only_the_rfc_basic_default() {
+        let server = discovery::Server {
+            issuer: "https://issuer.test".into(),
+            authorize: "https://issuer.test/authorize".into(),
+            token: "https://issuer.test/token".into(),
+            registration: Some("https://issuer.test/register".into()),
+            resource: "https://mcp.test/mcp".into(),
+            scope: None,
+            offline_access: false,
+            cimd: true,
+            response_iss_required: false,
+            auth_methods: None,
+        };
+        assert!(supports(&server, "client_secret_basic"));
+        assert!(!supports(&server, "none"));
+        assert!(!supports(&server, "client_secret_post"));
+        assert_eq!(preferred(&server), Some("client_secret_basic"));
+    }
+
+    #[test]
     fn registration_response_selects_actual_method_and_checks_secret() {
         let parse = |body, requested| registered(&json::parse(body).unwrap(), requested);
         assert_eq!(
@@ -311,7 +332,7 @@ mod tests {
             )
             .unwrap()
             .method,
-            ClientAuthMethod::ClientSecretPost
+            ClientAuthMethod::ClientSecretBasic
         );
         let public = parse(
             r#"{"client_id":"public","client_secret":"unused-secret","client_secret_expires_at":1,"token_endpoint_auth_method":"none"}"#,

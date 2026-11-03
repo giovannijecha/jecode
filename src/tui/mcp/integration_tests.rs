@@ -64,6 +64,55 @@ fn reply(stream: &mut TcpStream, status: u16, body: &str) {
 }
 
 #[test]
+fn saved_sign_in_worker_preserves_a_challenge_arriving_after_authorization_started() {
+    let server = Server::start(|listener, stop| {
+        let mut requests = Vec::new();
+        for body in [
+            r#"{"jsonrpc":"2.0","id":1,"result":{"supportedVersions":["2026-07-28"]}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}"#,
+        ] {
+            let mut stream = accept(&listener, &stop).unwrap();
+            requests.push(request(&mut stream));
+            reply(&mut stream, 200, body);
+        }
+        requests
+    });
+    let directory = Directory::new();
+    let store = crate::mcp::Store::new(directory.path().to_path_buf());
+    let endpoint = &server.endpoint;
+    let record = crate::json::parse(&format!(
+        r#"{{"id":"mcp-fixture","name":"Scoped","endpoint":"{endpoint}","method":"browser","oauth":{{"access_token":"isolated-old","endpoint":"{endpoint}","client_id":"fixture-client","issuer":"{endpoint}","token_endpoint":"{endpoint}/token","resource":"{endpoint}","github":false}}}}"#
+    ))
+    .unwrap();
+    let cached = store
+        .save(&crate::mcp::config::read(&record).unwrap())
+        .unwrap();
+    store.require_scope(&cached, "deploy").unwrap();
+    let (mut signed, guard) = store.prepare_sign_in(&cached, Some(&cached)).unwrap();
+    assert_eq!(signed.pending_scope.as_deref(), Some("deploy"));
+    let challenged = store.list().unwrap().remove(0);
+    store.require_scope(&challenged, "admin").unwrap();
+    signed.oauth.as_mut().unwrap().access_token = "isolated-new".into();
+    signed.pending_scope = None;
+    let result = Job::save(directory.path().to_path_buf(), signed, false, guard)
+        .finish()
+        .unwrap();
+    let ResultValue::Saved(Ok((saved, _))) = result else {
+        panic!("saved sign-in worker failed");
+    };
+    assert_eq!(saved.pending_scope.as_deref(), Some("admin"));
+    assert_eq!(
+        store.list().unwrap()[0]
+            .oauth
+            .as_ref()
+            .unwrap()
+            .access_token,
+        "isolated-new"
+    );
+    assert_eq!(server.finish().len(), 2);
+}
+
+#[test]
 fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits() {
     let server = Server::start(|listener, stop| {
         let mut requests = Vec::new();

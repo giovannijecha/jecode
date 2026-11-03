@@ -11,7 +11,7 @@ mod wire;
 
 pub use client::Client;
 pub use runtime::Runtime;
-pub use store::Store;
+pub use store::{SignInGuard, Store};
 pub use types::{AuthMethod, Catalog, Connection, Error, ErrorKind, Tool};
 
 mod bridge;

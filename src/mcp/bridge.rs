@@ -206,9 +206,9 @@ fn run(
     if action == "tools" {
         let catalog = match client.catalog(cancel) {
             Ok(catalog) => catalog,
-            Err(error) => {
+            Err(mut error) => {
                 *client = Client::new(connection.clone());
-                remember_scope(&store, &connection, &error);
+                remember_scope(&store, &connection, &mut error);
                 return Err(error);
             }
         };
@@ -232,9 +232,9 @@ fn run(
     }
     let result = match client.call(name, &input, cancel) {
         Ok(result) => result,
-        Err(error) => {
+        Err(mut error) => {
             *client = Client::new(connection.clone());
-            remember_scope(&store, &connection, &error);
+            remember_scope(&store, &connection, &mut error);
             return Err(error);
         }
     };
@@ -260,11 +260,15 @@ fn run(
 /// A challenged tool is never replayed. Sign-in can request the scope later.
 /// The result still reports `required_scope`, so a session that changed
 /// meanwhile skips the record without hiding the challenge itself.
-fn remember_scope(store: &Store, connection: &Connection, error: &Error) {
+fn remember_scope(store: &Store, connection: &Connection, error: &mut Error) {
     if connection.method == super::AuthMethod::Browser
         && let Some(scope) = super::auth::scopes::required(error)
+        && let Err(failure) = store.require_scope(connection, &scope)
     {
-        let _ = store.require_scope(connection, &scope);
+        error.message = format!(
+            "{}; Could not save requested permissions: {}",
+            error.message, failure.message
+        );
     }
 }
 
@@ -285,10 +289,11 @@ fn acquire<'a>(
     }
 }
 
-/// Token renewal changes only the OAuth record; anything else changed the target.
+/// Token renewal and pending permission requests do not change the target.
 fn same_target(saved: &Connection, current: &Connection) -> bool {
     let mut saved = saved.clone();
     saved.oauth.clone_from(&current.oauth);
+    saved.pending_scope.clone_from(&current.pending_scope);
     saved == *current
 }
 

@@ -43,6 +43,7 @@ impl App {
         if connection.method != method {
             connection.token.clear();
             connection.oauth = None;
+            draft.sign_in_guard = None;
         }
         connection.method = method;
         match method {

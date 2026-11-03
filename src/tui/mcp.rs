@@ -71,6 +71,7 @@ pub(super) struct Draft {
     methods: Vec<AuthMethod>,
     /// Started by a saved connection's Sign in action, which saves on success.
     sign_in: bool,
+    sign_in_guard: Option<crate::mcp::SignInGuard>,
 }
 
 #[derive(Default)]
@@ -155,6 +156,7 @@ impl App {
             connection,
             methods,
             sign_in,
+            sign_in_guard: None,
         });
     }
 

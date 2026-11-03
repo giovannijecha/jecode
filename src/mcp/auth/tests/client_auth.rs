@@ -2,13 +2,19 @@ use super::*;
 
 #[test]
 fn browser_pkce_and_refresh_stay_on_discovered_issuer_and_resource() {
-    browser_auth_round_trip("none", "none");
-    browser_auth_round_trip("client_secret_basic", "client_secret_basic");
-    browser_auth_round_trip("client_secret_post", "client_secret_post");
-    browser_auth_round_trip("none", "client_secret_basic");
+    browser_auth_round_trip(Some("none"), "none", None);
+    browser_auth_round_trip(Some("client_secret_basic"), "client_secret_basic", None);
+    browser_auth_round_trip(Some("client_secret_post"), "client_secret_post", None);
+    browser_auth_round_trip(Some("none"), "client_secret_basic", None);
+    browser_auth_round_trip(None, "client_secret_basic", None);
+    browser_auth_round_trip(Some("none"), "none", Some("repo:read"));
 }
 
-fn browser_auth_round_trip(advertised: &'static str, method: &'static str) {
+fn browser_auth_round_trip(
+    advertised: Option<&'static str>,
+    method: &'static str,
+    token_scope: Option<&'static str>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let issuer = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
@@ -89,21 +95,28 @@ fn browser_auth_round_trip(advertised: &'static str, method: &'static str) {
                 "/.well-known/oauth-authorization-server" => (
                     "200 OK",
                     format!(
-                        r#"{{"issuer":"{server_issuer}","authorization_endpoint":"{server_issuer}/authorize?audience=fixture","token_endpoint":"{server_issuer}/token","registration_endpoint":"{server_issuer}/register","authorization_response_iss_parameter_supported":true,"code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["{advertised}"]}}"#
+                        r#"{{"issuer":"{server_issuer}","authorization_endpoint":"{server_issuer}/authorize?audience=fixture","token_endpoint":"{server_issuer}/token","registration_endpoint":"{server_issuer}/register","authorization_response_iss_parameter_supported":true,"code_challenge_methods_supported":["S256"]{}}}"#,
+                        advertised.map_or(String::new(), |method| format!(
+                            r#", "token_endpoint_auth_methods_supported":["{method}"]"#
+                        ))
                     ),
                     String::new(),
                 ),
                 "/register" => {
-                    assert!(
-                        body.contains(&format!("\"token_endpoint_auth_method\":\"{advertised}\""))
-                    );
+                    assert!(body.contains(&format!(
+                        "\"token_endpoint_auth_method\":\"{}\"",
+                        advertised.unwrap_or("client_secret_basic")
+                    )));
                     (
                         "201 Created",
                         if method == "none" {
                             r#"{"client_id":"synthetic-client"}"#.into()
                         } else {
                             format!(
-                                r#"{{"client_id":"client:one","client_secret":"s:e+c","client_secret_expires_at":0,"token_endpoint_auth_method":"{method}"}}"#
+                                r#"{{"client_id":"client:one","client_secret":"s:e+c","client_secret_expires_at":0{}}}"#,
+                                advertised.map_or(String::new(), |_| format!(
+                                    r#", "token_endpoint_auth_method":"{method}""#
+                                ))
                             )
                         },
                         String::new(),
@@ -114,7 +127,15 @@ fn browser_auth_round_trip(advertised: &'static str, method: &'static str) {
                     assert!(body.contains("code_verifier="));
                     assert!(body.contains("resource="));
                     assert_client_auth(text, body, method);
-                    ("200 OK",r#"{"access_token":"access-one","refresh_token":"refresh-one","expires_in":120,"token_type":"Bearer"}"#.into(),String::new())
+                    (
+                        "200 OK",
+                        format!(
+                            r#"{{"access_token":"access-one","refresh_token":"refresh-one","expires_in":120,"token_type":"Bearer"{}}}"#,
+                            token_scope
+                                .map_or(String::new(), |scope| format!(r#", "scope":"{scope}""#))
+                        ),
+                        String::new(),
+                    )
                 }
                 "/token" if body.contains("grant_type=refresh_token") => {
                     refresh_count += 1;
@@ -192,7 +213,10 @@ fn browser_auth_round_trip(advertised: &'static str, method: &'static str) {
     );
     assert_eq!(signed.oauth_client_id, None);
     assert_eq!(signed.pending_scope, None);
-    assert_eq!(signed.oauth.as_ref().unwrap().scope, None);
+    assert_eq!(
+        signed.oauth.as_ref().unwrap().scope.as_deref(),
+        token_scope.or(Some("new:write granted:read repo:read"))
+    );
     assert_eq!(
         signed.oauth.as_ref().unwrap().resource.as_deref(),
         Some(expected_resource.as_str())
@@ -210,6 +234,10 @@ fn browser_auth_round_trip(advertised: &'static str, method: &'static str) {
     assert_eq!(
         renewed.oauth.as_ref().unwrap().client_secret.as_deref(),
         signed.oauth.as_ref().unwrap().client_secret.as_deref()
+    );
+    assert_eq!(
+        renewed.oauth.as_ref().unwrap().scope,
+        signed.oauth.as_ref().unwrap().scope
     );
     worker.join().unwrap();
 }

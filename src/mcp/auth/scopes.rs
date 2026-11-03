@@ -3,7 +3,6 @@
 use super::super::types::{Error, ErrorKind};
 
 const MAX_BYTES: usize = 4096;
-const MAX_TOKENS: usize = 64;
 
 fn invalid() -> Error {
     Error::new(ErrorKind::Authentication, "Invalid MCP OAuth scope")
@@ -28,9 +27,6 @@ pub(in crate::mcp) fn union(parts: &[Option<&str>]) -> Result<Option<String>, Er
         for token in part.split(' ').filter(|token| !token.is_empty()) {
             if tokens.contains(&token) {
                 continue;
-            }
-            if tokens.len() == MAX_TOKENS {
-                return Err(invalid());
             }
             bytes = bytes.saturating_add(token.len() + usize::from(!tokens.is_empty()));
             if bytes > MAX_BYTES {
@@ -77,12 +73,15 @@ mod tests {
             assert!(union(&[Some(scope)]).is_err());
         }
         assert!(union(&[Some(&"x".repeat(MAX_BYTES + 1))]).is_err());
-        assert!(union(&[Some(&vec!["x"; MAX_TOKENS + 1].join(" "))]).is_ok());
-        let many = (0..=MAX_TOKENS)
+        assert!(union(&[Some(&vec!["x"; 100].join(" "))]).is_ok());
+        let many = (0..100)
             .map(|index| format!("s{index}"))
             .collect::<Vec<_>>()
             .join(" ");
-        assert!(union(&[Some(&many)]).is_err());
+        assert_eq!(
+            union(&[Some(&many)]).unwrap().as_deref(),
+            Some(many.as_str())
+        );
     }
 
     #[test]

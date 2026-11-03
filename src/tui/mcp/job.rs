@@ -18,7 +18,7 @@ pub(super) enum ResultValue {
     Methods(Result<Vec<AuthMethod>, Error>),
     Probe(String, Option<Connection>, Result<Catalog, Error>),
     Saved(Result<(Connection, Catalog), Error>),
-    SignedIn(Result<Connection, Error>),
+    SignedIn(Result<(Connection, Option<mcp::SignInGuard>), Error>),
     Removed(String, Result<(), Error>),
     Enabled(String, bool, Result<(), Error>),
 }
@@ -185,7 +185,12 @@ impl Job {
     /// connection rather than obtained by a new sign-in: a refresh may have
     /// rotated them since, so the check uses the current stored tokens and the
     /// save keeps them.
-    pub(super) fn save(home: PathBuf, connection: Connection, kept: bool) -> Self {
+    pub(super) fn save(
+        home: PathBuf,
+        connection: Connection,
+        kept: bool,
+        sign_in_guard: Option<mcp::SignInGuard>,
+    ) -> Self {
         Self::start(move |cancel| {
             ResultValue::Saved((|| {
                 let store = mcp::Store::new(home);
@@ -200,7 +205,9 @@ impl Job {
                         "Connection save cancelled",
                     ));
                 }
-                let saved = if kept {
+                let saved = if let Some(guard) = &sign_in_guard {
+                    store.commit_sign_in(&connection, guard)?
+                } else if kept {
                     store.save_edit(&connection)?
                 } else {
                     store.save(&connection)?
@@ -210,13 +217,23 @@ impl Job {
         })
     }
 
-    pub(super) fn sign_in(connection: Connection, updates: Sender<mcp::auth::Update>) -> Self {
+    pub(super) fn sign_in(
+        home: PathBuf,
+        connection: Connection,
+        original: Option<Connection>,
+        updates: Sender<mcp::auth::Update>,
+    ) -> Self {
         Self::start(move |cancel| {
-            ResultValue::SignedIn(mcp::auth::sign_in(connection, &cancel, &mut |update| {
-                updates
-                    .send(update)
-                    .map_err(|_| "Sign-in cancelled".to_string())
-            }))
+            ResultValue::SignedIn((|| {
+                let (prepared, guard) =
+                    mcp::Store::new(home).prepare_sign_in(&connection, original.as_ref())?;
+                let signed = mcp::auth::sign_in(prepared, &cancel, &mut |update| {
+                    updates
+                        .send(update)
+                        .map_err(|_| "Sign-in cancelled".to_string())
+                })?;
+                Ok((signed, guard))
+            })())
         })
     }
 

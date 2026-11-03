@@ -66,13 +66,14 @@ Workspace and Full. Server annotations do not grant permission or prove that a
 tool is read-only. Local checkpoints cannot undo remote changes.
 
 [OAuth](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
-uses protected-resource and authorization-server metadata, a public client,
+uses protected-resource and authorization-server metadata, an OAuth client,
 PKCE S256 and a loopback callback on an ephemeral port. It supports a configured
 client ID or client metadata URL, Jecode's public metadata when advertised, and
 dynamic registration as a fallback. A dynamically registered client serves
 only the sign-in that registered it and that session's refreshes; the next
 sign-in registers again. Registration can assign `none`, `client_secret_basic`
-or `client_secret_post`; per-registration client secrets are stored and
+or `client_secret_post`; omitted server authentication methods default to
+`client_secret_basic`. Per-registration client secrets are stored and
 redacted with the session credentials. Refresh remains bound to the original
 endpoint, issuer and client. Query options such as
 [Supabase's `project_ref`](https://supabase.com/docs/guides/ai-tools/mcp) remain
@@ -82,13 +83,16 @@ The authorization server must advertise S256 support in its metadata; otherwise
 browser sign-in is unavailable. A bearer token remains an alternative.
 
 When the authorization server advertises `offline_access` and the sign-in
-request names resource scopes, Jecode adds it so the server can issue a refresh
-token. Without resource scopes the request omits `scope` and the server applies
-its defaults. Issuance remains the server's choice. A tool-specific
+request names scopes, Jecode adds it so the server can issue a refresh token.
+Without any requested scopes, Jecode omits `scope` and the server applies its
+defaults. Issuance remains the server's choice. A tool-specific
 `403 insufficient_scope` retains the required scope for the next sign-in in
 Settings, together with scopes previously granted by the same authorization
 server. Changing the endpoint discards a retained scope. The failed remote
 operation is not replayed automatically after authorization.
+Sign-in reloads current credentials and requested permissions before opening
+the browser. Saving a new grant preserves later permission requests for the
+same endpoint and rejects a saved connection removed or changed meanwhile.
 
 For the stock GitHub endpoint, Jecode requests the default toolsets and Actions.
 Custom toolset/tool headers and custom endpoint paths retain their selection.

@@ -81,6 +81,7 @@ impl App {
                     connection.oauth = None;
                     connection.oauth_client_id = None;
                     connection.pending_scope = None;
+                    draft.sign_in_guard = None;
                     connection.headers.clear();
                     draft.methods = self
                         .mcp
@@ -94,6 +95,7 @@ impl App {
                 connection.method = AuthMethod::Token;
                 connection.token = value;
                 connection.oauth = None;
+                draft.sign_in_guard = None;
             }
             Field::Timeout => match value.parse::<u64>() {
                 Ok(seconds @ 1..=600) => connection.timeout_secs = seconds,
@@ -124,6 +126,7 @@ impl App {
             }
             Field::ClientId => {
                 connection.oauth_client_id = (!value.is_empty()).then_some(value);
+                draft.sign_in_guard = None;
                 draft.methods = self
                     .mcp
                     .method_cache

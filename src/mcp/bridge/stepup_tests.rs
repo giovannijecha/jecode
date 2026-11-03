@@ -130,3 +130,66 @@ fn bearer_403_without_scope_does_not_create_a_pending_scope() {
     assert_eq!(pending, None);
     assert_eq!(requests.len(), 3);
 }
+
+fn scope_error() -> Error {
+    let mut error = Error::new(ErrorKind::Authentication, "MCP server requires more access");
+    error.status = Some(403);
+    error.headers = vec![(
+        "WWW-Authenticate".into(),
+        "Bearer error=\"insufficient_scope\", scope=\"write\"".into(),
+    )];
+    error
+}
+
+#[test]
+fn scope_storage_failure_keeps_the_challenge_and_explains_the_missing_record() {
+    let home = Directory::new();
+    let store = Store::new(home.path().to_path_buf());
+    let mut connection = Connection::draft("Fixture", "https://fixture.test/mcp");
+    connection.id = "mcp-fixture".into();
+    connection.method = AuthMethod::Browser;
+    std::fs::write(home.path().join("mcp.json"), "invalid JSON").unwrap();
+    let mut error = scope_error();
+    remember_scope(&store, &connection, &mut error);
+    assert_eq!(error.kind, ErrorKind::Authentication);
+    assert_eq!(error.status, Some(403));
+    assert_eq!(
+        crate::mcp::auth::scopes::required(&error).as_deref(),
+        Some("write")
+    );
+    assert!(error.message.starts_with("MCP server requires more access"));
+    assert!(
+        error
+            .message
+            .contains("Could not save requested permissions")
+    );
+}
+
+#[test]
+fn a_removed_session_does_not_replace_the_original_challenge_with_a_store_error() {
+    let home = Directory::new();
+    let store = Store::new(home.path().to_path_buf());
+    let mut connection = Connection::draft("Fixture", "https://fixture.test/mcp");
+    connection.id = "mcp-removed".into();
+    connection.method = AuthMethod::Browser;
+    let mut error = scope_error();
+    remember_scope(&store, &connection, &mut error);
+    assert_eq!(error.message, "MCP server requires more access");
+    assert_eq!(
+        crate::mcp::auth::scopes::required(&error).as_deref(),
+        Some("write")
+    );
+}
+
+#[test]
+fn pending_permissions_do_not_change_a_queued_calls_target() {
+    let saved = Connection::draft("Fixture", "https://fixture.test/mcp?project=one");
+    let mut current = saved.clone();
+    current.pending_scope = Some("deploy".into());
+    assert!(same_target(&saved, &current));
+    current.endpoint = "https://fixture.test/mcp?project=two".into();
+    assert!(!same_target(&saved, &current));
+    current.endpoint.clone_from(&saved.endpoint);
+    current.enabled = false;
+    assert!(!same_target(&saved, &current));
+}

@@ -89,7 +89,7 @@ pub(super) fn sign_in(
         .duration_since(UNIX_EPOCH)
         .map_err(|_| wire::failure("System clock is invalid"))?
         .as_secs();
-    connection.oauth = Some(token_record(
+    let mut tokens = token_record(
         &value,
         TokenContext {
             endpoint: &server.token,
@@ -104,7 +104,13 @@ pub(super) fn sign_in(
             now,
         },
         None,
-    )?);
+    )?;
+    // OAuth permits omitting an unchanged scope in the token response.
+    // Keep the authorized request so a later step-up can retain those grants.
+    if tokens.scope.is_none() {
+        tokens.scope = requested_scope;
+    }
+    connection.oauth = Some(tokens);
     connection.pending_scope = None;
     connection.method = super::super::types::AuthMethod::Browser;
     connection.token.clear();
@@ -262,7 +268,7 @@ fn requested_scope(
     connection: &Connection,
     server: &discovery::Server,
 ) -> Result<Option<String>, Error> {
-    scopes::union(&[
+    let scope = scopes::union(&[
         connection.pending_scope.as_deref(),
         connection
             .oauth
@@ -270,6 +276,12 @@ fn requested_scope(
             .filter(|oauth| oauth.issuer == server.issuer)
             .and_then(|oauth| oauth.scope.as_deref()),
         server.scope.as_deref(),
+    ])?;
+    // Do not request offline_access alone; an empty request lets the issuer
+    // apply its default scopes. Add it once actual resource scopes are known.
+    scopes::union(&[
+        scope.as_deref(),
+        (server.offline_access && scope.is_some()).then_some("offline_access"),
     ])
 }
 
@@ -303,6 +315,7 @@ mod tests {
             registration: None,
             resource: connection.endpoint.clone(),
             scope: Some("read".into()),
+            offline_access: false,
             cimd: false,
             response_iss_required: false,
             auth_methods: None,
@@ -315,6 +328,29 @@ mod tests {
         assert_eq!(
             requested_scope(&connection, &server).unwrap().as_deref(),
             Some("deploy legacy:read read")
+        );
+    }
+
+    #[test]
+    fn offline_access_waits_for_actual_scopes_even_without_resource_scopes() {
+        let mut connection = Connection::draft("Scoped", "https://mcp.test/mcp");
+        let server = discovery::Server {
+            issuer: "https://issuer.test".into(),
+            authorize: "https://issuer.test/authorize".into(),
+            token: "https://issuer.test/token".into(),
+            registration: None,
+            resource: connection.endpoint.clone(),
+            scope: None,
+            offline_access: true,
+            cimd: false,
+            response_iss_required: false,
+            auth_methods: None,
+        };
+        assert_eq!(requested_scope(&connection, &server).unwrap(), None);
+        connection.pending_scope = Some("deploy".into());
+        assert_eq!(
+            requested_scope(&connection, &server).unwrap().as_deref(),
+            Some("deploy offline_access")
         );
     }
 
