@@ -100,8 +100,10 @@ analysis results, never an automatic completion gate.
 Timeout and cancellation stop the caller's request; a healthy initialized
 server remains available. Cancellation is cooperative and late obsolete
 responses are ignored. Cancelling the first startup before dispatch stops
-its unused instance. Crashes fail pending requests; repeated failures suspend
-automatic restarts until you choose Allow restart.
+its unused instance. Crashes fail pending requests; three crashes or failed
+starts without a successful request in between suspend automatic restarts
+until you choose Allow restart. Unreadable documents, and documents too large
+to synchronize, are unavailable to queries and leave the server running.
 
 ## Configuration file
 

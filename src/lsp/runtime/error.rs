@@ -5,7 +5,13 @@ pub(super) enum QueryFailure {
 
 impl QueryFailure {
     pub(super) fn classify_local(error: String) -> Self {
-        if error.starts_with("Cannot read")
+        // The transport refuses an oversized message before writing anything, so the server stays healthy.
+        if error.starts_with("LSP message exceeds") {
+            Self::Controlled(
+                "unavailable",
+                format!("LSP document too large to synchronize: {error}"),
+            )
+        } else if error.starts_with("Cannot read")
             || error.starts_with("LSP document must")
             || error.contains("No such file")
         {

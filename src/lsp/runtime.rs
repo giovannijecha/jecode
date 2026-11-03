@@ -92,6 +92,21 @@ struct State {
     status: String,
     detail: String,
 }
+impl State {
+    /// Records a crash; consecutive crashes back off and, from the third, suppress restarts.
+    fn crashed(&mut self, error: &str) {
+        self.client.take();
+        self.failures = self.failures.saturating_add(1);
+        self.retry_at = Some(Instant::now() + Duration::from_secs(1 << self.failures.min(3)));
+        self.status = if self.failures >= 3 {
+            "restart_suppressed"
+        } else {
+            "crashed"
+        }
+        .into();
+        self.detail = error.into();
+    }
+}
 struct Inner {
     home: Option<PathBuf>,
     entries: Mutex<HashMap<(String, PathBuf), Arc<Entry>>>,
@@ -259,16 +274,7 @@ impl Runtime {
                         state.detail = error.clone();
                         return self.fail(&mut outcome, "timed_out", &error);
                     }
-                    state.failures = state.failures.saturating_add(1);
-                    state.retry_at =
-                        Some(Instant::now() + Duration::from_secs(1 << state.failures.min(3)));
-                    state.status = if state.failures >= 3 {
-                        "restart_suppressed"
-                    } else {
-                        "crashed"
-                    }
-                    .into();
-                    state.detail = error.clone();
+                    state.crashed(&error);
                     return self.fail(&mut outcome, "crashed", &error);
                 }
             }
@@ -366,29 +372,19 @@ impl Runtime {
             }
             Ok::<(), QueryFailure>(())
         })();
-        if let Err(error) = result {
-            match error {
-                QueryFailure::Controlled(status, detail) => {
-                    outcome.status = status.into();
-                    outcome.complete = false;
-                    outcome.detail = detail;
-                }
-                QueryFailure::Transport(error) => {
-                    state.client.take();
-                    state.failures = state.failures.saturating_add(1);
-                    state.retry_at =
-                        Some(Instant::now() + Duration::from_secs(1 << state.failures.min(3)));
-                    state.status = if state.failures >= 3 {
-                        "restart_suppressed"
-                    } else {
-                        "crashed"
-                    }
-                    .into();
-                    state.detail = error.clone();
-                    outcome.status = "crashed".into();
-                    outcome.complete = false;
-                    outcome.detail = error;
-                }
+        match result {
+            // A completed request proves the instance healthy again.
+            Ok(()) => state.failures = 0,
+            Err(QueryFailure::Controlled(status, detail)) => {
+                outcome.status = status.into();
+                outcome.complete = false;
+                outcome.detail = detail;
+            }
+            Err(QueryFailure::Transport(error)) => {
+                state.crashed(&error);
+                outcome.status = "crashed".into();
+                outcome.complete = false;
+                outcome.detail = error;
             }
         }
         if outcome.status == "ready"

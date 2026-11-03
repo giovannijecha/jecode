@@ -1,4 +1,4 @@
-use super::{Entry, Runtime};
+use super::{Entry, QueryFailure, Runtime};
 use crate::lsp::Store;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -49,32 +49,26 @@ impl Runtime {
                     break;
                 }
                 let poll = Instant::now() >= next_poll;
-                let result = if let Some(client) = state.client.as_mut() {
-                    client.drain().and_then(|()| {
-                        if poll {
-                            client.poll_open_documents()
-                        } else {
-                            Ok(())
-                        }
-                    })
-                } else {
+                let Some(client) = state.client.as_mut() else {
                     break;
+                };
+                let failure = match client.drain() {
+                    Err(error) => Some(error),
+                    // Local document problems are reported to the next request, not counted as crashes.
+                    Ok(()) if poll => match client
+                        .poll_open_documents()
+                        .map_err(QueryFailure::classify_local)
+                    {
+                        Err(QueryFailure::Transport(error)) => Some(error),
+                        _ => None,
+                    },
+                    Ok(()) => None,
                 };
                 if poll {
                     next_poll = Instant::now() + Duration::from_millis(500);
                 }
-                if let Err(error) = result {
-                    state.client.take();
-                    state.failures = state.failures.saturating_add(1);
-                    state.retry_at =
-                        Some(Instant::now() + Duration::from_secs(1 << state.failures.min(3)));
-                    state.status = if state.failures >= 3 {
-                        "restart_suppressed"
-                    } else {
-                        "crashed"
-                    }
-                    .into();
-                    state.detail = error;
+                if let Some(error) = failure {
+                    state.crashed(&error);
                     break;
                 }
             }
