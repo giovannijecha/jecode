@@ -46,16 +46,20 @@ release check.
 
 ## Prepare a complete tarball
 
-1. Merge the intended revision to `main` after its three CI jobs pass. Set the
+1. Before selecting a version, check both `npm view @giovannijecha/jecode versions --json`
+   and `npm view @giovannijecha/jecode time --json`. Removed
+   versions may be absent from `versions` but remain in `time`; npm permanently
+   reserves them. Choose a version that has never been published.
+2. Merge the intended revision to `main` after its three CI jobs pass. Set the
    release version in `Cargo.toml` and review the corresponding lockfile and
    user documentation in that revision.
-2. Run the **Prepare npm release** workflow manually for that revision. Its
+3. Run the **Prepare npm release** workflow manually for that revision. Its
    Windows and Linux jobs use this project's local runners; its macOS job uses
    GitHub's standard hosted `macos-15` ARM64 runner. Each job builds and tests
    the native executable, checks a local npm install/update/uninstall fixture
    and native terminal interaction through the launcher, then uploads a target
    artifact.
-3. The final hosted macOS job downloads all three artifacts, verifies their
+4. The final hosted macOS job downloads all three artifacts, verifies their
    version, revision, checkout cleanliness, and digests, assembles
    `giovannijecha-jecode-<version>.tgz`, runs the
    lifecycle fixture, and previews `npm publish <tarball> --dry-run` against
@@ -113,6 +117,7 @@ References: [npm package binaries](https://docs.npmjs.com/cli/v11/configuring-np
 [global update](https://docs.npmjs.com/updating-packages-downloaded-from-the-registry/),
 [global uninstall](https://docs.npmjs.com/uninstalling-packages-and-dependencies/),
 [first public publication](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/),
+[npm version reservation](https://docs.npmjs.com/policies/unpublish/),
 [trusted publishing](https://docs.npmjs.com/trusted-publishers/), and
 [GitHub runner architectures](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job).
 
