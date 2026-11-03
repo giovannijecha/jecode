@@ -37,6 +37,16 @@ impl Agent {
                 }),
             ),
             ("tool_execution", Value::string("direct")),
+            // Spares version-control probes in folders that have none.
+            (
+                "git_repository",
+                Value::Bool(
+                    self.tools
+                        .root()
+                        .ancestors()
+                        .any(|folder| folder.join(".git").exists()),
+                ),
+            ),
         ]);
         Value::object([
             ("role", Value::string("system")),

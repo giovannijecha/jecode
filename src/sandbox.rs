@@ -17,6 +17,8 @@ pub struct Policy {
     write: Vec<PathBuf>,
     cargo_home: Option<PathBuf>,
     git_config: Option<PathBuf>,
+    /// Real toolchain homes passed to the confined process by name.
+    runtime_homes: Vec<(&'static str, PathBuf)>,
 }
 
 impl Policy {
@@ -52,6 +54,7 @@ impl Policy {
             write: vec![root.clone()],
             cargo_home: None,
             git_config: None,
+            runtime_homes: Vec::new(),
         };
         if let Some(temporary) = temporary {
             let temporary = canonical_directory(temporary)?;
@@ -117,6 +120,43 @@ impl Policy {
             .flatten()
         {
             self.allow_existing_read_directory(&path, protected_home)?;
+        }
+        Ok(())
+    }
+
+    /// Node version managers keep runtimes in the user profile, but a confined
+    /// process sees its own container as LOCALAPPDATA. Pass each manager's real
+    /// home and grant it read-only, so shims resolve the selected runtime.
+    pub fn allow_installed_node_tools(
+        &mut self,
+        protected_home: Option<&Path>,
+    ) -> Result<(), String> {
+        self.allow_node_tools_from(|name| std::env::var_os(name), protected_home)
+    }
+
+    fn allow_node_tools_from(
+        &mut self,
+        variable: impl Fn(&str) -> Option<OsString>,
+        protected_home: Option<&Path>,
+    ) -> Result<(), String> {
+        let local = variable("LOCALAPPDATA").map(PathBuf::from);
+        let homes = [
+            (
+                "VOLTA_HOME",
+                variable("VOLTA_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| local.map(|local| local.join("Volta"))),
+            ),
+            ("NVM_HOME", variable("NVM_HOME").map(PathBuf::from)),
+            ("NVM_SYMLINK", variable("NVM_SYMLINK").map(PathBuf::from)),
+            ("FNM_DIR", variable("FNM_DIR").map(PathBuf::from)),
+        ];
+        for (name, path) in homes {
+            let Some(path) = path.filter(|path| path.is_absolute() && path.is_dir()) else {
+                continue;
+            };
+            self.allow_existing_read_directory(&path, protected_home)?;
+            self.runtime_homes.push((name, path));
         }
         Ok(())
     }
@@ -205,6 +245,14 @@ fn confined_environment(
         })
     {
         command.env("GIT_CONFIG_GLOBAL", crate::permissions::plain(git_config));
+    }
+    for (name, home) in &policy.runtime_homes {
+        if !explicit
+            .iter()
+            .any(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(name))
+        {
+            command.env(name, home);
+        }
     }
 }
 

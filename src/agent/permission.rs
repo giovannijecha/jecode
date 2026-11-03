@@ -198,7 +198,7 @@ impl Agent {
     pub(super) fn permission_instructions(&self) -> String {
         match self.permissions.level() {
             Level::Read => "Permissions: Read. Edits, commands, outside paths and browser control are unavailable; web GET/HEAD and enabled MCP connections are available. The user can change /permissions.\n",
-            Level::Workspace => "Permissions: Workspace. Bash and exec run confined to the folder where the system supports it, otherwise they need Full; browser control is unavailable, so use web for HTTP retrieval. Outside paths and exec cwd ask the user. A local server that needs host access requires the user to choose /permissions full first.\n",
+            Level::Workspace => "Permissions: Workspace. Bash and exec run confined to the folder where the system supports it, otherwise they need Full; browser control is unavailable, so use web for HTTP retrieval. Outside paths and exec cwd ask the user. A local server that needs host access requires the user to choose /permissions full first. Confinement causes permission errors outside the folder, such as EPERM on the drive root when Node.js resolves paths: report that and ask the user to choose /permissions full rather than installing substitute runtimes or rewriting the project around it.\n",
             Level::Full => "Permissions: Full. Bash and exec may work outside the folder.\n",
         }
         .into()

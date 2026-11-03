@@ -262,3 +262,49 @@ fn trusted_marker_replaces_user_environment_and_full_clears_it() {
     );
     assert!(Policy::for_command(Level::Read, project.path(), None, None).is_err());
 }
+
+#[test]
+fn node_manager_homes_are_read_only_and_passed_by_name() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let local = home.path().join("Local");
+    let volta = local.join("Volta");
+    let nvm = home.path().join("nvm");
+    for path in [&volta, &nvm] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let mut policy = Policy::for_command(Level::Workspace, project.path(), None, None)
+        .unwrap()
+        .unwrap();
+    // A confined process sees its container as LOCALAPPDATA; Volta's default
+    // home comes from the parent's value.
+    policy
+        .allow_node_tools_from(
+            |name| match name {
+                "LOCALAPPDATA" => Some(local.clone().into()),
+                "NVM_HOME" => Some(nvm.clone().into()),
+                "FNM_DIR" => Some(home.path().join("missing").into()),
+                _ => None,
+            },
+            None,
+        )
+        .unwrap();
+    for path in [&volta, &nvm] {
+        assert!(policy.read.contains(&std::fs::canonicalize(path).unwrap()));
+    }
+    assert_eq!(policy.write.len(), 1);
+    let mut command = Command::new("example");
+    command.env("NVM_HOME", "explicit");
+    // Confinement attaches only on Windows; the environment is set everywhere.
+    let _ = apply(&mut command, Some(&policy));
+    let variable = |name: &str| {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == name)
+            .and_then(|(_, value)| value)
+            .map(OsStr::to_os_string)
+    };
+    assert_eq!(variable("VOLTA_HOME"), Some(volta.clone().into_os_string()));
+    assert_eq!(variable("NVM_HOME"), Some("explicit".into()));
+    assert_eq!(variable("FNM_DIR"), None);
+}
