@@ -1,9 +1,8 @@
-use super::{Client, Entry, Inner, Outcome, Runtime, State, Status};
-use crate::cancel::Cancellation;
+use super::{Entry, Inner, Outcome, Runtime, Status};
 use crate::lsp::{Profile, Store};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 impl Runtime {
     pub fn include_credentials(&self, redactor: crate::redact::Redactor) {
@@ -59,36 +58,7 @@ impl Runtime {
         let Ok(entries) = self.0.entries.lock() else {
             return vec![];
         };
-        entries
-            .values()
-            .map(|entry| {
-                if let Ok(state) = entry.state.try_lock() {
-                    Status {
-                        server: entry.id.clone(),
-                        root: Some(entry.root.clone()),
-                        state: state.status.clone(),
-                        detail: if state.detail.is_empty() {
-                            entry.root_source.clone()
-                        } else {
-                            state.detail.clone()
-                        },
-                        capabilities: state.client.as_ref().map(|c| c.capabilities.clone()),
-                        pid: state.client.as_ref().map(Client::pid),
-                        generation: state.client.as_ref().map(|c| c.generation),
-                    }
-                } else {
-                    Status {
-                        server: entry.id.clone(),
-                        root: Some(entry.root.clone()),
-                        state: "busy".into(),
-                        detail: "Request in progress".into(),
-                        capabilities: None,
-                        pid: None,
-                        generation: None,
-                    }
-                }
-            })
-            .collect()
+        entries.values().map(|entry| entry.status()).collect()
     }
 
     pub fn invalidate_paths(&self, paths: &[PathBuf]) {
@@ -108,7 +78,7 @@ impl Runtime {
     pub fn reset_restart(&self, id: &str) {
         if let Ok(entries) = self.0.entries.lock() {
             for entry in entries.values().filter(|e| e.id == id) {
-                if let Ok(mut state) = entry.state.try_lock() {
+                if let Ok(mut state) = entry.try_session() {
                     state.failures = 0;
                     state.retry_at = None;
                     state.status = "not_started".into();
@@ -158,22 +128,12 @@ impl Runtime {
         {
             return Arc::clone(current);
         }
-        let fresh = Arc::new(Entry {
-            id: profile.id.clone(),
-            root: root.to_path_buf(),
-            root_source: root_source.into(),
+        let fresh = Arc::new(Entry::new(
+            profile.id.clone(),
+            root.to_path_buf(),
+            root_source.into(),
             fingerprint,
-            stop: Cancellation::default(),
-            dirty: AtomicU64::new(0),
-            state: Mutex::new(State {
-                client: None,
-                generation: 0,
-                failures: 0,
-                retry_at: None,
-                status: "not_started".into(),
-                detail: String::new(),
-            }),
-        });
+        ));
         let replaced = entries.insert(key, Arc::clone(&fresh));
         drop(entries);
         if let Some(replaced) = replaced {
@@ -218,11 +178,7 @@ impl Runtime {
     fn stop(&self, entry: Arc<Entry>) {
         entry.stop.cancel();
         let worker = std::thread::spawn(move || {
-            let client = entry
-                .state
-                .lock()
-                .ok()
-                .and_then(|mut state| state.client.take());
+            let client = entry.session().and_then(|mut state| state.client.take());
             if let Some(mut client) = client {
                 client.shutdown();
             }

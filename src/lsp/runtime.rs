@@ -6,6 +6,7 @@ mod error;
 mod idle;
 mod outcome;
 mod root;
+mod session;
 #[cfg(test)]
 mod tests;
 
@@ -20,7 +21,7 @@ use crate::cancel::Cancellation;
 use crate::json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -82,6 +83,10 @@ struct Entry {
     fingerprint: String,
     stop: Cancellation,
     dirty: AtomicU64,
+    /// Requests queued or running; only these make the instance `busy`.
+    requests: AtomicUsize,
+    /// What `statuses` reports, published whenever a session releases `state`.
+    observed: Mutex<Status>,
     state: Mutex<State>,
 }
 struct State {
@@ -196,6 +201,8 @@ impl Runtime {
             Err(error) => return Outcome::basic("configuration_error", error),
         };
         let entry = self.entry(profile, &root, &root_source);
+        // Declared before the session so it stops counting after the release.
+        let _pending = entry.pending();
         let dirty_before = entry.dirty.load(Ordering::Acquire);
         let mut outcome = Outcome::basic("ready", "");
         outcome.server = Some(profile.id.clone());
@@ -208,7 +215,7 @@ impl Runtime {
             if entry.stop.requested() {
                 return Outcome::basic("settings_changed", "LSP settings changed before dispatch");
             }
-            match entry.state.try_lock() {
+            match entry.try_session() {
                 Ok(state) => break state,
                 Err(std::sync::TryLockError::Poisoned(_)) => {
                     return Outcome::basic("unavailable", "LSP state unavailable");

@@ -168,6 +168,43 @@ fn local_document_failures_keep_the_server_and_success_clears_failures() {
 }
 
 #[test]
+fn only_requests_report_an_instance_busy() {
+    let fixture = Fixture::new();
+    let home = fixture.workspace().join("home");
+    Store::new(home.clone()).save(fixture.profile()).unwrap();
+    let runtime = Runtime::with_home(home);
+    assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
+    let entry = registered(&runtime);
+    let (_, pid) = observed(&entry);
+    // Holding the state stands in for an idle pump tick.
+    let held = entry.state.lock().unwrap();
+    let status = runtime.statuses().remove(0);
+    assert_eq!((status.state.as_str(), status.pid), ("ready", pid));
+    let queued_runtime = runtime.clone();
+    let workspace = fixture.workspace().to_path_buf();
+    let path = fixture.sample();
+    let queued = thread::spawn(move || {
+        queued_runtime.execute(
+            &workspace,
+            &[],
+            definition(path, 1),
+            &Cancellation::default(),
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while entry.requests.load(Ordering::Acquire) == 0 {
+        assert!(Instant::now() < deadline, "Request was not queued");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(runtime.statuses()[0].state, "busy");
+    drop(held);
+    assert_eq!(queued.join().unwrap().status, "ready");
+    let status = runtime.statuses().remove(0);
+    assert_eq!((status.state.as_str(), status.pid), ("ready", pid));
+    runtime.shutdown();
+}
+
+#[test]
 fn relative_executable_resolves_from_the_working_folder_for_runtime_and_check() {
     let fixture = Fixture::new();
     let nested = fixture.workspace().join("nested");
