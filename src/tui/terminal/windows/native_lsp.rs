@@ -141,7 +141,11 @@ pub(super) fn console() {
     select(&mut app, "Fixture LSP");
     press(&mut app, 13);
     paint_app(&app, "Not checked");
-    press(&mut app, 27); // Back to read-only /lsp.
+    press(&mut app, 27); // Back to the read-only /lsp list, not its instance.
+    assert!(matches!(
+        app.state.selector.as_ref().unwrap().purpose,
+        crate::tui::selector::Purpose::Lsp(crate::tui::lsp::Panel::List)
+    ));
     paint_app(&app, "Fixture LSP");
 
     app.open_lsp(true);

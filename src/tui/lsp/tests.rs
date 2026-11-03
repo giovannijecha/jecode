@@ -173,6 +173,29 @@ fn saving_changed_settings_shows_the_cleared_check() {
 }
 
 #[test]
+fn escape_returns_settings_detail_to_the_inspection_panel_that_opened_it() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let profile = Profile::draft_guided_rust();
+    app.lsp_store().save(profile.clone()).unwrap();
+    app.open_lsp(false);
+    press(&mut app, 13); // Not running: its Settings detail.
+    assert_eq!(panel(&app), Panel::Detail);
+    assert!(app.lsp.settings);
+    press(&mut app, 27);
+    assert_eq!(panel(&app), Panel::List);
+    assert!(!app.lsp.settings);
+    app.lsp.selected = Some(profile.id.clone());
+    app.choose_lsp(Panel::Instance, 0);
+    assert_eq!(panel(&app), Panel::Detail);
+    press(&mut app, 27);
+    assert_eq!(panel(&app), Panel::Instance);
+    assert!(!app.lsp.settings);
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn guided_profile_is_enabled_on_draft_and_starts_nothing_on_save() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);

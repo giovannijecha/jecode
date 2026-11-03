@@ -44,7 +44,8 @@ pub(super) enum Panel {
 #[derive(Default)]
 pub(super) struct Ui {
     settings: bool,
-    from_inspection: bool,
+    /// The read-only `/lsp` panel that Settings, entered from it, returns to.
+    from_inspection: Option<Panel>,
     profiles: Vec<Profile>,
     observed: Vec<lsp::Status>,
     selected: Option<String>,
@@ -239,7 +240,7 @@ impl App {
                         self.show_lsp_instance();
                     } else {
                         self.lsp.settings = true;
-                        self.lsp.from_inspection = true;
+                        self.lsp.from_inspection = Some(Panel::List);
                         self.show_lsp_detail();
                     }
                 }
@@ -304,7 +305,7 @@ impl App {
             Panel::ConfirmRemove if index == 0 => self.remove_lsp(),
             Panel::Instance if index == 0 => {
                 self.lsp.settings = true;
-                self.lsp.from_inspection = true;
+                self.lsp.from_inspection = Some(Panel::Instance);
                 self.show_lsp_detail();
             }
             _ => {}
@@ -315,8 +316,16 @@ impl App {
         match panel {
             Panel::Form => self.show_lsp_form(),
             Panel::Detail => self.show_lsp_detail(),
+            Panel::Instance => self.show_lsp_instance(),
             _ => self.show_lsp_list(),
         }
+    }
+
+    /// Leave Settings for the read-only `/lsp` panel it was entered from.
+    fn return_to_lsp_inspection(&mut self, back: Panel) {
+        self.lsp.settings = false;
+        self.lsp.from_inspection = None;
+        self.show_lsp_back(back);
     }
 
     pub(in crate::tui) fn close_lsp_panel(&mut self) -> bool {
@@ -326,10 +335,8 @@ impl App {
         };
         match panel {
             Panel::List => {
-                if self.lsp.from_inspection {
-                    self.lsp.settings = false;
-                    self.lsp.from_inspection = false;
-                    self.show_lsp_list();
+                if self.lsp.from_inspection.is_some() {
+                    self.return_to_lsp_inspection(Panel::List);
                     return true;
                 }
                 let settings = self.lsp.settings;
@@ -342,10 +349,8 @@ impl App {
                 }
             }
             Panel::Add => self.show_lsp_list(),
-            Panel::Detail if self.lsp.from_inspection => {
-                self.lsp.settings = false;
-                self.lsp.from_inspection = false;
-                self.show_lsp_instance();
+            Panel::Detail if let Some(back) = self.lsp.from_inspection => {
+                self.return_to_lsp_inspection(back);
             }
             Panel::Detail | Panel::Instance => self.show_lsp_list(),
             Panel::Form => {
@@ -381,7 +386,7 @@ impl App {
             && self.lsp.profiles.is_empty()
         {
             self.lsp.settings = true;
-            self.lsp.from_inspection = true;
+            self.lsp.from_inspection = Some(Panel::List);
             self.show_lsp_list();
             return true;
         }
