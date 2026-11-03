@@ -105,6 +105,20 @@ fn main() {
                         ),
                     );
                 }
+                // Push floods over files that are not open, beyond the client's report cache.
+                let finding = r#"[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"message":"flood"}]"#;
+                let stem = uri.trim_end_matches(".rs");
+                if uri.ends_with("flood.rs") {
+                    publish(&mut output, &uri, &version.to_string(), finding);
+                    for index in 0..300 {
+                        publish(&mut output, &format!("{stem}-{index}.rs"), "null", finding);
+                    }
+                }
+                if uri.ends_with("clear.rs") {
+                    for index in 0..300 {
+                        publish(&mut output, &format!("{stem}-{index}.rs"), "null", "[]");
+                    }
+                }
             }
             "shutdown" => reply(&mut output, id, "null"),
             "exit" => break,
@@ -143,6 +157,14 @@ fn reply(output: &mut impl Write, id: Option<usize>, result: &str) {
 fn send(output: &mut impl Write, body: &str) {
     write!(output, "Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
     output.flush().unwrap();
+}
+fn publish(output: &mut impl Write, uri: &str, version: &str, diagnostics: &str) {
+    send(
+        output,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{uri}","version":{version},"diagnostics":{diagnostics}}}}}"#
+        ),
+    );
 }
 fn log(marker: &str, message: &str) {
     use std::fs::OpenOptions;

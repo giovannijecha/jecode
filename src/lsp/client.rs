@@ -28,7 +28,7 @@ pub(super) struct Client {
     doc_order: VecDeque<String>,
     pub pull_diagnostics: HashMap<String, DiagnosticReport>,
     pub push_diagnostics: HashMap<String, DiagnosticReport>,
-    pub diagnostic_gap: bool,
+    report_ledger: reports::Ledger,
     pub generation: u64,
     next_document_version: i64,
     next_id: u64,
@@ -71,43 +71,12 @@ impl WatchPattern {
 
 mod documents;
 mod handler;
+mod reports;
 #[cfg(test)]
 mod tests;
 mod watches;
 
 impl Client {
-    pub(crate) fn put_report(&mut self, uri: String, report: DiagnosticReport, push: bool) {
-        if push {
-            self.push_diagnostics.insert(uri.clone(), report);
-        } else {
-            self.pull_diagnostics.insert(uri.clone(), report);
-        }
-        let count = self.push_diagnostics.len() + self.pull_diagnostics.len();
-        let bytes = self
-            .push_diagnostics
-            .values()
-            .chain(self.pull_diagnostics.values())
-            .flat_map(|report| report.values.iter())
-            .map(|value| value.encode().len())
-            .sum::<usize>();
-        if count > 256 || bytes > 16 * 1024 * 1024 {
-            let retained = if push {
-                self.push_diagnostics.remove(&uri)
-            } else {
-                self.pull_diagnostics.remove(&uri)
-            };
-            self.push_diagnostics.clear();
-            self.pull_diagnostics.clear();
-            if let Some(report) = retained {
-                if push {
-                    self.push_diagnostics.insert(uri, report);
-                } else {
-                    self.pull_diagnostics.insert(uri, report);
-                }
-            }
-            self.diagnostic_gap = true;
-        }
-    }
     pub fn pid(&self) -> u32 {
         self.wire.id()
     }
@@ -143,7 +112,7 @@ impl Client {
             doc_order: VecDeque::new(),
             pull_diagnostics: HashMap::new(),
             push_diagnostics: HashMap::new(),
-            diagnostic_gap: false,
+            report_ledger: reports::Ledger::default(),
             generation,
             next_document_version: 1,
             next_id: 1,

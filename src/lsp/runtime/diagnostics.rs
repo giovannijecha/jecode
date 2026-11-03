@@ -117,7 +117,8 @@ pub(super) fn diagnostics(
             .flat_map(|report| locations::diagnostics(&report.values, document, client.encoding))
             .filter(|value| unique.insert(value.encode()))
             .collect();
-        outcome.freshness = if client.sync_gap || client.diagnostic_gap || client.sync_kind == 0 {
+        let diagnostic_gap = client.diagnostic_gap(&document.uri);
+        outcome.freshness = if client.sync_gap || diagnostic_gap || client.sync_kind == 0 {
             "sync_gap"
         } else if reports.iter().any(|report| {
             report.generation != client.generation
