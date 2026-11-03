@@ -20,6 +20,10 @@ mod work_tests;
 #[path = "card_tests.rs"]
 mod card_tests;
 
+#[path = "console_probe.rs"]
+mod console_probe;
+use console_probe::snapshot as probe;
+
 #[path = "native_direct_input.rs"]
 mod native_direct_input;
 
@@ -236,30 +240,6 @@ fn measure(scenario: &str, source: String, entry: &str) {
     );
     assert!(!result.timed_out, "native {scenario} timed out");
     println!("{}", String::from_utf8_lossy(&result.stdout));
-}
-
-fn probe() -> String {
-    let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n$bytes = [Text.Encoding]::UTF8.GetBytes([JecodeConsoleProbe]::Snapshot()); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)",
-        include_str!("native_probe.cs")
-    );
-    let result = Command::new("powershell.exe")
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &script,
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    // Write UTF-8 to the pipe without changing the console's output code page.
-    String::from_utf8(result.stdout).unwrap()
 }
 
 fn restored(path: &std::path::Path) {

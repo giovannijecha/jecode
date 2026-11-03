@@ -77,6 +77,10 @@ These drive the real renderer through a pseudo-terminal and check input,
 resize, quitting and terminal restoration after normal exit and owner loss. CI
 runs the one for each platform. Run them after the normal suite, one at a time;
 running them concurrently with other suites can exceed their wait limits.
+Windows screen snapshots compile the owned C# probe once per fixture, then run
+the executable directly. Repeated snapshots keep the same native cell and mode
+assertions without repeatedly starting PowerShell and its compiler. Timeout
+diagnostics retain the end of the terminal output so child failures stay visible.
 
 ```text
 cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
