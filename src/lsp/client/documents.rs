@@ -49,10 +49,17 @@ impl Client {
             .map(|d| (d.path.clone(), d.language.clone(), d.uri.clone()))
             .collect::<Vec<_>>();
         for (path, language, uri) in docs {
-            if path.exists() {
-                self.reconcile(&path, &language)?;
-            } else {
-                self.close_document(&uri)?;
+            if !self.docs.contains_key(&uri) {
+                continue;
+            }
+            // A document that can no longer be read (deleted, replaced, not
+            // UTF-8, too large, locked) is closed alone; a later query on it
+            // reports the read error. Only protocol errors propagate.
+            match Document::read(&path, &language, 0) {
+                Ok(current) => {
+                    self.synchronize(current)?;
+                }
+                Err(_) => self.close_document(&uri)?,
             }
         }
         Ok(())

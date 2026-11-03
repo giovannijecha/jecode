@@ -67,3 +67,40 @@ fn full_text_changes_reconstruct_the_disk_text_for_every_line_break() {
     }
     client.shutdown();
 }
+
+#[test]
+fn unreadable_open_document_is_closed_without_stopping_the_server() {
+    let fixture = Fixture::new();
+    let (mut client, root) = start(&fixture);
+    let pid = client.pid();
+    let broken = root.join("sample.rs");
+    let healthy = root.join("other.rs");
+    std::fs::write(&healthy, "pub fn other() {}\n").unwrap();
+    let uri = client.reconcile(&broken, "rust").unwrap().uri;
+    client.reconcile(&healthy, "rust").unwrap();
+    client.push_diagnostics.insert(
+        uri.clone(),
+        crate::lsp::client::DiagnosticReport {
+            values: Vec::new(),
+            version: Some(1),
+            result_id: None,
+            generation: 1,
+            stale: false,
+        },
+    );
+    std::fs::write(&broken, b"pub fn \xff() {}\n").unwrap();
+    client.poll_open_documents().unwrap();
+    assert_eq!(client.pid(), pid);
+    assert!(!client.docs.contains_key(&uri));
+    assert!(!client.push_diagnostics.contains_key(&uri));
+    assert!(definition(&mut client, &healthy).get("result").is_some());
+    let log = std::fs::read_to_string(fixture.marker()).unwrap();
+    assert!(log.contains("textDocument/didClose"), "{log}");
+    let error = client.reconcile(&broken, "rust").err().unwrap();
+    assert!(
+        error.starts_with("Cannot read UTF-8 LSP document"),
+        "{error}"
+    );
+    assert_eq!(client.pid(), pid);
+    client.shutdown();
+}
