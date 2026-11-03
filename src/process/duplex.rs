@@ -18,6 +18,8 @@ pub struct Duplex {
     target_pid: u32,
     #[cfg(unix)]
     _owner: super::unix::Owner,
+    #[cfg(unix)]
+    group_stopped: bool,
 }
 
 impl Duplex {
@@ -55,6 +57,8 @@ impl Duplex {
             target_pid: spawned.target_pid,
             #[cfg(unix)]
             _owner: spawned.owner,
+            #[cfg(unix)]
+            group_stopped: false,
         })
     }
 
@@ -72,16 +76,16 @@ impl Duplex {
     /// Stops all descendants even if a server ignored shutdown or closed stdout.
     pub fn kill_tree(&mut self) -> Result<(), String> {
         self.stdin.take();
-        if self
-            .child
-            .try_wait()
-            .map_err(|error| error.to_string())?
-            .is_some()
-        {
-            return Ok(());
-        }
         #[cfg(windows)]
         {
+            if self
+                .child
+                .try_wait()
+                .map_err(|error| error.to_string())?
+                .is_some()
+            {
+                return Ok(());
+            }
             let result = super::windows::terminate(
                 &mut self.child,
                 self.control.as_ref(),
@@ -93,7 +97,14 @@ impl Duplex {
         }
         #[cfg(unix)]
         {
-            super::unix::terminate(&mut self.child)
+            // The guardian keeps the group ID reserved until this first group signal,
+            // even after the server exits; signalling again could reach a reused ID.
+            if self.group_stopped {
+                return Ok(());
+            }
+            let result = super::unix::terminate(&mut self.child);
+            self.group_stopped = result.is_ok();
+            result
         }
     }
 

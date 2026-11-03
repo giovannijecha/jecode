@@ -7,6 +7,7 @@ use std::time::Instant;
 const TREE_CHILD: &str = "process::duplex::tests::duplex_tree_child";
 const TREE_GRANDCHILD: &str = "process::duplex::tests::duplex_tree_grandchild";
 const HEARTBEAT: &str = "JECODE_DUPLEX_HEARTBEAT";
+const TREE_EXIT: &str = "JECODE_DUPLEX_TREE_EXIT";
 
 #[test]
 fn duplex_echo_child() {
@@ -55,6 +56,9 @@ fn duplex_tree_child() {
     std::thread::spawn(move || {
         let _ = grandchild.wait();
     });
+    if std::env::var_os(TREE_EXIT).is_some() {
+        std::process::exit(0);
+    }
     loop {
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -167,6 +171,20 @@ fn kill_tree_stops_a_running_grandchild() {
     wait_for_heartbeat(&heartbeat);
     process.kill_tree().unwrap();
     assert!(process.wait_timeout(Duration::from_secs(2)).unwrap());
+    assert_heartbeat_stopped(&heartbeat);
+}
+
+#[cfg(unix)]
+#[test]
+fn kill_tree_after_server_exit_stops_its_descendants() {
+    let directory = crate::test_support::Directory::new();
+    let heartbeat = directory.path().join("exited-heartbeat");
+    let mut command = tree_child(&heartbeat);
+    command.env(TREE_EXIT, "1");
+    let mut process = Duplex::spawn_cancellable(&mut command, &Cancellation::default()).unwrap();
+    wait_for_heartbeat(&heartbeat);
+    assert!(process.wait_timeout(Duration::from_secs(5)).unwrap());
+    process.kill_tree().unwrap();
     assert_heartbeat_stopped(&heartbeat);
 }
 
