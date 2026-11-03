@@ -22,6 +22,9 @@ pub struct Duplex {
 
 impl Duplex {
     pub fn spawn_cancellable(command: &mut Command, cancel: &Cancellation) -> Result<Self, String> {
+        if cancel.requested() {
+            return Err("Operation cancelled".into());
+        }
         #[cfg(windows)]
         let mut spawned =
             super::windows::spawn_duplex(command, cancel).map_err(|error| error.message)?;
