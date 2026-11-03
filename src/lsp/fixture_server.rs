@@ -63,6 +63,16 @@ fn main() {
                         r#"[{{"uri":"{uri}","range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":3}}}}}}]"#
                     ),
                 );
+                if uri.ends_with("burst.rs") {
+                    for index in 0..1000 {
+                        send(
+                            &mut output,
+                            &format!(
+                                r#"{{"jsonrpc":"2.0","method":"$/progress","params":{{"token":"fixture-progress","value":{{"kind":"report","message":"{index}"}}}}}}"#
+                            ),
+                        );
+                    }
+                }
             }
             "textDocument/diagnostic" => reply(
                 &mut output,

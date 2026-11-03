@@ -71,6 +71,8 @@ impl WatchPattern {
 
 mod documents;
 mod handler;
+#[cfg(test)]
+mod tests;
 mod watches;
 
 impl Client {
@@ -405,10 +407,6 @@ fn client_capabilities() -> Value {
                     Value::object([("didSave", Value::Bool(true))]),
                 ),
             ]),
-        ),
-        (
-            "window",
-            Value::object([("workDoneProgress", Value::Bool(true))]),
         ),
     ])
 }

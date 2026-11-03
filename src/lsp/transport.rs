@@ -2,11 +2,7 @@ use crate::json::{self, Value};
 use crate::process::duplex::Duplex;
 use std::io::{Read, Write};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{
-    Arc,
-    mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
-};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread;
 use std::time::Duration;
 
@@ -17,7 +13,6 @@ pub(super) struct Transport {
     process: Duplex,
     incoming: Receiver<Result<Value, String>>,
     writer: SyncSender<WriteRequest>,
-    overflow: Arc<AtomicBool>,
 }
 
 impl Transport {
@@ -43,21 +38,14 @@ impl Transport {
                 }
             }
         });
-        let (sender, incoming) = mpsc::sync_channel(128);
-        let overflow = Arc::new(AtomicBool::new(false));
-        let overflow_reader = Arc::clone(&overflow);
+        // Unbounded: a server may emit bursts while the client is busy, and blocking here
+        // could deadlock a single-threaded server that is waiting to write while we write.
+        let (sender, incoming) = mpsc::channel();
         thread::spawn(move || {
             loop {
                 let result = read_frame(&mut stdout);
                 let done = result.is_err();
-                match sender.try_send(result) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) => {
-                        overflow_reader.store(true, Ordering::Release);
-                    }
-                    Err(TrySendError::Disconnected(_)) => break,
-                }
-                if done {
+                if sender.send(result).is_err() || done {
                     break;
                 }
             }
@@ -74,7 +62,6 @@ impl Transport {
             process,
             incoming,
             writer,
-            overflow,
         })
     }
 
@@ -114,9 +101,6 @@ impl Transport {
     }
 
     pub fn recv(&self, timeout: Duration) -> Result<Option<Value>, String> {
-        if self.overflow.load(Ordering::Acquire) {
-            return Err("LSP incoming queue overflow".into());
-        }
         match self.incoming.recv_timeout(timeout) {
             Ok(result) => result.map(Some),
             Err(RecvTimeoutError::Timeout) => Ok(None),
