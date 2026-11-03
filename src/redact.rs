@@ -3,6 +3,26 @@ use std::sync::{Arc, Mutex};
 
 type Secrets = Arc<Mutex<Vec<(String, String)>>>;
 
+/// Whether a named configuration value is credential-like. Redaction replaces
+/// plain substrings, so a short ordinary value such as `true` or `1` must not
+/// become a secret everywhere.
+pub fn sensitive(name: &str, value: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    value.len() >= 20
+        || name == "cookie"
+        || [
+            "key",
+            "token",
+            "secret",
+            "password",
+            "auth",
+            "session",
+            "signature",
+        ]
+        .iter()
+        .any(|part| name.contains(part))
+}
+
 // No Debug implementation: this value owns a credential.
 #[derive(Clone)]
 pub struct Redactor {

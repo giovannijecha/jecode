@@ -115,6 +115,29 @@ fn environment_values_are_never_in_status_or_presentation_names() {
 }
 
 #[test]
+fn ordinary_environment_values_stay_visible_while_credentials_are_masked() {
+    let home = Directory::new();
+    let workspace = Directory::new();
+    let mut profile = Profile::draft_guided_rust();
+    profile
+        .environment
+        .insert("RUST_BACKTRACE".into(), "1".into());
+    profile.environment.insert("RA_LOG".into(), "info".into());
+    profile
+        .environment
+        .insert("SERVICE_TOKEN".into(), "short-tok".into());
+    profile.enabled = false;
+    Store::new(home.path().to_path_buf()).save(profile).unwrap();
+    let redactor = Redactor::empty();
+    let mut tools = Tools::new(workspace.path()).unwrap();
+    tools.configure_lsp(home.path(), redactor.clone()).unwrap();
+    assert_eq!(
+        redactor.text("level info, short-tok, 1"),
+        "level info, [redacted], 1"
+    );
+}
+
+#[test]
 fn escaped_server_output_stays_within_the_actual_encoded_budget() {
     let directory = Directory::new();
     let outputs = crate::output::Store::new(directory.path().join("outputs"), Redactor::empty());

@@ -154,9 +154,7 @@ impl Runtime {
             && let Some(redactor) = current.as_ref()
         {
             for profile in &profiles {
-                for secret in profile.environment.values() {
-                    redactor.add_secret(secret.clone());
-                }
+                profile.protect(redactor);
             }
         }
         Ok(profiles)

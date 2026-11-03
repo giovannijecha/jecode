@@ -60,9 +60,7 @@ impl Tools {
             .ok_or("LSP configuration is unavailable without a user configuration directory")?;
         let profiles = Store::new(home.clone()).load()?;
         for profile in &profiles {
-            for secret in profile.environment.values() {
-                self.lsp_redactor.add_secret(secret.clone());
-            }
+            profile.protect(&self.lsp_redactor);
         }
         Ok(profiles)
     }

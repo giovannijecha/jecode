@@ -99,8 +99,10 @@ automatic restarts until you choose Allow restart.
 Global entries are stored in `~/.jecode/lsp.json`, with a separate lock file.
 Plain mode uses the same model tool; configure entries in the TUI or edit
 this file. `/lsp` also provides read-only inspection in plain chat.
-Environment values are retained locally in plaintext, masked in
-the TUI and redacted from tool output.
+Environment values are retained locally in plaintext and masked in the TUI.
+Credential-like values (names containing key, token, secret, password, auth,
+session or signature, or values of 20 characters or more) are redacted from
+tool output; short ordinary values such as `1` or `info` stay readable.
 
 ```json
 {

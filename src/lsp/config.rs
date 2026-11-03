@@ -40,6 +40,15 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// Masks credential-like environment values in every output that uses `redactor`.
+    pub fn protect(&self, redactor: &crate::redact::Redactor) {
+        for (name, value) in &self.environment {
+            if crate::redact::sensitive(name, value) {
+                redactor.add_secret(value.clone());
+            }
+        }
+    }
+
     pub fn draft_custom() -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

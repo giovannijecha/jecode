@@ -90,7 +90,9 @@ impl App {
                 if value.is_empty() {
                     profile.environment.remove(name);
                 } else {
-                    self.archive.redactor.add_secret(value.into());
+                    if crate::redact::sensitive(name, value) {
+                        self.archive.redactor.add_secret(value.into());
+                    }
                     profile.environment.insert(name.into(), value.into());
                 }
             }

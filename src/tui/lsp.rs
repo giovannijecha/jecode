@@ -77,9 +77,7 @@ impl App {
         match self.lsp_store().load() {
             Ok(profiles) => {
                 for profile in &profiles {
-                    for value in profile.environment.values() {
-                        self.archive.redactor.add_secret(value.clone());
-                    }
+                    profile.protect(&self.archive.redactor);
                 }
                 self.lsp.profiles = profiles;
                 self.lsp.observed = self.facts().lsp_runtime.statuses();
