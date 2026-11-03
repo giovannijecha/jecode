@@ -1,4 +1,4 @@
-use super::{Client, Entry, Outcome, Runtime, State, Status};
+use super::{Client, Entry, Inner, Outcome, Runtime, State, Status};
 use crate::cancel::Cancellation;
 use crate::lsp::{Profile, Store};
 use std::path::{Path, PathBuf};
@@ -102,22 +102,7 @@ impl Runtime {
     }
 
     pub fn configuration_changed(&self, id: &str) {
-        let removed = if let Ok(mut entries) = self.0.entries.lock() {
-            let mut removed = Vec::new();
-            entries.retain(|(server, _), entry| {
-                if server == id {
-                    entry.stop.cancel();
-                    removed.push(Arc::clone(entry));
-                    false
-                } else {
-                    true
-                }
-            });
-            removed
-        } else {
-            Vec::new()
-        };
-        self.stop_entries(removed);
+        self.retire_where(|entry| entry.id == id);
     }
 
     pub fn reset_restart(&self, id: &str) {
@@ -132,16 +117,9 @@ impl Runtime {
         }
     }
 
+    /// Stops every instance; the last runtime owner waits for them to exit.
     pub fn shutdown(&self) {
-        let removed = if let Ok(mut entries) = self.0.entries.lock() {
-            for entry in entries.values() {
-                entry.stop.cancel();
-            }
-            entries.drain().map(|(_, entry)| entry).collect()
-        } else {
-            Vec::new()
-        };
-        self.stop_entries(removed);
+        self.retire_where(|_| true);
     }
 
     pub(super) fn authoritative(&self, fallback: &[Profile]) -> Result<Vec<Profile>, String> {
@@ -160,55 +138,111 @@ impl Runtime {
         Ok(profiles)
     }
     pub(super) fn prune(&self, profiles: &[Profile]) {
-        let removed = if let Ok(mut entries) = self.0.entries.lock() {
-            let mut removed = Vec::new();
-            entries.retain(|(id, _), entry| {
-                let valid = profiles.iter().any(|p| {
-                    &p.id == id && p.enabled && p.instance_fingerprint() == entry.fingerprint
-                });
-                if !valid {
-                    entry.stop.cancel();
-                    removed.push(Arc::clone(entry));
-                }
-                valid
-            });
-            removed
-        } else {
-            Vec::new()
-        };
-        self.stop_entries(removed);
+        self.retire_where(|entry| {
+            entry.stop.requested()
+                || !profiles.iter().any(|p| {
+                    p.id == entry.id && p.enabled && p.instance_fingerprint() == entry.fingerprint
+                })
+        });
     }
-    fn stop_entries(&self, entries: Vec<Arc<Entry>>) {
-        for entry in entries {
-            if let Ok(mut state) = entry.state.lock()
-                && let Some(mut client) = state.client.take()
+
+    /// The registered instance for `profile` and `root`, replacing one that
+    /// is stopping or was started with other settings.
+    pub(super) fn entry(&self, profile: &Profile, root: &Path, root_source: &str) -> Arc<Entry> {
+        let fingerprint = profile.instance_fingerprint();
+        let key = (profile.id.clone(), root.to_path_buf());
+        let mut entries = self.0.entries.lock().expect("LSP registry");
+        if let Some(current) = entries.get(&key)
+            && !current.stop.requested()
+            && current.fingerprint == fingerprint
+        {
+            return Arc::clone(current);
+        }
+        let fresh = Arc::new(Entry {
+            id: profile.id.clone(),
+            root: root.to_path_buf(),
+            root_source: root_source.into(),
+            fingerprint,
+            stop: Cancellation::default(),
+            dirty: AtomicU64::new(0),
+            state: Mutex::new(State {
+                client: None,
+                generation: 0,
+                failures: 0,
+                retry_at: None,
+                status: "not_started".into(),
+                detail: String::new(),
+            }),
+        });
+        let replaced = entries.insert(key, Arc::clone(&fresh));
+        drop(entries);
+        if let Some(replaced) = replaced {
+            self.stop(replaced);
+        }
+        fresh
+    }
+
+    /// Unregisters `entry` unless a newer instance took its place, then stops it.
+    pub(super) fn retire(&self, entry: &Arc<Entry>) {
+        if let Ok(mut entries) = self.0.entries.lock() {
+            let key = (entry.id.clone(), entry.root.clone());
+            if entries
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, entry))
             {
-                client.shutdown();
+                entries.remove(&key);
             }
         }
+        self.stop(Arc::clone(entry));
     }
-    pub(super) fn entry(&self, profile: &Profile, root: &Path, root_source: &str) -> Arc<Entry> {
-        let mut entries = self.0.entries.lock().expect("LSP registry");
-        entries
-            .entry((profile.id.clone(), root.to_path_buf()))
-            .or_insert_with(|| {
-                Arc::new(Entry {
-                    id: profile.id.clone(),
-                    root: root.to_path_buf(),
-                    root_source: root_source.into(),
-                    fingerprint: profile.instance_fingerprint(),
-                    stop: Cancellation::default(),
-                    dirty: AtomicU64::new(0),
-                    state: Mutex::new(State {
-                        client: None,
-                        generation: 0,
-                        failures: 0,
-                        retry_at: None,
-                        status: "not_started".into(),
-                        detail: String::new(),
-                    }),
-                })
-            })
-            .clone()
+
+    fn retire_where(&self, stale: impl Fn(&Entry) -> bool) {
+        let mut removed = Vec::new();
+        if let Ok(mut entries) = self.0.entries.lock() {
+            entries.retain(|_, entry| {
+                let keep = !stale(entry);
+                if !keep {
+                    removed.push(Arc::clone(entry));
+                }
+                keep
+            });
+        }
+        for entry in removed {
+            self.stop(entry);
+        }
+    }
+
+    /// Blocks new dispatch and cancels waiting work at once. The shutdown
+    /// handshake waits for an in-flight request and for servers that ignore
+    /// it, so it runs on its own thread instead of the caller's.
+    fn stop(&self, entry: Arc<Entry>) {
+        entry.stop.cancel();
+        let worker = std::thread::spawn(move || {
+            let client = entry
+                .state
+                .lock()
+                .ok()
+                .and_then(|mut state| state.client.take());
+            if let Some(mut client) = client {
+                client.shutdown();
+            }
+        });
+        if let Ok(mut retiring) = self.0.retiring.lock() {
+            retiring.retain(|worker| !worker.is_finished());
+            retiring.push(worker);
+        }
+    }
+}
+
+impl Drop for Inner {
+    /// The last owner, such as Jecode's exit, leaves no instance running.
+    fn drop(&mut self) {
+        let workers = match self.retiring.get_mut() {
+            Ok(workers) => std::mem::take(workers),
+            Err(poisoned) => std::mem::take(poisoned.into_inner()),
+        };
+        for worker in workers {
+            let _ = worker.join();
+        }
     }
 }

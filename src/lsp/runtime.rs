@@ -111,6 +111,7 @@ struct Inner {
     home: Option<PathBuf>,
     entries: Mutex<HashMap<(String, PathBuf), Arc<Entry>>>,
     redactor: Mutex<Option<crate::redact::Redactor>>,
+    retiring: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 #[derive(Clone)]
 pub struct Runtime(Arc<Inner>);
@@ -122,17 +123,17 @@ impl Default for Runtime {
 }
 impl Runtime {
     pub fn new() -> Self {
-        Self(Arc::new(Inner {
-            home: None,
-            entries: Mutex::new(HashMap::new()),
-            redactor: Mutex::new(None),
-        }))
+        Self::build(None)
     }
     pub fn with_home(home: PathBuf) -> Self {
+        Self::build(Some(home))
+    }
+    fn build(home: Option<PathBuf>) -> Self {
         Self(Arc::new(Inner {
-            home: Some(home),
+            home,
             entries: Mutex::new(HashMap::new()),
             redactor: Mutex::new(None),
+            retiring: Mutex::new(Vec::new()),
         }))
     }
 
@@ -441,10 +442,7 @@ impl Runtime {
                 })
             });
         if !still_enabled {
-            entry.stop.cancel();
-            if let Some(mut client) = state.client.take() {
-                client.shutdown();
-            }
+            self.retire(&entry);
             outcome.status = "settings_changed".into();
             outcome.freshness = "unavailable".into();
             outcome.complete = false;

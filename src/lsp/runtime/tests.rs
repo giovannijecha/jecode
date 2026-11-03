@@ -21,6 +21,17 @@ fn run(runtime: &Runtime, fixture: &Fixture, path: PathBuf) -> Outcome {
     )
 }
 
+fn wait_for(fixture: &Fixture, text: &str, failure: &str) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !fs::read_to_string(fixture.marker())
+        .unwrap_or_default()
+        .contains(text)
+    {
+        assert!(Instant::now() < deadline, "{failure}");
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
 fn registered(runtime: &Runtime) -> Arc<Entry> {
     let entries = runtime.0.entries.lock().unwrap();
     assert_eq!(entries.len(), 1);
@@ -30,6 +41,95 @@ fn registered(runtime: &Runtime) -> Arc<Entry> {
 fn observed(entry: &Entry) -> (String, Option<u32>) {
     let state = entry.state.lock().unwrap();
     (state.status.clone(), state.client.as_ref().map(Client::pid))
+}
+
+#[test]
+fn off_then_on_without_a_request_starts_a_fresh_instance() {
+    let fixture = Fixture::new();
+    let home = fixture.workspace().join("home");
+    let store = Store::new(home.clone());
+    let profile = fixture.profile();
+    store.save(profile.clone()).unwrap();
+    let runtime = Runtime::with_home(home);
+    let first = run(&runtime, &fixture, fixture.sample());
+    assert_eq!(first.status, "ready", "{}", first.detail);
+    store.set_enabled(&profile.id, false).unwrap();
+    wait_for(&fixture, "exit", "Off did not stop the idle instance");
+    assert!(runtime.statuses().is_empty());
+    store.set_enabled(&profile.id, true).unwrap();
+    let again = run(&runtime, &fixture, fixture.sample());
+    assert_eq!(again.status, "ready", "{}", again.detail);
+    runtime.shutdown();
+    drop(runtime);
+    assert!(
+        fs::read_to_string(fixture.marker())
+            .unwrap()
+            .contains("exit"),
+        "The last runtime owner did not wait for its instances to stop"
+    );
+}
+
+#[test]
+fn entry_replaces_stopping_or_differently_configured_instances() {
+    let runtime = Runtime::new();
+    let profile = Profile::draft_guided_rust();
+    let root = Path::new("root");
+    let first = runtime.entry(&profile, root, "test");
+    assert!(Arc::ptr_eq(&first, &runtime.entry(&profile, root, "test")));
+    let mut changed = profile.clone();
+    changed.arguments.push("--changed".into());
+    let second = runtime.entry(&changed, root, "test");
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert!(first.stop.requested());
+    second.stop.cancel();
+    let third = runtime.entry(&changed, root, "test");
+    assert!(!Arc::ptr_eq(&second, &third));
+    assert!(!third.stop.requested());
+    runtime.retire(&second);
+    assert!(Arc::ptr_eq(&third, &registered(&runtime)));
+    runtime.retire(&third);
+    assert!(runtime.statuses().is_empty());
+}
+
+#[test]
+fn turn_off_returns_while_a_request_is_in_flight() {
+    let fixture = Fixture::new();
+    let home = fixture.workspace().join("home");
+    let profile = fixture.profile();
+    Store::new(home.clone()).save(profile.clone()).unwrap();
+    let runtime = Runtime::with_home(home);
+    assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
+    let slow_runtime = runtime.clone();
+    let slow_root = fixture.workspace().to_path_buf();
+    let slow_path = fixture.sample();
+    let slow = thread::spawn(move || {
+        slow_runtime.execute(
+            &slow_root,
+            &[],
+            definition(slow_path, 6),
+            &Cancellation::default(),
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while fs::read_to_string(fixture.marker())
+        .unwrap()
+        .matches("textDocument/definition")
+        .count()
+        < 2
+    {
+        assert!(Instant::now() < deadline, "Slow call was not dispatched");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let started = Instant::now();
+    runtime.configuration_changed(&profile.id);
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "Turn off waited for the instance: {:?}",
+        started.elapsed()
+    );
+    assert!(runtime.statuses().is_empty());
+    assert_eq!(slow.join().unwrap().status, "settings_changed");
+    wait_for(&fixture, "exit", "Turn off did not stop the instance");
 }
 
 #[test]

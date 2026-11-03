@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 impl Runtime {
     pub(super) fn start_idle_pump(&self, entry: &Arc<Entry>, generation: u64) {
+        let runtime = Arc::downgrade(&self.0);
         let weak = Arc::downgrade(entry);
         let home = self.0.home.clone();
         std::thread::spawn(move || {
@@ -30,13 +31,8 @@ impl Runtime {
                                 })
                             });
                         if !valid {
-                            entry.stop.cancel();
-                            if let Ok(mut state) = entry.state.lock() {
-                                if let Some(mut client) = state.client.take() {
-                                    client.shutdown();
-                                }
-                                state.status = "off".into();
-                                state.detail = "Configuration changed".into();
+                            if let Some(inner) = runtime.upgrade() {
+                                Runtime(inner).retire(&entry);
                             }
                             break;
                         }
