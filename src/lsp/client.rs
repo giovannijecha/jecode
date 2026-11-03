@@ -334,7 +334,14 @@ impl Client {
     }
 
     pub fn drain(&mut self) -> Result<(), String> {
-        while let Some(message) = self.wire.recv(Duration::from_millis(0))? {
+        let started = Instant::now();
+        for _ in 0..256 {
+            if started.elapsed() >= Duration::from_millis(10) {
+                break;
+            }
+            let Some(message) = self.wire.recv(Duration::from_millis(0))? else {
+                break;
+            };
             self.handle(message)?;
         }
         Ok(())

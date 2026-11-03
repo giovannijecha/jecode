@@ -3,15 +3,28 @@ use crate::process::duplex::Duplex;
 use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 const MAX_FRAME: usize = 8 * 1024 * 1024;
+const MAX_QUEUED_FRAMES: usize = 4096;
+const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
+const QUEUE_OVERFLOW: &str = "LSP incoming queue overflow";
 type WriteRequest = (Vec<u8>, SyncSender<Result<(), String>>);
+type Incoming = Result<(Value, usize), String>;
+
+#[derive(Default)]
+struct QueueState {
+    frames: usize,
+    bytes: usize,
+    overflow: bool,
+}
 
 pub(super) struct Transport {
     process: Duplex,
-    incoming: Receiver<Result<Value, String>>,
+    incoming: Receiver<Incoming>,
+    queue: Arc<Mutex<QueueState>>,
     writer: SyncSender<WriteRequest>,
 }
 
@@ -38,15 +51,24 @@ impl Transport {
                 }
             }
         });
-        // Unbounded: a server may emit bursts while the client is busy, and blocking here
-        // could deadlock a single-threaded server that is waiting to write while we write.
+        // The reader must not block when the client is writing to a server that also writes.
+        // Account for queued frames instead; an excessive burst retires the instance.
         let (sender, incoming) = mpsc::channel();
+        let queue = Arc::new(Mutex::new(QueueState::default()));
+        let reader_queue = Arc::clone(&queue);
         thread::spawn(move || {
             loop {
                 let result = read_frame(&mut stdout);
-                let done = result.is_err();
-                if sender.send(result).is_err() || done {
-                    break;
+                match result {
+                    Ok(frame) => {
+                        if !queue_frame(&sender, &reader_queue, frame) {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        break;
+                    }
                 }
             }
         });
@@ -61,6 +83,7 @@ impl Transport {
         Ok(Self {
             process,
             incoming,
+            queue,
             writer,
         })
     }
@@ -101,11 +124,12 @@ impl Transport {
     }
 
     pub fn recv(&self, timeout: Duration) -> Result<Option<Value>, String> {
-        match self.incoming.recv_timeout(timeout) {
-            Ok(result) => result.map(Some),
-            Err(RecvTimeoutError::Timeout) => Ok(None),
-            Err(RecvTimeoutError::Disconnected) => Err("Language server exited".into()),
-        }
+        receive_frame(&self.incoming, &self.queue, timeout)
+    }
+
+    #[cfg(test)]
+    pub(super) fn queued_frames(&self) -> usize {
+        self.queue.lock().expect("LSP incoming queue").frames
     }
 
     pub fn stop(&mut self) {
@@ -120,13 +144,54 @@ impl Transport {
     }
 }
 
+fn queue_frame(
+    sender: &mpsc::Sender<Incoming>,
+    queue: &Mutex<QueueState>,
+    frame: (Value, usize),
+) -> bool {
+    let mut state = queue.lock().expect("LSP incoming queue");
+    if state.frames >= MAX_QUEUED_FRAMES || state.bytes.saturating_add(frame.1) > MAX_QUEUED_BYTES {
+        state.overflow = true;
+        return false;
+    }
+    state.frames += 1;
+    state.bytes += frame.1;
+    drop(state);
+    sender.send(Ok(frame)).is_ok()
+}
+
+fn receive_frame(
+    incoming: &Receiver<Incoming>,
+    queue: &Mutex<QueueState>,
+    timeout: Duration,
+) -> Result<Option<Value>, String> {
+    if queue.lock().expect("LSP incoming queue").overflow {
+        return Err(QUEUE_OVERFLOW.into());
+    }
+    match incoming.recv_timeout(timeout) {
+        Ok(Ok((value, bytes))) => {
+            let mut state = queue.lock().expect("LSP incoming queue");
+            state.frames -= 1;
+            state.bytes -= bytes;
+            if state.overflow {
+                Err(QUEUE_OVERFLOW.into())
+            } else {
+                Ok(Some(value))
+            }
+        }
+        Ok(Err(error)) => Err(error),
+        Err(RecvTimeoutError::Timeout) => Ok(None),
+        Err(RecvTimeoutError::Disconnected) => Err("Language server exited".into()),
+    }
+}
+
 impl Drop for Transport {
     fn drop(&mut self) {
         self.stop();
     }
 }
 
-fn read_frame(input: &mut impl Read) -> Result<Value, String> {
+fn read_frame(input: &mut impl Read) -> Result<(Value, usize), String> {
     let mut header = Vec::new();
     let mut byte = [0];
     while !header.ends_with(b"\r\n\r\n") {
@@ -163,12 +228,14 @@ fn read_frame(input: &mut impl Read) -> Result<Value, String> {
     input
         .read_exact(&mut body)
         .map_err(|e| format!("Incomplete LSP frame: {e}"))?;
-    json::parse(std::str::from_utf8(&body).map_err(|_| "LSP frame is not UTF-8")?)
+    let value = json::parse(std::str::from_utf8(&body).map_err(|_| "LSP frame is not UTF-8")?)?;
+    Ok((value, length))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn frame_handles_header_case_and_unicode() {
         let mut input = b"content-length: 15\r\n\r\n{\"x\":\"\xc3\xa9\"}".as_slice();
@@ -177,9 +244,38 @@ mod tests {
         assert_eq!(
             read_frame(&mut input)
                 .unwrap()
+                .0
                 .get("x")
                 .and_then(Value::as_str),
             Some("é")
+        );
+    }
+
+    #[test]
+    fn paused_receiver_reports_a_bounded_frame_overflow() {
+        let (sender, incoming) = mpsc::channel();
+        let queue = Mutex::new(QueueState::default());
+        for _ in 0..MAX_QUEUED_FRAMES {
+            assert!(queue_frame(&sender, &queue, (Value::Null, 1)));
+        }
+        assert!(!queue_frame(&sender, &queue, (Value::Null, 1)));
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap_err(),
+            QUEUE_OVERFLOW
+        );
+    }
+
+    #[test]
+    fn paused_receiver_reports_a_bounded_byte_overflow() {
+        let (sender, incoming) = mpsc::channel();
+        let queue = Mutex::new(QueueState::default());
+        for _ in 0..2 {
+            assert!(queue_frame(&sender, &queue, (Value::Null, MAX_FRAME)));
+        }
+        assert!(!queue_frame(&sender, &queue, (Value::Null, 1)));
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap_err(),
+            QUEUE_OVERFLOW
         );
     }
 }

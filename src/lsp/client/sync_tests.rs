@@ -131,6 +131,23 @@ fn generated_folders_stay_outside_the_watch_scan_budget() {
         "kept",
         Value::string(format!("{}/*.json", spelled(&kept))),
     );
+    let relative = root.join("target").join("relative");
+    std::fs::create_dir(&relative).unwrap();
+    register(
+        &mut client,
+        "relative",
+        Value::object([
+            ("baseUri", Value::string(path_to_uri(&root))),
+            ("pattern", Value::string("target/relative/*.json")),
+        ]),
+    );
+    let recursive = root.join("target").join("recursive");
+    std::fs::create_dir(&recursive).unwrap();
+    register(
+        &mut client,
+        "recursive",
+        Value::string("**/target/recursive/*.json"),
+    );
     client.poll_watches().unwrap();
     assert!(!client.sync_gap);
     assert!(client.watched.contains_key(&source) && client.watched.contains_key(&output));
@@ -141,11 +158,24 @@ fn generated_folders_stay_outside_the_watch_scan_budget() {
     );
     std::fs::write(&source, "pub fn changed_lib() {}\n").unwrap();
     std::fs::write(&output, r#"{"changed":true}"#).unwrap();
+    let relative_output = relative.join("new.json");
+    std::fs::write(&relative_output, "{}").unwrap();
+    let recursive_output = recursive.join("new.json");
+    std::fs::write(&recursive_output, "{}").unwrap();
     client.poll_watches().unwrap();
     assert!(!client.sync_gap);
     let log = watched_log(&mut client, &fixture);
     assert!(log.contains(&change(2, &source)), "{log}");
     assert!(log.contains(&change(2, &output)), "{log}");
+    assert!(log.contains(&change(1, &relative_output)), "{log}");
+    assert!(log.contains(&change(1, &recursive_output)), "{log}");
+    std::fs::write(&relative_output, r#"{"changed":true}"#).unwrap();
+    std::fs::write(&recursive_output, r#"{"changed":true}"#).unwrap();
+    client.poll_watches().unwrap();
+    assert!(!client.sync_gap);
+    let log = watched_log(&mut client, &fixture);
+    assert!(log.contains(&change(2, &relative_output)), "{log}");
+    assert!(log.contains(&change(2, &recursive_output)), "{log}");
     client.shutdown();
 }
 
@@ -224,7 +254,7 @@ fn missing_watch_bases_do_not_hold_back_other_watchers() {
 }
 
 #[test]
-fn settled_files_are_reread_only_after_size_or_time_changes() {
+fn settled_files_revalidate_after_metadata_change_or_interval() {
     let fixture = Fixture::new();
     let (mut client, root) = start(&fixture);
     let old = SystemTime::now() - Duration::from_secs(60);
@@ -235,7 +265,7 @@ fn settled_files_are_reread_only_after_size_or_time_changes() {
     client.poll_watches().unwrap();
     let hash = |client: &Client, path: &Path| client.watched[path].hash;
     let (first_settled, first_recent) = (hash(&client, &settled), hash(&client, &recent));
-    // Same size and timestamp: a settled hash is trusted without a read.
+    // Same size and timestamp: a settled hash is trusted briefly.
     std::fs::write(&settled, "two").unwrap();
     set_modified(&settled, old);
     // A hash taken right after a write is not trusted yet.
@@ -245,9 +275,17 @@ fn settled_files_are_reread_only_after_size_or_time_changes() {
     client.poll_watches().unwrap();
     assert_eq!(hash(&client, &settled), first_settled);
     assert_ne!(hash(&client, &recent), first_recent);
-    set_modified(&settled, old + Duration::from_secs(1));
+    client.watched.get_mut(&settled).unwrap().checked =
+        Instant::now() - super::RECHECK - Duration::from_secs(1);
     client.poll_watches().unwrap();
     assert_ne!(hash(&client, &settled), first_settled);
+    let log = watched_log(&mut client, &fixture);
+    assert!(log.contains(&change(2, &settled)), "{log}");
+    let refreshed = hash(&client, &settled);
+    std::fs::write(&settled, "six").unwrap();
+    set_modified(&settled, old + Duration::from_secs(1));
+    client.poll_watches().unwrap();
+    assert_ne!(hash(&client, &settled), refreshed);
     client.shutdown();
 }
 

@@ -73,6 +73,20 @@ fn main() {
                         );
                     }
                 }
+                if uri.ends_with("stream.rs") {
+                    log(&marker, "streaming");
+                    for index in 0..100_000 {
+                        send(
+                            &mut output,
+                            &format!(
+                                r#"{{"jsonrpc":"2.0","method":"$/progress","params":{{"token":"fixture-partial","value":[{index}]}}}}"#
+                            ),
+                        );
+                        if index % 16 == 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                    }
+                }
             }
             "textDocument/diagnostic" => reply(
                 &mut output,

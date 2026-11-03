@@ -82,18 +82,16 @@ fn diagnostic_findings_are_successful_with_colored_counts() {
         ),
     ]);
     let presentation = Presentation::default();
-    let card = card(
-        Tool {
-            name: "lsp",
-            arguments: &arguments,
-            summary: "",
-            result: Some(&result),
-            change: None,
-            presentation: &presentation,
-        },
-        80,
-        false,
-    );
+    let tool = Tool {
+        name: "lsp",
+        arguments: &arguments,
+        summary: "",
+        result: Some(&result),
+        change: None,
+        presentation: &presentation,
+    };
+    assert!(Status::of(&tool) == Status::Done);
+    let card = card(tool, 80, false);
     assert_eq!(card.rows[0].spans[0].background, Some(BADGE_IDLE));
     assert!(
         card.rows
@@ -171,6 +169,36 @@ fn failed_call_shows_its_error_instead_of_an_empty_result() {
         "LSP configuration must contain a servers array"
     );
     assert!(row.spans.iter().any(|span| span.style == BAD));
+}
+
+#[test]
+fn server_rpc_errors_fail_without_claiming_an_empty_result() {
+    let detail = "LSP server error -32801: content modified (retrying may succeed)";
+    for action in ["definition", "references", "diagnostics"] {
+        let arguments = Value::object([("action", Value::string(action))]);
+        let result = Value::object([
+            ("status", Value::string("server_error")),
+            ("detail", Value::string(detail)),
+            ("locations", Value::Array(vec![])),
+            ("diagnostics", Value::Array(vec![])),
+            ("complete", Value::Bool(false)),
+        ]);
+        let presentation = Presentation::default();
+        let tool = Tool {
+            name: "lsp",
+            arguments: &arguments,
+            summary: "",
+            result: Some(&result),
+            change: None,
+            presentation: &presentation,
+        };
+        assert!(Status::of(&tool) == Status::Failed, "{action}");
+        let row = card(tool, 160, false).rows.last().unwrap().plain();
+        assert!(row.contains("Server error"), "{action}: {row}");
+        assert!(row.contains(detail), "{action}: {row}");
+        assert!(!row.contains("No locations"), "{action}: {row}");
+        assert!(!row.contains("Diagnostics unavailable"), "{action}: {row}");
+    }
 }
 
 #[test]

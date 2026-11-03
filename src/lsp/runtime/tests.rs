@@ -189,3 +189,52 @@ fn relative_executable_resolves_from_the_working_folder_for_runtime_and_check() 
     let observation = check(&profile, fixture.workspace(), &Cancellation::default()).unwrap();
     assert!(Path::new(&observation.executable).is_file());
 }
+
+#[test]
+fn a_document_lost_during_a_request_invalidates_its_result_without_a_crash() {
+    let fixture = Fixture::new();
+    let home = fixture.workspace().join("home");
+    Store::new(home.clone()).save(fixture.profile()).unwrap();
+    let runtime = Runtime::with_home(home);
+    for replacement in [None, Some(vec![0xff, 0xfe])] {
+        fs::write(fixture.sample(), "pub fn sample() {}\n").unwrap();
+        assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
+        let pid = runtime.statuses()[0].pid;
+        let expected = fs::read_to_string(fixture.marker())
+            .unwrap()
+            .matches("textDocument/definition")
+            .count()
+            + 1;
+        let worker_runtime = runtime.clone();
+        let workspace = fixture.workspace().to_path_buf();
+        let path = fixture.sample();
+        let request = thread::spawn(move || {
+            worker_runtime.execute(
+                &workspace,
+                &[],
+                definition(path, 6),
+                &Cancellation::default(),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fs::read_to_string(fixture.marker())
+            .unwrap()
+            .matches("textDocument/definition")
+            .count()
+            < expected
+        {
+            assert!(Instant::now() < deadline, "Slow call was not dispatched");
+            thread::sleep(Duration::from_millis(10));
+        }
+        if let Some(bytes) = replacement {
+            fs::write(fixture.sample(), bytes).unwrap();
+        } else {
+            fs::remove_file(fixture.sample()).unwrap();
+        }
+        let result = request.join().unwrap();
+        assert_eq!(result.status, "ready", "{}", result.detail);
+        assert_eq!(result.freshness, "stale", "{}", result.detail);
+        assert_eq!(runtime.statuses()[0].pid, pid);
+    }
+    runtime.shutdown();
+}

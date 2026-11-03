@@ -1,4 +1,6 @@
 //! Compiled globs for LSP watched-file registrations.
+use std::path::PathBuf;
+
 const MAX_PATTERN_CHARS: usize = 4096;
 const MAX_ALTERNATIVES: usize = 128;
 const MAX_BRACE_GROUPS: usize = 32;
@@ -62,6 +64,71 @@ impl Pattern {
 
     pub(super) fn cost(&self) -> usize {
         self.cost
+    }
+
+    /// Scan roots beneath a generated directory named literally in the glob.
+    /// Descend through following literal directories without walking their
+    /// siblings; a wildcard begins the scanned subtree.
+    pub(super) fn explicit_scan_suffixes(&self, path: &str) -> Vec<PathBuf> {
+        let normalized = normalize(path);
+        let parts = normalized.split('/').collect::<Vec<_>>();
+        let mut roots = Vec::new();
+        for alternative in &self.alternatives {
+            let mut reachable = vec![false; parts.len() + 1];
+            reachable[0] = true;
+            for (index, segment) in alternative.segments.iter().enumerate() {
+                match segment {
+                    Segment::Recursive => {
+                        for index in 1..reachable.len() {
+                            reachable[index] |= reachable[index - 1];
+                        }
+                    }
+                    Segment::Tokens(tokens) => {
+                        for index in (1..reachable.len()).rev() {
+                            reachable[index] =
+                                reachable[index - 1] && match_tokens(tokens, parts[index - 1]);
+                        }
+                        reachable[0] = false;
+                        if index + 1 < alternative.segments.len()
+                            && tokens
+                                .iter()
+                                .all(|token| matches!(token, Token::Literal(_)))
+                            && reachable[parts.len()]
+                        {
+                            let remaining = &alternative.segments[index + 1..];
+                            let literal = remaining
+                                .iter()
+                                .take_while(|segment| {
+                                    matches!(segment, Segment::Tokens(tokens) if tokens.iter().all(|token| matches!(token, Token::Literal(_))))
+                                })
+                                .count();
+                            let directories = if literal == remaining.len() {
+                                literal.saturating_sub(1)
+                            } else {
+                                literal
+                            };
+                            let mut suffix = PathBuf::new();
+                            for segment in &remaining[..directories] {
+                                let Segment::Tokens(tokens) = segment else {
+                                    unreachable!()
+                                };
+                                suffix.push(
+                                    tokens
+                                        .iter()
+                                        .filter_map(|token| match token {
+                                            Token::Literal(ch) => Some(*ch),
+                                            _ => None,
+                                        })
+                                        .collect::<String>(),
+                                );
+                            }
+                            roots.push(suffix);
+                        }
+                    }
+                }
+            }
+        }
+        roots
     }
 
     pub(super) fn matches(&self, path: &str) -> bool {

@@ -77,6 +77,8 @@ diagnostic, error and warning totals. Inline truncation is separate from
 protocol completeness.
 No results, unsupported capabilities, an Off entry and unavailable analysis
 have distinct outcomes.
+An RPC error returned by the server is a failed call with its code and detail;
+it does not mean that a definition or reference search found no locations.
 
 Disk is authoritative. The client opens managed documents and reconciles
 changes, including external edits, before queries. Bounded portable polling
@@ -84,11 +86,15 @@ also handles active documents and registered workspace watches. The scan skips
 generated and dependency folders such as `target`, `node_modules`, `.git` and
 `.tmp`, unless a server registers a watch inside one. A scan budget gap is
 reported rather than treated as complete synchronization.
+Stable file hashes are rechecked periodically, so a same-size replacement that
+preserves modification time does not remain invisible indefinitely.
 The same bounded observer follows configured file associations and root markers.
 When a dependency changes, it resynchronizes managed snapshots with increasing
 protocol versions and invalidates prior diagnostics; source files are not
 rewritten. Push and pull reports are combined, so an empty pull cannot erase
 a current compiler diagnostic delivered by push.
+A document deleted or made unreadable during a query leaves the collected
+result marked stale while the healthy server remains available.
 
 Diagnostics can be current, pending, stale, unverified or unavailable. An
 empty current report means no reported errors or warnings for its stated
@@ -104,6 +110,9 @@ its unused instance. Crashes fail pending requests; three crashes or failed
 starts without a successful request in between suspend automatic restarts
 until you choose Allow restart. Unreadable documents, and documents too large
 to synchronize, are unavailable to queries and leave the server running.
+Incoming protocol traffic has limits in bytes and message count; an excessive
+backlog stops that instance with an explicit error. Routine notification bursts
+remain supported, and draining notifications yields to pending control actions.
 
 ## Configuration file
 

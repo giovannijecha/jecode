@@ -255,6 +255,7 @@ pub(super) fn summary_for(result: &Value, action: &str) -> String {
         "restart_suppressed" => "Automatic restart paused · Allow restart in Settings".into(),
         "configuration_error" => "Configuration error".into(),
         "invalid_input" => "Invalid request".into(),
+        "server_error" => "Server error".into(),
         "protocol_error" => "Protocol error".into(),
         "unavailable" => "Server unavailable".into(),
         "failed" => "Failed".into(),

@@ -84,6 +84,7 @@ impl Status {
                     | "failed"
                     | "configuration_error"
                     | "invalid_input"
+                    | "server_error"
                     | "protocol_error",
                 ) => {
                     return Self::Failed;

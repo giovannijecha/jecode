@@ -190,6 +190,7 @@ pub(super) fn console() {
     assert_eq!(state.toggle_tools(), Some((true, 3)));
     assert_mixed(&state);
     paint_state(&state, "references");
+    paint_state(&server_error(44), "Server error");
     println!("LSP_NATIVE_44_VERIFIED");
     io::stdout().flush().unwrap();
 
@@ -201,6 +202,7 @@ pub(super) fn console() {
     assert_eq!(state.toggle_tools(), Some((true, 3)));
     assert_mixed(&state);
     paint_state(&state, "references");
+    paint_state(&server_error(100), "Server error");
     println!("LSP_NATIVE_100_VERIFIED");
     io::stdout().flush().unwrap();
     assert!(provider.finish().is_empty());
@@ -382,6 +384,33 @@ fn mixed_work(columns: usize) -> State {
             result,
         });
     }
+    state.finish_tool_turn();
+    state
+}
+
+fn server_error(columns: usize) -> State {
+    let mut state = State {
+        width: columns,
+        height: 30,
+        ..State::default()
+    };
+    state.begin_tool_turn();
+    state.event(Event::ToolStarted {
+        id: "server-error".into(),
+        name: "lsp".into(),
+        arguments: Value::object([("action", Value::string("definition"))]),
+    });
+    state.event(Event::ToolFinished {
+        id: "server-error".into(),
+        name: "lsp".into(),
+        summary: String::new(),
+        result: Value::object([
+            ("status", Value::string("server_error")),
+            ("complete", Value::Bool(false)),
+            ("locations", Value::Array(vec![])),
+            ("detail", Value::string("Fixture request failed")),
+        ]),
+    });
     state.finish_tool_turn();
     state
 }

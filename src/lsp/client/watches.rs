@@ -5,21 +5,23 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MAX_ENTRIES: usize = 10_000;
 const MAX_HASHED_BYTES: u64 = 32 * 1024 * 1024;
 /// A hash taken this soon after the last write may miss a later same-size
 /// write that keeps the timestamp, so it is not reused.
 const SETTLED: Duration = Duration::from_secs(2);
+const RECHECK: Duration = Duration::from_secs(5);
 
 /// Last observed state of a watched path. Content is reread only when its
-/// size or timestamp changes, or while its hash is not yet settled.
+/// size or timestamp changes, while its hash is not settled, or after RECHECK.
 #[derive(Clone, Copy)]
 pub(super) struct Stamp {
     len: u64,
     modified: Option<SystemTime>,
     settled: bool,
+    checked: Instant,
     hash: u64,
 }
 
@@ -98,6 +100,7 @@ impl Client {
         let patterns = self.registrations.values().flatten().collect::<Vec<_>>();
         let mut scan = Scan {
             now: SystemTime::now(),
+            checked: Instant::now(),
             entries: 0,
             bytes: 0,
         };
@@ -137,7 +140,24 @@ impl Client {
                 let path = entry.path();
                 let kind = entry.file_type().ok()?;
                 if kind.is_dir() {
-                    if !skipped(&entry.file_name()) {
+                    if skipped(&entry.file_name()) {
+                        for watch in &patterns {
+                            let relative = if watch.absolute {
+                                Some(path.as_path())
+                            } else {
+                                path.strip_prefix(&watch.base).ok()
+                            };
+                            if let Some(relative) = relative {
+                                stack.extend(
+                                    watch
+                                        .pattern
+                                        .explicit_scan_suffixes(&relative.to_string_lossy())
+                                        .into_iter()
+                                        .map(|suffix| path.join(suffix)),
+                                );
+                            }
+                        }
+                    } else {
                         stack.push(path);
                     }
                     continue;
@@ -191,6 +211,7 @@ fn implicitly_reached(root: &Path, base: &Path) -> bool {
 
 struct Scan {
     now: SystemTime,
+    checked: Instant,
     entries: usize,
     bytes: u64,
 }
@@ -217,6 +238,7 @@ impl Scan {
                 len: 0,
                 modified,
                 settled: false,
+                checked: self.checked,
                 hash,
             }));
         }
@@ -229,6 +251,7 @@ impl Scan {
             && previous.len == len
             && modified.is_some()
             && previous.modified == modified
+            && self.checked.duration_since(previous.checked) < RECHECK
         {
             return Ok(Some(*previous));
         }
@@ -239,6 +262,7 @@ impl Scan {
             len,
             modified,
             settled,
+            checked: self.checked,
             hash,
         }))
     }

@@ -400,7 +400,7 @@ impl Runtime {
                         .docs
                         .values()
                         .find(|document| document.path == path)
-                        .is_some_and(|document| Some(document.version) != outcome.document_version)
+                        .is_none_or(|document| Some(document.version) != outcome.document_version)
                     {
                         outcome.freshness = "stale".into();
                         outcome

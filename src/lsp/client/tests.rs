@@ -2,6 +2,63 @@ use super::*;
 use crate::lsp::{Request, Runtime, Store, fixture::Fixture};
 use std::ffi::OsStr;
 
+#[test]
+fn drain_yields_before_consuming_an_entire_notification_burst() {
+    let fixture = Fixture::new();
+    let path = fixture.workspace().join("burst.rs");
+    std::fs::write(&path, "pub fn burst() {}\n").unwrap();
+    let cancel = Cancellation::default();
+    let stop = Cancellation::default();
+    let mut client =
+        Client::start(&fixture.profile(), fixture.workspace(), &cancel, &stop, 1).unwrap();
+    let params = Value::object([(
+        "textDocument",
+        Value::object([(
+            "uri",
+            Value::string(crate::lsp::documents::path_to_uri(&path)),
+        )]),
+    )]);
+    client
+        .query(
+            "textDocument/definition",
+            params,
+            Duration::from_secs(3),
+            &cancel,
+            &stop,
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while client.wire.queued_frames() < 1000 {
+        assert!(Instant::now() < deadline, "Fixture burst was not queued");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    client.drain().unwrap();
+    assert!(client.wire.queued_frames() >= 744);
+    client.shutdown();
+}
+
+#[test]
+fn off_finishes_while_the_server_streams_notifications() {
+    let fixture = Fixture::new();
+    let runtime = started(&fixture, &["stream.rs"]);
+    let outcome = definition(&runtime, &fixture, "stream.rs");
+    assert_eq!(outcome.status, "ready", "{}", outcome.detail);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !std::fs::read_to_string(fixture.marker())
+        .unwrap_or_default()
+        .contains("streaming")
+    {
+        assert!(Instant::now() < deadline, "Fixture did not start streaming");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let server = runtime.statuses()[0].server.clone();
+    let started = Instant::now();
+    runtime.configuration_changed(&server);
+    assert!(started.elapsed() < Duration::from_millis(200));
+    drop(runtime);
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
 fn definition(runtime: &Runtime, fixture: &Fixture, name: &str) -> crate::lsp::Outcome {
     runtime.execute(
         fixture.workspace(),
