@@ -1,10 +1,14 @@
 //! OAuth public-client flows for explicitly configured MCP connections.
 mod browser;
+mod client;
 mod discovery;
 mod github;
+mod identity;
+pub(super) mod resource;
+pub(super) mod scopes;
 mod wire;
 
-use super::types::{AuthMethod, Connection, Error, OAuthTokens};
+use super::types::{AuthMethod, ClientAuthMethod, Connection, Error, OAuthTokens};
 use crate::{cancel::Cancellation, json::Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -45,11 +49,7 @@ pub fn methods(connection: &Connection, cancel: &Cancellation) -> Result<Vec<Aut
             if !result.contains(&AuthMethod::Token) {
                 result.push(AuthMethod::Token);
             }
-            let available = match connection.oauth_client_id.as_deref() {
-                Some(id) if id.starts_with("https://") => server.cimd,
-                Some(_) => true,
-                None => server.registration.is_some(),
-            };
+            let available = client::available(connection, &server);
             let same_binding = connection.oauth.as_ref().is_none_or(|tokens| {
                 tokens.issuer == server.issuer && tokens.endpoint == connection.endpoint
             });
@@ -212,17 +212,14 @@ pub fn refresh(connection: &Connection, cancel: &Cancellation) -> Result<Connect
             return Err(wire::failure("MCP OAuth metadata changed; sign in again"));
         }
     }
-    let mut fields = vec![
-        ("grant_type", "refresh_token"),
-        ("client_id", previous.client_id.as_str()),
-        ("refresh_token", refresh),
-    ];
+    let mut fields = vec![("grant_type", "refresh_token"), ("refresh_token", refresh)];
     if !previous.github
         && let Some(resource) = &previous.resource
     {
         fields.push(("resource", resource));
     }
-    let value = wire::post_form(&previous.token_endpoint, &fields, cancel)?;
+    let client = client::Client::from_tokens(previous);
+    let value = client::token_request(&previous.token_endpoint, &fields, &client, cancel)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| wire::failure("System clock is invalid"))?
@@ -233,6 +230,9 @@ pub fn refresh(connection: &Connection, cancel: &Cancellation) -> Result<Connect
             endpoint: &previous.token_endpoint,
             bound_endpoint: &previous.endpoint,
             client: &previous.client_id,
+            client_auth_method: previous.client_auth_method,
+            client_secret: previous.client_secret.as_deref(),
+            client_secret_expires_at: previous.client_secret_expires_at,
             issuer: &previous.issuer,
             resource: previous.resource.as_deref(),
             github: previous.github,
@@ -251,6 +251,9 @@ struct TokenContext<'a> {
     endpoint: &'a str,
     bound_endpoint: &'a str,
     client: &'a str,
+    client_auth_method: ClientAuthMethod,
+    client_secret: Option<&'a str>,
+    client_secret_expires_at: Option<u64>,
     issuer: &'a str,
     resource: Option<&'a str>,
     github: bool,
@@ -311,6 +314,9 @@ fn token_record(
         token_endpoint: ctx.endpoint.into(),
         endpoint: ctx.bound_endpoint.into(),
         client_id: ctx.client.into(),
+        client_auth_method: ctx.client_auth_method,
+        client_secret: ctx.client_secret.map(str::to_owned),
+        client_secret_expires_at: ctx.client_secret_expires_at,
         issuer: ctx.issuer.into(),
         scope: value
             .get("scope")
@@ -322,5 +328,7 @@ fn token_record(
     })
 }
 
+#[cfg(test)]
+mod live;
 #[cfg(test)]
 mod tests;

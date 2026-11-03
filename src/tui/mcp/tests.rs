@@ -195,11 +195,11 @@ fn vercel_guided_setup_prefills_the_generic_form_without_connecting_or_saving() 
         .iter()
         .position(|(name, _)| name == "Vercel")
         .unwrap();
-    assert_eq!(rows(&app)[index].1, "Client approval required");
+    assert_eq!(rows(&app)[index].1, "mcp.vercel.com");
     app.choose_mcp(Panel::Add, index);
     let connection = draft(&app);
     assert_eq!(connection.name, "Vercel");
-    assert_eq!(connection.endpoint, "https://mcp.vercel.com");
+    assert_eq!(connection.endpoint, "https://mcp.vercel.com/");
     assert!(connection.token.is_empty());
     assert!(connection.oauth.is_none());
     assert!(app.mcp.draft.as_ref().unwrap().methods.is_empty());

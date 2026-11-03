@@ -96,7 +96,7 @@ pub(super) fn console() {
             true,
         );
         paint(columns, settings_state(columns, configured), "not checked");
-        let mut vercel = Connection::draft("Vercel", "https://mcp.vercel.com");
+        let mut vercel = Connection::draft("Vercel", "https://mcp.vercel.com/");
         vercel.method = AuthMethod::Browser;
         paint(
             columns,

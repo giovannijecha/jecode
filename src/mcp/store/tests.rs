@@ -24,6 +24,9 @@ fn browser_draft(client_id: &str) -> Connection {
         expires_at: None,
         token_endpoint: "https://issuer.test/token".into(),
         client_id: client_id.into(),
+        client_auth_method: crate::mcp::types::ClientAuthMethod::None,
+        client_secret: None,
+        client_secret_expires_at: None,
         issuer: "https://issuer.test".into(),
         scope: None,
         resource: Some(connection.endpoint.clone()),
@@ -93,6 +96,9 @@ fn oauth_session_without_expiry_round_trips() {
         expires_at: None,
         token_endpoint: "https://issuer.test/token".into(),
         client_id: "synthetic-client".into(),
+        client_auth_method: crate::mcp::types::ClientAuthMethod::None,
+        client_secret: None,
+        client_secret_expires_at: None,
         issuer: "https://issuer.test".into(),
         scope: None,
         resource: Some(connection.endpoint.clone()),
@@ -107,6 +113,76 @@ fn oauth_session_without_expiry_round_trips() {
     assert!(store.list().unwrap() == vec![saved.clone()]);
     assert_eq!(store.save(&draft("Other")).unwrap().name, "Other");
     assert!(store.fresh(&saved.id, &Cancellation::default()).unwrap() == saved);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn dynamic_client_secret_round_trips_and_stale_edit_keeps_rotated_session() {
+    use crate::mcp::types::ClientAuthMethod;
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let mut connection = browser_draft("issued-client");
+    let oauth = connection.oauth.as_mut().unwrap();
+    oauth.client_auth_method = ClientAuthMethod::ClientSecretBasic;
+    oauth.client_secret = Some("isolated-client-secret".into());
+    oauth.client_secret_expires_at = Some(0);
+    let loaded = store.save(&connection).unwrap();
+    assert!(store.list().unwrap()[0].oauth == loaded.oauth);
+    let redactor = crate::redact::Redactor::empty();
+    loaded.protect(&redactor);
+    assert_eq!(redactor.text("isolated-client-secret"), "[redacted]");
+
+    let mut rotated = loaded.clone();
+    rotated.oauth.as_mut().unwrap().refresh_token = Some("rotated-refresh".into());
+    store.save(&rotated).unwrap();
+    let mut renamed = loaded.clone();
+    renamed.name = "Renamed".into();
+    let saved = store.save_edit(&renamed).unwrap();
+    assert!(saved.oauth == rotated.oauth);
+
+    let mut public = saved.clone();
+    let oauth = public.oauth.as_mut().unwrap();
+    oauth.client_auth_method = ClientAuthMethod::None;
+    oauth.client_secret = None;
+    oauth.client_secret_expires_at = None;
+    store.save(&public).unwrap();
+    let disk = fs::read_to_string(store.path()).unwrap();
+    assert!(!disk.contains("isolated-client-secret"));
+    assert!(!disk.contains("\"client_secret\""));
+    assert!(!disk.contains("\"client_secret_expires_at\""));
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn old_public_oauth_record_without_new_fields_still_loads() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let saved = store.save(&browser_draft("old-client")).unwrap();
+    let mut document = json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    if let Value::Object(root) = &mut document
+        && let Some(Value::Array(entries)) = root.get_mut("connections")
+        && let Value::Object(entry) = &mut entries[0]
+        && let Some(Value::Object(oauth)) = entry.get_mut("oauth")
+    {
+        oauth.remove("client_auth_method");
+    }
+    fs::write(store.path(), document.encode()).unwrap();
+    assert!(store.list().unwrap()[0].oauth == saved.oauth);
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn pending_scope_round_trips_and_rejects_invalid_values() {
+    let home = fixture();
+    let store = Store::new(home.clone());
+    let mut connection = browser_draft("issued-client");
+    connection.pending_scope = Some("projects:read database:read".into());
+    let saved = store.save(&connection).unwrap();
+    assert_eq!(store.list().unwrap()[0].pending_scope, saved.pending_scope);
+    for bad in ["", "projects:read\nsecret", "projects:read\tsecret"] {
+        connection.pending_scope = Some(bad.into());
+        assert!(store.save(&connection).is_err(), "{bad:?}");
+    }
     fs::remove_dir_all(home).unwrap();
 }
 
@@ -170,6 +246,9 @@ fn edits_keep_rotated_oauth_tokens_and_new_sign_ins_replace_them() {
         expires_at: Some(u64::MAX / 2),
         token_endpoint: "https://auth.example.test/token".into(),
         client_id: "fixture-client".into(),
+        client_auth_method: crate::mcp::types::ClientAuthMethod::None,
+        client_secret: None,
+        client_secret_expires_at: None,
         issuer: "https://auth.example.test".into(),
         scope: None,
         resource: Some("https://example.test/mcp".into()),

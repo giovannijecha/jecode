@@ -17,11 +17,11 @@ secret.
 | Homepage | `https://github.com/giovannijecha/jecode` |
 | Availability | Any GitHub user or organization |
 | Authorization | Device Flow enabled; expiring user tokens; authorization during installation disabled |
-| Repository permissions | Contents, Issues and Pull requests: read/write; Metadata: read |
+| Repository permissions | Actions, Contents, Issues, Pull requests and Workflows: read/write; Checks, Commit statuses and Metadata: read |
 | Webhooks | Inactive |
 
 The maintainer registered this App on 2026-11-02 and its public identity and
-permissions were verified through GitHub's API. The public client ID is bundled
+permissions were verified through GitHub's API and updated on 2026-11-03. The public client ID is bundled
 in `src/mcp/auth/github.rs`, so source, CI and release builds share the same
 identity without a release-environment variable. Maintainer overrides through
 `JECODE_GITHUB_CLIENT_ID` remain available; end users need no setup variable.
@@ -48,20 +48,27 @@ MCP connection store; no token is part of the build.
 The App owner manages Device Flow, installability and permission changes in
 GitHub's App settings. [Permission increases require approval](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration#changing-the-permissions-of-a-github-app)
 before existing installations gain them. The current permissions support code,
-branch, issue and pull-request work; organization administration, Actions and
-secrets are outside the initial grant.
+branch, issue and pull-request work, workflow-file changes and Actions operations.
+Checks and commit statuses are readable. Organization administration and secrets
+are not requested.
+
+The stock remote endpoint enables the default toolsets plus `actions` through
+`X-MCP-Toolsets`. Explicit tool filters and custom endpoint paths keep their
+configured selection. GitHub filters the available tools and operations by the
+user's granted permissions; enabling a toolset does not grant repository access.
 
 GitHub's registration UI required a private key before installation. The owner
 keeps that key privately. Jecode's user/device OAuth flow does not use it: never
 put an App private key or client secret in source, builds, logs or release
 artifacts. [GitHub documents private-key handling](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps).
 
-[GITHUB_MCP_APP_MANIFEST.json](GITHUB_MCP_APP_MANIFEST.json) records the initial
+[GITHUB_MCP_APP_MANIFEST.json](GITHUB_MCP_APP_MANIFEST.json) records the public
 registration fields for maintenance. It contains no credentials. GitHub's
 manifest creation flow still requires owner browser consent; `GH_TOKEN` alone
 does not provide a direct create-App request. Device Flow is configured in
 GitHub's registration UI.
 
-Automated tests use isolated loopback fixtures. The App registration and
-installation are complete; a real end-user OAuth login through Jecode remains
-part of manual account validation.
+Automated tests use isolated loopback fixtures. On 2026-11-03, an explicit live
+Windows check completed device authorization, discovered 48 tools including
+Actions, refreshed the session and discovered tools again. This does not execute
+workflow writes or change the repository selection of other installations.

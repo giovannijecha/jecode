@@ -1,4 +1,4 @@
-use super::super::types::{AuthMethod, Connection, Error, ErrorKind};
+use super::super::types::{AuthMethod, ClientAuthMethod, Connection, Error, ErrorKind};
 use super::{TokenContext, Update, token_record, wire};
 use crate::cancel::Cancellation;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -96,6 +96,9 @@ pub(super) fn sign_in(
                         endpoint: TOKEN,
                         bound_endpoint: &connection.endpoint,
                         client: &id,
+                        client_auth_method: ClientAuthMethod::None,
+                        client_secret: None,
+                        client_secret_expires_at: None,
                         issuer: ISSUER,
                         resource: Some(&connection.endpoint),
                         github: true,

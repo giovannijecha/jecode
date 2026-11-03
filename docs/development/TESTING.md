@@ -108,6 +108,22 @@ states), successful calls and uncertain remote outcomes:
 cargo test --locked --offline tui::terminal::windows::native_tests::native_mcp::native_windows_mcp_panels -- --exact --ignored --nocapture --test-threads=1
 ```
 
+An explicit live MCP OAuth check opens the selected provider in the browser,
+registers or identifies Jecode, and waits for the user's approval. It discovers
+tools, then refreshes and discovers again when the server issues a refresh token.
+Credentials use an isolated fixture store removed when the test finishes. It
+does not read personal Jecode configuration or execute service mutations.
+
+```powershell
+$env:JECODE_MCP_LIVE_PROVIDER = 'vercel'
+cargo test --locked --offline mcp::auth::live::provider_oauth_roundtrip -- --exact --ignored --nocapture --test-threads=1
+```
+
+Choose `github`, `supabase`, `cloudflare` or `vercel`. GitHub also checks that
+the Actions toolset is visible. On Windows on 2026-11-03 all four completed
+authorization, refresh and discovery; Vercel returned 241 tools, Supabase 31,
+Cloudflare 4 and GitHub 48. Resource access and remote mutations were not tested.
+
 Interactive `exec` tests need `cc` on first use on Unix, plus `/proc` on Linux
 or `/bin/ps` on macOS. The compiled helper is cached under
 `target/measurements/pty-cache`. Unix interrupt probes also use the system

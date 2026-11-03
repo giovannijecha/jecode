@@ -213,6 +213,10 @@ impl Store {
                     return Err(failure("MCP OAuth session changed; reload the connection"));
                 }
                 next.oauth = Some(stored.clone());
+                // An edit opened before a step-up challenge must retain the
+                // scope recorded while the form was open.
+                next.pending_scope
+                    .clone_from(&existing[index].pending_scope);
             }
             entries[index] = config::write(&next, Some(entries[index].clone()));
         } else if keep_tokens && !next.id.is_empty() {
@@ -247,6 +251,38 @@ impl Store {
         };
         map.insert("enabled".into(), Value::Bool(enabled));
         self.write(&document)
+    }
+    /// Remember a tool-specific OAuth challenge only for the exact session
+    /// that received it. A late response cannot affect a new sign-in.
+    pub fn require_scope(&self, current: &Connection, scope: &str) -> Result<(), Error> {
+        if current.method != super::types::AuthMethod::Browser {
+            return Err(failure("MCP scope step-up requires browser OAuth"));
+        }
+        let _guard = self.lock()?;
+        let mut document = self.document()?;
+        let entries = Self::entries(&mut document)?;
+        let entry = entries
+            .iter_mut()
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(current.id.as_str()))
+            .ok_or_else(|| failure("MCP connection was removed before scope step-up"))?;
+        let stored = config::read(entry)?;
+        let mut expected = current.clone();
+        expected.pending_scope.clone_from(&stored.pending_scope);
+        if stored != expected {
+            return Err(failure(
+                "MCP connection changed before scope step-up; inspect it again",
+            ));
+        }
+        let merged = super::auth::scopes::union(&[stored.pending_scope.as_deref(), Some(scope)])?;
+        if merged != stored.pending_scope {
+            let mut updated = stored;
+            updated.pending_scope = merged;
+            config::validate(&updated)?;
+            let prior = entry.clone();
+            *entry = config::write(&updated, Some(prior));
+            self.write(&document)?;
+        }
+        Ok(())
     }
     /// Read and renew only the current record while holding the mutation lock.
     pub fn fresh(&self, id: &str, cancel: &Cancellation) -> Result<Connection, Error> {
@@ -292,5 +328,7 @@ fn make_id(existing: &[Connection]) -> String {
     }
 }
 
+#[cfg(test)]
+mod stepup_tests;
 #[cfg(test)]
 mod tests;

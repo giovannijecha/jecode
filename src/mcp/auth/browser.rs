@@ -1,5 +1,5 @@
 use super::super::types::{Connection, Error, ErrorKind};
-use super::{TokenContext, Update, discovery, token_record, wire};
+use super::{TokenContext, Update, client, discovery, scopes, token_record, wire};
 use crate::{auth::openai, cancel::Cancellation};
 use std::{
     io::{Read, Write},
@@ -33,7 +33,7 @@ pub(super) fn sign_in(
         .map_err(|_| wire::failure("Could not read OAuth callback port"))?
         .port();
     let redirect = format!("http://127.0.0.1:{port}/callback");
-    let client = discovery::client_id(&connection, &server, &redirect, cancel)?;
+    let client = client::resolve(&connection, &server, &redirect, cancel)?;
     let random =
         |n| openai::random(n, cancel).map_err(|_| wire::failure("OAuth random generator failed"));
     let state = wire::base64url(&random(32)?);
@@ -44,14 +44,22 @@ pub(super) fn sign_in(
     );
     let mut fields = vec![
         ("response_type", "code"),
-        ("client_id", client.as_str()),
+        ("client_id", client.id.as_str()),
         ("redirect_uri", redirect.as_str()),
         ("code_challenge_method", "S256"),
         ("code_challenge", challenge.as_str()),
         ("state", state.as_str()),
         ("resource", server.resource.as_str()),
     ];
-    if let Some(scope) = &server.scope {
+    let requested_scope = scopes::union(&[
+        connection.pending_scope.as_deref(),
+        connection
+            .oauth
+            .as_ref()
+            .and_then(|oauth| oauth.scope.as_deref()),
+        server.scope.as_deref(),
+    ])?;
+    if let Some(scope) = &requested_scope {
         fields.push(("scope", scope));
     }
     let separator = if server.authorize.contains('?') {
@@ -72,16 +80,16 @@ pub(super) fn sign_in(
         server.response_iss_required,
         cancel,
     )?;
-    let value = wire::post_form(
+    let value = client::token_request(
         &server.token,
         &[
             ("grant_type", "authorization_code"),
-            ("client_id", &client),
             ("code", &code),
             ("code_verifier", &verifier),
             ("redirect_uri", &redirect),
             ("resource", &server.resource),
         ],
+        &client,
         cancel,
     )?;
     let now = SystemTime::now()
@@ -93,7 +101,10 @@ pub(super) fn sign_in(
         TokenContext {
             endpoint: &server.token,
             bound_endpoint: &connection.endpoint,
-            client: &client,
+            client: &client.id,
+            client_auth_method: client.method,
+            client_secret: client.secret.as_deref(),
+            client_secret_expires_at: client.secret_expires_at,
             issuer: &server.issuer,
             resource: Some(&server.resource),
             github: false,
@@ -101,6 +112,7 @@ pub(super) fn sign_in(
         },
         None,
     )?);
+    connection.pending_scope = None;
     connection.method = super::super::types::AuthMethod::Browser;
     connection.token.clear();
     super::super::config::validate(&connection)?;

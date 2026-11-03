@@ -1,37 +1,41 @@
 # Vercel MCP client setup
 
-The guided Vercel entry prefills `https://mcp.vercel.com` in the common MCP
-form. It uses the same HTTP transport, discovery, OAuth and tool bridge as
-other services. It does not use the Vercel CLI or assume that a Vercel REST API
-token grants MCP access.
+The guided Vercel entry prefills `https://mcp.vercel.com/` in the common MCP
+form. Vercel's protected-resource metadata announces that exact resource URI.
+The connection uses the common HTTP transport, discovery, OAuth and tool bridge;
+it does not use the Vercel CLI or treat a Vercel REST API token as an MCP grant.
 
-Vercel [requires client review](https://vercel.com/docs/agent-resources/vercel-mcp#connecting-to-vercel-mcp)
-for authenticated MCP access. Jecode has not been approved or tested with a
-real Vercel account. The Add connection row states this requirement.
+Vercel [accepts clients with a Client ID Metadata Document (CIMD)](https://vercel.com/docs/agent-resources/vercel-mcp#client-identification-with-cimd)
+without prior client review. Users still approve each connection. Review is
+optional for inclusion in Vercel's supported-clients list.
 
-## Registration information
+## Public client identity
 
-| Item | Jecode configuration |
-| --- | --- |
-| Client name | Jecode |
-| Source and homepage | `https://github.com/giovannijecha/jecode` |
-| Client type | Native terminal application; public OAuth client |
-| Authorization | Authorization code with PKCE S256, protected-resource and issuer discovery |
-| Callback | `http://127.0.0.1:<ephemeral-port>/callback`; a fixed client ID must accept any loopback port ([RFC 8252](https://www.rfc-editor.org/rfc/rfc8252#section-7.3)) |
-| Client registration | Public client ID, Client ID Metadata Document URL, or dynamic registration when offered |
-| Identity | Jecode; no credentials or client identity from another approved coding tool |
-| Permissions | Teams and resources authorized by the user, independently of local file/command levels |
+Jecode's native public-client document is
+[`.well-known/mcp-oauth-client.json`](../../.well-known/mcp-oauth-client.json)
+in the repository. Its `client_id` is
+`https://giovannijecha.github.io/jecode/mcp-oauth-client.json`. Publication
+maps that source document to the exact client ID URL on a static Pages branch;
+the URL must return the JSON document directly over HTTPS before a Vercel
+sign-in can use it. The document carries Jecode's name and source, the
+`http://127.0.0.1/callback` loopback redirect, authorization-code and refresh
+grants, and `token_endpoint_auth_method: none`. Jecode listens on an ephemeral
+loopback port and uses PKCE S256. No client secret or logo is bundled.
 
-Submit this information through the client review form linked by Vercel.
-No review request has been submitted by this implementation. If approval
-requires a public client ID or metadata URL, open the connection's
-**Advanced > Custom OAuth client** and enter it as the OAuth client ID. Without
-one, sign-in uses dynamic registration when Vercel offers it. Follow Vercel's
-registration instructions;
-Jecode does not embed a client secret or an invented default ID.
+The authorization server advertises CIMD support, so Jecode selects this URL
+by default. **Advanced > Custom OAuth client** can override it with another
+client ID or metadata URL. If an authorization server does not support CIMD,
+the generic client can use its dynamic registration endpoint instead.
 
-After approval, complete browser sign-in from Settings > MCP and grant the
-intended teams. Start verification by listing teams/projects and reading one
-deployment. The connection's discovered schemas define the actual tools and
-parameters. Do not infer MCP access from a successful CLI/API call; Vercel
-[documents their separate authentication](https://vercel.com/docs/agent-resources/vercel-mcp/tools).
+The document is served as `application/json` by GitHub Pages from the dedicated
+`gh-pages` branch. That branch contains the published document and `.nojekyll`;
+application source and local working files are not part of the site. Publish
+metadata updates from the canonical source above and verify the exact public
+document before shipping a changed identity.
+
+On 2026-11-03, an explicit live Windows check completed the native loopback
+authorization flow, discovered 241 tools, refreshed the token and discovered
+tools again. Jecode requests `offline_access` when the authorization server
+advertises it; Vercel requires that scope to issue refresh tokens. Although its
+metadata lists `web_message.opener`, the native query callback was verified.
+The check performs no deployment or project mutation.

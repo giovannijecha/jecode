@@ -10,6 +10,13 @@ pub enum AuthMethod {
     GitHubDevice,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClientAuthMethod {
+    None,
+    ClientSecretBasic,
+    ClientSecretPost,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct OAuthTokens {
     pub endpoint: String,
@@ -18,6 +25,9 @@ pub struct OAuthTokens {
     pub expires_at: Option<u64>,
     pub token_endpoint: String,
     pub client_id: String,
+    pub client_auth_method: ClientAuthMethod,
+    pub client_secret: Option<String>,
+    pub client_secret_expires_at: Option<u64>,
     pub issuer: String,
     pub scope: Option<String>,
     pub resource: Option<String>,
@@ -34,6 +44,7 @@ pub struct Connection {
     pub token: String,
     pub oauth: Option<OAuthTokens>,
     pub oauth_client_id: Option<String>,
+    pub pending_scope: Option<String>,
     pub timeout_secs: u64,
     pub headers: Vec<(String, String)>,
 }
@@ -49,6 +60,7 @@ impl Connection {
             token: String::new(),
             oauth: None,
             oauth_client_id: None,
+            pending_scope: None,
             timeout_secs: 60,
             headers: Vec::new(),
         }
@@ -91,6 +103,9 @@ impl Connection {
             redactor.add_secret(tokens.access_token.clone());
             if let Some(refresh) = &tokens.refresh_token {
                 redactor.add_secret(refresh.clone());
+            }
+            if let Some(secret) = &tokens.client_secret {
+                redactor.add_secret(secret.clone());
             }
         }
     }

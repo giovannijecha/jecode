@@ -11,6 +11,7 @@ mod handshake;
 
 const MAX_PAGES: usize = 100;
 const MAX_TOOLS: usize = 10_000;
+const GITHUB_TOOLSETS: &str = "context,issues,pull_requests,repos,users,actions";
 
 #[derive(Clone)]
 enum Mode {
@@ -297,6 +298,9 @@ impl Client {
             }
             headers.push((key.clone(), value.clone()));
         }
+        if stock_github_toolsets(&self.connection) {
+            headers.push(("X-MCP-Toolsets".into(), GITHUB_TOOLSETS.into()));
+        }
         if let Some(bearer) = self.connection.bearer() {
             if bearer.bytes().any(|byte| byte < 33 || byte == 127) {
                 return Err(Error::new(
@@ -324,6 +328,19 @@ impl Client {
         }
         Ok(headers)
     }
+}
+
+/// The guided GitHub endpoint uses its default tools plus Actions unless the
+/// user selected tools explicitly. Other paths and custom selection win.
+fn stock_github_toolsets(connection: &Connection) -> bool {
+    matches!(
+        connection.endpoint.as_str(),
+        "https://api.githubcopilot.com/mcp" | "https://api.githubcopilot.com/mcp/"
+    ) && !connection.headers.iter().any(|(name, _)| {
+        name.eq_ignore_ascii_case("X-MCP-Toolsets")
+            || name.eq_ignore_ascii_case("X-MCP-Tools")
+            || name.eq_ignore_ascii_case("X-MCP-Exclude-Tools")
+    })
 }
 
 fn parse_tool(value: &Value) -> Option<Tool> {
@@ -409,5 +426,7 @@ fn rejection(response: &transport::Response, error: Option<wire::RpcError>) -> E
     error
 }
 
+#[cfg(test)]
+mod header_tests;
 #[cfg(test)]
 mod tests;

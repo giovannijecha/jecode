@@ -10,6 +10,8 @@ use std::{
 
 mod bounded;
 #[cfg(test)]
+mod stepup_tests;
+#[cfg(test)]
 mod tests;
 
 const CONFIGURATION: &str = "Settings > MCP in the TUI, or ~/.jecode/mcp.json";
@@ -82,7 +84,8 @@ pub fn execute_with(
     let result = run(runtime, home, arguments, cancel, redactor);
     bounded::bound(
         redactor.value(&result.unwrap_or_else(|error| {
-            Value::object([
+            let required_scope = super::auth::scopes::required(&error);
+            let mut fields = vec![
                 ("error", Value::string(error.message)),
                 (
                     "outcome",
@@ -96,7 +99,16 @@ pub fn execute_with(
                     "sign_in_required",
                     Value::Bool(error.kind == ErrorKind::Authentication),
                 ),
-            ])
+            ];
+            if let Some(scope) = required_scope {
+                fields.push(("required_scope", Value::string(scope)));
+            }
+            Value::Object(
+                fields
+                    .into_iter()
+                    .map(|(name, value)| (name.into(), value))
+                    .collect(),
+            )
         })),
         outputs,
     )
@@ -196,6 +208,7 @@ fn run(
             Ok(catalog) => catalog,
             Err(error) => {
                 *client = Client::new(connection.clone());
+                remember_scope(&store, &connection, &error)?;
                 return Err(error);
             }
         };
@@ -221,6 +234,7 @@ fn run(
         Ok(result) => result,
         Err(error) => {
             *client = Client::new(connection.clone());
+            remember_scope(&store, &connection, &error)?;
             return Err(error);
         }
     };
@@ -241,6 +255,16 @@ fn run(
         );
     }
     Ok(value)
+}
+
+/// A challenged tool is never replayed. Sign-in can request the scope later.
+fn remember_scope(store: &Store, connection: &Connection, error: &Error) -> Result<(), Error> {
+    if connection.method == super::AuthMethod::Browser
+        && let Some(scope) = super::auth::scopes::required(error)
+    {
+        store.require_scope(connection, &scope)?;
+    }
+    Ok(())
 }
 
 /// Waits for the connection's session without ignoring cancellation;

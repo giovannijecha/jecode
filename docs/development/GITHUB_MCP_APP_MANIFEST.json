@@ -5,9 +5,13 @@
   "public": true,
   "default_events": [],
   "default_permissions": {
+    "actions": "write",
+    "checks": "read",
     "contents": "write",
     "issues": "write",
-    "pull_requests": "write"
+    "pull_requests": "write",
+    "statuses": "read",
+    "workflows": "write"
   },
   "request_oauth_on_install": false
 }

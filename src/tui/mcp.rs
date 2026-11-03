@@ -35,11 +35,7 @@ pub(super) const PRESETS: [(&str, &str, &str); 4] = [
         "https://mcp.cloudflare.com/mcp",
         "mcp.cloudflare.com",
     ),
-    (
-        "Vercel",
-        "https://mcp.vercel.com",
-        "Client approval required",
-    ),
+    ("Vercel", "https://mcp.vercel.com/", "mcp.vercel.com"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
