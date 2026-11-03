@@ -6,6 +6,8 @@ mod error;
 mod idle;
 mod outcome;
 mod root;
+#[cfg(test)]
+mod tests;
 
 use diagnostics::diagnostics;
 use error::QueryFailure;
@@ -222,7 +224,10 @@ impl Runtime {
             }
             state.status = "starting".into();
             state.generation += 1;
-            match Client::start(profile, &root, cancel, &entry.stop, state.generation) {
+            let generation = state.generation;
+            let started = super::executable::launch(profile, workspace)
+                .and_then(|launch| Client::start(&launch, &root, cancel, &entry.stop, generation));
+            match started {
                 Ok(client) => {
                     state.client = Some(client);
                     state.status = "ready".into();

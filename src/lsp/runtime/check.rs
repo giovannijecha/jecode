@@ -23,14 +23,14 @@ pub fn check(
     if !root.is_dir() {
         return Err("LSP check root must be a directory".into());
     }
-    let executable = crate::lsp::executable::resolve(profile, &root)?;
-    let mut client = Client::start(profile, &root, cancel, &Cancellation::default(), 1)?;
+    let launch = crate::lsp::executable::launch(profile, workspace)?;
+    let mut client = Client::start(&launch, &root, cancel, &Cancellation::default(), 1)?;
     let capabilities = client.capabilities.clone();
     client.shutdown();
     Ok(CheckObservation {
         capabilities,
         root,
-        executable: executable.to_string_lossy().into_owned(),
+        executable: launch.executable,
         fingerprint: profile.analysis_fingerprint(),
     })
 }

@@ -10,6 +10,9 @@ Without a configured server, the other tools remain available.
 Open **Settings > LSP > Add server**, then choose Rust / rust-analyzer,
 C/C++ / clangd or Custom server. Guided entries prefill the same form. Select
 an executable path, or a command name resolved by the server's environment.
+A relative path starts from the working folder, for Check and for every root.
+On Windows, a command name resolves to an `.exe` or a name with its extension;
+extensionless shell shims on PATH are skipped.
 For a script-based server, select its runtime executable and put the script
 path and its arguments in Advanced.
 Languages pairs language IDs with file extensions, for example
