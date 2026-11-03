@@ -73,8 +73,10 @@ have distinct outcomes.
 
 Disk is authoritative. The client opens managed documents and reconciles
 changes, including external edits, before queries. Bounded portable polling
-also handles active documents and registered workspace watches. A scan budget
-gap is reported rather than treated as complete synchronization.
+also handles active documents and registered workspace watches. The scan skips
+generated and dependency folders such as `target`, `node_modules`, `.git` and
+`.tmp`, unless a server registers a watch inside one. A scan budget gap is
+reported rather than treated as complete synchronization.
 The same bounded observer follows configured file associations and root markers.
 When a dependency changes, it resynchronizes managed snapshots with increasing
 protocol versions and invalidates prior diagnostics; source files are not
