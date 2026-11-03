@@ -30,10 +30,14 @@ pub(super) fn resolve(profile: &Profile, root: &Path) -> Result<PathBuf, String>
 }
 
 fn executable(path: &Path) -> Option<PathBuf> {
-    let mut candidates = vec![path.to_path_buf()];
+    let candidates = vec![path.to_path_buf()];
     #[cfg(windows)]
-    if path.extension().is_none() {
-        candidates.push(path.with_extension("exe"));
-    }
+    let candidates = {
+        let mut candidates = candidates;
+        if path.extension().is_none() {
+            candidates.push(path.with_extension("exe"));
+        }
+        candidates
+    };
     candidates.into_iter().find(|candidate| candidate.is_file())
 }

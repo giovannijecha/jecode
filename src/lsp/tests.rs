@@ -390,7 +390,7 @@ fn oversized_watched_file_reports_sync_gap_without_crashing_server() {
     let oversized = fixture.workspace().join("huge.txt");
     std::fs::File::create(&oversized)
         .unwrap()
-        .set_len(1_000_000_000)
+        .set_len(32 * 1024 * 1024 + 1)
         .unwrap();
     let result = runtime.execute(
         fixture.workspace(),
