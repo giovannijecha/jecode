@@ -40,7 +40,9 @@ pub(super) struct Client {
     registrations: HashMap<String, Vec<WatchPattern>>,
     observed_extensions: Vec<String>,
     observed_markers: Vec<String>,
-    watched: HashMap<PathBuf, u64>,
+    watched: HashMap<PathBuf, watches::Stamp>,
+    /// False until a scan completes after startup or a re-registration; that
+    /// scan treats paths not tracked before as a baseline, not as creations.
     watch_initialized: bool,
     pub sync_gap: bool,
     settings: Value,

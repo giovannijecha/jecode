@@ -214,7 +214,7 @@ fn parse_registration(
             } else {
                 root.to_path_buf()
             };
-            let base = std::fs::canonicalize(&base).unwrap_or(base);
+            let base = resolved_base(base);
             if absolute && !base.is_absolute() {
                 return None;
             }
@@ -251,6 +251,27 @@ fn absolute_watch_base(pattern: &str) -> std::path::PathBuf {
         directory.to_owned()
     };
     directory.into()
+}
+
+/// Canonical spelling of a watch base whose tail may not exist yet: resolve
+/// the nearest existing ancestor and keep the missing names, so the base
+/// compares with the canonical root (verbatim on Windows) and its entries.
+fn resolved_base(base: std::path::PathBuf) -> std::path::PathBuf {
+    let mut missing = Vec::new();
+    let mut current = base.as_path();
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(current) {
+            return missing
+                .into_iter()
+                .rev()
+                .fold(resolved, |path, name| path.join(name));
+        }
+        let (Some(name), Some(parent)) = (current.file_name(), current.parent()) else {
+            return base;
+        };
+        missing.push(name.to_os_string());
+        current = parent;
+    }
 }
 
 #[cfg(test)]

@@ -1,107 +1,53 @@
 use super::Client;
 use crate::json::Value;
 use crate::lsp::documents::path_to_uri;
-use std::collections::HashMap;
-use std::io::Read;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
+use std::io::{ErrorKind, Read};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const MAX_ENTRIES: usize = 10_000;
+const MAX_HASHED_BYTES: u64 = 32 * 1024 * 1024;
+/// A hash taken this soon after the last write may miss a later same-size
+/// write that keeps the timestamp, so it is not reused.
+const SETTLED: Duration = Duration::from_secs(2);
+
+/// Last observed state of a watched path. Content is reread only when its
+/// size or timestamp changes, or while its hash is not yet settled.
+#[derive(Clone, Copy)]
+pub(super) struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    settled: bool,
+    hash: u64,
+}
 
 impl Client {
     pub(super) fn poll_watches(&mut self) -> Result<(), String> {
-        let patterns = self.registrations.values().flatten().collect::<Vec<_>>();
-        if patterns.is_empty()
+        if self.registrations.values().all(Vec::is_empty)
             && self.observed_extensions.is_empty()
             && self.observed_markers.is_empty()
         {
             return Ok(());
         }
-        let mut stack = vec![self.root.clone()];
-        for watch in &patterns {
-            if watch.literal.is_none()
-                && !watch.base.starts_with(&self.root)
-                && !stack.contains(&watch.base)
-            {
-                stack.push(watch.base.clone());
-            }
-        }
-        let mut found = HashMap::new();
-        let mut count = 0;
-        let mut bytes = 0_u64;
-        for path in patterns.iter().filter_map(|watch| watch.literal.as_ref()) {
-            count += 1;
-            match hash_path(path, &mut bytes, true) {
-                Ok(Some(hash)) => {
-                    found.insert(path.clone(), hash);
-                }
-                Ok(None) => {}
-                Err(()) => {
-                    self.sync_gap = true;
-                    return Ok(());
-                }
-            }
-        }
-        while let Some(folder) = stack.pop() {
-            let entries = match std::fs::read_dir(folder) {
-                Ok(entries) => entries,
-                Err(_) => {
-                    self.sync_gap = true;
-                    return Ok(());
-                }
-            };
-            for entry in entries {
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(_) => {
-                        self.sync_gap = true;
-                        return Ok(());
-                    }
-                };
-                count += 1;
-                if count > 10_000 {
-                    self.sync_gap = true;
-                    return Ok(());
-                }
-                let path = entry.path();
-                let kind = match entry.file_type() {
-                    Ok(kind) => kind,
-                    Err(_) => {
-                        self.sync_gap = true;
-                        return Ok(());
-                    }
-                };
-                if kind.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if !kind.is_file() {
-                    continue;
-                }
-                if !self.generic_file(&path)
-                    && !patterns.iter().any(|pattern| pattern.matches(&path))
-                {
-                    continue;
-                }
-                match hash_path(&path, &mut bytes, false) {
-                    Ok(Some(hash)) => {
-                        found.insert(path, hash);
-                    }
-                    Ok(None) => {}
-                    Err(()) => {
-                        self.sync_gap = true;
-                        return Ok(());
-                    }
-                }
-            }
-        }
+        let Some(found) = self.scan_watches() else {
+            self.sync_gap = true;
+            return Ok(());
+        };
+        let patterns = self.registrations.values().flatten().collect::<Vec<_>>();
+        let creations = self.watch_initialized;
         let changes = found
             .iter()
-            .filter_map(|(path, hash)| match self.watched.get(path) {
-                None => Some((path.clone(), 1)),
-                Some(previous) if previous != hash => Some((path.clone(), 2)),
+            .filter_map(|(path, stamp)| match self.watched.get(path) {
+                None => creations.then(|| (path.clone(), 1)),
+                Some(previous) if previous.hash != stamp.hash => Some((path.clone(), 2)),
                 _ => None,
             })
             .chain(
                 self.watched
                     .keys()
-                    .filter(|path| !found.contains_key(*path))
+                    .filter(|path| !found.contains_key(*path) && !path.exists())
                     .map(|path| (path.clone(), 3)),
             )
             .filter(|(path, change)| {
@@ -118,10 +64,7 @@ impl Client {
             .collect::<Vec<_>>();
         self.watched = found;
         self.sync_gap = false;
-        if !self.watch_initialized {
-            self.watch_initialized = true;
-            return Ok(());
-        }
+        self.watch_initialized = true;
         let dependency_changed = changes
             .iter()
             .any(|(path, _)| !self.docs.values().any(|document| document.path == *path));
@@ -150,7 +93,71 @@ impl Client {
         Ok(())
     }
 
-    fn generic_file(&self, path: &std::path::Path) -> bool {
+    /// Every watched path with its stamp, or None when the scan is incomplete.
+    fn scan_watches(&self) -> Option<HashMap<PathBuf, Stamp>> {
+        let patterns = self.registrations.values().flatten().collect::<Vec<_>>();
+        let mut scan = Scan {
+            now: SystemTime::now(),
+            entries: 0,
+            bytes: 0,
+        };
+        let mut found = HashMap::new();
+        for path in patterns.iter().filter_map(|watch| watch.literal.as_ref()) {
+            scan.entries += 1;
+            if let Some(stamp) = scan.stamp(path, self.watched.get(path), true).ok()? {
+                found.insert(path.clone(), stamp);
+            }
+        }
+        let mut stack = vec![self.root.clone()];
+        stack.extend(
+            patterns
+                .iter()
+                .filter(|watch| {
+                    watch.literal.is_none() && !implicitly_reached(&self.root, &watch.base)
+                })
+                .map(|watch| watch.base.clone()),
+        );
+        let mut visited = HashSet::new();
+        while let Some(folder) = stack.pop() {
+            if !visited.insert(folder.clone()) {
+                continue;
+            }
+            let entries = match std::fs::read_dir(&folder) {
+                Ok(entries) => entries,
+                // A missing base, or a folder removed mid-scan, holds no paths.
+                Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                Err(_) => return None,
+            };
+            for entry in entries {
+                let entry = entry.ok()?;
+                scan.entries += 1;
+                if scan.entries > MAX_ENTRIES {
+                    return None;
+                }
+                let path = entry.path();
+                let kind = entry.file_type().ok()?;
+                if kind.is_dir() {
+                    if !skipped(&entry.file_name()) {
+                        stack.push(path);
+                    }
+                    continue;
+                }
+                if !kind.is_file()
+                    || found.contains_key(&path)
+                    || (!self.generic_file(&path)
+                        && !patterns.iter().any(|watch| watch.matches(&path)))
+                {
+                    continue;
+                }
+                if let Some(stamp) = scan.stamp(&path, self.watched.get(&path), false).ok()? {
+                    found.insert(path, stamp);
+                }
+            }
+        }
+        Some(found)
+    }
+
+    fn generic_file(&self, path: &Path) -> bool {
         let associated = path
             .extension()
             .and_then(|extension| extension.to_str())
@@ -163,53 +170,103 @@ impl Client {
         let marker = relative.is_some_and(|relative| {
             self.observed_markers
                 .iter()
-                .any(|known| relative == std::path::Path::new(known))
+                .any(|known| relative == Path::new(known))
         });
         associated || marker
     }
 }
 
-fn hash_path(path: &std::path::Path, bytes: &mut u64, directory: bool) -> Result<Option<u64>, ()> {
-    use std::io::ErrorKind;
-    let metadata = match std::fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(()),
-    };
-    if metadata.is_dir() {
-        return Ok(directory.then(|| {
-            metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |time| time.as_nanos() as u64)
-        }));
+/// Generated, dependency and scratch folders are left out of implicit descent;
+/// a watch base registered inside one is still scanned as its own root.
+fn skipped(name: &OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        name.eq_ignore_ascii_case(".tmp") || crate::checkpoints::generated_name(name)
+    })
+}
+
+fn implicitly_reached(root: &Path, base: &Path) -> bool {
+    base.strip_prefix(root)
+        .is_ok_and(|rest| !rest.iter().any(skipped))
+}
+
+struct Scan {
+    now: SystemTime,
+    entries: usize,
+    bytes: u64,
+}
+
+impl Scan {
+    /// None when the path is absent; Err when the scan cannot be completed.
+    fn stamp(
+        &mut self,
+        path: &Path,
+        previous: Option<&Stamp>,
+        directory: bool,
+    ) -> Result<Option<Stamp>, ()> {
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(()),
+        };
+        let modified = metadata.modified().ok();
+        if metadata.is_dir() {
+            let hash = modified
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map_or(0, |time| time.as_nanos() as u64);
+            return Ok(directory.then_some(Stamp {
+                len: 0,
+                modified,
+                settled: false,
+                hash,
+            }));
+        }
+        if !metadata.is_file() {
+            return Ok(None);
+        }
+        let len = metadata.len();
+        if let Some(previous) = previous
+            && previous.settled
+            && previous.len == len
+            && modified.is_some()
+            && previous.modified == modified
+        {
+            return Ok(Some(*previous));
+        }
+        let settled = modified
+            .and_then(|time| self.now.duration_since(time).ok())
+            .is_some_and(|age| age >= SETTLED);
+        Ok(self.hash(path, len)?.map(|hash| Stamp {
+            len,
+            modified,
+            settled,
+            hash,
+        }))
     }
-    if !metadata.is_file() {
-        return Ok(None);
+
+    fn hash(&mut self, path: &Path, len: u64) -> Result<Option<u64>, ()> {
+        let remaining = MAX_HASHED_BYTES.saturating_sub(self.bytes);
+        if len > remaining {
+            return Err(());
+        }
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(()),
+        };
+        let mut data = Vec::new();
+        file.take(remaining + 1)
+            .read_to_end(&mut data)
+            .map_err(|_| ())?;
+        if data.len() as u64 > remaining {
+            return Err(());
+        }
+        self.bytes += data.len() as u64;
+        Ok(Some(
+            data.iter().fold(0xcbf29ce484222325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+            }),
+        ))
     }
-    let remaining = (32 * 1024 * 1024_u64).saturating_sub(*bytes);
-    if metadata.len() > remaining {
-        return Err(());
-    }
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(()),
-    };
-    let mut data = Vec::new();
-    file.take(remaining + 1)
-        .read_to_end(&mut data)
-        .map_err(|_| ())?;
-    if data.len() as u64 > remaining {
-        return Err(());
-    }
-    *bytes += data.len() as u64;
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in data {
-        hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
-    }
-    Ok(Some(hash))
 }
 
 #[cfg(test)]
@@ -263,7 +320,9 @@ mod tests {
         assert!(!client.sync_gap);
         std::fs::remove_dir(base).unwrap();
         client.poll_watches().unwrap();
-        assert!(client.sync_gap);
+        // A missing base is an empty scope, not an incomplete scan, so it
+        // does not hold back events from the other watchers.
+        assert!(!client.sync_gap);
         assert_eq!(client.pid(), pid);
         let document = client.reconcile(&fixture.sample(), "rust").unwrap();
         let response = client

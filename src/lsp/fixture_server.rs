@@ -20,6 +20,9 @@ fn main() {
         if !method.is_empty() {
             log(&marker, &method);
         }
+        if method == "workspace/didChangeWatchedFiles" {
+            log(&format!("{marker}-watched"), &text);
+        }
         if matches!(
             method.as_str(),
             "textDocument/didOpen" | "textDocument/didChange"

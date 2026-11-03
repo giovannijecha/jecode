@@ -247,6 +247,12 @@ const GENERATED: &[&str] = &[
     ".cache",
 ];
 
+/// A generated or Jecode temporary entry name, which implicit walks skip.
+pub(crate) fn generated_name(part: &str) -> bool {
+    GENERATED.iter().any(|name| name.eq_ignore_ascii_case(part))
+        || (part.starts_with(".jecode-") && part.ends_with(".tmp"))
+}
+
 /// Eligibility for an implicit recursive walk below `selected_root`. Explicit
 /// paths only need `protected`.
 pub(super) fn eligible_beneath(path: &str, selected_root: &str, excluded: &[String]) -> bool {
@@ -257,11 +263,7 @@ pub(super) fn eligible_beneath(path: &str, selected_root: &str, excluded: &[Stri
             .and_then(|rest| rest.strip_prefix('/'))
             .unwrap_or(path)
     };
-    protected(path, excluded)
-        && !below.split('/').any(|part| {
-            GENERATED.iter().any(|name| name.eq_ignore_ascii_case(part))
-                || (part.starts_with(".jecode-") && part.ends_with(".tmp"))
-        })
+    protected(path, excluded) && !below.split('/').any(generated_name)
 }
 
 mod discovery;
