@@ -99,6 +99,7 @@ pub(super) fn console() {
             tokens: Some(34_000),
             capacity: Some(100_000),
             auto_compact: 80,
+            pending: None,
         }),
         ..State::default()
     };

@@ -31,6 +31,7 @@ fn state(columns: usize) -> State {
             tokens: Some(122_400),
             capacity: Some(200_000),
             auto_compact: 80,
+            pending: None,
         }),
         ..State::default()
     }

@@ -2,12 +2,18 @@
 //! current instructions and the request-only environment, and its size.
 
 use super::{Agent, environment};
-use crate::json::Value;
+use crate::{context::state_message, json::Value};
+
+/// Starts the section of state that carries newly arrived collaborator reports.
+const REPORTS: &str = "Collaborator reports, each shown once when it arrives:";
 
 pub(super) struct Request {
     pub messages: Vec<Value>,
     pub measurement: crate::context::measurement::RequestMeasurement,
     pub estimated_tokens: usize,
+    /// Runtime state sent at the end of this request, with its source position.
+    /// Once the provider accepts the request, it stays at that position.
+    pub state: Option<(usize, String)>,
 }
 
 impl Agent {
@@ -21,7 +27,8 @@ impl Agent {
         let original = self.messages.lock().unwrap();
         let mut messages = self.projected_context(&self.context, &original);
         let overhead = self.request_overhead(&self.context, &messages[0], &original, &environment);
-        self.append_environment(&mut messages, &environment, &original);
+        let state = self.pending_state(&self.context, &environment, &original);
+        append_state(&mut messages, state.as_deref());
         let measurement = self.context.request_measurement(
             &original,
             &messages,
@@ -33,6 +40,7 @@ impl Agent {
             messages,
             measurement,
             estimated_tokens: self.context_estimate(&environment, &original),
+            state: state.map(|text| (original.len(), text)),
         }
     }
 
@@ -43,7 +51,13 @@ impl Agent {
         messages: &[Value],
         environment: &environment::Environment,
     ) -> usize {
-        let state = self.request_state_message(environment, messages);
+        let pending = self.pending_state(context, environment, messages);
+        let states = context
+            .visible_states()
+            .map(|state| state.text.as_str())
+            .chain(pending.as_deref())
+            .map(|text| state_message(text).encode().len())
+            .fold(0usize, usize::saturating_add);
         let last = messages
             .iter()
             .enumerate()
@@ -51,7 +65,7 @@ impl Agent {
             .filter(|(index, _)| !context.returned.contains(index))
             .map(|(_, message)| message)
             .next_back();
-        let note = if state.is_none() && (context.summary.is_empty() || last.is_some()) {
+        let note = if pending.is_none() && (context.summary.is_empty() || last.is_some()) {
             super::continuation::note_after(last.or(Some(system)))
         } else {
             None
@@ -60,40 +74,51 @@ impl Agent {
             .encode()
             .len()
             .saturating_add(crate::tools::encoded_size_for(!self.child))
-            .saturating_add(state.map_or(0, |state| state.encode().len()))
+            .saturating_add(states)
             .saturating_add(note.map_or(0, |note| note.encode().len()))
     }
 
-    fn request_state_message(
+    /// Current runtime state when it differs from the latest state already in
+    /// the window. Unchanged state is never repeated, so request prefixes stay
+    /// identical across tool calls and provider caches keep advancing. Reports
+    /// join once; after compaction, those of active collaborators are sent again.
+    fn pending_state(
         &self,
+        context: &crate::context::Context,
         environment: &environment::Environment,
         messages: &[Value],
-    ) -> Option<Value> {
-        let state = self.request_environment_for(environment, messages);
-        (!state.is_empty()).then(|| {
-            Value::object([
-                ("role", Value::string("user")),
-                ("jecode_request_state", Value::Bool(true)),
-                (
-                    "content",
-                    Value::string(format!(
-                        "Jecode session state for the next request. This is runtime context, not a new user task. Continue the existing task using the current state below.\n\n{state}"
-                    )),
-                ),
-            ])
-        })
-    }
-
-    fn append_environment(
-        &self,
-        projected: &mut Vec<Value>,
-        environment: &environment::Environment,
-        messages: &[Value],
-    ) {
-        if let Some(state) = self.request_state_message(environment, messages) {
-            projected.push(state);
+    ) -> Option<String> {
+        let base = self.request_environment_for(environment, messages);
+        let reports = environment
+            .1
+            .iter()
+            .filter(|(marker, _)| {
+                !context
+                    .visible_states()
+                    .any(|state| state.text.contains(marker.as_str()))
+            })
+            .map(|(_, entry)| entry.as_str())
+            .collect::<Vec<_>>();
+        let latest = context.visible_states().last().map(|state| {
+            state
+                .text
+                .split_once(REPORTS)
+                .map_or(state.text.as_str(), |(base, _)| base)
+                .trim_end()
+        });
+        if reports.is_empty()
+            && (latest == Some(base.trim_end()) || base.is_empty() && latest.is_none())
+        {
+            return None;
         }
-        super::continuation::end_with_user_turn(projected);
+        if reports.is_empty() {
+            return Some(base);
+        }
+        Some(
+            format!("{base}\n\n{REPORTS}\n{}", reports.join("\n"))
+                .trim_start()
+                .to_owned(),
+        )
     }
 
     pub(super) fn projected_context(
@@ -161,9 +186,18 @@ impl Agent {
             }
             None => {
                 let mut projected = self.projected_context(context, messages);
-                self.append_environment(&mut projected, environment, messages);
+                let state = self.pending_state(context, environment, messages);
+                append_state(&mut projected, state.as_deref());
                 context.estimate_projected_for(&projected, self.client.inputs(), !self.child)
             }
         }
     }
+}
+
+/// Ends a request with newly sent state, then the user turn it may need.
+fn append_state(projected: &mut Vec<Value>, state: Option<&str>) {
+    if let Some(state) = state {
+        projected.push(state_message(state));
+    }
+    super::continuation::end_with_user_turn(projected);
 }

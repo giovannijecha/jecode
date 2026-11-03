@@ -92,7 +92,13 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
         };
         if progress.is_none() && !activity.stopping {
             facts.extend(
-                activity::generated(activity.generated).map(|tokens| Line::new(&tokens, DIM)),
+                [
+                    activity::sent(activity.sent),
+                    activity::generated(activity.generated),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|tokens| Line::new(&tokens, DIM)),
             );
         }
         return fitted(

@@ -178,7 +178,7 @@ fn request_effort_is_transient_and_internal_state_marker_is_not_sent() {
 }
 
 #[test]
-fn claude_cache_stops_before_request_only_state() {
+fn claude_cache_covers_anchored_request_state() {
     let fixture = HttpFixture::new(vec![(200, crate::test_support::completion("ok", vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     client
@@ -203,15 +203,14 @@ fn claude_cache_stops_before_request_only_state() {
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    assert!(
-        history[0].get("content").and_then(Value::as_array).unwrap()[0]
-            .get("cache_control")
-            .is_some()
-    );
-    assert_eq!(
-        history[1].get("content"),
-        Some(&Value::string("Changing state"))
-    );
+    // State stays where it was first sent, so it belongs to the cached prefix.
+    for message in &history[..2] {
+        assert!(
+            message.get("content").and_then(Value::as_array).unwrap()[0]
+                .get("cache_control")
+                .is_some()
+        );
+    }
 }
 
 #[test]
@@ -242,19 +241,19 @@ fn growing_tool_batches_keep_the_prior_explicit_boundary() {
             ("content", Value::string("Stable task")),
         ])];
         batch(&mut messages, 0);
-        let state = Value::object([
+        // Runtime state is anchored where it was first sent.
+        messages.push(Value::object([
             ("role", Value::string("user")),
-            ("content", Value::string("Changing request state")),
-        ]);
-        let mut first = messages.clone();
-        first.push(state.clone());
+            ("content", Value::string("Anchored request state")),
+        ]));
         client
-            .sample_owned(first, Effort::Default, true, true, None, &mut |_| Ok(()))
+            .sample_owned(messages.clone(), Effort::Default, true, None, &mut |_| {
+                Ok(())
+            })
             .unwrap();
         batch(&mut messages, 1);
-        messages.push(state);
         client
-            .sample_owned(messages, Effort::Default, true, true, None, &mut |_| Ok(()))
+            .sample_owned(messages, Effort::Default, true, None, &mut |_| Ok(()))
             .unwrap();
         let requests = fixture.finish();
         let first = requests[0]
@@ -268,11 +267,11 @@ fn growing_tool_batches_keep_the_prior_explicit_boundary() {
             .and_then(Value::as_array)
             .unwrap();
         assert_eq!(
-            &first[..26],
-            &second[..26],
+            &first[..27],
+            &second[..27],
             "{model} changed the cached prefix"
         );
-        for index in [25, 50] {
+        for index in [25, 26, 51] {
             assert!(
                 second[index]
                     .get("content")

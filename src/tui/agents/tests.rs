@@ -338,6 +338,7 @@ fn footer_keeps_context_and_critical_counts_in_its_existing_row() {
         tokens: Some(34_000),
         capacity: Some(100_000),
         auto_compact: 80,
+        pending: None,
     });
     state.collaboration = vec![
         record(1, "running"),

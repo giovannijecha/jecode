@@ -11,21 +11,46 @@ pub mod sandbox;
 pub mod server;
 pub use protocol::{completion, tool_call};
 
-/// History assertions exclude the separate runtime suffix; wire tests inspect it directly.
-pub fn durable_messages(messages: &[Value]) -> &[Value] {
-    let state = messages.last().is_some_and(|message| {
-        let content = message.get("content");
-        let text = content
-            .and_then(Value::as_str)
-            .or_else(|| content?.as_array()?.first()?.get("text")?.as_str());
-        message.get("jecode_request_state") == Some(&Value::Bool(true))
-            || text
-                .is_some_and(|text| text.starts_with("Jecode session state for the next request."))
-    });
-    &messages[..messages.len() - usize::from(state)]
+/// Whether a request message carries runtime state rather than conversation.
+pub fn is_request_state(message: &Value) -> bool {
+    let content = message.get("content");
+    let text = content
+        .and_then(Value::as_str)
+        .or_else(|| content?.as_array()?.first()?.get("text")?.as_str());
+    message.get("jecode_request_state") == Some(&Value::Bool(true))
+        || text.is_some_and(|text| text.starts_with("Jecode session state"))
 }
 
-pub fn request_messages(body: &Value) -> &[Value] {
+/// History assertions exclude runtime state, which stays where it was first
+/// sent; wire tests inspect it directly.
+pub fn durable_messages(messages: &[Value]) -> Vec<Value> {
+    messages
+        .iter()
+        .filter(|message| !is_request_state(message))
+        .cloned()
+        .collect()
+}
+
+/// The latest runtime state text in a request, wherever it was first sent.
+pub fn latest_state(body: &Value) -> String {
+    body.get("messages")
+        .or_else(|| body.get("input"))
+        .and_then(Value::as_array)
+        .expect("Fixture request has messages")
+        .iter()
+        .rev()
+        .find(|message| is_request_state(message))
+        .and_then(|message| {
+            let content = message.get("content")?;
+            content
+                .as_str()
+                .or_else(|| content.as_array()?.first()?.get("text")?.as_str())
+                .map(str::to_owned)
+        })
+        .expect("Fixture request has runtime state")
+}
+
+pub fn request_messages(body: &Value) -> Vec<Value> {
     durable_messages(
         body.get("messages")
             .or_else(|| body.get("input"))

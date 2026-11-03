@@ -157,7 +157,8 @@ fn attachments_are_sent_as_parts_and_pdf_annotations_are_replayed() {
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    let roles = crate::test_support::durable_messages(third)
+    let durable = crate::test_support::durable_messages(third);
+    let roles = durable
         .iter()
         .rev()
         .take(2)

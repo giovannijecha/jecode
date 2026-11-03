@@ -161,21 +161,10 @@ fn resumed_and_new_sessions_keep_their_own_working_files_and_complete_outputs() 
     let requests = fixture.finish();
     assert_eq!(requests.len(), 4);
     for request in requests {
-        let state = request
-            .body
-            .get("messages")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .last()
-            .unwrap()
-            .get("content")
-            .unwrap()
-            .as_str()
-            .unwrap();
+        let state = crate::test_support::latest_state(&request.body);
         assert!(state.contains("tmp:relative/path"));
         assert!(state.contains("JECODE_TMP"));
-        assert!(state.contains(&path));
+        assert!(state.contains(path.as_str()));
     }
 }
 

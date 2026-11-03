@@ -7,6 +7,32 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
+/// What a provider request is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Purpose {
+    /// The conversation: tool definitions, the selected effort and live usage.
+    Conversation,
+    /// A summary over the conversation's own request: the same definitions and
+    /// effort keep the provider's cached prefix; recorded as maintenance.
+    CachedSummary,
+    /// Standalone maintenance without tools, at maintenance effort.
+    Maintenance,
+}
+
+impl Purpose {
+    fn tools(self) -> bool {
+        self != Self::Maintenance
+    }
+
+    fn label(self) -> &'static str {
+        if self == Self::Conversation {
+            "completion"
+        } else {
+            "context_compaction"
+        }
+    }
+}
+
 /// Retry state shared by the attempts of one request.
 #[derive(Default)]
 pub(super) struct Retries {
@@ -18,7 +44,7 @@ impl Agent {
     pub(super) fn complete_retry(
         &self,
         messages: &[Value],
-        tools: bool,
+        purpose: Purpose,
         output_tokens: Option<usize>,
         emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
@@ -26,7 +52,7 @@ impl Agent {
         loop {
             if let Some(completion) = self.complete_attempt(
                 messages,
-                tools,
+                purpose,
                 output_tokens,
                 &mut retries,
                 RequestTiming::start(),
@@ -42,7 +68,7 @@ impl Agent {
     pub(super) fn complete_attempt(
         &self,
         messages: &[Value],
-        tools: bool,
+        purpose: Purpose,
         output_tokens: Option<usize>,
         retries: &mut Retries,
         mut timing: RequestTiming,
@@ -54,6 +80,7 @@ impl Agent {
         let mut partial = String::new();
         let mut reported_usage = Usage::default();
         let mut has_usage = false;
+        let tools = purpose.tools();
         let effort = if tools {
             self.effort()
         } else {
@@ -99,7 +126,7 @@ impl Agent {
                     Update::Usage(usage) => {
                         has_usage = true;
                         reported_usage.update(usage);
-                        if tools
+                        if purpose == Purpose::Conversation
                             && self
                                 .context
                                 .reported
@@ -120,7 +147,7 @@ impl Agent {
                 if let Some(usage) = completion.usage {
                     has_usage = true;
                     reported_usage.update(usage);
-                    if tools
+                    if purpose == Purpose::Conversation
                         && self
                             .context
                             .reported
@@ -137,11 +164,7 @@ impl Agent {
             }
         }
         self.record_request_timing(
-            if tools {
-                "completion"
-            } else {
-                "context_compaction"
-            },
+            purpose.label(),
             retries.attempt.saturating_add(1),
             timing,
             effort,
@@ -173,17 +196,7 @@ impl Agent {
                 retries.attempt = retries.attempt.saturating_add(1);
                 let attempt = retries.attempt;
                 let delay = retry_delay(attempt, error.retry_after, cfg!(test));
-                self.record_recovery(
-                    if tools {
-                        "completion"
-                    } else {
-                        "context_compaction"
-                    },
-                    attempt,
-                    delay,
-                    &error.message,
-                    &partial,
-                )?;
+                self.record_recovery(purpose.label(), attempt, delay, &error.message, &partial)?;
                 emit(Event::Recovering {
                     attempt,
                     delay,

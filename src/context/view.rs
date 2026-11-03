@@ -94,9 +94,18 @@ pub(super) fn preview(message: &Value, index: usize, limit: usize) -> Value {
             shortened = true;
         }
     }
+    // Other result shapes carry their payload elsewhere; keep a bounded excerpt.
+    let encoded = result.encode();
+    if encoded.len() > limit.saturating_mul(2) {
+        result = Value::object([("result_excerpt", Value::string(excerpt(&encoded, limit)))]);
+        shortened = true;
+    }
     if !shortened {
         return message.clone();
     }
+    let Value::Object(fields) = &mut result else {
+        unreachable!()
+    };
     fields.insert("context_truncated".into(), Value::Bool(true));
     fields.insert(
         "history_reference".into(),

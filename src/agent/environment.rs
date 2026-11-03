@@ -4,7 +4,8 @@ use crate::json::Value;
 const PROMPT: &str = include_str!("PROMPT.md");
 
 /// Message-independent request instructions, read before messages are locked.
-pub(super) struct Environment(String);
+/// Request instructions and collaborator reports, read before `messages` is locked.
+pub(super) struct Environment(String, pub(super) Vec<(String, String)>);
 
 fn join<const N: usize>(parts: [String; N]) -> String {
     parts
@@ -85,12 +86,15 @@ impl Agent {
     /// state while it appends to this conversation, so the lock order is
     /// collaboration state, then messages.
     pub(super) fn environment(&self) -> Environment {
-        Environment(join([
-            self.permission_instructions(),
-            self.temporary_instructions(),
-            self.checkpoint_instructions(),
-            self.collaboration_instructions(),
-        ]))
+        Environment(
+            join([
+                self.permission_instructions(),
+                self.temporary_instructions(),
+                self.checkpoint_instructions(),
+                self.collaboration_instructions(),
+            ]),
+            self.collaboration_reports(),
+        )
     }
 
     pub(super) fn request_environment_for(
@@ -167,32 +171,36 @@ impl Agent {
                 ("running" | "stopping", _) => "working",
                 _ => "close when safe to release",
             };
+            // Only transitions change this line: state persists at the position
+            // first sent, so progress text would grow every request. Reports
+            // join once through `collaboration_reports`.
             lines.push(format!(
                 "{id} {title}: {state}, received assignment v{received}, report {}, {}",
                 report_version.map_or_else(|| "none".to_owned(), |version| format!("v{version}")),
                 review_state
             ));
-            if let Some(report) = record
-                .get("report")
-                .and_then(|report| report.get("text"))
-                .and_then(Value::as_str)
-            {
-                lines.push(format!(
-                    "{id} report: {}",
-                    report.chars().take(2000).collect::<String>()
-                ));
-            } else if let Some(update) = record
-                .get("updates")
-                .and_then(Value::as_array)
-                .and_then(|updates| updates.last())
-                .and_then(Value::as_str)
-            {
-                lines.push(format!(
-                    "{id} latest update: {}",
-                    update.chars().take(1000).collect::<String>()
-                ));
-            }
         }
         lines.join("\n")
+    }
+
+    /// Reports of active collaborators as `(marker, entry)`. Runtime state
+    /// carries each report once, where it arrived, rather than on every update.
+    fn collaboration_reports(&self) -> Vec<(String, String)> {
+        if self.child {
+            return Vec::new();
+        }
+        self.collaboration
+            .snapshot()
+            .iter()
+            .filter_map(|record| {
+                let id = record.get("id").and_then(Value::as_str)?;
+                let report = record.get("report")?;
+                let version = report.get("version").and_then(Value::as_usize)?;
+                let text = report.get("text").and_then(Value::as_str)?;
+                let marker = format!("{id} report v{version}:");
+                let entry = format!("{marker} {}", text.chars().take(2000).collect::<String>());
+                Some((marker, entry))
+            })
+            .collect()
     }
 }

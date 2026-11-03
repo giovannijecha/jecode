@@ -268,6 +268,7 @@ fn the_displayed_percentage_reaches_the_threshold_exactly_with_the_budget() {
             tokens: Some(tokens),
             capacity: Some(capacity),
             auto_compact: percent,
+            pending: None,
         };
         assert!(status(budget).percent() >= Some(usize::from(percent)));
         assert!(status(budget - 1).percent() < Some(usize::from(percent)));
@@ -276,6 +277,7 @@ fn the_displayed_percentage_reaches_the_threshold_exactly_with_the_budget() {
         tokens: Some(5000),
         capacity: None,
         auto_compact: 80,
+        pending: None,
     };
     assert_eq!(unknown.percent(), None);
     assert_eq!(
@@ -313,4 +315,73 @@ fn the_effective_capacity_includes_a_learned_ceiling() {
     assert_eq!(context.budget(limits, 50), 6000);
     context.ceiling = Some(30000);
     assert_eq!(context.capacity(Some(limits)), Some(24000));
+}
+
+#[test]
+fn request_states_keep_their_first_position_and_survive_saving() {
+    let messages = vec![
+        Value::object([("role", Value::string("system"))]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Task")),
+        ]),
+        Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::string("Working")),
+        ]),
+    ];
+    let mut context = Context::default();
+    context.anchor_state(2, "Permissions: Read.".into());
+    // Unchanged state is never repeated.
+    context.anchor_state(3, "Permissions: Read.".into());
+    context.anchor_state(3, "Permissions: Full.".into());
+    assert_eq!(context.states.len(), 2);
+    let projected = context.project(&messages, 0);
+    let contents = projected
+        .iter()
+        .map(|message| message.get("content").and_then(Value::as_str).unwrap_or(""))
+        .collect::<Vec<_>>();
+    assert_eq!(contents[1], "Task");
+    assert!(contents[2].ends_with("Permissions: Read."));
+    assert_eq!(contents[3], "Working");
+    assert!(contents[4].ends_with("Permissions: Full."));
+    let restored = Context::parse(Some(&context.value())).unwrap();
+    assert_eq!(restored.states, context.states);
+    restored.validate(&messages).unwrap();
+    // A state can never split a tool call from its results.
+    let mut split = messages.clone();
+    split.push(Value::object([
+        ("role", Value::string("tool")),
+        ("tool_call_id", Value::string("call")),
+        ("content", Value::string("ok")),
+    ]));
+    let mut invalid = Context::default();
+    invalid.anchor_state(3, "State".into());
+    assert!(invalid.validate(&split).is_err());
+}
+
+#[test]
+fn previews_bound_results_whose_payload_has_no_known_text_field() {
+    let records = Value::object([(
+        "records",
+        Value::Array(
+            (0..200)
+                .map(|index| Value::string(format!("record {index} {}", "x".repeat(100))))
+                .collect(),
+        ),
+    )]);
+    let message = Value::object([
+        ("role", Value::string("tool")),
+        ("tool_call_id", Value::string("call")),
+        ("content", Value::string(records.encode())),
+    ]);
+    let preview = view::preview(&message, 7, 2048);
+    let content = preview.get("content").and_then(Value::as_str).unwrap();
+    assert!(content.len() < 4096);
+    let parsed = crate::json::parse(content).unwrap();
+    assert!(parsed.get("result_excerpt").is_some());
+    assert_eq!(
+        parsed.get("history_reference").and_then(Value::as_str),
+        Some("history:7")
+    );
 }

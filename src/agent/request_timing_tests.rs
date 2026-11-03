@@ -170,7 +170,12 @@ fn compaction_attempt_uses_medium_without_changing_the_selected_effort() {
         ("content", Value::string("Summarize this work")),
     ])];
     agent
-        .complete_retry(&messages, false, Some(256), &mut |_| Ok(()))
+        .complete_retry(
+            &messages,
+            super::recovery::Purpose::Maintenance,
+            Some(256),
+            &mut |_| Ok(()),
+        )
         .unwrap();
     assert_eq!(agent.effort(), crate::effort::Effort::High);
     let request = fixture.finish().remove(0);
@@ -295,7 +300,12 @@ fn claude_compaction_falls_back_to_supported_effort_and_records_it() {
         ("content", Value::string("Summarize this work")),
     ])];
     agent
-        .complete_retry(&messages, false, Some(2048), &mut |_| Ok(()))
+        .complete_retry(
+            &messages,
+            super::recovery::Purpose::Maintenance,
+            Some(2048),
+            &mut |_| Ok(()),
+        )
         .unwrap();
     let requests = fixture.finish();
     assert!(requests[1].body.get("thinking").is_none());

@@ -102,7 +102,7 @@ fn unknown_capacity_stays_unknown_and_a_model_switch_forgets_the_previous_window
 }
 
 #[test]
-fn preview_only_reduction_keeps_the_provider_meter_unknown() {
+fn preview_only_reduction_shows_its_estimate_without_a_provider_reading() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion("Reported.", vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
@@ -161,8 +161,10 @@ fn preview_only_reduction_keeps_the_provider_meter_unknown() {
         .find(|(label, _)| *label == "context")
         .unwrap()
         .1;
+    // No provider reading yet: the meter shows the reduced request's estimate.
     assert_eq!(reduced.tokens, None);
-    assert_eq!(reduced.percent(), None);
+    assert!(reduced.pending.is_some());
+    assert!(reduced.percent().unwrap() < usize::from(AUTO_COMPACT_DEFAULT));
     assert!(agent.locked_estimate() < budget);
     assert!(trace.iter().all(|(label, _)| *label != "maintenance"));
     assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
@@ -170,7 +172,7 @@ fn preview_only_reduction_keeps_the_provider_meter_unknown() {
 }
 
 #[test]
-fn a_summary_keeps_the_provider_meter_unknown_without_ordinary_usage() {
+fn a_summary_shows_its_estimate_without_ordinary_usage() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
@@ -206,7 +208,8 @@ fn a_summary_keeps_the_provider_meter_unknown_without_ordinary_usage() {
         .unwrap()
         .1;
     assert_eq!(reduced.tokens, None);
-    assert_eq!(reduced.percent(), None);
+    assert!(reduced.pending.is_some());
+    assert!(reduced.percent().unwrap() < usize::from(AUTO_COMPACT_DEFAULT));
     assert!(agent.locked_estimate() < budget);
     assert!(!agent.context.summary.is_empty());
     assert_eq!(reduced.capacity, Some(capacity));
@@ -305,7 +308,7 @@ fn an_unattainable_threshold_fails_once_and_preserves_history() {
 }
 
 #[test]
-fn accepted_input_changes_the_internal_budget_without_changing_provider_usage() {
+fn compaction_starts_with_the_meter_at_its_triggering_estimate() {
     for with_tool in [false, true] {
         let directory = Directory::new();
         let workspace = directory
@@ -399,9 +402,12 @@ fn accepted_input_changes_the_internal_budget_without_changing_provider_usage() 
             .unwrap();
         let status = before_summary.expect("Accepted input should trigger a summary");
         assert_eq!(summaries_started, 1);
+        // The reading stays the provider's; the meter shows the estimate that
+        // triggered compaction, so it reaches the threshold when compaction starts.
         assert_eq!(status.tokens, Some(measured));
         assert_eq!(status.capacity, Some(capacity));
-        assert_eq!(status.percent(), Some(measured * 100 / capacity));
+        assert!(status.pending.is_some());
+        assert!(status.percent().unwrap() >= usize::from(AUTO_COMPACT_DEFAULT));
         assert_eq!(agent.context_status().tokens, Some(measured));
         assert!(!agent.context.summary.is_empty());
         assert_eq!(fixture.finish().len(), 3);

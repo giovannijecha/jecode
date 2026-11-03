@@ -120,7 +120,8 @@ fn prior_tool_batch_boundary_survives_a_new_large_batch() {
         None,
     )
     .unwrap();
-    assert!(request.get("cache_control").is_none());
+    // The automatic breakpoint covers the newly sent state at the end.
+    assert!(request.get("cache_control").is_some());
     let history = request.get("messages").and_then(Value::as_array).unwrap();
     for index in [2, 4] {
         let blocks = history[index]
@@ -134,7 +135,7 @@ fn prior_tool_batch_boundary_survives_a_new_large_batch() {
 }
 
 #[test]
-fn request_state_suffix_is_outside_the_cached_prefix() {
+fn newly_sent_state_is_covered_by_the_automatic_breakpoint() {
     let messages = [
         Value::object([
             ("role", Value::string("user")),
@@ -156,7 +157,7 @@ fn request_state_suffix_is_outside_the_cached_prefix() {
         None,
     )
     .unwrap();
-    assert!(request.get("cache_control").is_none());
+    assert!(request.get("cache_control").is_some());
     let history = request.get("messages").and_then(Value::as_array).unwrap();
     assert!(
         history[0].get("content").and_then(Value::as_array).unwrap()[0]
@@ -232,7 +233,7 @@ fn mid_system_state_preserves_the_cached_prefix_as_history_grows() {
         next.last().unwrap().get("role").and_then(Value::as_str),
         Some("system")
     );
-    assert!(cold.get("cache_control").is_none());
+    assert!(cold.get("cache_control").is_some());
 }
 
 #[test]

@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 pub struct Activity {
     pub started: Instant,
     pub tools: usize,
+    /// Input tokens the turn's requests sent, cached input included, as reported.
+    pub sent: usize,
     /// Tokens the turn's responses generated, as they reported them.
     pub generated: usize,
     pub stopping: bool,
@@ -14,6 +16,7 @@ impl Activity {
         Self {
             started: Instant::now(),
             tools: 0,
+            sent: 0,
             generated: 0,
             stopping: false,
             #[cfg(test)]
@@ -51,16 +54,25 @@ pub fn duration(elapsed: Duration) -> String {
     }
 }
 
+/// `↑ 640`, `↑ 1.2k`, `↑ 46.4M`: input tokens sent, cached input included,
+/// absent at zero.
+pub fn sent(tokens: usize) -> Option<String> {
+    quantity(tokens).map(|value| format!("↑ {value}"))
+}
+
 /// `↓ 640`, `↓ 1.2k`, `↓ 128k`, `↓ 1.4M`: generated tokens, absent at zero.
 pub fn generated(tokens: usize) -> Option<String> {
-    let value = match tokens {
+    quantity(tokens).map(|value| format!("↓ {value}"))
+}
+
+fn quantity(tokens: usize) -> Option<String> {
+    Some(match tokens {
         0 => return None,
         1..1000 => tokens.to_string(),
         1000..100_000 => format!("{:.1}k", tokens as f64 / 1000.0),
         100_000..1_000_000 => format!("{}k", tokens / 1000),
         _ => format!("{:.1}M", tokens as f64 / 1_000_000.0),
-    };
-    Some(format!("↓ {value}"))
+    })
 }
 
 /// `1 tool`, `4 tools`, absent at zero.
@@ -87,6 +99,9 @@ mod tests {
         assert_eq!(generated(1234).as_deref(), Some("↓ 1.2k"));
         assert_eq!(generated(128_400).as_deref(), Some("↓ 128k"));
         assert_eq!(generated(1_420_000).as_deref(), Some("↓ 1.4M"));
+        assert_eq!(sent(0), None);
+        assert_eq!(sent(46_432_593).as_deref(), Some("↑ 46.4M"));
+        assert_eq!(sent(9_136).as_deref(), Some("↑ 9.1k"));
         assert_eq!(tools(0), None);
         assert_eq!(tools(1).as_deref(), Some("1 tool"));
         assert_eq!(tools(4).as_deref(), Some("4 tools"));

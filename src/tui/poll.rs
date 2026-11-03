@@ -106,6 +106,7 @@ impl App {
                         let facts = [
                             Some(activity::duration(activity.elapsed())),
                             activity::tools(activity.tools),
+                            activity::sent(activity.sent),
                             activity::generated(activity.generated),
                             served,
                         ];

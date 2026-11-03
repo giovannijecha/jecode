@@ -105,7 +105,7 @@ fn generated_output_does_not_define_the_compaction_threshold() {
     agent
         .run_turn("Inspect.", &mut |event| {
             match event {
-                Event::Generated { tokens } => generated += tokens,
+                Event::Generated { tokens, .. } => generated += tokens,
                 Event::Maintenance { .. } | Event::ContextCompacted { .. } => {
                     panic!("Output is below the input-context budget")
                 }

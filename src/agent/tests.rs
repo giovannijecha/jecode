@@ -175,12 +175,7 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
         assert_eq!(change.removed, usize::from(!change.created));
     }
     let requests = fixture.finish();
-    let second = requests[1]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let second = crate::test_support::request_messages(&requests[1].body);
     let assistant = first.get("choices").unwrap().as_array().unwrap()[0]
         .get("message")
         .unwrap();
@@ -189,12 +184,7 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
         second[3].get("tool_call_id").unwrap().as_str(),
         Some("read_1")
     );
-    let third = requests[2]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let third = crate::test_support::request_messages(&requests[2].body);
     let result = json::parse(third[7].get("content").unwrap().as_str().unwrap()).unwrap();
     assert_eq!(result.get("stdout").unwrap().as_str(), Some("after\n"));
     assert_eq!(result.get("exit_code").unwrap().as_usize(), Some(0));
@@ -479,11 +469,7 @@ fn interrupted_result_display_keeps_completed_work_and_cancels_remaining_calls()
     );
     agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
-    let messages = requests[1]
-        .body
-        .get("messages")
-        .and_then(Value::as_array)
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[1].body);
     assert_eq!(
         messages[3].get("tool_call_id").and_then(Value::as_str),
         Some("completed")

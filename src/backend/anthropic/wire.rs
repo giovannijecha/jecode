@@ -82,7 +82,7 @@ fn build_request(
     let mut results = Vec::new();
     let active_start = attachments::active_view_start(messages);
     let mut views = Vec::new();
-    let mut volatile_start = None;
+    let mut latest_state = None;
     for (index, message) in messages.iter().enumerate() {
         let role = message.get("role").and_then(Value::as_str);
         if role != Some("tool") && !results.is_empty() {
@@ -103,10 +103,8 @@ fn build_request(
                 }
             }
             Some("user") => {
+                // Runtime state keeps its first position, so it is cacheable history.
                 let request_state = message.get("jecode_request_state") == Some(&Value::Bool(true));
-                if request_state {
-                    volatile_start = Some(wire.len());
-                }
                 let mut mapped = user(message, pool)?;
                 if request_state
                     && subscription
@@ -114,6 +112,9 @@ fn build_request(
                     && let Value::Object(fields) = &mut mapped
                 {
                     fields.insert("role".into(), Value::string("system"));
+                }
+                if request_state {
+                    latest_state = Some(wire.len());
                 }
                 wire.push(mapped);
             }
@@ -147,10 +148,16 @@ fn build_request(
     }
     // A tool-result batch can exceed the 20-block lookback window. Preserve
     // recent user-message ends, including earlier batched tool results.
-    let durable_end = volatile_start.unwrap_or(wire.len());
-    let slots = if volatile_start.is_some() { 3 } else { 2 };
+    // The automatic top-level breakpoint covers the request end, including
+    // newly sent state, so explicit slots keep the earlier boundaries.
+    let marked_end = if latest_state.is_some_and(|index| index + 1 == wire.len()) {
+        wire.len() - 1
+    } else {
+        wire.len()
+    };
+    let slots = 2;
     let mut marked = 0;
-    for message in wire[..durable_end].iter_mut().rev() {
+    for message in wire[..marked_end].iter_mut().rev() {
         if message.get("role").and_then(Value::as_str) == Some("user") && cache_breakpoint(message)
         {
             marked += 1;
@@ -189,9 +196,7 @@ fn build_request(
     if !subscription && empty_system {
         fields.remove("system");
     }
-    if volatile_start.is_none() {
-        fields.insert("cache_control".into(), ephemeral());
-    }
+    fields.insert("cache_control".into(), ephemeral());
     match effort {
         Effort::Default => {}
         Effort::None => {

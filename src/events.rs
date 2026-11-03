@@ -50,8 +50,10 @@ pub enum Event {
     },
     /// The provider's reported context count, capacity or configured threshold changed.
     Context(crate::context::Status),
-    /// A response reported how many tokens it generated, reasoning included.
+    /// A response reported the input it was sent, cached input included, and
+    /// the tokens it generated, reasoning included.
     Generated {
+        input: usize,
         tokens: usize,
     },
     ToolStarted {

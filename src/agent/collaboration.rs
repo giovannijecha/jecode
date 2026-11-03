@@ -15,7 +15,18 @@ impl Agent {
         Arc::clone(&self.auto_compact)
     }
 
+    /// Runs an agent action and returns the model view of its result.
     pub(super) fn agent_tool(&self, arguments: &Value) -> Result<Value, String> {
+        let action = arguments
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let id = arguments.get("id").and_then(Value::as_str);
+        self.agent_action(arguments)
+            .map(|value| view::result(action, id, value))
+    }
+
+    fn agent_action(&self, arguments: &Value) -> Result<Value, String> {
         if self.child {
             return Err("Collaborators cannot delegate or manage agents".into());
         }
@@ -292,6 +303,8 @@ fn optional_number(value: &Value, name: &str) -> Result<Option<usize>, String> {
         })
         .transpose()
 }
+
+mod view;
 
 #[cfg(test)]
 mod attachment_tests;
