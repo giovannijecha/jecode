@@ -42,9 +42,12 @@ instructions, and Jecode's tool rules always apply.
 - Parent directories are never read. Launched in `project/web/`,
   `project/AGENTS.md` does not apply. A command changing directory does not move
   this boundary.
-- The search skips `.git`, `node_modules`, `.venv` and `vendor` directories and
+- The search skips `.git`, `.tmp`, `node_modules`, `.venv` and `vendor` directories and
   does not follow directory links or junctions. Other directories, including
   `target`, are searched even when Git ignores them.
+  Descendant `.tmp` folders are transient working data and may contain unrelated
+  checkouts. If such a folder is the explicit launch root, its own instructions
+  are still read. Files removed during a scan are treated as absent.
 - Other names, such as `JECODE.md`, are not read, and `@file` references are not
   expanded. If you used `JECODE.md` before, move its content into `AGENTS.md`.
 

@@ -107,6 +107,18 @@ fn legacy_instruction_files_are_ignored_without_a_fallback() {
 }
 
 #[test]
+fn a_directory_removed_during_discovery_does_not_block_other_instructions() {
+    let directory = Directory::new();
+    let root = fs::canonicalize(directory.path()).unwrap();
+    let missing = root.join("removed");
+    let mut sections = Vec::new();
+    let mut total = 0;
+    scan(&root, &missing, &mut sections, &mut total).unwrap();
+    assert!(sections.is_empty());
+    assert_eq!(total, 0);
+}
+
+#[test]
 fn nested_invalid_files_and_aggregate_overflow_fail_before_history_changes() {
     let directory = Directory::new();
     let child = directory.path().join("src");
