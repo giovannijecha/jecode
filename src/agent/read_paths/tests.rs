@@ -1,7 +1,8 @@
 use super::*;
 use crate::backend::openrouter::OpenRouter;
-use crate::test_support::Directory;
+use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 use crate::tools::Tools;
+use std::fs;
 
 fn read(agent: &Agent, arguments: Value) -> Value {
     agent.execute_tool(&ToolCall {
@@ -159,4 +160,64 @@ fn invalid_batches_fail_before_reading() {
     assert!(read(&agent, paths(&[])).get("error").is_some());
     let many = vec!["a.txt"; MAX_PATHS + 1];
     assert!(read(&agent, paths(&many)).get("error").is_some());
+}
+
+#[test]
+fn a_multi_path_read_reads_its_files_beside_other_calls() {
+    let project = Directory::new();
+    fs::write(project.path().join("a.txt"), "alpha\n").unwrap();
+    fs::write(project.path().join("b.txt"), "beta\n").unwrap();
+    let paths = || Value::Array(vec![Value::string("a.txt"), Value::string("b.txt")]);
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![
+                    tool_call("batch", "read", Value::object([("paths", paths())])),
+                    tool_call(
+                        "single",
+                        "read",
+                        Value::object([("path", Value::string("a.txt"))]),
+                    ),
+                    tool_call(
+                        "declared",
+                        "read",
+                        Value::object([("paths", paths()), ("parallel", Value::Bool(true))]),
+                    ),
+                    tool_call(
+                        "neighbour",
+                        "read",
+                        Value::object([
+                            ("path", Value::string("b.txt")),
+                            ("parallel", Value::Bool(true)),
+                        ]),
+                    ),
+                ],
+            ),
+        ),
+        (200, completion("Done", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.run_turn("Read them", &mut |_| Ok(())).unwrap();
+    let messages = agent.archive().messages.lock().unwrap().clone();
+    for id in ["batch", "declared"] {
+        let content = messages
+            .iter()
+            .find(|message| message.get("tool_call_id").and_then(Value::as_str) == Some(id))
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_str)
+            .unwrap();
+        let result = crate::json::parse(content).unwrap();
+        let files = result.get("files").and_then(Value::as_array).unwrap();
+        assert_eq!(files.len(), 2, "{id}: {content}");
+        assert!(
+            content.contains("alpha") && content.contains("beta"),
+            "{id}: {content}"
+        );
+    }
+    assert_eq!(fixture.finish().len(), 2);
 }
