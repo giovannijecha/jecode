@@ -4,6 +4,7 @@ use crate::test_support::Directory;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 pub struct Fixture {
     directory: Directory,
@@ -59,6 +60,22 @@ impl Fixture {
             Err(fs::TryLockError::WouldBlock) => true,
             Err(fs::TryLockError::Error(error)) => panic!("fixture server lock: {error}"),
         }
+    }
+    /// Waits for server process `pid` to end, within a bound that covers the
+    /// shutdown handshake and a kill during a loaded parallel run.
+    #[track_caller]
+    pub fn wait_stopped(&self, pid: u32, failure: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self.running(pid) {
+            assert!(Instant::now() < deadline, "{failure}");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    /// Lets the requests the fixture server holds (column 10) reply.
+    pub fn release(&self) {
+        let mut path = self.marker().into_os_string();
+        path.push("-release");
+        fs::write(path, "").unwrap();
     }
     pub fn profile(&self) -> Profile {
         let mut profile = Profile::draft_guided_rust();

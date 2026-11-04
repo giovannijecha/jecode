@@ -21,19 +21,6 @@ fn run(runtime: &Runtime, fixture: &Fixture, path: PathBuf) -> Outcome {
     )
 }
 
-fn wait_for(fixture: &Fixture, text: &str, failure: &str) {
-    // Shutdown includes the handshake timeouts; a loaded parallel run needs
-    // headroom beyond their nominal 1.2 s.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !fs::read_to_string(fixture.marker())
-        .unwrap_or_default()
-        .contains(text)
-    {
-        assert!(Instant::now() < deadline, "{failure}");
-        thread::sleep(Duration::from_millis(25));
-    }
-}
-
 fn registered(runtime: &Runtime) -> Arc<Entry> {
     let entries = runtime.0.entries.lock().unwrap();
     assert_eq!(entries.len(), 1);
@@ -55,18 +42,19 @@ fn off_then_on_without_a_request_starts_a_fresh_instance() {
     let runtime = Runtime::with_home(home);
     let first = run(&runtime, &fixture, fixture.sample());
     assert_eq!(first.status, "ready", "{}", first.detail);
+    let pid = runtime.statuses()[0].pid.expect("server pid");
     store.set_enabled(&profile.id, false).unwrap();
-    wait_for(&fixture, "exit", "Off did not stop the idle instance");
+    // A server slow to read exit is killed; either way it must stop.
+    fixture.wait_stopped(pid, "Off did not stop the idle instance");
     assert!(runtime.statuses().is_empty());
     store.set_enabled(&profile.id, true).unwrap();
     let again = run(&runtime, &fixture, fixture.sample());
     assert_eq!(again.status, "ready", "{}", again.detail);
+    let pid = runtime.statuses()[0].pid.expect("server pid");
     runtime.shutdown();
     drop(runtime);
     assert!(
-        fs::read_to_string(fixture.marker())
-            .unwrap()
-            .contains("exit"),
+        !fixture.running(pid),
         "The last runtime owner did not wait for its instances to stop"
     );
 }
@@ -135,14 +123,7 @@ fn turn_off_returns_while_a_request_is_in_flight() {
     assert!(runtime.statuses().is_empty());
     assert_eq!(stuck.join().unwrap().status, "settings_changed");
     // Unanswered, the shutdown handshake times out and the server is killed.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while fixture.running(pid) {
-        assert!(
-            Instant::now() < deadline,
-            "Turn off did not stop the instance"
-        );
-        thread::sleep(Duration::from_millis(25));
-    }
+    fixture.wait_stopped(pid, "Turn off did not stop the instance");
 }
 
 #[test]

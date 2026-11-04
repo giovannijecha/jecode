@@ -58,6 +58,13 @@ fn main() {
                 if text.contains("\"character\":8") {
                     std::thread::sleep(std::time::Duration::from_secs(60));
                 }
+                // Held in flight until the test releases it.
+                if text.contains("\"character\":9") {
+                    let release = format!("{marker}-release");
+                    while !std::path::Path::new(&release).exists() {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
                 if text.contains("\"character\":7") {
                     error(&mut output, id, "Fixture request failed");
                     continue;

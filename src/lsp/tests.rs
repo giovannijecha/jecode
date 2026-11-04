@@ -188,18 +188,9 @@ fn cancelled_startup_does_not_suppress_restart_and_off_shuts_down() {
         &Cancellation::default(),
     );
     assert_eq!(result.status, "ready", "{}", result.detail);
+    let pid = runtime.statuses()[0].pid.expect("server pid");
     store.set_enabled(&profile.id, false).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    while !std::fs::read_to_string(fixture.marker())
-        .unwrap()
-        .contains("exit")
-    {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "Off did not shut down the owned server"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(25));
-    }
+    fixture.wait_stopped(pid, "Off did not shut down the owned server");
     let unavailable = runtime.execute(
         fixture.workspace(),
         &[],
@@ -435,6 +426,7 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
     let first_runtime = runtime.clone();
     let first_path = fixture.sample();
     let first_root = fixture.workspace().to_path_buf();
+    // The fixture holds this request until the release below.
     let first = std::thread::spawn(move || {
         first_runtime.execute(
             &first_root,
@@ -442,7 +434,7 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
             Request::Definition {
                 path: first_path,
                 line: 1,
-                column: 6,
+                column: 10,
                 server: None,
             },
             &Cancellation::default(),
@@ -457,7 +449,7 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
     {
         assert!(
             std::time::Instant::now() < deadline,
-            "Slow call was not dispatched"
+            "Held call was not dispatched"
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
@@ -483,11 +475,13 @@ fn cancelling_a_queued_call_does_not_dispatch_or_stop_shared_server() {
     cancel.cancel();
     let outcome = queued.join().unwrap();
     assert_eq!(outcome.status, "cancelled");
-    // The queued call must not wait for the slow 500 ms reply it was queued behind.
+    // The held call cannot finish before its release, so it is still
+    // running unless the cancellation waited for it to time out.
     assert!(
         !first.is_finished(),
-        "cancellation waited for the slow call"
+        "cancellation waited for the held call"
     );
+    fixture.release();
     assert_eq!(first.join().unwrap().status, "ready");
     assert_eq!(
         std::fs::read_to_string(fixture.marker())
