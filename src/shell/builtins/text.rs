@@ -1,5 +1,6 @@
+use super::super::streams::Source;
 use super::*;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 
 /// `tr -d`, streaming standard input to standard output.
 pub(super) fn tr(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
@@ -113,6 +114,14 @@ pub(super) fn head_tail(shell: &mut Shell, args: &[String], io: &Io) -> Outcome 
                     errors.push_str(&format!("{name}: {operand}: {error}\n"));
                 }
                 result => result?,
+            }
+            // The next command on this standard input reads what was not selected.
+            // A pipe opened as a file cannot seek and keeps nothing, as in GNU head.
+            if file.is_none()
+                && let Source::File(input) = &io.stdin
+            {
+                let unread = lines.buffer().len() as i64;
+                let _ = (&*input).seek(SeekFrom::Current(-unread));
             }
         }
         writer.flush()

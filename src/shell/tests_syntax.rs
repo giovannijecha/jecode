@@ -107,6 +107,19 @@ fn head_and_tail_report_a_missing_file_and_go_on() {
 }
 
 #[test]
+fn head_leaves_a_redirected_file_after_its_lines() {
+    let (directory, mut shell) = shell();
+    let script = "seq 1 3 > f; (head -n1; cat) < f > rest; \
+        (head -n1; head -n1; cat) < f > steps; (head -n0; cat) < f > none; \
+        (tail -n1; cat) < f > all_read";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "rest"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "steps"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "none"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "all_read"), "3\n");
+}
+
+#[test]
 fn missing_programs_name_the_built_ins() {
     let (directory, mut shell) = shell();
     assert_eq!(
