@@ -355,7 +355,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             "Context",
             selecting(
                 columns,
-                Selector::context_settings(80, crate::backend::CacheRetention::Short),
+                Selector::context_settings(80, crate::backend::CacheRetention::Long),
             ),
         ),
         (

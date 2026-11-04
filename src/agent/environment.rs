@@ -91,10 +91,10 @@ impl Agent {
                 "jecode_cache_prefix".into(),
                 Value::number(PROMPT.trim().len()),
             );
-            let retention = self.cache_retention();
-            if retention != CacheRetention::default() {
-                fields.insert(retention::MARKER.into(), Value::string(retention.id()));
-            }
+            fields.insert(
+                retention::MARKER.into(),
+                Value::string(self.cache_retention().id()),
+            );
         }
         message
     }

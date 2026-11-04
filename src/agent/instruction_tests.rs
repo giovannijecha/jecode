@@ -180,6 +180,11 @@ fn one_hour_prompt_cache_reaches_claude_breakpoints_from_the_next_request() {
         .set_model("anthropic/claude-sonnet-4.5".into())
         .unwrap();
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    assert_eq!(
+        agent.cache_retention(),
+        crate::backend::CacheRetention::Long
+    );
+    agent.set_cache_retention(crate::backend::CacheRetention::Short);
     agent.run_turn("First request", &mut |_| Ok(())).unwrap();
     // A running conversation's shared preference changes like auto-compact.
     agent

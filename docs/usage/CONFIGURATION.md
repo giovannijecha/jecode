@@ -70,16 +70,18 @@ choose a model with a larger context window, then continue.
 ## Prompt cache
 
 Claude models reuse the unchanged start of each request from the provider's
-prompt cache, which is much cheaper than sending it again. By default that
-cache lasts five minutes after its last use: after a longer break, the next
-request writes the whole conversation to the cache again.
+prompt cache, which is much cheaper than sending it again. The provider's
+default cache lasts five minutes after its last use: after a longer break, the
+next request writes the whole conversation to the cache again.
 
-`/settings` → **Context** → **Prompt cache** chooses **5 minutes** or
-**1 hour**. With one hour, a request after a break reads the conversation from
-the cache instead, but every cache write costs more (twice the input price
-instead of 1.25 times, at Anthropic's list prices). One hour pays off when you
-pause for more than five minutes during longer work; five minutes is cheaper
-when requests follow each other closely. The choice applies from the next
+`/settings` → **Context** → **Prompt cache** chooses **1 hour**, the default,
+or **5 minutes**. With one hour, a request after a break reads the
+conversation from the cache instead, but every cache write costs more (twice
+the input price instead of 1.25 times, at Anthropic's list prices). In a
+measured working session with two breaks of six and a half minutes, five
+minutes rewrote 24,000 and 112,000 tokens after the breaks and one hour about
+1,700 in total; one hour came out cheaper overall. Five minutes is cheaper
+only when requests follow each other without breaks. The choice applies from the next
 request, in the current conversation and its collaborators, for Claude on
 Anthropic, the Claude plan and OpenRouter. Other models keep their provider's
 automatic caching. Jecode's own instructions and tools, shared by every
@@ -137,7 +139,7 @@ the default:
     "effort": "default",
     "routing": { "provider/model-id": { "mode": "auto" } }
   },
-  "context": { "auto_compact_percent": 80, "prompt_cache": "5m" },
+  "context": { "auto_compact_percent": 80, "prompt_cache": "1h" },
   "permissions": { "default": "workspace" }
 }
 ```
@@ -150,7 +152,7 @@ the default:
 | `backends.<id>.routing` | Saved routing per model ID. |
 | `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
-| `context.prompt_cache` | How long Claude prompt caches last: `5m` or `1h`. Default `5m`. |
+| `context.prompt_cache` | How long Claude prompt caches last: `1h` or `5m`. Default `1h`. |
 | `permissions.default` | `read`, `workspace` or `full`. Default `workspace`. |
 
 To pin an endpoint by hand, set the model's routing entry, in the `openrouter`

@@ -86,7 +86,9 @@ impl Agent {
             prepared: None,
             context: crate::context::Context::default(),
             auto_compact: Arc::new(AtomicU8::new(crate::context::AUTO_COMPACT_DEFAULT)),
-            cache_retention: Arc::default(),
+            cache_retention: Arc::new(std::sync::atomic::AtomicBool::new(
+                crate::backend::CacheRetention::default() == crate::backend::CacheRetention::Long,
+            )),
             project_instructions: String::new(),
             skills: crate::skills::Library::default(),
             used_skills: std::collections::BTreeSet::new(),

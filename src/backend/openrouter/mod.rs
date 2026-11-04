@@ -322,7 +322,7 @@ impl OpenRouter {
         let marker = cache::marker(if claude_cache {
             retention
         } else {
-            Default::default()
+            crate::backend::CacheRetention::Short
         });
         if marked {
             cache::mark_recent(&mut messages, &marker);

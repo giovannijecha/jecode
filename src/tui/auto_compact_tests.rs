@@ -105,7 +105,7 @@ fn a_saved_threshold_applies_to_this_and_new_conversations() {
         .map(|line| line.plain())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rows.contains("Context") && rows.contains("55% · 5 minutes"));
+    assert!(rows.contains("Context") && rows.contains("55% · 1 hour"));
     app.close_selector();
     assert_eq!(app.state.editor.text, "kept draft");
     app.state.editor.take();
