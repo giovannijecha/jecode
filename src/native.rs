@@ -61,9 +61,10 @@ fn plausible(path: &Path, length: usize) -> bool {
 }
 
 fn root() -> Result<PathBuf, String> {
+    // Adapters are content-addressed and published atomically, so test processes
+    // share one folder, as installed Jecode processes share `cache/native`.
     #[cfg(test)]
-    return Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(format!(".tmp/native-tests-{}", std::process::id())));
+    return Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp/native-tests"));
     #[cfg(not(test))]
     {
         let store = crate::config::Store::discover()?;
