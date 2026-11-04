@@ -56,7 +56,7 @@ pub(super) fn todo() -> Value {
     );
     super::tool(
         "todo_list",
-        "Own the current conversation's plan; the user reads it in /todo. Keep one for work with several steps and update it when a step finishes or the plan changes, not before each call. get reads it; set atomically replaces the full task list and records a chronological snapshot. Keep existing task IDs when changing title, status or note; use cancelled for work removed by a decision. Only the main agent marks its plan and decides when a task is done, after reviewing any collaborator's returned work. Collaborators keep their own plans and never complete the main agent's tasks. Calls run in order even with parallel:true.",
+        "Own the current conversation's plan; the user reads it in /todo. Each set is a full request of your own: skip the plan for a fix or change you can finish in a few calls; for longer work set it once and update it when a task finishes or the plan changes, not to mark the next task in progress. get reads it; set atomically replaces the full task list and records a chronological snapshot. Keep existing task IDs when changing title, status or note; use cancelled for work removed by a decision. Only the main agent marks its plan and decides when a task is done, after reviewing any collaborator's returned work. Collaborators keep their own plans and never complete the main agent's tasks. Calls run in order even with parallel:true.",
         Value::object([
             (
                 "action",
