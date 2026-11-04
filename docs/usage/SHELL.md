@@ -28,8 +28,11 @@ interactive terminal; see [Tools](TOOLS.md#commands).
   subshell. `wait` waits for background jobs started in the same call.
 - **Per-command variables.** `NAME=value command` sets `NAME` for that command
   only, including built-ins, pipeline stages and background jobs.
-- **Redirection.** `<`, `>`, `>>`, `2>`, `2>>` and `>&2`. A descriptor number
-  counts only directly before `>`, so `echo 1 > file` writes `1`. `/dev/null`
+- **Redirection.** `<`, `>`, `>>`, `2>`, `2>>`, `>&2`, `2>&1`, `&>` and `&>>`.
+  Here-documents (`<<WORD`, `<<-WORD`) and here-strings (`<<< WORD`) feed
+  standard input. A quoted here-document delimiter keeps its body literal;
+  an unquoted delimiter expands variables and command substitutions. A descriptor
+  number counts only directly before `>`, so `echo 1 > file` writes `1`. `/dev/null`
   works on every platform. A redirection alone, such as `> file`, creates or
   truncates the file.
 - **Control flow.** `if … then … elif … else … fi`, `for NAME in WORDS; do …;
@@ -38,6 +41,8 @@ interactive terminal; see [Tools](TOOLS.md#commands).
   their closing word (`done > file`) and work in `&&`/`||` lists and pipelines.
 - **Braces.** `{}` and braces without a comma or `..` are ordinary characters,
   so `find . -exec cmd {} \;` and `HEAD@{1}` work.
+- **Path patterns.** Unquoted `*`, `?` and bracket classes expand to matching
+  paths. A pattern without matches stays literal; quoted patterns stay literal.
 
 On Windows, variable names are case-insensitive like the environment, so `$PATH`
 reads `Path`.
@@ -46,7 +51,7 @@ reads `Path`.
 
 `pwd`, `cd`, `echo`, `printf`, `cat`, `ls`, `mkdir`, `cp`, `mv`, `rm`, `touch`,
 `test` and `[`, `sleep`, `env`, `export`, `set -e` and `set +e`, `wc -c`, `seq`,
-`tr -d`, `mktemp`, `wait`, `true`, `false`, `:` and `exit`.
+`tr -d`, `head`, `tail`, `grep`, `mktemp`, `wait`, `true`, `false`, `:` and `exit`.
 
 Built-ins support only the options they implement; for example, `wc` supports
 only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
@@ -57,14 +62,17 @@ only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
 - `mv` falls back to copy and delete when moving across volumes.
 - `mktemp` accepts `-d` and a template ending in at least six `X` characters,
   and never replaces an existing path.
+- `head` and `tail` select lines with `-n N` or `-N`; `tail` also accepts
+  `-n +N`. `grep` supports basic and extended regular expressions, fixed
+  strings, common selection and context options, and recursive file search.
+  Perl regular expressions (`-P`) are unsupported.
 
 ## Not supported
 
-The interpreter is deliberately small. It does not do glob expansion (`*`
-stays literal), unquoted word splitting, brace expansion, here-documents,
-functions, aliases, arrays, traps, arithmetic expansion (`$(( ))`), backtick
-substitution, brace groups (`{ …; }`) or interactive job control. `>&2` is the
-only descriptor duplication.
+The interpreter is deliberately small. It does not do unquoted word splitting,
+brace expansion, functions, aliases, arrays, traps, arithmetic expansion
+(`$(( ))`), backtick substitution, brace groups (`{ …; }`) or interactive job
+control.
 
 Unsupported syntax and unbalanced quotes fail with an error before anything
 runs. When a task needs one of these features, the model can call an installed

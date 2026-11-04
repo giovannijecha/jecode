@@ -276,6 +276,21 @@ fn here_documents_feed_standard_input() {
 }
 
 #[test]
+fn background_lists_keep_here_document_bodies() {
+    let (directory, mut shell) = shell();
+    let script = "cat <<FIRST | cat > piped &\nfrom pipeline\nFIRST\n\
+        (cat <<SECOND) > grouped &\nfrom subshell\nSECOND\n\
+        (cat <<INSIDE\ninside subshell\nINSIDE\n) > inside &\n\
+        cat <<LEFT | cat <<RIGHT > multiple &\nignored\nLEFT\nsecond body\nRIGHT\n\
+        wait";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "piped"), "from pipeline\n");
+    assert_eq!(read(&directory, "grouped"), "from subshell\n");
+    assert_eq!(read(&directory, "inside"), "inside subshell\n");
+    assert_eq!(read(&directory, "multiple"), "second body\n");
+}
+
+#[test]
 fn unquoted_patterns_expand_to_sorted_paths() {
     let (directory, mut shell) = shell();
     let script = "mkdir -p src/nested test; touch src/b.js src/a.js src/c.rs src/.hidden.js src/nested/d.js test/x.test.js; \

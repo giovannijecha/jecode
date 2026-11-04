@@ -128,8 +128,10 @@ impl Parser<'_> {
                 _ => {}
             }
             let start = self.tokens[self.index].start;
+            let first_token = self.index;
             let and_or = self.and_or()?;
             let end = self.tokens[self.index - 1].end;
+            let last_token = self.index;
             let background = self.eat_op("&");
             if !background && !self.eat_op(";") {
                 match self.peek() {
@@ -139,7 +141,22 @@ impl Parser<'_> {
             }
             items.push(Item {
                 and_or,
-                background: background.then(|| self.script[start..end].to_owned()),
+                background: background.then(|| {
+                    let mut source = self.script[start..end].to_owned();
+                    let mut appended = false;
+                    for (body_start, body_end) in self.tokens[first_token..last_token]
+                        .iter()
+                        .filter_map(|token| token.body)
+                        .filter(|(body_start, _)| *body_start >= end)
+                    {
+                        if !appended {
+                            source.push('\n');
+                            appended = true;
+                        }
+                        source.push_str(&self.script[body_start..body_end]);
+                    }
+                    source
+                }),
             });
         }
         Ok(items)

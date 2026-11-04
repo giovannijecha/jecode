@@ -33,6 +33,7 @@ pub(super) fn start(
             token: Token::Op("<<<"),
             start: at,
             end: chars.position,
+            body: None,
         });
         return Ok(());
     }
@@ -75,6 +76,7 @@ pub(super) fn start(
         token: Token::Op("<<"),
         start: at,
         end: chars.position,
+        body: None,
     });
     documents.push(Document {
         delimiter,
@@ -86,6 +88,7 @@ pub(super) fn start(
         token: Token::Word(Word(Vec::new())),
         start: chars.position,
         end: chars.position,
+        body: None,
     });
     Ok(())
 }
@@ -97,6 +100,7 @@ pub(super) fn bodies(
     documents: &mut Vec<Document>,
 ) -> Result<(), String> {
     for document in documents.drain(..) {
+        let body_start = chars.position;
         let mut text = String::new();
         loop {
             let mut line = String::new();
@@ -131,6 +135,7 @@ pub(super) fn bodies(
             expanded(&text)?
         };
         tokens[document.token].token = Token::Word(Word(parts));
+        tokens[document.token].body = Some((body_start, chars.position));
     }
     Ok(())
 }

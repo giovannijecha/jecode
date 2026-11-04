@@ -14,6 +14,8 @@ pub struct Spanned {
     pub token: Token,
     pub start: usize,
     pub end: usize,
+    /// Original here-document body and closing line, if this is its target.
+    pub body: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,6 +97,7 @@ impl Pending {
             token: Token::Word(Word(std::mem::take(&mut self.word))),
             start: self.start,
             end,
+            body: None,
         });
         self.unquoted.clear();
         self.started = false;
@@ -219,6 +222,7 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
                     token: Token::Op(op),
                     start: at,
                     end: chars.position,
+                    body: None,
                 });
                 continue;
             }
@@ -266,6 +270,7 @@ fn separator(tokens: &mut Vec<Spanned>, at: usize) {
             token: Token::Op(";"),
             start: at,
             end: at,
+            body: None,
         });
     }
 }
