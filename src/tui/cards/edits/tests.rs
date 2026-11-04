@@ -211,6 +211,49 @@ fn a_failed_file_is_one_row_in_call_order_on_a_failed_card() {
     );
 }
 
+#[test]
+fn an_emptied_file_changed_though_it_wrote_no_bytes() {
+    let emptied: File<'_> = (SESSION, Some(("a\nb\nc\n", "")));
+    let files = [emptied, (TOKEN, Some(("x\n", "x\ny\n")))];
+    let rows = plain(&card(&call(&files, false, false), 80, false).rows);
+    assert!(rows[0].ends_with("  2 files · +1 −3 lines"), "{rows:#?}");
+    assert!(rows.contains(&format!("  {SESSION}  −3")), "{rows:#?}");
+    assert!(rows.iter().any(|row| row.contains("1 − a")), "{rows:#?}");
+    // Alone it reads as today's single-file card does.
+    let rows = plain(&card(&call(&files[..1], false, false), 80, false).rows);
+    assert_eq!(
+        rows[0],
+        format!(" UPDATE  {SESSION}  −3 lines"),
+        "{rows:#?}"
+    );
+    assert!(rows.iter().any(|row| row.contains("1 − a")), "{rows:#?}");
+    // A replacement that changed nothing also reports no bytes, without a diff.
+    let mut quiet = call(&files, false, false);
+    quiet.result = Some(Value::object([(
+        "files",
+        Value::Array(vec![
+            Value::object([
+                ("path", Value::string(SESSION)),
+                ("bytes_written", Value::number(0)),
+            ]),
+            Value::object([
+                ("path", Value::string(TOKEN)),
+                ("bytes_written", Value::number(4)),
+            ]),
+        ]),
+    )]));
+    quiet.change = Change::several(vec![(
+        TOKEN.to_string(),
+        Change::between(Some("x\n"), "x\ny\n").unwrap(),
+    )]);
+    let rows = plain(&card(&quiet, 80, false).rows);
+    assert!(
+        rows.contains(&format!("  {SESSION}  No changes")),
+        "{rows:#?}"
+    );
+    assert!(rows[0].ends_with("  1 file · +1 line"), "{rows:#?}");
+}
+
 /// A call the permission gate stopped before any file was touched.
 fn gated(outcome: &str, key: &str, reason: &str, expanded: bool) -> Call {
     let mut gated = call(&three(), false, expanded);

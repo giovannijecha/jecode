@@ -108,7 +108,10 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
     if result.get("error").is_some() {
         return summary::line(tool, Status::Failed, None);
     }
-    let written = entries.iter().filter(|entry| written(entry)).count();
+    let written = entries
+        .iter()
+        .filter(|entry| written(entry, change_of(tool, entry)))
+        .count();
     if written == 0 {
         return if failed > 0 {
             Line::new(&format!("No files changed · {failed} failed"), BAD)
@@ -161,20 +164,21 @@ fn sections(
             origin += 1;
             continue;
         }
-        let change = tool.change.and_then(|change| change.file(path));
+        let change = change_of(tool, entry);
+        let written = written(entry, change);
         let arguments = argument(tool.arguments, path);
         if !single {
             rows.push(heading(
                 path,
-                tail(entry, change, arguments),
+                tail(written, change, arguments),
                 columns,
                 origin,
             ));
             origin += 1;
         }
         let notices = content::notices("edit", entry, columns, expanded);
-        if !written(entry) || (!expanded && opened == OPEN_DIFFS) {
-            if written(entry) {
+        if !written || (!expanded && opened == OPEN_DIFFS) {
+            if written {
                 more += 1;
                 more_rows += change.map_or(0, |change| change.hunks.iter().map(Vec::len).sum());
             }
@@ -238,9 +242,9 @@ fn heading(path: &str, tail: Line, columns: usize, origin: usize) -> Line {
     line.at_source(origin).gutter("  ", DIM).shortened(columns)
 }
 
-fn tail(entry: &Value, change: Option<&Change>, arguments: Option<&Value>) -> Line {
+fn tail(written: bool, change: Option<&Change>, arguments: Option<&Value>) -> Line {
     match change {
-        _ if !written(entry) => Line::new("No changes", MUTED),
+        _ if !written => Line::new("No changes", MUTED),
         Some(change) if change.added + change.removed > 0 => {
             counts(change.added, change.removed, false)
         }
@@ -312,8 +316,13 @@ fn replacements(arguments: Option<&Value>) -> String {
     format!("Applied {count} {noun}")
 }
 
-fn written(entry: &Value) -> bool {
-    entry.get("bytes_written").and_then(Value::as_usize) > Some(0)
+/// A retained diff proves the file changed; without one, the result decides.
+fn written(entry: &Value, change: Option<&Change>) -> bool {
+    change.is_some() || crate::events::file_changed(entry)
+}
+
+fn change_of<'a>(tool: &Tool<'a>, entry: &Value) -> Option<&'a Change> {
+    tool.change?.file(field(entry, "path"))
 }
 
 /// The call's entry for `path`.

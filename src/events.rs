@@ -432,10 +432,7 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             .iter()
             .filter(|file| file.get("error").is_some())
             .count();
-        let changed = files
-            .iter()
-            .filter(|file| file.get("bytes_written").and_then(Value::as_usize) > Some(0))
-            .count();
+        let changed = files.iter().filter(|file| file_changed(file)).count();
         let mut summary = match changed {
             0 => "no files changed".to_owned(),
             changed => format!("changed {}", counted(changed, "file")),
@@ -474,8 +471,10 @@ pub fn process_status(result: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+mod batch;
 mod description;
 mod lsp;
+pub use batch::file_changed;
 pub use description::{description, edited, target};
 pub(crate) use lsp::diagnostic_counts;
 

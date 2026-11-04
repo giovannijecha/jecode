@@ -150,6 +150,55 @@ fn multi_file_edits_name_their_files_and_count_outcomes() {
 }
 
 #[test]
+fn an_emptied_file_counts_as_changed_and_a_no_op_does_not() {
+    use crate::{cancel::Cancellation, checkpoints::session::Session, tools::Begun};
+    let root = crate::test_support::Directory::new();
+    let home = crate::test_support::Directory::new();
+    std::fs::write(root.path().join("emptied.rs"), "all\n").unwrap();
+    std::fs::write(root.path().join("same.rs"), "same\n").unwrap();
+    let mut tools = crate::tools::Tools::new(root.path()).unwrap();
+    tools.configure_checkpoints(Session::open(home.path(), tools.root()));
+    let file = |path: &str, old: &str, new: &str| {
+        Value::object([
+            ("path", Value::string(path)),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string(old)),
+                    ("new_text", Value::string(new)),
+                ])]),
+            ),
+        ])
+    };
+    let run = |files: Vec<Value>| {
+        let arguments = Value::object([("files", Value::Array(files))]).encode();
+        tools
+            .execute_begun(
+                Begun::default(),
+                "edit",
+                &arguments,
+                &Cancellation::default(),
+            )
+            .result
+    };
+    let result = run(vec![
+        file("emptied.rs", "all\n", ""),
+        file("same.rs", "same", "same"),
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("emptied.rs")).unwrap(),
+        ""
+    );
+    assert_eq!(
+        tool_summary("edit", &result),
+        "changed 1 file",
+        "{result:?}"
+    );
+    let result = run(vec![file("same.rs", "same", "same")]);
+    assert_eq!(tool_summary("edit", &result), "no files changed");
+}
+
+#[test]
 fn routine_description_overrides_command_and_blank_falls_back() {
     for (name, key, command, fallback) in [
         (
