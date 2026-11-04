@@ -100,7 +100,9 @@ util-linux `script` tool; the macOS fixture needs the system `script` and `tty`
 utilities. Do not run the private `native_pty_fixture` child directly. Other
 Windows fixtures cover permission requests
 (`native_tests::native_permissions::native_windows_permissions`) and light
-terminal backgrounds (`native_tests::native_background::`).
+terminal backgrounds (`native_tests::native_background::`). The fullscreen
+fixture also paints tool cards through the console, including multi-file edits
+and the steps of one `steps` call.
 
 The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
 the list, add, form and Advanced panels (including unchecked and signed-out

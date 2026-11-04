@@ -200,6 +200,17 @@ pub fn target(name: &str, arguments: &Value) -> String {
             return paths.join(", ");
         }
     }
+    // Only a refused call reaches a card; steps that run have their own.
+    if name == "steps" {
+        let tools: Vec<_> = arguments
+            .get("steps")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|step| step.get("tool")?.as_str())
+            .collect();
+        return tools.join(", ");
+    }
     let path = arguments
         .get("path")
         .and_then(Value::as_str)
