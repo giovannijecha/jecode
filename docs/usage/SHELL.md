@@ -53,8 +53,9 @@ reads `Path`.
 ## Built-in commands
 
 `pwd`, `cd`, `echo`, `printf`, `cat`, `ls`, `mkdir`, `cp`, `mv`, `rm`, `touch`,
-`test` and `[`, `sleep`, `env`, `export`, `set -e` and `set +e`, `wc -c`, `seq`,
-`tr -d`, `head`, `tail`, `grep`, `mktemp`, `wait`, `true`, `false`, `:` and `exit`.
+`test` and `[`, `sleep`, `env`, `printenv`, `export`, `set -e` and `set +e`,
+`wc -c`, `seq`, `tr -d`, `head`, `tail`, `grep`, `mktemp`, `wait`, `true`, `false`,
+`:` and `exit`.
 
 Built-ins support only the options they implement; for example, `wc` supports
 only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
