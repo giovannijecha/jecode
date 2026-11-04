@@ -85,7 +85,7 @@ impl Agent {
                 next.set_routing(preference);
             }
         }
-        next.set_conversation(self.persistence.as_ref().map(crate::sessions::Handle::id));
+        next.set_conversation(self.conversation_key());
         if prepare {
             next.prepare().map_err(|error| self.redact(&error))?;
         }

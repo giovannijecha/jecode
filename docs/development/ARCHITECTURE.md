@@ -93,6 +93,9 @@ function of the record, so request prefixes stay identical and caches keep
 advancing. Sessions saved earlier get the same view, at the cost of one cache
 miss when they resume.
 
+Collaborators send the main conversation's cache key (`prompt_cache_key`,
+OpenRouter `session_id`), since they share most of its request prefix.
+
 ### Streaming and persistence
 
 Backends deliver text as deltas. The agent masks credentials incrementally,

@@ -45,6 +45,8 @@ pub struct Agent {
     collaboration_seen: usize,
     /// The `steps` call now running; its steps' results collect here.
     chain: Option<steps::Chain>,
+    /// A collaborator's main conversation, for provider cache affinity.
+    parent_conversation: Option<String>,
 }
 
 impl Agent {
@@ -105,6 +107,7 @@ impl Agent {
             inherited_project_instructions: None,
             collaboration_seen: 0,
             chain: None,
+            parent_conversation: None,
         };
         agent.register_backend(agent.client.services());
         agent.clear();
