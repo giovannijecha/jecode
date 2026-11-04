@@ -210,6 +210,22 @@ fn grep_writes_the_original_bytes_of_a_line() {
     assert_eq!(bytes("boundary"), b"");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn grep_reads_special_files_that_report_no_size() {
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("grep -c MemTotal /proc/meminfo > count"), 0);
+    assert_eq!(read(&directory, "count"), "1\n");
+}
+
+#[test]
+fn a_file_that_is_also_the_output_cannot_feed_itself() {
+    let directory = crate::test_support::Directory::new();
+    fs::write(directory.path().join("both"), "hit\n").unwrap();
+    assert_eq!(bounded_script("grep hit both >> both", &directory), 0);
+    assert_eq!(read(&directory, "both"), "hit\nhit\n");
+}
+
 #[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));

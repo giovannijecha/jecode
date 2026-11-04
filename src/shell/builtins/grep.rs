@@ -46,11 +46,12 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         } else {
             match fs::File::open(shell.path(name)) {
                 // The size at opening bounds the read, so a file that is also
-                // the output cannot feed itself.
-                Ok(file) => {
-                    let size = file.metadata().map_or(u64::MAX, |metadata| metadata.len());
-                    Box::new(file.take(size))
-                }
+                // the output cannot feed itself. Special files such as those
+                // in /proc report no size and are read to their end.
+                Ok(file) => match file.metadata().map_or(0, |metadata| metadata.len()) {
+                    0 => Box::new(file),
+                    size => Box::new(file.take(size)),
+                },
                 Err(error) => {
                     errors.push(format!("grep: {name}: {error}"));
                     continue;
