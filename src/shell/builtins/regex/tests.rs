@@ -1,4 +1,4 @@
-use super::{Edges, Regex, Syntax};
+use super::{Edges, Regex, Syntax, parser};
 
 fn found(pattern: &str, text: &str) -> Option<(usize, usize)> {
     Regex::new(&[pattern], Syntax::Extended, Edges::Any, false)
@@ -23,6 +23,33 @@ fn alternatives_and_repetition_choose_the_leftmost_longest_match() {
     assert_eq!(found("a*|b", "b"), Some((0, 1)));
     assert_eq!(found("^a+$", "aaa"), Some((0, 3)));
     assert_eq!(found("^a+$", "zaaa"), None);
+}
+
+/// Compiles on a stack with room left of the 1 MiB a shell can run on.
+fn compiles(pattern: String) -> Result<(), String> {
+    std::thread::Builder::new()
+        .stack_size(768 * 1024)
+        .spawn(move || {
+            Regex::new(&[&pattern], Syntax::Extended, Edges::Any, false).map(|regex| drop(regex))
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+#[test]
+fn deep_nesting_is_refused_before_it_can_overflow_the_stack() {
+    let groups = format!("{}a{}", "(".repeat(5000), ")".repeat(5000));
+    let error = compiles(groups).unwrap_err();
+    assert!(error.contains("nests too deeply"), "{error}");
+    let stacked = format!("a{}", "*".repeat(100_000));
+    let error = compiles(stacked).unwrap_err();
+    assert!(error.contains("nests too deeply"), "{error}");
+    let mut deepest = "a".to_owned();
+    for _ in 0..parser::MAX_GROUPS {
+        deepest = format!("({deepest}{})", "{1}".repeat(parser::MAX_STACKED));
+    }
+    assert_eq!(compiles(deepest), Ok(()));
 }
 
 #[test]

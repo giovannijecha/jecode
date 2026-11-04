@@ -4,6 +4,11 @@ use super::{Boundary, Class, Item, Node, word};
 
 const UNMATCHED_BRACKET: &str = "unmatched [, [^, [:, [. or [= in pattern";
 const RANGE_END: &str = "invalid range end in bracket expression";
+const TOO_DEEP: &str = "regular expression nests too deeply";
+
+/// Limits on nesting, because parsing and compiling recurse over it.
+pub(super) const MAX_GROUPS: usize = 32;
+pub(super) const MAX_STACKED: usize = 4;
 
 pub(super) fn parse(pattern: &str, basic: bool) -> Result<Node, String> {
     let mut parser = Parser {
@@ -93,6 +98,7 @@ impl Parser {
     }
 
     fn quantified(&mut self, mut node: Node) -> Result<Node, String> {
+        let mut stacked = 0;
         loop {
             let (min, max) = if self.eat('*') {
                 (0, None)
@@ -108,6 +114,10 @@ impl Parser {
             } else {
                 return Ok(node);
             };
+            stacked += 1;
+            if stacked > MAX_STACKED {
+                return Err(TOO_DEEP.into());
+            }
             node = Node::Repeat(Box::new(node), min, max);
         }
     }
@@ -156,6 +166,9 @@ impl Parser {
     /// anchors. Basic `$` anchors only at the end of its branch.
     fn atom(&mut self, first: bool) -> Result<Node, String> {
         if self.eat('(') {
+            if self.groups == MAX_GROUPS {
+                return Err(TOO_DEEP.into());
+            }
             self.groups += 1;
             let inner = self.alternatives()?;
             self.groups -= 1;
