@@ -1,6 +1,7 @@
-//! `grep` over files, directories (`-r`) or standard input, with the options
-//! models reach for: `-E -F -G -P -i -v -n -c -l -L -q -s -h -H -o -w -x -r`,
-//! `-e`, `-m`, `-A -B -C`, `--include`, `--exclude` and `--exclude-dir`.
+//! `grep` over files, directories (`-r`, `-R`) or standard input, with the
+//! options models reach for: `-E -F -G -i -v -n -c -l -L -q -s -h -H -o -w -x
+//! -a -I`, `-e`, `-m`, `-A -B -C`, `--binary-files`, `--include`, `--exclude`
+//! and `--exclude-dir`. Perl syntax (`-P`) is refused.
 
 #[path = "grep/options.rs"]
 mod options;
@@ -38,7 +39,15 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     let names = options
         .names
         .unwrap_or(options.recursive || options.operands.len() > 1);
-    let mut writer = &io.stdout;
+    // Standard input may be a live stream, so its matches appear line by line.
+    let stdout = &io.stdout;
+    let mut whole_lines = std::io::LineWriter::new(stdout);
+    let mut chunks = std::io::BufWriter::with_capacity(64 * 1024, stdout);
+    let writer: &mut dyn Write = if files.iter().any(|name| name == "-") {
+        &mut whole_lines
+    } else {
+        &mut chunks
+    };
     let mut selected = false;
     let mut printed = false;
     for name in &files {
@@ -64,15 +73,7 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         } else {
             name
         };
-        match search(
-            &options,
-            &regex,
-            source,
-            shown,
-            names,
-            &mut writer,
-            &mut printed,
-        ) {
+        match search(&options, &regex, source, shown, names, writer, &mut printed) {
             Ok(found) => selected |= found,
             Err(error) if closed(&error) => {
                 shell.broken_output = true;

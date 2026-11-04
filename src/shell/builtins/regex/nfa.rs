@@ -68,6 +68,7 @@ impl Machine {
             return None;
         }
         let mut active = vec![NONE; self.states.len()];
+        let mut next = vec![NONE; self.states.len()];
         let mut queue = VecDeque::new();
         let mut best: Option<(usize, usize)> = None;
         let mut before = previous(text, from);
@@ -91,7 +92,7 @@ impl Machine {
                 return best;
             }
             let Some((ch, length)) = current else { break };
-            let mut next = vec![NONE; self.states.len()];
+            next.fill(NONE);
             for (state, start) in active.iter().copied().enumerate() {
                 if start == NONE {
                     continue;
@@ -102,7 +103,7 @@ impl Machine {
                     }
                 }
             }
-            active = next;
+            std::mem::swap(&mut active, &mut next);
             before = Some(ch);
             at += length;
         }
