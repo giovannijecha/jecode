@@ -156,12 +156,13 @@ impl Policy {
             ("NVM_SYMLINK", variable("NVM_SYMLINK").map(PathBuf::from)),
             ("FNM_DIR", variable("FNM_DIR").map(PathBuf::from)),
         ];
+        let mut manager_paths = Vec::new();
         for (name, path) in homes {
             let Some(path) = path.filter(|path| path.is_absolute() && path.is_dir()) else {
                 continue;
             };
             self.allow_existing_read_directory(&path, protected_home)?;
-            self.add_node_path(&path);
+            manager_paths.push(path.clone());
             self.runtime_homes.push((name, path));
         }
         if let Some(directory) = variable("PATH").and_then(|path| {
@@ -169,6 +170,18 @@ impl Policy {
                 .find(|directory| directory.is_absolute() && directory.join("node.exe").is_file())
         }) {
             self.add_node_path(&directory);
+            // A file link can place node.exe on another drive even when its
+            // PATH directory is not itself linked.
+            if let Ok(target) = std::fs::canonicalize(directory.join("node.exe"))
+                && let Some(parent) = target.parent()
+            {
+                self.add_node_path(parent);
+            }
+            // Version managers can keep the selected runtime away from the
+            // executable on PATH. Their drives are needed only with Node.
+            for path in manager_paths {
+                self.add_node_path(&path);
+            }
         }
         Ok(())
     }

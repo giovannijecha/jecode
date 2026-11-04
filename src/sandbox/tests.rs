@@ -311,6 +311,49 @@ fn node_manager_homes_are_read_only_and_passed_by_name() {
 }
 
 #[test]
+fn empty_node_manager_homes_do_not_make_drives_enumerable() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let local = home.path().join("Local");
+    let volta = local.join("Volta");
+    let nvm = home.path().join("nvm");
+    let fnm = home.path().join("fnm");
+    let empty_path = home.path().join("bin");
+    for path in [&volta, &nvm, &fnm, &empty_path] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let mut policy = Policy::for_command(Level::Workspace, project.path(), None, None)
+        .unwrap()
+        .unwrap();
+    let variables = |name: &str| match name {
+        "LOCALAPPDATA" => Some(local.clone().into()),
+        "NVM_HOME" => Some(nvm.clone().into()),
+        "FNM_DIR" => Some(fnm.clone().into()),
+        "PATH" => Some(empty_path.clone().into()),
+        _ => None,
+    };
+    policy.allow_node_tools_from(variables, None).unwrap();
+    for path in [&volta, &nvm, &fnm] {
+        assert!(policy.read.contains(&std::fs::canonicalize(path).unwrap()));
+    }
+    assert!(policy.enumerable_roots().is_empty());
+
+    std::fs::write(empty_path.join("node.exe"), "").unwrap();
+    let mut installed = Policy::for_command(Level::Workspace, project.path(), None, None)
+        .unwrap()
+        .unwrap();
+    installed.allow_node_tools_from(variables, None).unwrap();
+    for path in [&volta, &nvm, &fnm] {
+        assert!(
+            installed
+                .node_paths
+                .contains(&std::fs::canonicalize(path).unwrap())
+        );
+    }
+    assert!(!installed.enumerable_roots().is_empty());
+}
+
+#[test]
 fn installed_node_makes_only_its_drive_roots_enumerable() {
     let project = Directory::new();
     let home = Directory::new();

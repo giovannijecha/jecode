@@ -92,10 +92,10 @@ filesystem policy on the command and every process it starts:
 - Installed Rust toolchain data is readable, and Cargo's cache is redirected to
   the temporary area.
 - Node.js runtimes installed through Volta, nvm-windows or fnm are readable.
-  When Node.js is installed, through one of these managers or as `node.exe` on
-  `PATH`, commands can also list the drives that hold the working folder, the
-  temporary area and the runtime, because Node.js checks each drive root while
-  resolving script and module paths. Windows grants this listing for a whole
+  When `node.exe` is on `PATH`, including a version-manager shim, commands can
+  also list the drives that hold the working folder, the temporary area, the
+  executable and configured manager homes, because Node.js checks each drive
+  root while resolving script and module paths. Windows grants this listing for a whole
   drive: a command can see the names and metadata of files and folders there,
   including your user profile and the Jecode home, but cannot read their
   contents or write outside the writable folders. On Windows builds without
@@ -120,6 +120,9 @@ commands. Start Jecode in a narrower project directory, or choose Full.
 - **Windows hosts without the required support** (Process Security Environment
   1.1 with filesystem and network policies) also refuse Workspace commands.
   There is no automatic fallback to Full on any platform.
+- **Deep paths on Windows.** Working or session temporary paths can exceed the
+  native adapter's legacy Windows path limits and prevent Workspace commands
+  from starting. Use a shorter project or configuration location.
 - **Interactive terminals** (`exec` with `tty: true`) require Full on every
   platform.
 - **Browser control** requires Full, because browser file access and downloads
