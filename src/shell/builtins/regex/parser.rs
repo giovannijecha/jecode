@@ -97,10 +97,6 @@ impl Parser {
             } else {
                 return Ok(node);
             };
-            // A lazy marker changes which match is reported, not whether one exists.
-            if self.operator('?') {
-                self.eat('?');
-            }
             node = Node::Repeat(Box::new(node), min, max);
         }
     }

@@ -144,6 +144,15 @@ fn intervals_follow_gnu_grep() {
 }
 
 #[test]
+fn a_question_mark_after_a_repetition_makes_it_optional() {
+    selects(&[
+        ("b\n", "-E 'a+?b'", "b\n"),
+        ("b\nab\n", "-oE 'a*?b'", "b\nab\n"),
+        ("b\naab\n", "-oE 'a{2}?b'", "b\naab\n"),
+    ]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }
