@@ -37,6 +37,31 @@ pub(super) fn start(
         });
         return Ok(());
     }
+    let (delimiter, quoted, strip_tabs) = header(chars)?;
+    tokens.push(Spanned {
+        token: Token::Op("<<"),
+        start: at,
+        end: chars.position,
+        body: None,
+    });
+    documents.push(Document {
+        delimiter,
+        quoted,
+        strip_tabs,
+        token: tokens.len(),
+    });
+    tokens.push(Spanned {
+        token: Token::Word(Word(Vec::new())),
+        start: chars.position,
+        end: chars.position,
+        body: None,
+    });
+    Ok(())
+}
+
+/// What follows `<<` or `<<-`: the delimiter, whether any of it is quoted, and
+/// whether the body's leading tabs are stripped.
+pub(super) fn header(chars: &mut Cursor<'_>) -> Result<(String, bool, bool), String> {
     let strip_tabs = chars.peek() == Some('-');
     if strip_tabs {
         chars.next();
@@ -72,24 +97,41 @@ pub(super) fn start(
     if delimiter.is_empty() {
         return Err("here-document needs a delimiter word after <<".into());
     }
-    tokens.push(Spanned {
-        token: Token::Op("<<"),
-        start: at,
-        end: chars.position,
-        body: None,
-    });
-    documents.push(Document {
-        delimiter,
-        quoted,
-        strip_tabs,
-        token: tokens.len(),
-    });
-    tokens.push(Spanned {
-        token: Token::Word(Word(Vec::new())),
-        start: chars.position,
-        end: chars.position,
-        body: None,
-    });
+    Ok((delimiter, quoted, strip_tabs))
+}
+
+/// After a newline inside `$(...)`, skips the pending bodies as plain text. As
+/// in Bash, the substitution may close directly after a delimiter: `EOF)`.
+pub(super) fn skip_bodies(
+    chars: &mut Cursor<'_>,
+    documents: &mut Vec<(String, bool)>,
+) -> Result<(), String> {
+    for (delimiter, strip_tabs) in documents.drain(..) {
+        loop {
+            let rest = chars.rest();
+            let Some(line) = rest.split_inclusive('\n').next() else {
+                return Err(format!(
+                    "here-document is missing its closing {delimiter} line"
+                ));
+            };
+            let content = if strip_tabs {
+                line.trim_start_matches('\t')
+            } else {
+                line
+            };
+            let indent = line.len() - content.len();
+            if let Some(after) = content.strip_prefix(&delimiter)
+                && after.starts_with(')')
+            {
+                chars.advance(indent + delimiter.len());
+                return Ok(());
+            }
+            chars.advance(line.len());
+            if content.trim_end_matches('\n').trim_end_matches('\r') == delimiter {
+                break;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -143,10 +185,7 @@ pub(super) fn bodies(
 /// An unquoted body: `$` expansions apply and `\` escapes `$`, `` ` ``, `\`
 /// and newline; quotes are ordinary characters.
 fn expanded(text: &str) -> Result<Vec<Part>, String> {
-    let mut chars = Cursor {
-        chars: text.chars().peekable(),
-        position: 0,
-    };
+    let mut chars = Cursor::new(text);
     let mut parts = Vec::new();
     let mut literal = String::new();
     while let Some(ch) = chars.next() {

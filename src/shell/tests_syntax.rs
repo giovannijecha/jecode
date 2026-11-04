@@ -223,6 +223,33 @@ fn escaped_closing_parenthesis_stays_inside_command_substitution() {
 }
 
 #[test]
+fn command_substitution_reads_here_document_bodies_as_text() {
+    let (directory, mut shell) = shell();
+    let script = "echo \"$(cat <<'EOF'\nSubject\n\nit's a fix (for \"quotes)\nEOF\n)\" > message\n\
+        echo \"$(cat <<EOF\nvalue ) $(echo 'inner)')\nEOF\n)\" > expanded\n\
+        echo \"$(cat <<EOF\nbody\nEOF)\" > closed_on_delimiter\n\
+        echo \"$(cat <<-EOF\n\t' tabbed )\n\tEOF\n)\" > tabs\n\
+        echo \"$(cat <<A; cat <<B\n'a\nA\n)b\nB\n)\" > two\n\
+        echo $(tr -d o <<< \"foo)\") > here_string\n\
+        echo \"$(echo keep # don't close )\n)\" > comment\n\
+        echo \"$(echo not#comment)\" > hash\n";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(
+        read(&directory, "message"),
+        "Subject\n\nit's a fix (for \"quotes)\n"
+    );
+    assert_eq!(read(&directory, "expanded"), "value ) inner)\n");
+    assert_eq!(read(&directory, "closed_on_delimiter"), "body\n");
+    assert_eq!(read(&directory, "tabs"), "' tabbed )\n");
+    assert_eq!(read(&directory, "two"), "'a\n)b\n");
+    assert_eq!(read(&directory, "here_string"), "f)\n");
+    assert_eq!(read(&directory, "comment"), "keep\n");
+    assert_eq!(read(&directory, "hash"), "not#comment\n");
+    assert!(tokenize("echo \"$(cat <<EOF\nnever closed)\"").is_err());
+    assert!(tokenize("echo $(cat <<)").is_err());
+}
+
+#[test]
 fn set_e_stops_only_on_unhandled_failures() {
     let (directory, mut shell) = shell();
     let script = "set -e; false || true; false && true; if false; then :; fi; echo ok > ok; false; echo no > no";

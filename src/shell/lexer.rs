@@ -36,6 +36,7 @@ pub enum Part {
 }
 
 struct Cursor<'a> {
+    source: &'a str,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     position: usize,
 }
@@ -50,9 +51,27 @@ impl Iterator for Cursor<'_> {
     }
 }
 
-impl Cursor<'_> {
+impl<'a> Cursor<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            chars: source.chars().peekable(),
+            position: 0,
+        }
+    }
+
     fn peek(&mut self) -> Option<char> {
         self.chars.peek().copied()
+    }
+
+    fn rest(&self) -> &'a str {
+        &self.source[self.position..]
+    }
+
+    /// Moves forward by `length` bytes, which must end on a character boundary.
+    fn advance(&mut self, length: usize) {
+        let target = self.position + length;
+        while self.position < target && self.next().is_some() {}
     }
 }
 
@@ -122,10 +141,7 @@ impl Pending {
 }
 
 pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
-    let mut chars = Cursor {
-        chars: script.chars().peekable(),
-        position: 0,
-    };
+    let mut chars = Cursor::new(script);
     let mut tokens = Vec::new();
     let mut pending = Pending::default();
     let mut quote = None;
@@ -380,20 +396,24 @@ fn variable(next: char, chars: &mut Cursor<'_>) -> Result<Option<Part>, String> 
     }))
 }
 
+/// The source text up to the `)` closing a `$(`. Quotes, comments and
+/// here-document bodies may hold an unbalanced `)` or quote, so they are skipped
+/// as the substitution's own interpreter will read them.
 fn substitution(chars: &mut Cursor<'_>) -> Result<String, String> {
-    let mut script = String::new();
+    let start = chars.position;
     let mut depth = 1;
     let mut inner_quote = None;
-    let mut escaped = false;
-    for c in chars.by_ref() {
-        if escaped {
-            script.push(c);
-            escaped = false;
-            continue;
-        }
+    let mut word_start = true;
+    let mut documents = Vec::new();
+    loop {
+        let at = chars.position;
+        let Some(c) = chars.next() else {
+            return Err("unterminated command substitution".into());
+        };
+        let starts_word =
+            std::mem::replace(&mut word_start, c.is_whitespace() || ";&|(".contains(c));
         if c == '\\' && inner_quote != Some('\'') {
-            script.push(c);
-            escaped = true;
+            chars.next();
             continue;
         }
         if c == '\'' || c == '"' {
@@ -402,21 +422,37 @@ fn substitution(chars: &mut Cursor<'_>) -> Result<String, String> {
             } else if inner_quote.is_none() {
                 inner_quote = Some(c);
             }
+            continue;
         }
-        if inner_quote.is_none() {
-            if c == '(' {
-                depth += 1;
-            }
-            if c == ')' {
+        if inner_quote.is_some() {
+            continue;
+        }
+        match c {
+            '(' => depth += 1,
+            ')' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Ok(script);
+                    return Ok(chars.source[start..at].to_owned());
                 }
             }
+            '#' if starts_word => {
+                while chars.peek().is_some_and(|c| c != '\n') {
+                    chars.next();
+                }
+            }
+            '<' if chars.peek() == Some('<') => {
+                chars.next();
+                if chars.peek() == Some('<') {
+                    chars.next();
+                } else {
+                    let (delimiter, _, strip_tabs) = heredoc::header(chars)?;
+                    documents.push((delimiter, strip_tabs));
+                }
+            }
+            '\n' => heredoc::skip_bodies(chars, &mut documents)?,
+            _ => {}
         }
-        script.push(c);
     }
-    Err("unterminated command substitution".into())
 }
 
 /// Detects unquoted `{a,b}` or `{1..3}`, which Bash would expand. Literal
