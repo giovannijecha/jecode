@@ -29,9 +29,7 @@ fn alternatives_and_repetition_choose_the_leftmost_longest_match() {
 fn compiles(pattern: String) -> Result<(), String> {
     std::thread::Builder::new()
         .stack_size(768 * 1024)
-        .spawn(move || {
-            Regex::new(&[&pattern], Syntax::Extended, Edges::Any, false).map(|regex| drop(regex))
-        })
+        .spawn(move || Regex::new(&[&pattern], Syntax::Extended, Edges::Any, false).map(drop))
         .unwrap()
         .join()
         .unwrap()

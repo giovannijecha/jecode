@@ -197,7 +197,7 @@ fn set(pattern: &[Item]) -> Option<(Set, usize)> {
 
 /// `name:]` after `[:`, with how many items it spans. An unknown name matches
 /// nothing, so the pattern stays literal as in Bash.
-fn class_item(pattern: &[Item]) -> Option<(fn(char) -> bool, usize)> {
+fn class_item(pattern: &[Item]) -> Option<(ClassTest, usize)> {
     let end = pattern
         .windows(2)
         .position(|pair| pair == [Item::Literal(':'), Item::Meta(']')])?;
@@ -205,8 +205,11 @@ fn class_item(pattern: &[Item]) -> Option<(fn(char) -> bool, usize)> {
     Some((named_class(&name).unwrap_or(|_| false), end + 2))
 }
 
+/// Whether a character belongs to a POSIX class.
+type ClassTest = fn(char) -> bool;
+
 /// The test of a POSIX class such as `alpha`, for path and grep patterns.
-pub(super) fn named_class(name: &str) -> Option<fn(char) -> bool> {
+pub(super) fn named_class(name: &str) -> Option<ClassTest> {
     Some(match name {
         "alpha" => char::is_alphabetic,
         "digit" => |ch| ch.is_ascii_digit(),
