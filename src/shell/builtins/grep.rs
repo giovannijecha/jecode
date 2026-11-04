@@ -156,7 +156,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     (options.after, options.before) = (lines, lines);
                 }
                 "color" | "colour" | "binary-files" => {}
-                "extended-regexp" | "perl-regexp" => options.extended = true,
+                "extended-regexp" => options.extended = true,
+                "perl-regexp" => {
+                    return Err("grep: Perl regular expressions are unsupported".into());
+                }
                 "fixed-strings" => options.fixed = true,
                 "ignore-case" => options.insensitive = true,
                 "invert-match" => options.invert = true,
@@ -193,7 +196,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 }
             };
             match flag {
-                'E' | 'P' => options.extended = true,
+                'E' => options.extended = true,
+                'P' => return Err("grep: Perl regular expressions are unsupported".into()),
                 'G' => options.extended = false,
                 'F' => options.fixed = true,
                 'i' | 'y' => options.insensitive = true,
@@ -342,10 +346,11 @@ fn search(
     let mut last: Option<usize> = None;
     let lines_shown = !options.quiet && !options.count && options.listed.is_none();
     loop {
+        if options.max.is_some_and(|max| count >= max) && after == 0 {
+            break;
+        }
         bytes.clear();
-        if reader.read_until(b'\n', &mut bytes)? == 0
-            || options.max.is_some_and(|max| count >= max) && after == 0
-        {
+        if reader.read_until(b'\n', &mut bytes)? == 0 {
             break;
         }
         number += 1;
@@ -436,4 +441,37 @@ fn prefix(
         write!(writer, "{number}{separator}")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_count_zero_does_not_wait_for_standard_input() {
+        let (reader, writer) = io::pipe().unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let child = std::thread::spawn(move || {
+            let options = Options {
+                max: Some(0),
+                ..Options::default()
+            };
+            let regex = Regex::new("foo", false).unwrap();
+            let mut output = Vec::new();
+            sender
+                .send(search(
+                    &options,
+                    &regex,
+                    Box::new(reader),
+                    "-",
+                    false,
+                    &mut output,
+                ))
+                .unwrap();
+        });
+        let completed = receiver.recv_timeout(std::time::Duration::from_secs(1));
+        drop(writer);
+        child.join().unwrap();
+        assert!(!completed.unwrap().unwrap());
+    }
 }

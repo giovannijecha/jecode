@@ -95,3 +95,15 @@ fn grep_searches_trees_with_names_and_filters() {
     );
     assert_eq!(read(&directory, "status"), "2\n");
 }
+
+#[test]
+fn grep_extended_only_matching_uses_leftmost_longest() {
+    assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
+}
+
+#[test]
+fn grep_refuses_perl_patterns_it_cannot_interpret() {
+    let (status, output) = grep("grep -P 'ok(?= 1)' log");
+    assert_eq!(status, 2);
+    assert!(output.is_empty());
+}
