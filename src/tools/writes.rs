@@ -92,8 +92,8 @@ impl Tools {
         ))
     }
 
-    /// Two spellings of one file would edit it from two snapshots, so the
-    /// call is refused before any file changes.
+    /// Two spellings of one file would split its replacements across entries
+    /// that apply separately, so the call is refused before any file changes.
     fn distinct(&self, files: &[(&str, &Value)]) -> Result<(), String> {
         let mut seen: Vec<(PathBuf, &str)> = Vec::with_capacity(files.len());
         for &(path, _) in files {
