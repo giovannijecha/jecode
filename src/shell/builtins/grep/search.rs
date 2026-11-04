@@ -2,7 +2,7 @@
 
 use super::super::regex::Regex;
 use super::super::*;
-use super::Options;
+use super::options::{Binary, Options};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 
@@ -30,7 +30,11 @@ pub(super) fn search(
             break;
         }
         number += 1;
-        binary |= bytes.contains(&0);
+        binary |= options.binary != Binary::Text && bytes.contains(&0);
+        if binary && options.binary == Binary::WithoutMatch {
+            count = 0;
+            break;
+        }
         let line = String::from_utf8_lossy(&bytes);
         let line = line.trim_end_matches('\n').trim_end_matches('\r');
         let chars: Vec<char> = line.chars().collect();

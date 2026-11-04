@@ -69,6 +69,9 @@ only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
   expressions (`-P`) are unsupported.
 - `grep -r` follows a link named as an operand and skips links and junctions
   met during the walk; `-R` follows them too and stops at loops.
+- `grep` treats input holding a NUL byte as binary and reports only that it
+  matches. `-a` or `--binary-files=text` searches it as text; `-I` or
+  `--binary-files=without-match` treats it as not matching.
 
 ## Not supported
 

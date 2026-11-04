@@ -1,4 +1,5 @@
 use super::tests::shell;
+use super::tests_grep_syntax::over;
 use super::tests_runtime::bounded_script;
 use super::*;
 
@@ -152,6 +153,34 @@ fn recursive_search_skips_a_dangling_junction() {
     fs::remove_dir(root.join("gone")).unwrap();
     assert_eq!(shell.run("grep -r hit tree > walked"), 0);
     assert_eq!(read(&directory, "walked"), "tree/a:hit\n");
+}
+
+#[test]
+fn binary_input_follows_the_chosen_mode() {
+    let input = "a\0b\n";
+    for (args, status, output) in [
+        ("a", 0, "Binary file in matches\n"),
+        ("-c a", 0, "1\n"),
+        ("-l a", 0, "in\n"),
+        ("-a a", 0, "a\0b\n"),
+        ("--text a", 0, "a\0b\n"),
+        ("--binary-files=text a", 0, "a\0b\n"),
+        ("--binary-files binary a", 0, "Binary file in matches\n"),
+        ("-av zz", 0, "a\0b\n"),
+        ("-aI a", 1, ""),
+        ("-I a", 1, ""),
+        ("--binary-files=without-match a", 1, ""),
+        ("-Ic a", 1, "0\n"),
+        ("-IL a", 1, "in\n"),
+        ("-Ia a", 0, "a\0b\n"),
+        ("--binary-files=other a", 2, ""),
+    ] {
+        assert_eq!(
+            over(input, args),
+            (status, output.to_owned()),
+            "grep {args}"
+        );
+    }
 }
 
 #[test]

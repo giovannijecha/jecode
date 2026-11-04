@@ -1,5 +1,15 @@
 //! Command-line options of `grep`.
 
+/// How to treat input holding a NUL byte: report only that it matches (`-U`,
+/// the default), search it as text (`-a`) or treat it as not matching (`-I`).
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum Binary {
+    #[default]
+    Report,
+    Text,
+    WithoutMatch,
+}
+
 #[derive(Default)]
 pub(super) struct Options {
     pub(super) patterns: Vec<String>,
@@ -19,6 +29,7 @@ pub(super) struct Options {
     pub(super) recursive: bool,
     /// `-R`: follow links met during a recursive walk.
     pub(super) follow: bool,
+    pub(super) binary: Binary,
     pub(super) after: usize,
     pub(super) before: usize,
     pub(super) max: Option<usize>,
@@ -68,7 +79,16 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                     let lines = number(&value()?)?;
                     (options.after, options.before) = (lines, lines);
                 }
-                "color" | "colour" | "binary-files" => {}
+                "color" | "colour" | "binary" => {}
+                "text" => options.binary = Binary::Text,
+                "binary-files" => {
+                    options.binary = match value()?.as_str() {
+                        "binary" => Binary::Report,
+                        "text" => Binary::Text,
+                        "without-match" => Binary::WithoutMatch,
+                        _ => return Err("grep: unknown binary-files type".into()),
+                    };
+                }
                 "extended-regexp" => options.extended = true,
                 "perl-regexp" => {
                     return Err("grep: Perl regular expressions are unsupported".into());
@@ -129,7 +149,9 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                 'x' => options.whole = true,
                 'r' => (options.recursive, options.follow) = (true, false),
                 'R' => (options.recursive, options.follow) = (true, true),
-                'I' | 'a' | 'U' => {}
+                'U' => {}
+                'a' => options.binary = Binary::Text,
+                'I' => options.binary = Binary::WithoutMatch,
                 'e' => options.patterns.push(value()?),
                 'm' => options.max = Some(number(&value()?)?),
                 'A' => options.after = number(&value()?)?,

@@ -4,7 +4,7 @@ use super::tests::shell;
 use super::*;
 
 /// Runs `grep ARGS in` with `input` in the file `in`.
-fn over(input: &str, args: &str) -> (i32, String) {
+pub(super) fn over(input: &str, args: &str) -> (i32, String) {
     let (directory, mut shell) = shell();
     fs::write(directory.path().join("in"), input).unwrap();
     let status = shell.run(&format!("grep {args} in > out 2> err"));
