@@ -99,21 +99,11 @@ impl Document {
                 let arguments = call.arguments.as_str();
                 let mut arguments =
                     json::parse(arguments).unwrap_or_else(|_| Value::string(arguments));
-                if name == "agent"
-                    && let Value::Object(fields) = &mut arguments
-                {
-                    fields.remove("display_number");
-                }
-                if name == "agent"
-                    && let Some(id) = arguments.get("id").and_then(Value::as_str)
-                    && let Some(number) = display_numbers.get(id)
-                    && let Value::Object(fields) = &mut arguments
-                {
-                    fields.insert("display_number".into(), Value::number(*number));
-                }
+                numbered(name, &mut arguments, &display_numbers);
                 let result = json::parse(string(message, "content").unwrap()).unwrap();
                 if name == "steps" && result.get("steps").is_some() {
-                    latest_tool = step_records(&mut records, id, &arguments, &result);
+                    latest_tool =
+                        step_records(&mut records, id, &arguments, &result, &display_numbers);
                     continue;
                 }
                 latest_tool = Some(records.len());
@@ -131,12 +121,31 @@ impl Document {
     }
 }
 
+/// An agent card shows the number saved with its collaborator, never the model's.
+fn numbered(name: &str, arguments: &mut Value, numbers: &HashMap<String, usize>) {
+    if name != "agent" {
+        return;
+    }
+    let Value::Object(fields) = arguments else {
+        return;
+    };
+    fields.remove("display_number");
+    let number = fields
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| numbers.get(id));
+    if let Some(number) = number {
+        fields.insert("display_number".into(), Value::number(*number));
+    }
+}
+
 /// One card per step that ran, with the same identifiers as when it was live.
 fn step_records(
     records: &mut Vec<Record>,
     id: &str,
     arguments: &Value,
     result: &Value,
+    numbers: &HashMap<String, usize>,
 ) -> Option<usize> {
     let calls = arguments.get("steps").and_then(Value::as_array)?;
     let results = result.get("steps").and_then(Value::as_array)?;
@@ -148,13 +157,14 @@ fn step_records(
         ) else {
             continue;
         };
-        let arguments = match call.get("arguments") {
+        let mut arguments = match call.get("arguments") {
             Some(Value::String(text)) => {
                 json::parse(text).unwrap_or_else(|_| Value::string(text.as_str()))
             }
             Some(value) => value.clone(),
             None => Value::object([]),
         };
+        numbered(tool, &mut arguments, numbers);
         latest = Some(records.len());
         records.push(Record::Tool {
             id: format!("{id}_s{}", index + 1),

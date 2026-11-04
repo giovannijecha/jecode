@@ -193,6 +193,65 @@ fn resumed_agent_calls_keep_the_number_saved_with_their_collaborator() {
 }
 
 #[test]
+fn a_resumed_agent_step_keeps_its_number_too() {
+    let directory = Directory::new();
+    let mut doc = Document::new(
+        directory.path().to_path_buf(),
+        "fixture/model".into(),
+        Effort::Default,
+    )
+    .unwrap();
+    let wait = Value::object([
+        ("action", Value::string("wait")),
+        ("id", Value::string("a3")),
+    ]);
+    let step = Value::object([("tool", Value::string("agent")), ("arguments", wait)]);
+    doc.messages = vec![
+        message("system", "Fixture"),
+        message("user", "Review"),
+        Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "tool_calls",
+                Value::Array(vec![tool_call(
+                    "chain",
+                    "steps",
+                    Value::object([("steps", Value::Array(vec![step]))]),
+                )]),
+            ),
+        ]),
+        Value::object([
+            ("role", Value::string("tool")),
+            ("tool_call_id", Value::string("chain")),
+            (
+                "content",
+                Value::string(r#"{"steps":[{"tool":"agent","result":{}}]}"#),
+            ),
+        ]),
+    ];
+    doc.events = vec![Value::object([
+        ("type", Value::string("collaboration")),
+        ("after_message", Value::number(2)),
+        (
+            "records",
+            Value::Array(vec![Value::object([
+                ("id", Value::string("a3")),
+                ("number", Value::number(1)),
+            ])]),
+        ),
+    ])];
+    let arguments = doc
+        .records()
+        .into_iter()
+        .find_map(|record| match record {
+            Record::Tool { arguments, .. } => Some(arguments),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(crate::events::target("agent", &arguments), "wait AGENT 1");
+}
+
+#[test]
 fn large_histories_restore_all_messages_and_events_in_conversation_order() {
     let directory = Directory::new();
     let mut doc = Document::new(
