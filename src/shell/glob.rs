@@ -13,14 +13,18 @@ pub(super) enum Item {
 /// Expands `pattern` relative to `cwd`; `None` when it has no unquoted
 /// metacharacter or matches nothing.
 pub(super) fn expand(pattern: &[Item], cwd: &Path) -> Option<Vec<String>> {
-    if !pattern
-        .iter()
-        .any(|item| matches!(item, Item::Meta('*' | '?' | '[')))
-    {
+    // A `[` with nothing to close it, as in the command `[ -f x ]`, is a
+    // literal, and reading the directory for it would slow every test.
+    let closes = |at: usize| pattern[at..].contains(&Item::Meta(']'));
+    if !pattern.iter().enumerate().any(|(at, item)| match item {
+        Item::Meta('*' | '?') => true,
+        Item::Meta('[') => closes(at),
+        _ => false,
+    }) {
         return None;
     }
     let components: Vec<&[Item]> = pattern
-        .split(|item| matches!(item, Item::Literal('/' | '\\') | Item::Meta('/')))
+        .split(|item| matches!(item, Item::Literal('/' | '\\')))
         .collect();
     let mut prefixes = vec![String::new()];
     for (index, component) in components.iter().enumerate() {
@@ -57,14 +61,18 @@ pub(super) fn expand(pattern: &[Item], cwd: &Path) -> Option<Vec<String>> {
             let Ok(entries) = std::fs::read_dir(&directory) else {
                 continue;
             };
+            // Names first: only a match in a middle component needs a stat.
             let mut names: Vec<String> = entries
                 .filter_map(Result::ok)
-                .filter(|entry| last || entry.path().is_dir())
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .filter(|name| {
-                    !name.starts_with('.') || component.first() == Some(&Item::Literal('.'))
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let shown =
+                        !name.starts_with('.') || component.first() == Some(&Item::Literal('.'));
+                    (shown
+                        && matches(&tokens, &name.chars().collect::<Vec<_>>())
+                        && (last || entry.path().is_dir()))
+                    .then_some(name)
                 })
-                .filter(|name| matches(&tokens, &name.chars().collect::<Vec<_>>()))
                 .collect();
             names.sort();
             next.extend(names.iter().map(|name| joined(name)));
