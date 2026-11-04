@@ -99,6 +99,51 @@ fn only_media_views_wait_for_a_single_read() {
 }
 
 #[test]
+fn a_skill_read_through_paths_stays_tracked_after_a_rebuild() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let package = home.path().join("skills/audit");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(
+        package.join("SKILL.md"),
+        "---\nname: audit\ndescription: Audit a change.\n---\n\n# Audit\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("a.txt"), "alpha\n").unwrap();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.prepare_turn("Inspect").unwrap();
+    assert!(agent.skill_checkpoint_instructions().is_empty());
+    let call = ToolCall {
+        id: "batch".into(),
+        name: "read".into(),
+        arguments: paths(&["skill:audit", "a.txt"]).encode(),
+    };
+    let result = agent.execute_tool(&call);
+    agent.tool_result(&call, &result);
+    assert!(
+        agent
+            .skill_checkpoint_instructions()
+            .contains("skill:audit"),
+        "{}",
+        result.encode()
+    );
+    // Compaction and resume rebuild the list from the saved receipts.
+    agent.used_skills.clear();
+    agent.rebuild_used_skills();
+    assert!(
+        agent
+            .skill_checkpoint_instructions()
+            .contains("skill:audit"),
+        "{}",
+        result.encode()
+    );
+}
+
+#[test]
 fn invalid_batches_fail_before_reading() {
     let directory = Directory::new();
     std::fs::write(directory.path().join("a.txt"), "alpha\n").unwrap();

@@ -326,11 +326,8 @@ impl Agent {
                 Value::string(self.redactor.value(result).encode()),
             ),
         ]));
-        if let Some(reference) = result.get("skill_reference").and_then(Value::as_str)
-            && let Ok((name, _)) = crate::skills::parse_reference(reference)
-        {
-            self.used_skills.insert(name.to_owned());
-        }
+        self.used_skills
+            .extend(skills::delivered(result).map(str::to_owned));
     }
 
     fn cancel_calls(&mut self, calls: &[ToolCall]) {
