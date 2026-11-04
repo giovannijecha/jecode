@@ -34,14 +34,7 @@ impl Observer {
             .unwrap()
             .as_ref()
             .and_then(|(_, handle)| handle.as_ref())
-            .map(|handle| {
-                handle
-                    .store()
-                    .bucket()
-                    .join("collaboration")
-                    .join(handle.id())
-                    .join("child-home")
-            });
+            .map(|handle| handle.store().collaborator_home(&handle.id()));
         home.and_then(|home| Store::new(home, Path::new(&directory)).ok())
             .and_then(|store| store.read(&session).ok())
             .map_or_else(Vec::new, |document| changes(&document.events))

@@ -44,9 +44,27 @@ impl Area {
         })
     }
 
+    /// This area, for an agent the owning agent delegates to.
+    pub fn share(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            project: self.project.clone(),
+            session: self.session.clone(),
+            establishment: std::sync::Mutex::new(()),
+        }
+    }
+
     #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// An existing entry, found without creating the area.
+    pub fn existing(&self, alias: &str) -> Option<(PathBuf, PathBuf)> {
+        crate::disk::metadata_if_present(&self.path)
+            .ok()
+            .flatten()?;
+        self.file(alias, false).ok()
     }
 
     pub fn relative_path(&self, value: &str) -> Option<String> {

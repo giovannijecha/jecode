@@ -40,11 +40,8 @@ impl Agent {
             document.routing = self.routing().clone();
             document.permissions = Some(self.permissions.default_level());
             document.backend = self.backend_id().into();
-            self.tools.configure_session_output(
-                store.output_directory(),
-                &document.id,
-                self.redactor.clone(),
-            )?;
+            self.tools
+                .configure_output_store(store.outputs(&document.id, self.redactor.clone())?);
             self.tools
                 .configure_temporary(store.temporary_area(&document.id)?);
             self.tools.configure_attachments(store.attachments());

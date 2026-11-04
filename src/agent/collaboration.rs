@@ -258,15 +258,12 @@ impl Agent {
             .and_then(Path::parent)
             .ok_or("Invalid session storage location")?
             .to_path_buf();
-        let child_home = handle
-            .store()
-            .bucket()
-            .join("collaboration")
-            .join(handle.id())
-            .join("child-home");
+        let child_home = handle.store().collaborator_home(&handle.id());
         crate::disk::ensure_private_directory(&child_home)
             .map_err(|error| format!("Could not prepare collaborator storage: {error}"))?;
         child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
+        // References the main agent hands over resolve in its own storage.
+        child.tools.inherit_references(&self.tools);
         child.enable_checkpoints(&child_home);
         child.skills.configure(&home);
         let _ = child.configure_mcp(&home);
@@ -323,6 +320,8 @@ mod placement_tests;
 mod reclaim_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod reference_tests;
 #[cfg(test)]
 mod resume_tests;
 #[cfg(test)]

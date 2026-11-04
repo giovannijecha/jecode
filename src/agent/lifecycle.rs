@@ -98,11 +98,11 @@ impl Agent {
         self.collaboration_seen = 0;
         self.begin_checkpoints();
         if let Some(handle) = &self.persistence {
-            self.tools.configure_session_output(
-                handle.store().output_directory(),
-                &handle.id(),
-                self.redactor.clone(),
-            )?;
+            self.tools.configure_output_store(
+                handle
+                    .store()
+                    .outputs(&handle.id(), self.redactor.clone())?,
+            );
         }
         if let Some(temporary) = temporary {
             self.tools.configure_temporary(temporary);
@@ -193,11 +193,11 @@ impl Agent {
         };
         self.begin_checkpoints();
         let handle = self.persistence.as_ref().unwrap();
-        self.tools.configure_session_output(
-            handle.store().output_directory(),
-            &handle.id(),
-            self.redactor.clone(),
-        )?;
+        self.tools.configure_output_store(
+            handle
+                .store()
+                .outputs(&handle.id(), self.redactor.clone())?,
+        );
         self.tools.configure_temporary(temporary);
         Ok(match reclaimed {
             Some(note) => format!("{status} {note}"),
@@ -243,12 +243,7 @@ impl Agent {
         document.input.history.clear();
         document.input.question = None;
         let temporary = store.temporary_area(&document.id)?;
-        let outputs = crate::output::Store::for_session(
-            store.output_directory(),
-            self.tools.root().to_path_buf(),
-            &document.id,
-            self.redactor.clone(),
-        )?;
+        let outputs = store.outputs(&document.id, self.redactor.clone())?;
         let next = Handle::new(store, document, self.redactor.clone());
         let live_attachments = next.snapshot().input.attachment_ids();
         self.collaboration.stop_all();

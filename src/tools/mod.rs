@@ -74,6 +74,8 @@ pub struct Tools {
     root: PathBuf,
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
+    /// Temporary areas of the agents above this one, nearest first.
+    inherited_temporary: Vec<crate::scratch::Area>,
     attachments: Option<crate::attachments::Pool>,
     processes: processes::Registry,
     checkpoints: Option<Arc<Session>>,
@@ -104,6 +106,7 @@ impl Tools {
             ),
             root,
             temporary: None,
+            inherited_temporary: Vec::new(),
             attachments: None,
             processes: processes::Registry::default(),
             checkpoints: None,
@@ -255,7 +258,7 @@ impl Tools {
                             self.read_checkpoint(path, &arguments, cancellation)
                                 .map(|value| (value, None))
                         } else {
-                            let (root, arguments) = self.file_arguments(&arguments, false)?;
+                            let (root, arguments) = self.read_arguments(&arguments)?;
                             let (root, arguments) = match base {
                                 Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
                                 None => (root, arguments),

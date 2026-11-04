@@ -73,6 +73,30 @@ impl Store {
         self.bucket.join("outputs")
     }
 
+    /// Saved tool outputs of session `id`, which also resolve the outputs of
+    /// the collaborators it starts.
+    pub fn outputs(
+        &self,
+        id: &str,
+        redactor: crate::redact::Redactor,
+    ) -> Result<crate::output::Store, String> {
+        Ok(crate::output::Store::for_session(
+            self.output_directory(),
+            self.directory.clone(),
+            id,
+            redactor,
+        )?
+        .with_collaborators(self.collaborator_home(id)))
+    }
+
+    /// Where the collaborators of session `id` keep their own sessions.
+    pub fn collaborator_home(&self, id: &str) -> PathBuf {
+        self.bucket
+            .join("collaboration")
+            .join(id)
+            .join("child-home")
+    }
+
     /// Session-owned copies of attached files, shared by this project's sessions.
     pub fn attachments(&self) -> crate::attachments::Pool {
         crate::attachments::Pool::new(self.attachment_bucket.join("attachments"))
