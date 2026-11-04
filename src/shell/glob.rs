@@ -32,6 +32,7 @@ pub(super) fn expand(pattern: &[Item], cwd: &Path) -> Option<Vec<String>> {
                 Item::Meta(_) => None,
             })
             .collect();
+        let tokens = compile(component);
         let mut next = Vec::new();
         for prefix in &prefixes {
             let joined = |name: &str| {
@@ -63,7 +64,7 @@ pub(super) fn expand(pattern: &[Item], cwd: &Path) -> Option<Vec<String>> {
                 .filter(|name| {
                     !name.starts_with('.') || component.first() == Some(&Item::Literal('.'))
                 })
-                .filter(|name| matches(component, &name.chars().collect::<Vec<_>>()))
+                .filter(|name| matches(&tokens, &name.chars().collect::<Vec<_>>()))
                 .collect();
             names.sort();
             next.extend(names.iter().map(|name| joined(name)));
@@ -88,60 +89,120 @@ pub(super) fn name_matches(pattern: &str, name: &str) -> bool {
             _ => Item::Literal(ch),
         })
         .collect();
-    matches(&pattern, &name.chars().collect::<Vec<_>>())
+    matches(&compile(&pattern), &name.chars().collect::<Vec<_>>())
 }
 
-/// Whether `name` matches one path component of the pattern.
-fn matches(pattern: &[Item], name: &[char]) -> bool {
-    let Some((first, rest)) = pattern.split_first() else {
-        return name.is_empty();
-    };
-    match first {
-        Item::Meta('*') => (0..=name.len()).any(|skip| matches(rest, &name[skip..])),
-        Item::Meta('?') => !name.is_empty() && matches(rest, &name[1..]),
-        Item::Meta('[') => match class(rest) {
-            Some((accepts, after)) => {
-                !name.is_empty() && accepts(name[0]) && matches(after, &name[1..])
+/// One element of a compiled path component.
+enum Token {
+    Star,
+    One,
+    Char(char),
+    Set(Set),
+}
+
+/// A bracket expression.
+struct Set {
+    negated: bool,
+    ranges: Vec<(char, char)>,
+}
+
+impl Token {
+    fn accepts(&self, ch: char) -> bool {
+        match self {
+            Self::Star => false,
+            Self::One => true,
+            Self::Char(expected) => ch == *expected,
+            Self::Set(set) => {
+                set.ranges
+                    .iter()
+                    .any(|(low, high)| (*low..=*high).contains(&ch))
+                    != set.negated
             }
-            None => name.first() == Some(&'[') && matches(rest, &name[1..]),
-        },
-        Item::Literal(ch) | Item::Meta(ch) => name.first() == Some(ch) && matches(rest, &name[1..]),
+        }
     }
 }
 
-/// A bracket expression after `[`: its test and the pattern after `]`.
-fn class(pattern: &[Item]) -> Option<(impl Fn(char) -> bool + '_, &[Item])> {
-    let negated = matches!(
-        pattern.first(),
-        Some(Item::Literal('!' | '^') | Item::Meta('!' | '^'))
-    );
-    let body = &pattern[usize::from(negated)..];
-    // A `]` first in the expression is a member, not its end.
-    let end = body
-        .iter()
-        .enumerate()
-        .skip(1)
-        .find(|(_, item)| **item == Item::Meta(']'))
-        .map(|(index, _)| index)?;
-    let members: Vec<char> = body[..end]
-        .iter()
-        .map(|item| match item {
-            Item::Literal(ch) | Item::Meta(ch) => *ch,
-        })
-        .collect();
-    let accepts = move |ch: char| {
-        let mut index = 0;
-        let mut found = false;
-        while index < members.len() {
-            if index + 2 < members.len() && members[index + 1] == '-' {
-                found |= (members[index]..=members[index + 2]).contains(&ch);
-                index += 3;
-            } else {
-                found |= members[index] == ch;
-                index += 1;
+/// A `[` with no closing `]` is an ordinary character.
+fn compile(pattern: &[Item]) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut at = 0;
+    while let Some(item) = pattern.get(at) {
+        at += 1;
+        tokens.push(match item {
+            Item::Meta('*') => Token::Star,
+            Item::Meta('?') => Token::One,
+            Item::Meta('[') => match set(&pattern[at..]) {
+                Some((set, length)) => {
+                    at += length;
+                    Token::Set(set)
+                }
+                None => Token::Char('['),
+            },
+            Item::Literal(ch) | Item::Meta(ch) => Token::Char(*ch),
+        });
+    }
+    tokens
+}
+
+/// The bracket expression after a `[` and how many items it spans, its `]`
+/// included. A `]` first in the expression is a member, not its end.
+fn set(pattern: &[Item]) -> Option<(Set, usize)> {
+    let negated = matches!(pattern.first(), Some(Item::Literal('!' | '^')));
+    let first = usize::from(negated);
+    let mut ranges = Vec::new();
+    let mut at = first;
+    loop {
+        let item = *pattern.get(at)?;
+        if item == Item::Meta(']') && at > first {
+            return Some((Set { negated, ranges }, at + 1));
+        }
+        let low = character(item);
+        match (pattern.get(at + 1), pattern.get(at + 2)) {
+            (Some(Item::Literal('-')), Some(high)) if *high != Item::Meta(']') => {
+                ranges.push((low, character(*high)));
+                at += 3;
+            }
+            _ => {
+                ranges.push((low, low));
+                at += 1;
             }
         }
-        found != negated
-    };
-    Some((accepts, &body[end + 1..]))
+    }
+}
+
+fn character(item: Item) -> char {
+    match item {
+        Item::Literal(ch) | Item::Meta(ch) => ch,
+    }
+}
+
+/// Whether `name` matches a whole compiled component. Only the latest `*` is
+/// ever retried, so the work stays proportional to pattern times name length.
+fn matches(tokens: &[Token], name: &[char]) -> bool {
+    let (mut token, mut at) = (0, 0);
+    let mut retry: Option<(usize, usize)> = None;
+    loop {
+        match tokens.get(token) {
+            Some(Token::Star) => {
+                token += 1;
+                retry = Some((token, at));
+                continue;
+            }
+            Some(next) if name.get(at).is_some_and(|ch| next.accepts(*ch)) => {
+                token += 1;
+                at += 1;
+                continue;
+            }
+            None if at == name.len() => return true,
+            _ => {}
+        }
+        match &mut retry {
+            Some((resume, from)) if *from < name.len() => {
+                *from += 1;
+                token = *resume;
+                at = *from;
+            }
+            _ => return false,
+        }
+    }
 }

@@ -1,4 +1,5 @@
 use super::tests::shell;
+use super::tests_runtime::bounded_script;
 use super::*;
 use lexer::{Token, tokenize};
 
@@ -400,6 +401,17 @@ fn patterns_list_only_paths_that_exist_and_keep_dangling_links() {
     assert_eq!(read(&directory, "listed"), "dangling\nreal\n");
     assert_eq!(read(&directory, "status"), "0\n");
     assert_eq!(read(&directory, "named"), "dangling\n");
+}
+
+#[test]
+fn many_stars_on_a_long_name_stay_fast() {
+    let directory = crate::test_support::Directory::new();
+    let name = "a".repeat(120);
+    fs::write(directory.path().join(&name), "").unwrap();
+    let script = "echo *a*a*a*a*a*a*a*a*b > unmatched; echo *a*a*a*a*a*a*a*a* > matched";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(read(&directory, "unmatched"), "*a*a*a*a*a*a*a*a*b\n");
+    assert_eq!(read(&directory, "matched"), format!("{name}\n"));
 }
 
 #[test]
