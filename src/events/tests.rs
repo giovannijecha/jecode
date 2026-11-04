@@ -149,6 +149,90 @@ fn multi_file_edits_name_their_files_and_count_outcomes() {
     }
 }
 
+fn member(path: &str, field: (&str, Value), checkpoint: Option<Value>) -> Value {
+    let mut member = Value::object([("path", Value::string(path)), field]);
+    if let (Value::Object(fields), Some(checkpoint)) = (&mut member, checkpoint) {
+        fields.insert("checkpoint".into(), checkpoint);
+    }
+    member
+}
+
+fn batch(members: Vec<Value>) -> Value {
+    Value::object([("files", Value::Array(members))])
+}
+
+#[test]
+fn multi_file_edits_warn_about_each_members_checkpoint() {
+    let receipt = |status: &str, reason: Option<&str>| match reason {
+        Some(reason) => Value::object([
+            ("status", Value::string(status)),
+            ("reason", Value::string(reason)),
+        ]),
+        None => Value::object([("status", Value::string(status))]),
+    };
+    let written = |path, checkpoint| member(path, ("bytes_written", Value::number(4)), checkpoint);
+    let full = || receipt("none", Some("disk full"));
+    for (members, expected) in [
+        (
+            vec![
+                written("a.rs", Some(receipt("saved", None))),
+                written("b.rs", None),
+            ],
+            "changed 2 files",
+        ),
+        (
+            vec![
+                written("a.rs", Some(receipt("saved", None))),
+                written("b.rs", Some(receipt("partial", None))),
+            ],
+            "changed 2 files; checkpoint partial (b.rs)",
+        ),
+        (
+            vec![
+                written("a.rs", Some(full())),
+                written("b.rs", Some(receipt("saved", None))),
+                written("c.rs", Some(full())),
+            ],
+            "changed 3 files; checkpoint none: disk full (a.rs, c.rs)",
+        ),
+        (
+            vec![
+                written("a.rs", Some(full())),
+                written("b.rs", Some(receipt("partial", Some("locked")))),
+                member("c.rs", ("error", Value::string("no match")), None),
+            ],
+            "changed 2 files; 1 failed; checkpoint none: disk full (a.rs); checkpoint partial: locked (b.rs)",
+        ),
+    ] {
+        assert_eq!(tool_summary("edit", &batch(members)), expected);
+    }
+    // One file keeps its own wording.
+    let single = Value::object([("bytes_written", Value::number(4)), ("checkpoint", full())]);
+    assert_eq!(
+        tool_summary("edit", &single),
+        "wrote 4 bytes; checkpoint none: disk full"
+    );
+}
+
+#[test]
+fn multi_path_reads_count_the_files_they_could_not_read() {
+    let read = |path| member(path, ("content", Value::string("1: a\n")), None);
+    let missed = |path| member(path, ("error", Value::string("not found")), None);
+    for (members, expected) in [
+        (vec![read("a.rs"), read("b.rs")], "read 2 files"),
+        (
+            vec![read("a.rs"), missed("b.rs")],
+            "read 1 file; 1 not read",
+        ),
+        (
+            vec![missed("a.rs"), missed("b.rs")],
+            "no files read; 2 not read",
+        ),
+    ] {
+        assert_eq!(tool_summary("read", &batch(members)), expected);
+    }
+}
+
 #[test]
 fn an_emptied_file_counts_as_changed_and_a_no_op_does_not() {
     use crate::{cancel::Cancellation, checkpoints::session::Session, tools::Begun};

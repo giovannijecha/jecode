@@ -89,11 +89,12 @@ impl<F: FnMut(Event) -> Result<(), String>> EventSink for F {
 }
 
 pub fn tool_summary(name: &str, result: &Value) -> String {
-    let summary = outcome_summary(name, result);
-    match checkpoint_warning(result) {
-        Some(warning) => format!("{summary}; {warning}"),
-        None => summary,
-    }
+    checkpoint_warning(result)
+        .into_iter()
+        .chain(batch::warnings(result))
+        .fold(outcome_summary(name, result), |summary, warning| {
+            format!("{summary}; {warning}")
+        })
 }
 
 /// A checkpoint problem that people should see next to a tool result.
@@ -425,21 +426,9 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         }
         return summary;
     }
-    if name == "edit"
-        && let Some(files) = result.get("files").and_then(Value::as_array)
+    if let Some(files) = result.get("files").and_then(Value::as_array)
+        && let Some(summary) = batch::summary(name, files)
     {
-        let failed = files
-            .iter()
-            .filter(|file| file.get("error").is_some())
-            .count();
-        let changed = files.iter().filter(|file| file_changed(file)).count();
-        let mut summary = match changed {
-            0 => "no files changed".to_owned(),
-            changed => format!("changed {}", counted(changed, "file")),
-        };
-        if failed > 0 {
-            summary.push_str(&format!("; {failed} failed"));
-        }
         return summary;
     }
     if let Some(bytes) = result.get("bytes_written").and_then(Value::as_usize) {
