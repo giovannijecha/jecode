@@ -318,6 +318,22 @@ fn background_lists_keep_here_document_bodies() {
 }
 
 #[test]
+fn background_lists_leave_out_bodies_of_earlier_commands() {
+    let (directory, mut shell) = shell();
+    let script = "cat <<A > first; (echo x > second\ntouch injected\nA\necho y > third) &\n\
+        wait\n\
+        cat <<C > one; (cat <<D > two\nfor one\nC\nfor two\nD\n) &\n\
+        wait";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "first"), "touch injected\n");
+    assert_eq!(read(&directory, "second"), "x\n");
+    assert_eq!(read(&directory, "third"), "y\n");
+    assert!(!directory.path().join("injected").exists());
+    assert_eq!(read(&directory, "one"), "for one\n");
+    assert_eq!(read(&directory, "two"), "for two\n");
+}
+
+#[test]
 fn unquoted_patterns_expand_to_sorted_paths() {
     let (directory, mut shell) = shell();
     let script = "mkdir -p src/nested test; touch src/b.js src/a.js src/c.rs src/.hidden.js src/nested/d.js test/x.test.js; \

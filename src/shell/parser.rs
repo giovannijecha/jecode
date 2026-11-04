@@ -141,25 +141,42 @@ impl Parser<'_> {
             }
             items.push(Item {
                 and_or,
-                background: background.then(|| {
-                    let mut source = self.script[start..end].to_owned();
-                    let mut appended = false;
-                    for (body_start, body_end) in self.tokens[first_token..last_token]
-                        .iter()
-                        .filter_map(|token| token.body)
-                        .filter(|(body_start, _)| *body_start >= end)
-                    {
-                        if !appended {
-                            source.push('\n');
-                            appended = true;
-                        }
-                        source.push_str(&self.script[body_start..body_end]);
-                    }
-                    source
-                }),
+                background: background
+                    .then(|| self.background_source(start, end, first_token, last_token)),
             });
         }
         Ok(items)
+    }
+
+    /// The source of a background item spanning `start..end` and owning the
+    /// tokens `first..last`. An earlier command's here-document body can lie
+    /// inside that span and is left out; the item's own bodies that come after
+    /// the span follow it.
+    fn background_source(&self, start: usize, end: usize, first: usize, last: usize) -> String {
+        let mut source = String::new();
+        let mut copied = start;
+        for (body_start, body_end) in self.tokens[..first]
+            .iter()
+            .filter_map(|token| token.body)
+            .filter(|(body_start, body_end)| *body_start >= start && *body_end <= end)
+        {
+            source.push_str(&self.script[copied..body_start]);
+            copied = body_end;
+        }
+        source.push_str(&self.script[copied..end]);
+        let mut appended = false;
+        for (body_start, body_end) in self.tokens[first..last]
+            .iter()
+            .filter_map(|token| token.body)
+            .filter(|(body_start, _)| *body_start >= end)
+        {
+            if !appended {
+                source.push('\n');
+                appended = true;
+            }
+            source.push_str(&self.script[body_start..body_end]);
+        }
+        source
     }
 
     fn and_or(&mut self) -> Result<AndOr, String> {
