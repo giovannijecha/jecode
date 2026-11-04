@@ -112,9 +112,10 @@ impl Area {
             (
                 "bash_environment",
                 Value::Array(
-                    ["JECODE_TMP", "TMPDIR", "TEMP", "TMP"]
-                        .map(Value::string)
-                        .into(),
+                    variables(&environment_path(&self.path))
+                        .iter()
+                        .map(|name| Value::string(*name))
+                        .collect(),
                 ),
             ),
             ("lifetime", Value::string("session_including_resume")),
@@ -281,6 +282,33 @@ fn inspect(path: &Path) -> Result<Metadata, String> {
         return Err("Temporary area contains a link or junction; it was left unchanged".into());
     }
     Ok(metadata)
+}
+
+/// Points a command's temporary-file variables at the area at `root`.
+pub fn export(command: &mut std::process::Command, root: &Path) {
+    let value = environment_path(root);
+    for name in variables(&value) {
+        command.env(name, &value);
+    }
+}
+
+/// The variables that name an area, given its environment path. Windows
+/// programs read TEMP and TMP through GetTempPathW, which returns at most
+/// MAX_PATH + 1 characters with the separator it appends; with a longer TMP,
+/// a program cmd.exe starts stays suspended, as Volta's node shim does. An
+/// area that deep, such as a collaborator's under a long home, keeps the
+/// inherited TEMP and TMP.
+fn variables(value: &Path) -> &'static [&'static str] {
+    const ALL: &[&str] = &["JECODE_TMP", "TMPDIR", "TEMP", "TMP"];
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        const MAX_PATH: usize = 260;
+        if value.as_os_str().encode_wide().count() > MAX_PATH {
+            return &ALL[..2];
+        }
+    }
+    ALL
 }
 
 /// Win32 extended paths are unsuitable for Git Bash and many child programs.

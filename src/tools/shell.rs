@@ -249,12 +249,7 @@ fn command(root: &Path, text: &str, temporary: Option<&Path>) -> Result<Command,
         .env("TERM", "dumb");
     crate::auth::isolate_environment(&mut command);
     if let Some(temporary) = temporary {
-        let temporary = crate::scratch::environment_path(temporary);
-        command
-            .env("JECODE_TMP", &temporary)
-            .env("TMPDIR", &temporary)
-            .env("TEMP", &temporary)
-            .env("TMP", &temporary);
+        crate::scratch::export(&mut command, temporary);
     }
     Ok(command)
 }

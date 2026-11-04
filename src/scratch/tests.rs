@@ -299,3 +299,42 @@ fn links_or_junctions_are_rejected_before_any_cleanup() {
     fs::remove_file(link).unwrap();
     temporary.clean().unwrap();
 }
+
+#[test]
+fn commands_get_temp_and_tmp_only_for_a_path_windows_accepts() {
+    let exported = |root: &Path| {
+        let mut command = std::process::Command::new("fixture");
+        export(&mut command, root);
+        let mut names = command
+            .get_envs()
+            .map(|(name, value)| {
+                assert_eq!(value, Some(environment_path(root).as_os_str()));
+                name.to_string_lossy().into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    // MAX_PATH characters fit; one more does not.
+    let path = |length: usize| {
+        let drive = if cfg!(windows) { "C:/" } else { "/" };
+        PathBuf::from(format!("{drive}{}", "a".repeat(length - drive.len())))
+    };
+    let all = ["JECODE_TMP", "TEMP", "TMP", "TMPDIR"];
+    assert_eq!(exported(&path(260)), all);
+    let long = path(261);
+    let kept: &[&str] = if cfg!(windows) {
+        &["JECODE_TMP", "TMPDIR"]
+    } else {
+        &all
+    };
+    assert_eq!(exported(&long), kept);
+    let instructions = Area::new(long, PathBuf::from("/project"), "123-7-0")
+        .unwrap()
+        .instructions();
+    assert_eq!(
+        instructions.contains("\"TEMP\""),
+        !cfg!(windows),
+        "{instructions}"
+    );
+}

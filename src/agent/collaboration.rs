@@ -330,3 +330,5 @@ mod temporary_tests;
 mod tests;
 #[cfg(test)]
 mod update_tests;
+#[cfg(all(test, windows))]
+mod windows_temp_tests;
