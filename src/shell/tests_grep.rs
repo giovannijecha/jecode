@@ -184,6 +184,35 @@ fn binary_input_follows_the_chosen_mode() {
 }
 
 #[test]
+fn binary_input_splits_at_nul_and_stops_at_its_first_match() {
+    for (input, args, status, output) in [
+        ("a\0a\nb\n", "-c a", 0, "2\n"),
+        ("foo\0bar\n", "-c '^bar'", 0, "1\n"),
+        ("a\0b\n", "-cv zz", 0, "2\n"),
+        ("a\0a\n", "-ac a", 0, "1\n"),
+        ("x\nfoo\0bar\n", "x", 0, "Binary file in matches\n"),
+        ("x\nfoo\0bar\n", "-I x", 1, ""),
+        ("\0\0\0\nhit\0\0\n", "-c hit", 0, "1\n"),
+        ("\0\0\0", "-c ''", 0, "3\n"),
+    ] {
+        assert_eq!(
+            over(input, args),
+            (status, output.to_owned()),
+            "grep {args} over {input:?}"
+        );
+    }
+    let directory = crate::test_support::Directory::new();
+    fs::write(directory.path().join("binary"), "a\0b\n").unwrap();
+    let script = "while true; do cat binary; done | grep a > first; echo after > marker";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(
+        read(&directory, "first"),
+        "Binary file (standard input) matches\n"
+    );
+    assert_eq!(read(&directory, "marker"), "after\n");
+}
+
+#[test]
 fn grep_writes_the_original_bytes_of_a_line() {
     let (directory, mut shell) = shell();
     fs::write(
