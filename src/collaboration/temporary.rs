@@ -7,7 +7,9 @@ use std::path::PathBuf;
 impl Observer {
     /// The collaborators of this conversation whose temporary areas hold
     /// `alias`, in the order they started, each with the area and the file;
-    /// only `agent` when one is named. Lookups are read-only.
+    /// only `agent` when one is named. Lookups are read-only. Without a named
+    /// agent, one collaborator's unusable area never hides another's file: its
+    /// failure is reported only when nothing was found.
     pub fn temporary_files(
         &self,
         agent: Option<&str>,
@@ -26,17 +28,21 @@ impl Observer {
         let store = handle.store();
         let home = store.collaborator_home(&handle.id()).join("tmp");
         let mut found = Vec::new();
+        let mut failure = None;
         for (id, session) in self.sessions() {
             if agent.is_some_and(|agent| agent != id) {
                 continue;
             }
-            if let Some((root, path)) =
-                crate::scratch::find(store.bucket(), &home, &session, alias)?
-            {
-                found.push((id, root, path));
+            match crate::scratch::find(store.bucket(), &home, &session, alias) {
+                Ok(Some((root, path))) => found.push((id, root, path)),
+                Ok(None) => {}
+                Err(error) => failure = failure.or(Some(error)),
             }
         }
-        Ok(found)
+        match failure {
+            Some(error) if found.is_empty() => Err(error),
+            _ => Ok(found),
+        }
     }
 
     /// Each collaborator's ID and session, including closed ones whose

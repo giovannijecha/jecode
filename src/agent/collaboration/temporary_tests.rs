@@ -130,6 +130,28 @@ fn a_path_several_collaborators_wrote_names_them() {
 }
 
 #[test]
+fn one_unusable_area_does_not_hide_another_collaborators_file() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let (parent, fixture) = main_agent(
+        &project,
+        &home,
+        &[("first.md", "first notes"), ("second.md", "second notes")],
+    );
+    delegate(&parent, "a1");
+    delegate(&parent, "a2");
+    fixture.finish();
+    let found = parent
+        .collaboration()
+        .temporary_files(Some("a1"), "first.md")
+        .unwrap();
+    std::fs::write(found[0].1.join(".jecode-tmp.json"), "not a record").unwrap();
+    assert_reads(&parent, "tmp:second.md", "second notes");
+    // Nothing else holds this one, so the unusable area is reported.
+    assert!(refusal(&parent, "tmp:first.md").contains("ownership"));
+}
+
+#[test]
 fn collaborators_of_another_conversation_are_refused() {
     let project = Directory::new();
     let home = Directory::new();
