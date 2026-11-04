@@ -1,7 +1,7 @@
 //! Command-line options of `grep`.
 
-/// How to treat input holding a NUL byte: report only that it matches (`-U`,
-/// the default), search it as text (`-a`) or treat it as not matching (`-I`).
+/// How to treat input holding a NUL byte: report only that it matches, the
+/// default, search it as text (`-a`) or treat it as not matching (`-I`).
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum Binary {
     #[default]
@@ -33,8 +33,8 @@ pub(super) struct Options {
     pub(super) after: usize,
     pub(super) before: usize,
     pub(super) max: Option<usize>,
-    pub(super) include: Vec<String>,
-    pub(super) exclude: Vec<String>,
+    /// `--include` (true) and `--exclude` (false) patterns, in command order.
+    pub(super) filters: Vec<(bool, String)>,
     pub(super) exclude_dir: Vec<String>,
     pub(super) operands: Vec<String>,
 }
@@ -68,8 +68,8 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                     .ok_or(format!("grep: --{name} needs a value"))
             };
             match name {
-                "include" => options.include.push(value()?),
-                "exclude" => options.exclude.push(value()?),
+                "include" => options.filters.push((true, value()?)),
+                "exclude" => options.filters.push((false, value()?)),
                 "exclude-dir" => options.exclude_dir.push(value()?),
                 "regexp" => options.patterns.push(value()?),
                 "max-count" => options.max = Some(number(&value()?)?),

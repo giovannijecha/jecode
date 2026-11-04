@@ -269,6 +269,64 @@ fn file_listings_stop_at_the_first_selected_line() {
 }
 
 #[test]
+fn file_filters_apply_to_operands_and_the_last_match_wins() {
+    for (args, status, expected) in [
+        (
+            "hit tree/a.rs tree/b.txt --include='*.rs'",
+            0,
+            "tree/a.rs:hit\n",
+        ),
+        (
+            "hit tree/a.rs tree/b.txt --exclude='*.rs'",
+            0,
+            "tree/b.txt:hit\n",
+        ),
+        (
+            "hit tree/a.rs tree/b.txt --exclude='tree/a.rs'",
+            0,
+            "tree/b.txt:hit\n",
+        ),
+        (
+            "hit tree/a.rs tree/b.txt --exclude='a.rs'",
+            0,
+            "tree/b.txt:hit\n",
+        ),
+        ("hit tree/a.rs --exclude='*'", 1, ""),
+        ("hit missing --exclude='*'", 2, ""),
+        (
+            "-r hit tree/top --exclude='top/a.rs'",
+            0,
+            "tree/top/a.rs:hit\n",
+        ),
+        ("-r hit tree/top --include='*.rs' --exclude='a*'", 1, ""),
+        (
+            "-r hit tree/top --exclude='a*' --include='*.rs'",
+            0,
+            "tree/top/a.rs:hit\n",
+        ),
+        ("-r hit tree/top --exclude='a*'", 1, ""),
+        ("-r hit tree/top --include='*.none'", 1, ""),
+    ] {
+        let (directory, mut shell) = shell();
+        fs::create_dir_all(directory.path().join("tree/top")).unwrap();
+        for name in ["tree/a.rs", "tree/b.txt", "tree/top/a.rs"] {
+            fs::write(directory.path().join(name), "hit\n").unwrap();
+        }
+        let found = shell.run(&format!("grep {args} > out 2> err"));
+        assert_eq!(
+            (found, read(&directory, "out").as_str()),
+            (status, expected),
+            "grep {args}"
+        );
+    }
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("echo hit | grep hit --exclude='*' - > stdin"), 0);
+    assert_eq!(read(&directory, "stdin"), "hit\n");
+    assert_eq!(shell.run("echo hit | grep hit --exclude='*' > implicit"), 0);
+    assert_eq!(read(&directory, "implicit"), "hit\n");
+}
+
+#[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
 }

@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::Options;
+use crate::shell::glob::name_matches;
 use std::path::PathBuf;
 
 /// Expands an operand into files, descending into directories with `-r`. A
@@ -15,9 +16,17 @@ pub(super) fn collect(
     files: &mut Vec<String>,
     errors: &mut Vec<String>,
 ) {
-    let path = shell.path(operand);
-    if operand == "-" || !path.is_dir() {
+    if operand == "-" {
         files.push(operand.to_owned());
+        return;
+    }
+    let path = shell.path(operand);
+    if !path.is_dir() {
+        // A missing operand stays, so opening it reports the error.
+        let any_suffix = |glob: &str| suffixes(operand).any(|name| name_matches(glob, name));
+        if !path.exists() || included(options, any_suffix) {
+            files.push(operand.to_owned());
+        }
         return;
     }
     if !options.recursive {
@@ -99,13 +108,13 @@ impl Walk<'_> {
                         .options
                         .exclude_dir
                         .iter()
-                        .any(|glob| crate::shell::glob::name_matches(glob, &name))
+                        .any(|glob| name_matches(glob, &name))
                     {
                         self.directory(&child, false);
                     }
                 }
                 Target::File => {
-                    if included(self.options, &name) {
+                    if included(self.options, |glob| name_matches(glob, &name)) {
                         self.files.push(child);
                     }
                 }
@@ -125,11 +134,23 @@ enum Target {
     Other,
 }
 
-fn included(options: &Options, name: &str) -> bool {
-    let matches = |globs: &[String]| {
-        globs
-            .iter()
-            .any(|glob| crate::shell::glob::name_matches(glob, name))
-    };
-    (options.include.is_empty() || matches(&options.include)) && !matches(&options.exclude)
+/// Whether a file stays, by the last `--include` or `--exclude` whose pattern
+/// `matches` it. A file no pattern matches stays unless the first of these
+/// options is `--include`.
+fn included(options: &Options, matches: impl Fn(&str) -> bool) -> bool {
+    let last_match = options.filters.iter().rev().find(|(_, glob)| matches(glob));
+    match (last_match, options.filters.first()) {
+        (Some((include, _)), _) => *include,
+        (None, Some((include, _))) => !include,
+        (None, None) => true,
+    }
+}
+
+/// An operand's whole name and each trailing part of it after a slash, which is
+/// what GNU grep matches an operand's filters against.
+fn suffixes(path: &str) -> impl Iterator<Item = &str> {
+    std::iter::once(path).chain(
+        path.match_indices(['/', '\\'])
+            .map(|(at, _)| &path[at + 1..]),
+    )
 }

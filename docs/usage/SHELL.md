@@ -74,7 +74,9 @@ only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
   line ending: carriage returns before the newline are neither matched nor
   printed.
 - `grep -r` follows a link named as an operand and skips links and junctions
-  met during the walk; `-R` follows them too and stops at loops.
+  met during the walk; `-R` follows them too and stops at loops. `--include`,
+  `--exclude` and `--exclude-dir` also apply to operands other than standard
+  input, and the last matching `--include` or `--exclude` wins.
 - `grep` treats input holding a NUL byte as binary: a NUL also ends a line, and
   the search stops at the first match, reporting only that the file matches.
   `-a` or `--binary-files=text` searches it as text; `-I` or
