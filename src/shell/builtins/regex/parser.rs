@@ -2,6 +2,9 @@
 
 use super::{Boundary, Class, Item, Node, word};
 
+const UNMATCHED_BRACKET: &str = "unmatched [, [^, [:, [. or [= in pattern";
+const RANGE_END: &str = "invalid range end in bracket expression";
+
 pub(super) fn parse(pattern: &str, basic: bool) -> Result<Node, String> {
     let mut parser = Parser {
         chars: pattern.chars().collect(),
@@ -216,44 +219,88 @@ impl Parser {
         })
     }
 
+    /// A bracket expression after its `[`. A backslash is an ordinary character
+    /// here. A hyphen is one only first, last or as the end of a range.
     fn class(&mut self) -> Result<Class, String> {
         let negated = self.peek() == Some('^');
         self.at += usize::from(negated);
+        let body = self.at;
         let mut items = Vec::new();
-        let mut first = true;
+        let mut plain = true;
         loop {
+            let first = self.at == body;
             let Some(ch) = self.peek() else {
-                return Err("unmatched [ in pattern".into());
+                return Err(UNMATCHED_BRACKET.into());
             };
             self.at += 1;
             if ch == ']' && !first {
-                return Ok(Class { negated, items });
+                break;
             }
-            first = false;
-            let low = match ch {
-                '[' if self.peek() == Some(':') => {
+            if ch == '-' && !first && self.peek().is_some_and(|next| next != ']') {
+                return Err(RANGE_END.into());
+            }
+            let low = match (ch, self.peek()) {
+                ('[', Some(':')) => {
                     items.push(self.posix()?);
+                    plain = false;
                     continue;
                 }
-                '\\' => match self.escape()? {
-                    Node::Class(class) => {
-                        items.extend(class.items);
-                        continue;
-                    }
-                    Node::Char(ch) => ch,
-                    _ => 'b',
-                },
+                ('[', Some('=')) => {
+                    let member = self.collating('=')?;
+                    items.push(Item::Range(member, member));
+                    continue;
+                }
+                ('[', Some('.')) => self.collating('.')?,
                 _ => ch,
             };
             if self.peek() == Some('-') && self.chars.get(self.at + 1).is_some_and(|ch| *ch != ']')
             {
-                let high = self.chars[self.at + 1];
-                self.at += 2;
+                self.at += 1;
+                let high = self.range_end()?;
+                if high < low {
+                    return Err(RANGE_END.into());
+                }
+                plain = false;
                 items.push(Item::Range(low, high));
             } else {
                 items.push(Item::Range(low, low));
             }
         }
+        let members = &self.chars[body..self.at - 1];
+        if plain
+            && members.len() > 2
+            && members.first() == Some(&':')
+            && members.last() == Some(&':')
+            && members.iter().any(|member| *member != ':')
+        {
+            return Err("character class syntax is [[:space:]], not [:space:]".into());
+        }
+        Ok(Class { negated, items })
+    }
+
+    fn range_end(&mut self) -> Result<char, String> {
+        let ch = self.chars[self.at];
+        self.at += 1;
+        match (ch, self.peek()) {
+            ('[', Some('.')) => self.collating('.'),
+            ('[', Some(':' | '=')) => Err(RANGE_END.into()),
+            _ => Ok(ch),
+        }
+    }
+
+    /// `[.x.]` or `[=x=]` with `at` on the first `mark`. Only a single character
+    /// can be named; these locales have no longer collating elements.
+    fn collating(&mut self, mark: char) -> Result<char, String> {
+        let rest = &self.chars[self.at + 1..];
+        let end = rest
+            .windows(2)
+            .position(|pair| pair == [mark, ']'])
+            .ok_or(UNMATCHED_BRACKET)?;
+        let &[member] = &rest[..end] else {
+            return Err("invalid collation character in bracket expression".into());
+        };
+        self.at += end + 3;
+        Ok(member)
     }
 
     /// `[:name:]` inside a bracket expression, with `at` on its first colon.
@@ -262,7 +309,7 @@ impl Parser {
         let end = rest
             .windows(2)
             .position(|pair| pair == [':', ']'])
-            .ok_or("unterminated character class in pattern")?;
+            .ok_or(UNMATCHED_BRACKET)?;
         let name: String = rest[..end].iter().collect();
         self.at += end + 3;
         let test: fn(char) -> bool = match name.as_str() {
