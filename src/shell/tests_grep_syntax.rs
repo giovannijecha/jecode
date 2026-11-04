@@ -97,6 +97,18 @@ fn back_references_are_refused_by_name() {
 }
 
 #[test]
+fn a_leading_extended_repetition_repeats_nothing() {
+    selects(&[
+        ("abc\n*bc\nq\n", "-oE '*bc'", "bc\nbc\n"),
+        ("abc\n+bc\n", "-oE '+bc'", "bc\nbc\n"),
+        ("abc\n?bc\n", "-oE '?bc'", "bc\nbc\n"),
+        ("abc\n", "-oE 'x|*bc'", "bc\n"),
+        ("abc\n", "-oE '(*bc)'", "bc\n"),
+        ("*ab\nxab\n", "-E '^*ab'", "*ab\nxab\n"),
+    ]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }

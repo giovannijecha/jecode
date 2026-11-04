@@ -123,6 +123,10 @@ impl Parser {
             }
             return Ok(inner);
         }
+        // A leading extended repetition repeats nothing, as in GNU grep.
+        if !self.basic && matches!(self.peek(), Some('*' | '+' | '?')) {
+            return Ok(Node::Sequence(Vec::new()));
+        }
         let ch = self.chars[self.at];
         self.at += 1;
         Ok(match ch {
@@ -137,7 +141,6 @@ impl Parser {
             }
             '[' => Node::Class(self.class()?),
             '\\' => self.escape()?,
-            // A quantifier with nothing to repeat is an ordinary character.
             _ => Node::Char(ch),
         })
     }
