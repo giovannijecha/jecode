@@ -178,6 +178,9 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         }
         .into();
     }
+    if let Some(reason) = not_run(result) {
+        return reason.into();
+    }
     if name == "todo_list" {
         let revision = result
             .get("revision")

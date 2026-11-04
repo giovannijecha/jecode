@@ -234,6 +234,33 @@ fn multi_path_reads_count_the_files_they_could_not_read() {
 }
 
 #[test]
+fn a_call_that_never_ran_says_why_instead_of_how_it_finished() {
+    for outcome in ["denied", "unavailable"] {
+        let result = Value::object([
+            ("outcome", Value::string(outcome)),
+            ("reason", Value::string("Nothing ran")),
+        ]);
+        for name in ["edit", "read", "write", "bash", "exec", "list", "web"] {
+            assert_eq!(tool_summary(name, &result), "Nothing ran", "{name}");
+        }
+    }
+    // Each still reports through its own route.
+    let unanswered = Value::object([("outcome", Value::string("unavailable"))]);
+    assert_eq!(
+        tool_summary("ask_user", &unanswered),
+        "Interactive input unavailable"
+    );
+    let interrupted = Value::object([
+        ("outcome", Value::string("not_executed")),
+        ("error", Value::string("Tool was not executed")),
+    ]);
+    assert_eq!(
+        tool_summary("edit", &interrupted),
+        "error: Tool was not executed"
+    );
+}
+
+#[test]
 fn an_emptied_file_counts_as_changed_and_a_no_op_does_not() {
     use crate::{cancel::Cancellation, checkpoints::session::Session, tools::Begun};
     let root = crate::test_support::Directory::new();
