@@ -44,12 +44,16 @@ pub(crate) fn files(arguments: &Value) -> Result<Option<Vec<(&str, &Value)>>, St
             _ => Ok(None),
         };
     }
-    if single
-        || ["edits", "old_text", "new_text"]
-            .iter()
-            .any(|name| arguments.get(name).is_some_and(|value| !placeholder(value)))
+    // A path without replacements beside files changes nothing, so files is
+    // the call; only single-file replacements conflict with it.
+    if ["edits", "old_text", "new_text"]
+        .iter()
+        .any(|name| arguments.get(name).is_some_and(|value| !placeholder(value)))
     {
-        return Err("Use path with edits for one file, or files for several, not both".into());
+        return Err(
+            "Send replacements either as path with edits for one file, or inside files entries for several, not both"
+                .into(),
+        );
     }
     let Value::Array(files) = files else {
         return Err("files must be an array of {path, edits} objects".into());

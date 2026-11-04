@@ -132,3 +132,54 @@ fn workspace_asks_once_for_a_call_with_an_outside_file() {
     );
     assert_eq!(fixture.finish().len(), 2);
 }
+
+#[test]
+fn json_text_files_from_the_model_run_and_are_stored_decoded() {
+    let project = Directory::new();
+    for name in ["a.rs", "b.rs"] {
+        fs::write(project.path().join(name), "before\n").unwrap();
+    }
+    let decoded = edit("text", &["a.rs", "b.rs"]);
+    let files = decoded
+        .get("function")
+        .and_then(|function| function.get("arguments"))
+        .and_then(Value::as_str)
+        .map(|arguments| crate::json::parse(arguments).unwrap())
+        .and_then(|arguments| arguments.get("files").cloned())
+        .unwrap();
+    let as_text = tool_call(
+        "text",
+        "edit",
+        Value::object([("files", Value::string(files.encode()))]),
+    );
+    let fixture = HttpFixture::new(vec![
+        (200, completion("", vec![as_text])),
+        (200, completion("Done", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.permissions().set_level(Level::Workspace).unwrap();
+    agent.run_turn("Rename it", &mut |_| Ok(())).unwrap();
+    for name in ["a.rs", "b.rs"] {
+        assert_eq!(
+            fs::read_to_string(project.path().join(name)).unwrap(),
+            "after\n"
+        );
+    }
+    // History keeps the decoded call, so later requests and cards agree.
+    let archive = agent.archive();
+    let messages = archive.messages.lock().unwrap();
+    let call = messages
+        .iter()
+        .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+        .flatten()
+        .map(|call| crate::conversation::ToolCall::parse(call).unwrap())
+        .find(|call| call.id == "text")
+        .unwrap();
+    let arguments = crate::json::parse(&call.arguments).unwrap();
+    assert!(matches!(arguments.get("files"), Some(Value::Array(_))));
+    drop(messages);
+    assert_eq!(fixture.finish().len(), 2);
+}

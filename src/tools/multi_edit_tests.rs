@@ -94,6 +94,7 @@ fn malformed_calls_are_refused_before_any_file_changes() {
     let mut mixed = files(vec![a()]);
     if let Value::Object(fields) = &mut mixed {
         fields.insert("path".into(), Value::string("b.rs"));
+        fields.insert("edits".into(), Value::Array(vec![replace("two", "2")]));
     }
     for (arguments, expected) in [
         (files(vec![]), "1-12 entries"),
@@ -210,4 +211,33 @@ fn every_written_file_gets_its_own_checkpoint_and_outside_files_need_the_calls_a
         text(entries[1].get("checkpoint").unwrap(), "reason"),
         "the file is outside the working folder"
     );
+}
+
+#[test]
+fn a_path_without_replacements_beside_files_does_not_block_the_call() {
+    // Claude once sent files as JSON text plus a stray path; both are accepted.
+    let root = Directory::new();
+    fs::write(root.path().join("a.rs"), "one\n").unwrap();
+    fs::write(root.path().join("b.rs"), "two\n").unwrap();
+    let tools = Tools::new(root.path()).unwrap();
+    let listed = Value::Array(vec![
+        entry("a.rs", vec![replace("one", "1")]),
+        entry("b.rs", vec![replace("two", "2")]),
+    ]);
+    let sent = Value::object([
+        ("files", Value::string(listed.encode())),
+        ("path", Value::string("b.rs")),
+    ])
+    .encode();
+    let decoded = crate::tools::coerce::arguments("edit", &sent).unwrap();
+    let execution = run(&tools, &json::parse(&decoded).unwrap(), Begun::default());
+    let entries = execution.result.get("files").and_then(Value::as_array);
+    assert_eq!(
+        entries.map(<[Value]>::len),
+        Some(2),
+        "{:?}",
+        execution.result
+    );
+    assert_eq!(fs::read_to_string(root.path().join("a.rs")).unwrap(), "1\n");
+    assert_eq!(fs::read_to_string(root.path().join("b.rs")).unwrap(), "2\n");
 }

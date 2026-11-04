@@ -1,5 +1,6 @@
 mod access;
 mod attachment;
+pub(crate) mod coerce;
 mod configuration;
 pub(crate) mod discovery;
 pub(crate) mod edit;

@@ -182,7 +182,10 @@ impl Agent {
             emit(Event::Streaming { text })?;
         }
         match result {
-            Ok(completion) => Ok(Some(completion)),
+            Ok(mut completion) => {
+                decode_json_text_arguments(&mut completion);
+                Ok(Some(completion))
+            }
             Err(error) if matches!(error.kind, FailureKind::Temporary | FailureKind::Empty) => {
                 if error.kind == FailureKind::Empty {
                     retries.empty_responses += 1;
@@ -317,6 +320,35 @@ impl Agent {
             usage,
             after_message,
         ));
+    }
+}
+
+/// Decodes JSON-text arrays and objects where a tool's schema expects them
+/// (`tools::coerce`), in the calls to run and in the stored message alike.
+fn decode_json_text_arguments(completion: &mut Completion) {
+    for call in &mut completion.calls {
+        let Some(decoded) = crate::tools::coerce::arguments(&call.name, &call.arguments) else {
+            continue;
+        };
+        if let Value::Object(fields) = &mut completion.message
+            && let Some(Value::Array(stored)) = fields.get_mut("tool_calls")
+        {
+            for entry in stored {
+                if entry.get("id").and_then(Value::as_str) != Some(call.id.as_str()) {
+                    continue;
+                }
+                let target = match entry {
+                    Value::Object(entry) if entry.contains_key("function") => {
+                        entry.get_mut("function")
+                    }
+                    entry => Some(entry),
+                };
+                if let Some(Value::Object(target)) = target {
+                    target.insert("arguments".into(), Value::string(&decoded));
+                }
+            }
+        }
+        call.arguments = decoded;
     }
 }
 
