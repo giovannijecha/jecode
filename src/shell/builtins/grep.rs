@@ -85,10 +85,12 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
             break;
         }
     }
-    if let Err(error) = writer.flush()
-        && closed(&error)
-    {
-        shell.broken_output = true;
+    if let Err(error) = writer.flush() {
+        if closed(&error) {
+            shell.broken_output = true;
+        } else {
+            errors.push(format!("grep: output: {error}"));
+        }
     }
     let status = match (selected, errors.is_empty() || options.quiet && selected) {
         (_, false) => 2,

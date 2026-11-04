@@ -1,5 +1,6 @@
 use super::search::Lines;
 use super::*;
+use crate::shell::{Sink, Source};
 
 #[test]
 fn max_count_zero_does_not_wait_for_standard_input() {
@@ -46,4 +47,61 @@ fn binary_input_without_newlines_stays_bounded() {
     }
     assert!(lines.binary());
     assert_eq!(total, 2 + 1024 * 1024);
+}
+
+#[test]
+fn buffered_output_error_sets_failure_status() {
+    let directory = crate::test_support::Directory::new();
+    fs::write(directory.path().join("input"), "hit\n").unwrap();
+    let mut shell = Shell::new().unwrap();
+    shell.cwd = directory.path().to_path_buf();
+
+    for silent in [false, true] {
+        let io = Io {
+            stdin: Source::Null,
+            stdout: Sink::File(fs::File::open(directory.path().join("input")).unwrap()),
+            stderr: Sink::Null,
+        };
+        let mut args = vec!["grep".to_owned(), "hit".to_owned(), "input".to_owned()];
+        if silent {
+            args.insert(1, "-s".to_owned());
+        }
+        let (status, _, stderr) = grep(&mut shell, &args, &io).unwrap();
+        assert_eq!(status, 2);
+        if silent {
+            assert!(stderr.is_empty());
+        } else {
+            assert!(
+                String::from_utf8(stderr)
+                    .unwrap()
+                    .starts_with("grep: output: ")
+            );
+        }
+        assert!(!shell.broken_output);
+    }
+}
+
+#[test]
+fn buffered_broken_pipe_marks_output_closed() {
+    let directory = crate::test_support::Directory::new();
+    fs::write(directory.path().join("input"), "hit\n").unwrap();
+    let mut shell = Shell::new().unwrap();
+    shell.cwd = directory.path().to_path_buf();
+    let (reader, writer) = io::pipe().unwrap();
+    drop(reader);
+    let io = Io {
+        stdin: Source::Null,
+        stdout: Sink::Pipe(writer),
+        stderr: Sink::Null,
+    };
+
+    let (status, _, stderr) = grep(
+        &mut shell,
+        &["grep".into(), "hit".into(), "input".into()],
+        &io,
+    )
+    .unwrap();
+    assert_eq!(status, 0);
+    assert!(stderr.is_empty());
+    assert!(shell.broken_output);
 }
