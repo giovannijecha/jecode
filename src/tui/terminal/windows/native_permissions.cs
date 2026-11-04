@@ -60,6 +60,20 @@ public sealed partial class JecodeTestPty {
         Wait("Waiting for permission", request);
         Send("3");
         Wait("Native second read complete.");
+
+        // A call too long for the dock pages to its end; the choices still decide.
+        int paged = Mark();
+        Command("run the long command");
+        Wait("PgUp/PgDn", paged);
+        Wait("native-step-01", paged);
+        for (int page = 0; page < 5; page++) {
+            Send("\x1b[6~");
+            Thread.Sleep(120);
+        }
+        Wait("native-step-40", paged);
+        Send("3");
+        Wait("nothing ran; the agent was told", paged);
+        Wait("Native long command denied.", paged);
         Send("kept draft");
         Wait("kept draft");
         Send("\x11");

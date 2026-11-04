@@ -5,7 +5,7 @@
 
 use super::{
     composer, footer,
-    panel::{self, Key, Part, key},
+    panel::{self, Part, key},
 };
 use crate::{
     permissions::{Kind, wording},
@@ -28,30 +28,105 @@ pub(super) fn block(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let rule = |label: &[Line], aside: &Line| composer::rule(columns, ACCENT, label, aside);
-    let choices = choices(pending, columns);
-    let keys = if columns >= 7 {
-        panel::keys(&keys(pending), columns - 4, false)
-    } else {
-        Vec::new()
-    };
-    // The top rule and the access row always stay beside the choices and keys.
-    let room = height.saturating_sub(2 + choices.len() + keys.len()).max(1);
+    let layout = Layout::new(pending, columns, height);
     let mut parts = vec![
         (status, Part::Chrome),
         (rule(&title(pending), &cards::level(level)), Part::Keep),
     ];
-    for row in facts(pending, panel::text_width(columns), room) {
+    for row in layout.facts(pending, panel::text_width(columns)) {
         parts.push((panel::indent(row, columns), Part::Keep));
     }
     parts.push((Line::default(), Part::Space));
-    for (row, on) in choices {
+    for (row, on) in layout.choices {
         parts.push((row, if on { Part::Focus } else { Part::Keep }));
     }
     parts.push((rule(&[], &Line::default()), Part::Chrome));
-    for row in keys {
+    for row in layout.keys {
         parts.push((row.indent("  ", MUTED), Part::Keep));
     }
     panel::fitted(parts, None, height)
+}
+
+/// Where PgUp or PgDn leaves a call too long for the dock; `None` when all of
+/// it shows, and those keys scroll the conversation as ever.
+pub(super) fn page(pending: &Pending, columns: usize, height: usize, back: bool) -> Option<usize> {
+    let layout = Layout::new(pending, columns, height);
+    let last = layout.call.len().checked_sub(layout.room)?;
+    if last == 0 {
+        return None;
+    }
+    // One row stays in view, so a line is never lost across the page.
+    let step = layout.room.saturating_sub(1).max(1);
+    Some(if back {
+        layout.start.saturating_sub(step)
+    } else {
+        (layout.start + step).min(last)
+    })
+}
+
+/// The rows a request needs with one row of its call: its choices and keys
+/// outrank the panels' two-thirds cap (B12.4).
+pub(super) fn floor(pending: &Pending, columns: usize) -> usize {
+    let layout = Layout::new(pending, columns, 0);
+    3 + layout.choices.len() + layout.keys.len()
+}
+
+/// How the call shares the dock. It is what the user agrees to, so it is
+/// never cut, and the choices and keys never leave: what does not fit scrolls.
+struct Layout {
+    choices: Vec<(Line, bool)>,
+    keys: Vec<Line>,
+    /// The tool name, which stays while the call scrolls.
+    head: Line,
+    call: Vec<Line>,
+    room: usize,
+    start: usize,
+}
+
+impl Layout {
+    fn new(pending: &Pending, columns: usize, height: usize) -> Self {
+        let choices = choices(pending, columns);
+        let head = cards::tool_title(&pending.request.tool).append(Line::new(" ", MUTED));
+        let width = panel::text_width(columns).saturating_sub(panel::cells(&head));
+        let call = call(pending, width.max(1));
+        // The top rule and the access row always stay beside the choices and keys.
+        let room = |keys: &[Line]| height.saturating_sub(2 + choices.len() + keys.len()).max(1);
+        let mut keys = key_rows(pending, None, columns);
+        let mut shown = room(&keys);
+        let mut start = 0;
+        if call.len() > shown {
+            // Measured at its widest, as the key may take a row of its own.
+            shown = room(&key_rows(pending, Some(call.len()), columns));
+            start = pending.scroll.min(call.len() - shown);
+            keys = key_rows(pending, Some(call.len() - shown), columns);
+        }
+        Self {
+            choices,
+            keys,
+            head,
+            call,
+            room: shown,
+            start,
+        }
+    }
+
+    /// The rows of the call in view, under the tool name, then the access.
+    fn facts(&self, pending: &Pending, width: usize) -> Vec<Line> {
+        let indent = Line::new(&" ".repeat(panel::cells(&self.head)), MUTED);
+        let mut rows: Vec<Line> = self
+            .call
+            .iter()
+            .skip(self.start)
+            .take(self.room)
+            .enumerate()
+            .map(|(index, part)| {
+                let lead = if index == 0 { &self.head } else { &indent };
+                lead.clone().append(part.clone())
+            })
+            .collect();
+        rows.push(Line::new(wording::access(&pending.request.access), MUTED).shortened(width));
+        rows
+    }
 }
 
 /// `Permission  MAIN AGENT  · 1 of 3`, then without the count.
@@ -66,15 +141,10 @@ fn title(pending: &Pending) -> Vec<Line> {
     vec![counted, head]
 }
 
-/// The tool name in its family colour and the target in full, wrapping under
-/// itself and never cut; then the access. A multi-file edit names every file
-/// that fits `room` rows and counts the rest, so its choices stay visible.
-fn facts(pending: &Pending, width: usize, room: usize) -> Vec<Line> {
+/// The target, or every file of a multi-file edit, wrapping under itself.
+fn call(pending: &Pending, width: usize) -> Vec<Line> {
     let access = &pending.request.access;
-    let head = cards::tool_title(&pending.request.tool).append(Line::new(" ", MUTED));
-    let indent = panel::cells(&head);
-    let wrapped = |call: Line| call.wrap(width.saturating_sub(indent).max(1), true);
-    let mut rows = if access.members.is_empty() {
+    let call = if access.members.is_empty() {
         let target = match access.kind {
             Kind::Runs => text::clean(&access.target),
             Kind::Reads | Kind::Edits => footer::path(&access.target),
@@ -83,38 +153,16 @@ fn facts(pending: &Pending, width: usize, room: usize) -> Vec<Line> {
         if let Some(place) = &access.place {
             call.push(&format!(" in {}", footer::path(place)), MUTED);
         }
-        wrapped(call)
+        call
     } else {
         let paths: Vec<_> = access
             .members
             .iter()
             .map(|file| footer::path(&file.target))
             .collect();
-        let mut named = paths.len();
-        loop {
-            let mut call = Line::new(&paths[..named].join(", "), STRONG);
-            if named < paths.len() {
-                call.push(&format!(" +{} files", paths.len() - named), MUTED);
-            }
-            let rows = wrapped(call);
-            if rows.len() <= room || named == 1 {
-                break rows;
-            }
-            named -= 1;
-        }
-    }
-    .into_iter()
-    .enumerate()
-    .map(|(index, part)| {
-        if index == 0 {
-            head.clone().append(part)
-        } else {
-            Line::new(&" ".repeat(indent), MUTED).append(part)
-        }
-    })
-    .collect::<Vec<Line>>();
-    rows.push(Line::new(wording::access(access), MUTED).shortened(width));
-    rows
+        Line::new(&paths.join(", "), STRONG)
+    };
+    call.wrap(width, true)
 }
 
 /// The choices as option rows. A fact is what the user agrees to, so it is
@@ -165,12 +213,21 @@ fn choices(pending: &Pending, columns: usize) -> Vec<(Line, bool)> {
     rows
 }
 
-/// 1–3 choose while no row has the focus; Enter once ↑↓ placed it.
-fn keys(pending: &Pending) -> Vec<Key<'static>> {
-    let choose = if pending.focus.is_some() {
+/// 1–3 choose while no row has the focus; Enter once ↑↓ placed it. `hidden`
+/// counts the rows of the call that PgUp/PgDn can bring into view.
+fn key_rows(pending: &Pending, hidden: Option<usize>, columns: usize) -> Vec<Line> {
+    if columns < 7 {
+        return Vec::new();
+    }
+    let hidden = hidden.map(|rows| format!("+{rows} {}", if rows == 1 { "line" } else { "lines" }));
+    let mut keys = vec![if pending.focus.is_some() {
         key("Enter", "choose")
     } else {
         key("1–3", "choose")
-    };
-    vec![choose, key("↑↓", "move").optional()]
+    }];
+    if let Some(hidden) = &hidden {
+        keys.push(key("PgUp/PgDn", hidden));
+    }
+    keys.push(key("↑↓", "move").optional());
+    panel::keys(&keys, columns - 4, false)
 }

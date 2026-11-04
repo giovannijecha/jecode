@@ -61,8 +61,89 @@ fn outside(kind: Kind, target: &str) -> Access {
     }
 }
 
+/// The sizes a request meets, from a wide window to a short, narrow one.
+const SIZES: [(usize, usize); 5] = [(80, 24), (100, 40), (44, 24), (80, 12), (40, 16)];
+
+/// Every word of `seen` that PgDn reveals from the top of the call, checking
+/// at each stop that the choices and the paging key stayed on screen.
+fn page_through(app: &mut App, width: usize, height: usize, words: &[String]) -> Vec<String> {
+    app.state.width = width;
+    app.state.height = height;
+    for _ in 0..words.len() {
+        key(app, 33, 0);
+    }
+    let mut seen = Vec::new();
+    for _ in 0..words.len() {
+        let shown = screen(app);
+        for choice in [
+            "Approve",
+            "Approve and remember",
+            "Deny",
+            "1–3",
+            "PgUp/PgDn",
+        ] {
+            assert!(
+                shown.contains(choice),
+                "{width}x{height} lost {choice}\n{shown}"
+            );
+        }
+        seen.extend(words.iter().filter(|word| shown.contains(*word)).cloned());
+        key(app, 34, 0);
+    }
+    seen.sort();
+    seen.dedup();
+    seen
+}
+
 #[test]
-fn a_multi_file_request_keeps_its_choices_and_counts_the_files_it_cannot_name() {
+fn a_long_command_keeps_its_choices_and_pages_through_every_line() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.permission_observer
+        .set_surface(crate::permissions::Surface::Panel);
+    let lines: Vec<String> = (0..60).map(|line| format!("line-{line:02}")).collect();
+    let command = lines
+        .iter()
+        .map(|line| format!("echo {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    app.permission_observer
+        .begin("call", "bash", &outside(Kind::Runs, &command))
+        .unwrap();
+    app.refresh_permission();
+    for (width, height) in SIZES {
+        assert_eq!(
+            page_through(&mut app, width, height, &lines),
+            lines,
+            "{width}x{height}"
+        );
+        // The last stop still names what the keys can bring back.
+        assert!(screen(&app).contains(" lines"), "{}", screen(&app));
+        // The tool name stays while the call scrolls.
+        assert!(screen(&app).contains("BASH"), "{}", screen(&app));
+    }
+}
+
+#[test]
+fn a_call_that_fits_leaves_page_keys_to_the_conversation() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.permission_observer
+        .set_surface(crate::permissions::Surface::Panel);
+    app.permission_observer
+        .begin("call", "bash", &outside(Kind::Runs, "cargo test session"))
+        .unwrap();
+    app.refresh_permission();
+    let before = screen(&app);
+    assert!(!before.contains("PgUp/PgDn"), "{before}");
+    key(&mut app, 34, 0);
+    assert_eq!(screen(&app), before);
+}
+
+#[test]
+fn a_multi_file_request_keeps_its_choices_and_pages_through_every_file() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![]);
     let mut app = app(&directory, &fixture);
@@ -87,39 +168,36 @@ fn a_multi_file_request_keeps_its_choices_and_counts_the_files_it_cannot_name() 
             ..outside(Kind::Edits, "")
         }
     };
-    let mut ask = |access: &Access, width: usize, height: usize| {
-        let asked = app
-            .permission_observer
-            .begin("call", "edit", access)
-            .unwrap();
-        app.refresh_permission();
-        app.state.width = width;
-        app.state.height = height;
-        let shown = screen(&app);
-        app.permission_observer
-            .decide(asked.id, crate::permissions::Decision::Deny)
-            .unwrap();
-        app.refresh_permission();
-        shown
-    };
-    for (width, height) in [(80, 24), (100, 40), (44, 24), (80, 12)] {
-        let shown = ask(&request(12), width, height);
-        for choice in ["Approve", "Approve and remember", "Deny", "1–3"] {
-            assert!(
-                shown.contains(choice),
-                "{width}x{height} lost {choice}\n{shown}"
-            );
-        }
-        assert!(shown.contains("file-00.rs"), "{shown}");
-        assert!(shown.contains(" files"), "{shown}");
+    let names: Vec<String> = (0..12).map(|index| format!("file-{index:02}.rs")).collect();
+    let asked = app
+        .permission_observer
+        .begin("call", "edit", &request(12))
+        .unwrap();
+    app.refresh_permission();
+    for (width, height) in [(80, 24), (44, 24), (80, 12)] {
+        assert_eq!(
+            page_through(&mut app, width, height, &names),
+            names,
+            "{width}x{height}"
+        );
     }
-    // With room, every file is named and nothing is counted.
-    let shown = ask(&request(2), 100, 40);
+    app.permission_observer
+        .decide(asked.id, crate::permissions::Decision::Deny)
+        .unwrap();
+    app.refresh_permission();
+    // With room, every file is named and nothing pages.
+    app.permission_observer
+        .begin("call", "edit", &request(2))
+        .unwrap();
+    app.refresh_permission();
+    app.state.width = 100;
+    app.state.height = 40;
+    let shown = screen(&app);
     assert!(
         shown.contains("file-00.rs") && shown.contains("file-01.rs"),
         "{shown}"
     );
-    assert!(!shown.contains(" +"), "{shown}");
+    assert!(!shown.contains("PgUp/PgDn"), "{shown}");
     assert!(
         shown.contains("Edits to these files, this conversation"),
         "{shown}"

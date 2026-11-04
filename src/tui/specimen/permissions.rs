@@ -54,6 +54,7 @@ fn asking(columns: usize, tool: &str, access: Access, agent: &str, waiting: usiz
         agent: agent.into(),
         focus: None,
         guard: None,
+        scroll: 0,
     });
     state
 }
@@ -106,6 +107,18 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     };
     let mut focused = asking(columns, "edit", edit, "MAIN AGENT", 1);
     focused.permission.as_mut().unwrap().focus = Some(1);
+    let long = (1..=40)
+        .map(|line| format!("echo step {line} of the release script"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut paged = asking(
+        columns,
+        "bash",
+        access(Kind::Runs, &long, Some(r"C:\Projects\webterminal")),
+        "MAIN AGENT",
+        1,
+    );
+    paged.permission.as_mut().unwrap().scroll = 14;
     let indicator = |level| {
         let mut composer = state(columns);
         composer.permission_level = level;
@@ -121,9 +134,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         ("Request · edit, focus on remember", focused),
         (
-            "Request · multi-file edit, every file that fits",
+            "Request · multi-file edit, paged",
             asking(columns, "edit", several, "MAIN AGENT", 1),
         ),
+        ("Request · long command, paged", paged),
         (
             "Request · collaborator command, 1 of 3",
             asking(columns, "exec", run, "AGENT 1", 3),

@@ -70,7 +70,9 @@ In the TUI, type `1`, `2` or `3`, or move with the arrow keys and press Enter.
 Nothing is selected when the request appears, so a stray Enter does nothing, and
 pasted text never answers it. If the request arrives while you are typing, your
 keys keep going to the draft until you pause or press an arrow key or Tab.
-Ctrl+C stops the turn. Requests appear one at a time.
+Ctrl+C stops the turn. Requests appear one at a time. A call too long for the
+space shows `PgUp/PgDn` with the number of lines out of view: nothing is cut,
+and the choices stay on screen while you read it.
 
 Approving never switches the conversation to Full. To review approvals, open
 `/permissions` → **Remembered** and press Ctrl+D on one to revoke it. Read and

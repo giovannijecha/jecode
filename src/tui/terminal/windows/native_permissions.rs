@@ -56,11 +56,26 @@ pub(super) fn fixture(path: &std::path::Path) {
             Value::object([("path", Value::string(file.to_string_lossy()))]),
         )
     };
+    let script = (1..=40)
+        .map(|step| format!("echo native-step-{step:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let long = tool_call(
+        "native-long",
+        "exec",
+        Value::object([
+            ("executable", Value::string("powershell.exe")),
+            ("args", Value::Array(vec![Value::string(script)])),
+            ("cwd", Value::string(outside.path().to_string_lossy())),
+        ]),
+    );
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![read("native-read-1")])),
         (200, completion("Native first read complete.", vec![])),
         (200, completion("", vec![read("native-read-2")])),
         (200, completion("Native second read complete.", vec![])),
+        (200, completion("", vec![long])),
+        (200, completion("Native long command denied.", vec![])),
     ]);
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let config = SessionConfig {
@@ -116,5 +131,11 @@ pub(super) fn fixture(path: &std::path::Path) {
             .and_then(Value::as_str),
         Some("denied")
     );
-    assert_eq!(fixture.finish().len(), 4);
+    assert_eq!(
+        tool_result("native-long")
+            .get("outcome")
+            .and_then(Value::as_str),
+        Some("denied")
+    );
+    assert_eq!(fixture.finish().len(), 6);
 }

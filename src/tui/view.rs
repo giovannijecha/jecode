@@ -145,10 +145,23 @@ pub(super) fn panel_open(state: &State) -> bool {
 
 pub(super) fn chrome_height(state: &State) -> usize {
     if state.height >= 12 && panel_open(state) {
-        state.height * 2 / 3
+        let cap = state.height * 2 / 3;
+        state.permission.as_ref().map_or(cap, |pending| {
+            cap.max(permission::floor(pending, state.width.max(1)))
+        })
     } else {
         state.height
     }
+}
+
+/// Where PgUp or PgDn leaves the request's call, when it does not fit the dock.
+pub(super) fn permission_page(state: &State, back: bool) -> Option<usize> {
+    permission::page(
+        state.permission.as_ref()?,
+        state.width.max(1),
+        chrome_height(state).min(state.height),
+        back,
+    )
 }
 
 #[cfg(test)]
