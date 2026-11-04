@@ -125,17 +125,41 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
 /// Each file of a multi-path read under its path; failures name their cause.
 fn files(result: &Value, columns: usize) -> Vec<Line> {
     let mut rows = Vec::new();
+    let mut origin = 2;
     for file in result.get("files").and_then(Value::as_array).unwrap_or(&[]) {
         let path = field(file, "path");
-        if let Some(error) = file.get("error").and_then(Value::as_str) {
-            rows.push(Line::new(&format!("{path} · {error}"), WARNING));
-            continue;
+        let error = file.get("error").and_then(Value::as_str);
+        let label = match error {
+            Some(error) => Line::new(
+                &format!("{} · {}", text::clean(path), text::clean(error)),
+                WARNING,
+            ),
+            None => Line::new(&text::clean(path), MUTED),
+        };
+        rows.extend(line_rows(&label, columns, origin, "    ", "    ", DIM));
+        origin += 1;
+        if error.is_none() {
+            let arguments = Value::object([("path", Value::string(path))]);
+            let mut source = read(&arguments, file, columns);
+            origin = placed(&mut source, origin);
+            rows.extend(source);
         }
-        rows.push(Line::new(path, MUTED));
-        let arguments = Value::object([("path", Value::string(path))]);
-        rows.extend(read(&arguments, file, columns));
     }
     rows
+}
+
+/// Moves rows numbered from source line 2 to start at `origin`, and returns
+/// the first line after them.
+pub(super) fn placed(rows: &mut [Line], origin: usize) -> usize {
+    for row in rows.iter_mut() {
+        if let Some(source) = &mut row.origin {
+            source.line += origin - 2;
+        }
+    }
+    rows.iter()
+        .filter_map(|row| row.origin.map(|source| source.line + 1))
+        .max()
+        .unwrap_or(origin)
 }
 
 fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {

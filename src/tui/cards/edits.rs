@@ -205,17 +205,7 @@ fn sections(
                 .and_then(|arguments| edit_fallback::body(arguments, entry, columns, expanded)),
         };
         if let Some(mut body) = body {
-            for row in &mut body.rows {
-                if let Some(source) = &mut row.origin {
-                    source.line += origin - 2;
-                }
-            }
-            origin = body
-                .rows
-                .iter()
-                .filter_map(|row| row.origin.map(|source| source.line + 1))
-                .max()
-                .unwrap_or(origin);
+            origin = content::placed(&mut body.rows, origin);
             let label = (body.hidden > 0).then(|| body.more());
             rows.extend(body.rows);
             if let Some(label) = label {
