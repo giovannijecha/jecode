@@ -30,8 +30,9 @@ pub(super) struct Options {
     /// `-R`: follow links met during a recursive walk.
     pub(super) follow: bool,
     pub(super) binary: Binary,
-    pub(super) after: usize,
-    pub(super) before: usize,
+    /// Context lines. Given at all, even as 0, they separate groups with `--`.
+    pub(super) after: Option<usize>,
+    pub(super) before: Option<usize>,
     pub(super) max: Option<usize>,
     /// `--include` (true) and `--exclude` (false) patterns, in command order.
     pub(super) filters: Vec<(bool, String)>,
@@ -73,10 +74,10 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                 "exclude-dir" => options.exclude_dir.push(value()?),
                 "regexp" => options.patterns.push(value()?),
                 "max-count" => options.max = Some(number(&value()?)?),
-                "after-context" => options.after = number(&value()?)?,
-                "before-context" => options.before = number(&value()?)?,
+                "after-context" => options.after = Some(number(&value()?)?),
+                "before-context" => options.before = Some(number(&value()?)?),
                 "context" => {
-                    let lines = number(&value()?)?;
+                    let lines = Some(number(&value()?)?);
                     (options.after, options.before) = (lines, lines);
                 }
                 "color" | "colour" | "binary" => {}
@@ -154,14 +155,14 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                 'I' => options.binary = Binary::WithoutMatch,
                 'e' => options.patterns.push(value()?),
                 'm' => options.max = Some(number(&value()?)?),
-                'A' => options.after = number(&value()?)?,
-                'B' => options.before = number(&value()?)?,
+                'A' => options.after = Some(number(&value()?)?),
+                'B' => options.before = Some(number(&value()?)?),
                 'C' => {
-                    let lines = number(&value()?)?;
+                    let lines = Some(number(&value()?)?);
                     (options.after, options.before) = (lines, lines);
                 }
                 digit if digit.is_ascii_digit() => {
-                    let lines = number(&flags[index - 1..].iter().collect::<String>())?;
+                    let lines = Some(number(&flags[index - 1..].iter().collect::<String>())?);
                     index = flags.len();
                     (options.after, options.before) = (lines, lines);
                 }

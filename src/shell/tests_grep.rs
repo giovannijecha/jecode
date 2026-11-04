@@ -355,6 +355,30 @@ fn excluded_directories_ignore_trailing_slashes_and_cover_operands() {
 }
 
 #[test]
+fn context_groups_are_separated_across_files_and_for_zero_lines() {
+    let (directory, mut shell) = shell();
+    fs::write(directory.path().join("one"), "hit\nctx\nz\n").unwrap();
+    fs::write(directory.path().join("two"), "hit\nctx\nz\n").unwrap();
+    assert_eq!(shell.run("grep -A1 hit one two > across"), 0);
+    assert_eq!(
+        read(&directory, "across"),
+        "one:hit\none-ctx\n--\ntwo:hit\ntwo-ctx\n"
+    );
+    assert_eq!(
+        over("a\nb\nc\nd\na\n", "-A0 a"),
+        (0, "a\n--\na\n".to_owned())
+    );
+    assert_eq!(over("a\nb\na\n", "-B0 a"), (0, "a\n--\na\n".to_owned()));
+    assert_eq!(over("a\na\n", "-A0 a"), (0, "a\na\n".to_owned()));
+    assert_eq!(over("a\nb\na\n", "-C0 a"), (0, "a\n--\na\n".to_owned()));
+    assert_eq!(over("a\nb\na\n", "a"), (0, "a\na\n".to_owned()));
+    assert_eq!(
+        over("a\nb\na\nb\n", "-m1 -A5 a"),
+        (0, "a\nb\na\nb\n".to_owned())
+    );
+}
+
+#[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
 }

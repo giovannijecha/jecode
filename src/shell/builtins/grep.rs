@@ -40,6 +40,7 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         .unwrap_or(options.recursive || options.operands.len() > 1);
     let mut writer = &io.stdout;
     let mut selected = false;
+    let mut printed = false;
     for name in &files {
         let source: Box<dyn Read + '_> = if name == "-" {
             Box::new(&io.stdin)
@@ -63,7 +64,15 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         } else {
             name
         };
-        match search(&options, &regex, source, shown, names, &mut writer) {
+        match search(
+            &options,
+            &regex,
+            source,
+            shown,
+            names,
+            &mut writer,
+            &mut printed,
+        ) {
             Ok(found) => selected |= found,
             Err(error) if closed(&error) => {
                 shell.broken_output = true;

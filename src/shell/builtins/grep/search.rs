@@ -74,12 +74,16 @@ pub(super) fn search(
     name: &str,
     names: bool,
     writer: &mut dyn Write,
+    printed: &mut bool,
 ) -> io::Result<bool> {
     let empty_selected = regex.find(b"", 0).is_some() != options.invert;
     let mut lines = Lines::new(source, options.binary != Binary::Text, !empty_selected);
     let mut bytes = Vec::new();
     let mut before: VecDeque<(usize, Vec<u8>)> = VecDeque::new();
     let (mut number, mut count, mut after) = (0usize, 0usize, 0usize);
+    let separated = options.after.is_some() || options.before.is_some();
+    let context_after = options.after.unwrap_or(0);
+    let context_before = options.before.unwrap_or(0);
     let mut last: Option<usize> = None;
     let lines_shown = !options.quiet && !options.count && options.listed.is_none();
     loop {
@@ -111,11 +115,11 @@ pub(super) fn search(
                 writeln!(writer, "Binary file {name} matches")?;
                 return Ok(true);
             }
-            if last.is_some_and(|last| number > last + before.len() + 1)
-                && (options.before > 0 || options.after > 0)
-            {
+            let group = number - before.len();
+            if separated && *printed && last.is_none_or(|last| group > last + 1) {
                 writer.write_all(b"--\n")?;
             }
+            *printed = true;
             for (line_number, text) in before.drain(..) {
                 prefix(writer, options, name, names, line_number, '-')?;
                 terminated(writer, &text)?;
@@ -136,7 +140,7 @@ pub(super) fn search(
                 terminated(writer, line)?;
             }
             last = Some(number);
-            after = options.after;
+            after = context_after;
             continue;
         }
         if !lines_shown || lines.binary() {
@@ -147,8 +151,8 @@ pub(super) fn search(
             prefix(writer, options, name, names, number, '-')?;
             terminated(writer, line)?;
             last = Some(number);
-        } else if options.before > 0 {
-            if before.len() == options.before {
+        } else if context_before > 0 {
+            if before.len() == context_before {
                 before.pop_front();
             }
             before.push_back((number, line.to_owned()));

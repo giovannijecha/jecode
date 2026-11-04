@@ -20,6 +20,7 @@ fn max_count_zero_does_not_wait_for_standard_input() {
                 "-",
                 false,
                 &mut output,
+                &mut false,
             ))
             .unwrap();
     });
