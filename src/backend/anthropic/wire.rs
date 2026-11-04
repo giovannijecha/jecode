@@ -345,9 +345,26 @@ fn cache_breakpoint(message: &mut Value, control: &Value) -> bool {
 
 fn assistant(message: &Value) -> Result<Value, String> {
     if let Some(blocks) = message.get("anthropic_blocks").and_then(Value::as_array) {
+        let mut blocks = blocks.to_vec();
+        let calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .unwrap_or(&[]);
+        // The canonical call records the arguments actually executed, including
+        // decoded JSON-text containers. Keep the rest of the native reply intact.
+        for block in &mut blocks {
+            if block.get("type").and_then(Value::as_str) == Some("tool_use")
+                && let Some(call) = calls.iter().find(|call| call.get("id") == block.get("id"))
+            {
+                let call = ToolCall::parse(call)?;
+                if let Value::Object(fields) = block {
+                    fields.insert("input".into(), crate::json::parse(&call.arguments)?);
+                }
+            }
+        }
         return Ok(Value::object([
             ("role", Value::string("assistant")),
-            ("content", Value::Array(blocks.to_vec())),
+            ("content", Value::Array(blocks)),
         ]));
     }
     let mut blocks = Vec::new();
@@ -479,3 +496,6 @@ fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| format!("Conversation {key} must be a string"))
 }
+
+#[cfg(test)]
+mod replay_tests;

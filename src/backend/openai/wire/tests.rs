@@ -204,3 +204,58 @@ fn opaque_reasoning_is_not_replayed_for_another_account() {
             .contains("account-a-secret")
     );
 }
+
+#[test]
+fn native_replay_uses_executed_arguments_and_preserves_encrypted_reasoning() {
+    let original = r#"{"paths":"[\"a.rs\",\"b.rs\"]"}"#;
+    let decoded = crate::tools::coerce::arguments("read", original).unwrap();
+    let reasoning = Value::object([
+        ("type", Value::string("reasoning")),
+        ("encrypted_content", Value::string("fixture-reasoning")),
+    ]);
+    let tool = Value::object([
+        ("type", Value::string("function_call")),
+        ("call_id", Value::string("read-1")),
+        ("namespace", Value::string("jecode")),
+        ("name", Value::string("read")),
+        ("arguments", Value::string(original)),
+        ("provider_extension", Value::Bool(true)),
+    ]);
+    let mut message = Value::object([
+        ("role", Value::string("assistant")),
+        (
+            "tool_calls",
+            Value::Array(vec![
+                ToolCall {
+                    id: "read-1".into(),
+                    name: "read".into(),
+                    arguments: decoded.clone(),
+                }
+                .value(),
+            ]),
+        ),
+        (
+            "openai_items",
+            Value::Array(vec![reasoning.clone(), tool.clone()]),
+        ),
+    ]);
+    let origin = crate::conversation::Origin::with_account("openai", "model", None);
+    crate::conversation::stamp(&mut message, &origin);
+    let projected = crate::conversation::project(&message, &origin);
+    let replayed = request("model", Effort::Default, &[projected], false, None).unwrap();
+    let items = replayed.get("input").and_then(Value::as_array).unwrap();
+    assert_eq!(items[0], reasoning);
+    assert_eq!(
+        items[1].get("arguments").and_then(Value::as_str),
+        Some(decoded.as_str())
+    );
+    assert_eq!(items[1].get("provider_extension"), Some(&Value::Bool(true)));
+    let archived = crate::conversation::project(&message, &origin);
+    assert_eq!(
+        archived
+            .get("openai_items")
+            .and_then(Value::as_array)
+            .unwrap()[1],
+        tool
+    );
+}
