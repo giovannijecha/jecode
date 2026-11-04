@@ -424,3 +424,47 @@ fn permission_display_masks_secrets_and_paste_never_approves() {
     key(&mut app, 68, 4);
     assert!(app.permission_observer.grants().is_empty());
 }
+
+#[test]
+fn multi_file_permission_masks_member_paths_without_changing_grants() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    let secret = "permission-fixture-secret";
+    app.archive.redactor.add_secret(secret.into());
+    let members = [
+        outside(Kind::Edits, &format!(r"C:\outside\{secret}\first.rs")),
+        outside(Kind::Edits, r"C:\outside\second.rs"),
+    ];
+    let access = Access {
+        target: members
+            .iter()
+            .map(|member| member.target.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        members: members.to_vec(),
+        ..outside(Kind::Edits, "")
+    };
+    app.permission_observer
+        .begin("edit-batch", "edit", &access)
+        .unwrap();
+    app.refresh_permission();
+    let shown = screen(&app);
+    assert!(
+        shown.contains("[redacted]") && shown.contains("second.rs"),
+        "{shown}"
+    );
+    assert!(!shown.contains(secret), "{shown}");
+    assert!(
+        app.permission_observer.pending().unwrap().0.access.members[0]
+            .target
+            .contains(secret)
+    );
+
+    text(&mut app, "2");
+    assert_eq!(app.permission_observer.grants(), access.grants());
+    assert!(app.permission_observer.grants()[0].target.contains(secret));
+    app.dispatch("/permissions".into()).unwrap();
+    text(&mut app, "4");
+    assert!(!screen(&app).contains(secret), "{}", screen(&app));
+}
