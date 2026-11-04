@@ -97,6 +97,18 @@ fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
         (200, completion("Finished.", vec![])),
     ]);
     let mut agent = crowded(&fixture, &directory);
+    // Margin past the trigger, so two portions stay needed when the built-in
+    // prompt grows a little; the request still leaves room for the reply.
+    for index in 0..2 {
+        agent.messages.lock().unwrap().push(Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "content",
+                Value::string(format!("Margin {index}: {}", "progress ".repeat(400))),
+            ),
+        ]));
+    }
+    assert!(agent.locked_estimate() + 8192 < CAPACITY);
     agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
     assert_eq!(requests.len(), 4);
