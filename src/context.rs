@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 
 pub use crate::conversation::portable;
 
+mod compact;
 pub(crate) mod measurement;
 pub(crate) mod provider;
 pub(crate) mod source;
@@ -364,7 +365,9 @@ impl Context {
             && self.preview_limit > 0
             && message.get("role").and_then(Value::as_str) == Some("tool")
         {
-            view::preview(message, index, self.preview_limit)
+            view::preview(&compact::compact(message), index, self.preview_limit)
+        } else if message.get("role").and_then(Value::as_str) == Some("tool") {
+            compact::compact(message)
         } else if index < compatible_from
             && message.get("role").and_then(Value::as_str) == Some("assistant")
             && !crate::conversation::has_origin(message)

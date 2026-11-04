@@ -5,6 +5,9 @@ overview, read [Tools](TOOLS.md) first. The model receives these contracts as
 tool schemas; this page is for understanding results, diagnosing behavior and
 writing [skills](SKILLS.md).
 
+Saved results keep every field described here. Requests send the model a shorter
+view without fields that only restate a default, such as `truncated: false`.
+
 ## Arguments
 
 Every tool except `steps` accepts an optional boolean `parallel`. The routine tools `read`,
@@ -163,9 +166,11 @@ Absolute paths inside the project are accepted.
   contents are still filtered.
 - Results are capped at 64 KiB per page. Continue with `next_offset` and the
   same arguments until it is `null`; restart after the workspace changes.
-- Each match has `line`, `text`, `byte_offset` and `before`/`after` context. Long
-  lines are searched in chunks and previewed around the match, with
-  `text_truncated`; use `read` with the `byte_offset` to see the full text.
+- Each saved match has `line`, `text`, `byte_offset` and `before`/`after` context.
+  The model reads them as grep lines: the path, then `line:text` for matches and
+  `line-text` for context, with `--` between gaps. Long lines are searched in
+  chunks and previewed around the match, marked `[line cut; read from byte_offset
+  N]`; `read` with that `byte_offset` shows the full text.
 - Binary and non-UTF-8 files are counted in `skipped`. Unreadable paths appear in
   `errors`. `complete` is `false` when more results exist or errors prevented a
   full search, so an empty result proves absence only within the readable scope.
@@ -211,7 +216,8 @@ still correct.
 
 A finished command returns `exit_code`, `cancelled`, `timed_out`, byte counts
 and a preview of each stream; truncated previews keep the beginning and end.
-`stdout_file` and `stderr_file` reference the complete saved streams. Known
+`stdout_file` and `stderr_file` reference the complete saved streams; the model
+receives them when output is cut or the process is still running. Known
 credentials are masked before output is saved. If saving output or confirming
 cleanup fails after launch, the result is `outcome: "unknown"`.
 

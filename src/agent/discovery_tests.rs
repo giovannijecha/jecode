@@ -111,7 +111,13 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
         Some(&Value::number(entries.len()))
     );
     let searched = receipt(next, "search-source");
-    let matches = searched.get("matches").unwrap().as_array().unwrap();
+    // The model reads grep lines; the record keeps every structured field.
+    let lines = searched.get("matches").and_then(Value::as_str).unwrap();
+    assert!(lines.starts_with("src/alpha.rs\n"), "{lines}");
+    assert!(lines.contains("2:needle here\n"), "{lines}");
+    let original = agent.messages.lock().unwrap().clone();
+    let saved = receipt(&original, "search-source");
+    let matches = saved.get("matches").unwrap().as_array().unwrap();
     assert_eq!(matches.len(), 1);
     assert_eq!(
         matches[0].get("path").and_then(Value::as_str),
@@ -122,8 +128,6 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
         matches[0].get("text").and_then(Value::as_str),
         Some("needle here")
     );
-    let original = agent.messages.lock().unwrap().clone();
-    assert_eq!(receipt(&original, "search-source"), searched);
     drop(agent);
 
     let second = HttpFixture::new(vec![(
@@ -138,11 +142,11 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
     resumed.resume(&id).unwrap();
     assert_eq!(
         receipt(&resumed.messages.lock().unwrap(), "list-source"),
-        listed
+        receipt(&original, "list-source")
     );
     assert_eq!(
         receipt(&resumed.messages.lock().unwrap(), "search-source"),
-        searched
+        saved
     );
     resumed
         .run_turn("Use the previous result", &mut |_| Ok(()))
@@ -250,7 +254,7 @@ fn openai_namespace_carries_empty_search_receipt_to_the_followup() {
     assert_eq!(result.get("matches_returned"), Some(&Value::number(0)));
     assert_eq!(result.get("complete"), Some(&Value::Bool(true)));
     assert_eq!(
-        receipt(&agent.messages.lock().unwrap(), "empty-search"),
-        result
+        receipt(&agent.messages.lock().unwrap(), "empty-search").get("matches"),
+        result.get("matches")
     );
 }
