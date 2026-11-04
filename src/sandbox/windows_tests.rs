@@ -4,6 +4,30 @@ use crate::test_support::{Directory, sandbox as probe};
 use std::time::Duration;
 
 #[test]
+fn listing_roots_are_canonical_and_leave_granted_roots_alone() {
+    let project = Directory::new();
+    let mut policy = Policy::for_command(Level::Workspace, project.path(), None, None)
+        .unwrap()
+        .unwrap();
+    // A working folder at a drive root and a manager home at another: a
+    // listing entry would replace their grants.
+    policy.write = vec![PathBuf::from(r"\\?\D:\")];
+    policy.read = vec![PathBuf::from(r"\\?\E:\")];
+    // PATH and manager variables may spell paths with forward slashes.
+    policy.node_paths = vec![
+        PathBuf::from("C:/Tools/node"),
+        PathBuf::from("c:/Other/node"),
+        PathBuf::from("//server/share/node"),
+        PathBuf::from("d:/node"),
+        PathBuf::from(r"e:\node"),
+    ];
+    assert_eq!(
+        policy.enumerable_roots(),
+        [PathBuf::from(r"C:\"), PathBuf::from(r"\\server\share\")]
+    );
+}
+
+#[test]
 fn workspace_lists_drive_roots_only_for_installed_node() {
     let root = Directory::new();
     let outside = Directory::new();

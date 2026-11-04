@@ -93,9 +93,9 @@ filesystem policy on the command and every process it starts:
   the temporary area.
 - Node.js runtimes installed through Volta, nvm-windows or fnm are readable.
   When `node.exe` is on `PATH`, including a version-manager shim, commands can
-  also list the drives that hold the working folder, the temporary area, the
-  executable and configured manager homes, because Node.js checks each drive
-  root while resolving script and module paths. Windows grants this listing for a whole
+  also list the drives that hold the writable folders, the executable and
+  configured manager homes, because Node.js checks each drive root while
+  resolving script and module paths. Windows grants this listing for a whole
   drive: a command can see the names and metadata of files and folders there,
   including your user profile and the Jecode home, but cannot read their
   contents or write outside the writable folders. On Windows builds without

@@ -200,20 +200,34 @@ impl Policy {
     /// leaves unreadable. The Windows policy can grant listing only for a
     /// whole tree, so when Node.js is installed the drives holding writable
     /// folders and the runtime become listable: names and metadata, never
-    /// file contents or writes.
+    /// file contents or writes. Windows lets a listing entry replace a grant
+    /// for the same path, so a granted root stays out of the list, and the
+    /// native adapter accepts only the canonical separator.
     #[cfg(any(windows, test))]
     fn enumerable_roots(&self) -> Vec<PathBuf> {
         let mut roots: Vec<PathBuf> = Vec::new();
         if self.node_paths.is_empty() {
             return roots;
         }
+        let plain = |path: &Path| {
+            PathBuf::from(
+                crate::permissions::plain(path).replace('/', std::path::MAIN_SEPARATOR_STR),
+            )
+        };
+        let granted: Vec<PathBuf> = self
+            .read
+            .iter()
+            .chain(&self.write)
+            .map(|path| plain(path))
+            .collect();
         for path in self.write.iter().chain(&self.node_paths) {
             let Some(root) = path.ancestors().last().filter(|root| root.has_root()) else {
                 continue;
             };
-            let root = PathBuf::from(crate::permissions::plain(root));
-            if !roots
+            let root = plain(root);
+            if !granted
                 .iter()
+                .chain(&roots)
                 .any(|known| known.as_os_str().eq_ignore_ascii_case(root.as_os_str()))
             {
                 roots.push(root);
