@@ -12,6 +12,7 @@ mod network;
 pub mod processes;
 pub(crate) mod schema;
 mod shell;
+mod writes;
 
 pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
@@ -268,44 +269,13 @@ impl Tools {
                             .map(|value| (value, None))
                         }
                     }
-                    "write" | "edit" => {
-                        let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
-                        let (root, arguments) = match base {
-                            Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
-                            None => (root, arguments),
-                        };
-                        // Session temporary files are outside the workspace scope.
-                        let checkpoints = self.checkpoints.as_deref().filter(|_| root == self.root);
-                        let result = if name == "write" {
-                            files::write_with_change(&root, &arguments, checkpoints, cancellation)
-                        } else {
-                            files::edit_with_change(&root, &arguments, checkpoints, cancellation)
-                        };
-                        result.map(|(mut value, change)| {
-                            if self.checkpoints.is_some()
-                                && root != self.root
-                                && value.get("bytes_written").is_some()
-                                && let Value::Object(fields) = &mut value
-                            {
-                                fields.insert(
-                                    "checkpoint".into(),
-                                    Value::object([
-                                        ("status", Value::string("none")),
-                                        ("saved_paths", Value::number(0)),
-                                        (
-                                            "reason",
-                                            Value::string(if base.is_some() {
-                                                "the file is outside the working folder"
-                                            } else {
-                                                "session temporary storage is outside the workspace"
-                                            }),
-                                        ),
-                                    ]),
-                                );
-                            }
-                            (value, change)
-                        })
+                    "edit" if edit::several(&arguments) => {
+                        let outside = permission
+                            .and_then(|(_, access)| access.as_ref())
+                            .is_some_and(|access| access.outside);
+                        self.edit_files(&arguments, outside, cancellation)
                     }
+                    "write" | "edit" => self.change_file(name, &arguments, base, cancellation),
                     "bash" | "exec" | "process" => {
                         let temporary = self
                             .temporary
@@ -489,5 +459,7 @@ pub(crate) fn optional_number(
 mod checkpoint_tests;
 #[cfg(test)]
 mod local_read_tests;
+#[cfg(test)]
+mod multi_edit_tests;
 #[cfg(test)]
 mod tests;

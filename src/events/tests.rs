@@ -119,6 +119,37 @@ fn several_read_paths_are_named_together() {
 }
 
 #[test]
+fn multi_file_edits_name_their_files_and_count_outcomes() {
+    let file = |path: &str| Value::object([("path", Value::string(path))]);
+    let arguments = Value::object([(
+        "files",
+        Value::Array(vec![file("src/a.rs"), file("src/b.rs"), file("README.md")]),
+    )]);
+    assert_eq!(
+        description("edit", &arguments),
+        "src/a.rs, src/b.rs, README.md"
+    );
+    let entry = |path: &str, outcome: (&str, Value)| {
+        Value::object([("path", Value::string(path)), outcome])
+    };
+    let written = |path| entry(path, ("bytes_written", Value::number(12)));
+    let failed = |path| {
+        entry(
+            path,
+            ("error", Value::string("edit 1: old text was not found")),
+        )
+    };
+    for (entries, expected) in [
+        (vec![written("a"), written("b")], "changed 2 files"),
+        (vec![written("a"), failed("b")], "changed 1 file; 1 failed"),
+        (vec![failed("a"), failed("b")], "no files changed; 2 failed"),
+    ] {
+        let result = Value::object([("files", Value::Array(entries))]);
+        assert_eq!(tool_summary("edit", &result), expected);
+    }
+}
+
+#[test]
 fn routine_description_overrides_command_and_blank_falls_back() {
     for (name, key, command, fallback) in [
         (

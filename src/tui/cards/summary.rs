@@ -177,7 +177,7 @@ fn command(result: &Value, failed: bool, elapsed: Option<Duration>, expanded: bo
     }
 }
 
-fn changed(change: &Change) -> Line {
+pub(super) fn changed(change: &Change) -> Line {
     if change.created {
         return Line::new(
             &format!("New file · {} {}", change.added, plural(change.added)),

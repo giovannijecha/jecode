@@ -425,6 +425,26 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         }
         return summary;
     }
+    if name == "edit"
+        && let Some(files) = result.get("files").and_then(Value::as_array)
+    {
+        let failed = files
+            .iter()
+            .filter(|file| file.get("error").is_some())
+            .count();
+        let changed = files
+            .iter()
+            .filter(|file| file.get("bytes_written").and_then(Value::as_usize) > Some(0))
+            .count();
+        let mut summary = match changed {
+            0 => "no files changed".to_owned(),
+            changed => format!("changed {}", counted(changed, "file")),
+        };
+        if failed > 0 {
+            summary.push_str(&format!("; {failed} failed"));
+        }
+        return summary;
+    }
     if let Some(bytes) = result.get("bytes_written").and_then(Value::as_usize) {
         return format!("wrote {bytes} bytes");
     }
@@ -444,7 +464,7 @@ pub fn process_status(result: &Value) -> Option<&str> {
 
 mod description;
 mod lsp;
-pub use description::{description, target};
+pub use description::{description, edited, target};
 pub(crate) use lsp::diagnostic_counts;
 
 #[cfg(test)]

@@ -472,6 +472,8 @@ mod map_tests;
 #[cfg(test)]
 mod mcp_tests;
 #[cfg(test)]
+mod multi_edit_tests;
+#[cfg(test)]
 mod naming_tests;
 #[cfg(test)]
 mod network_tests;

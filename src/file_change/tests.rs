@@ -111,6 +111,19 @@ fn final_newline_and_crlf_changes_do_not_inflate_content_counts() {
 fn persisted_value_round_trips() {
     let change = Change::between(Some("a\nb\nc\n"), "a\nx\nc").unwrap();
     assert_eq!(Change::from_value(&change.value()).unwrap(), change);
+    // A single-file change keeps its saved shape.
+    assert!(change.value().get("files").is_none());
+    let other = Change::between(Some("one\n"), "one\ntwo\n").unwrap();
+    let several = Change::several(vec![
+        ("src/a.rs".into(), change.clone()),
+        ("src/b.rs".into(), other),
+    ])
+    .unwrap();
+    assert_eq!((several.added, several.removed), (2, 1));
+    assert!(several.hunks.is_empty());
+    assert_eq!(several.file("src/a.rs"), Some(&change));
+    assert_eq!(Change::from_value(&several.value()).unwrap(), several);
+    assert!(Change::several(Vec::new()).is_none());
 }
 
 #[test]

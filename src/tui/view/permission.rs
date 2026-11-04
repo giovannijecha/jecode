@@ -68,7 +68,13 @@ fn facts(pending: &Pending, width: usize) -> Vec<Line> {
     let indent = panel::cells(&head);
     let target = match access.kind {
         Kind::Runs => text::clean(&access.target),
-        Kind::Reads | Kind::Edits => footer::path(&access.target),
+        // A multi-file edit names every file.
+        Kind::Reads | Kind::Edits => access
+            .target
+            .split(", ")
+            .map(footer::path)
+            .collect::<Vec<_>>()
+            .join(", "),
     };
     let mut call = Line::new(&target, STRONG);
     if let Some(place) = &access.place {

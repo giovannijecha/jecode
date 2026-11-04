@@ -12,6 +12,7 @@ mod content;
 mod diff;
 mod discovery;
 mod edit_fallback;
+mod edits;
 mod failure;
 mod lsp;
 mod map;
@@ -131,6 +132,24 @@ impl Body {
             unit: "lines",
         }
     }
+
+    /// What Ctrl+O would add: `+6 lines`, or `+1 hunk · 6 rows`.
+    fn more(&self) -> String {
+        if self.hidden_hunks > 0 {
+            let hunks = if self.hidden_hunks == 1 {
+                "hunk"
+            } else {
+                "hunks"
+            };
+            return format!("+{} {hunks} · {} rows", self.hidden_hunks, self.hidden);
+        }
+        let unit = if self.hidden == 1 {
+            self.unit.strip_suffix('s').unwrap_or(self.unit)
+        } else {
+            self.unit
+        };
+        format!("+{} {unit}", self.hidden)
+    }
 }
 
 #[cfg(test)]
@@ -166,6 +185,9 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         mcp::card(tool, columns, keycap)
     } else if tool.name == "lsp" {
         lsp::card(tool, columns, keycap)
+    } else if tool.name == "edit" && crate::tools::edit::several(tool.arguments) {
+        // It places its own keycaps around a title that may wrap.
+        return edits::card(tool, columns, keycap);
     } else if matches!(tool.name, "read" | "write" | "edit") {
         file_card(tool, columns, keycap)
     } else {
@@ -233,29 +255,10 @@ fn file_card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
                 .max()
                 .unwrap_or(2)
                 + 1;
-            let unit = if body.hidden == 1 {
-                body.unit.strip_suffix('s').unwrap_or(body.unit)
-            } else {
-                body.unit
-            };
-            let label = if body.hidden_hunks > 0 {
-                format!(
-                    "+{} {} · {} rows",
-                    body.hidden_hunks,
-                    if body.hidden_hunks == 1 {
-                        "hunk"
-                    } else {
-                        "hunks"
-                    },
-                    body.hidden
-                )
-            } else {
-                format!("+{} {unit}", body.hidden)
-            };
             // A diff runs from column 2, so its count does too.
             let gutter = if diff { "  " } else { "    " };
             let mut more = line_rows(
-                &Line::new(&label, DIM),
+                &Line::new(&body.more(), DIM),
                 columns,
                 origin,
                 gutter,

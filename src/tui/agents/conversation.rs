@@ -77,14 +77,7 @@ fn call(tool: &Value, working: bool, turn_id: u64, changes: &HashMap<String, Cha
             .then(|| Value::object([("error", Value::string("No confirmed result"))]))
     });
     let change = tool.get("change").map(|counts| {
-        let counted = Change {
-            added: super::number(counts, "added"),
-            removed: super::number(counts, "removed"),
-            created: counts.get("created") == Some(&Value::Bool(true)),
-            hunks: Vec::new(),
-            ending_change: None,
-            final_newline: None,
-        };
+        let counted = counted(counts);
         let full = changes.get(super::value(tool, "id")).filter(|change| {
             (change.added, change.removed, change.created)
                 == (counted.added, counted.removed, counted.created)
@@ -103,6 +96,22 @@ fn call(tool: &Value, working: bool, turn_id: u64, changes: &HashMap<String, Cha
             turn_id,
             ..Presentation::default()
         },
+    }
+}
+
+/// A change from the counts a record kept, per file for a multi-file edit.
+fn counted(counts: &Value) -> Change {
+    Change {
+        added: super::number(counts, "added"),
+        removed: super::number(counts, "removed"),
+        created: counts.get("created") == Some(&Value::Bool(true)),
+        hunks: Vec::new(),
+        ending_change: None,
+        final_newline: None,
+        files: super::list(counts, "files")
+            .iter()
+            .map(|file| (super::value(file, "path").to_owned(), counted(file)))
+            .collect(),
     }
 }
 

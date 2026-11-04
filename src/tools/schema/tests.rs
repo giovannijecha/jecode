@@ -156,17 +156,12 @@ fn command_and_process_budgets_advertise_the_same_bounded_preview_contract() {
 }
 
 #[test]
-fn edit_schema_advertises_only_ordered_replacements() {
+fn edit_schema_advertises_ordered_replacements_for_one_file_or_several() {
     let tools = definitions();
     let edit = &tools.as_array().unwrap()[2];
     let parameters = edit.get("parameters").unwrap();
-    assert_eq!(
-        parameters.get("required"),
-        Some(&Value::Array(vec![
-            Value::string("path"),
-            Value::string("edits")
-        ]))
-    );
+    // path with edits, or files; the tool reports a call that mixes them.
+    assert_eq!(parameters.get("required"), Some(&Value::Array(vec![])));
     assert_eq!(
         parameters.get("additionalProperties"),
         Some(&Value::Bool(false))
@@ -174,17 +169,31 @@ fn edit_schema_advertises_only_ordered_replacements() {
     let properties = parameters.get("properties").unwrap();
     assert!(properties.get("old_text").is_none());
     assert!(properties.get("new_text").is_none());
-    let edits = properties.get("edits").unwrap();
-    assert_eq!(edits.get("minItems"), Some(&Value::number(1)));
-    let items = edits.get("items").unwrap();
-    assert_eq!(items.get("additionalProperties"), Some(&Value::Bool(false)));
+    let replacements = |edits: &Value| {
+        assert_eq!(edits.get("minItems"), Some(&Value::number(1)));
+        let items = edits.get("items").unwrap();
+        assert_eq!(items.get("additionalProperties"), Some(&Value::Bool(false)));
+        assert_eq!(
+            items.get("required"),
+            Some(&Value::Array(vec![
+                Value::string("old_text"),
+                Value::string("new_text")
+            ]))
+        );
+    };
+    replacements(properties.get("edits").unwrap());
+    let files = properties.get("files").unwrap();
+    assert_eq!(files.get("minItems"), Some(&Value::number(1)));
+    assert_eq!(files.get("maxItems"), Some(&Value::number(12)));
+    let file = files.get("items").unwrap();
     assert_eq!(
-        items.get("required"),
+        file.get("required"),
         Some(&Value::Array(vec![
-            Value::string("old_text"),
-            Value::string("new_text")
+            Value::string("path"),
+            Value::string("edits")
         ]))
     );
+    replacements(file.get("properties").unwrap().get("edits").unwrap());
 }
 
 #[test]

@@ -76,6 +76,29 @@ fn strings() -> Value {
     Value::object([("type", Value::string("array")), ("items", string())])
 }
 
+/// An edit's ordered replacements.
+fn replacements() -> Value {
+    Value::object([
+        ("type", Value::string("array")),
+        ("minItems", Value::number(1)),
+        (
+            "items",
+            Value::object([
+                ("type", Value::string("object")),
+                (
+                    "properties",
+                    Value::object([("old_text", string()), ("new_text", string())]),
+                ),
+                (
+                    "required",
+                    Value::Array(["old_text", "new_text"].map(Value::string).into()),
+                ),
+                ("additionalProperties", Value::Bool(false)),
+            ]),
+        ),
+    ])
+}
+
 fn build_definitions() -> Value {
     let mut tools = base_definitions();
     tools.extend(super::discovery::definitions());
@@ -195,27 +218,27 @@ fn base_definitions() -> Vec<Value> {
         ),
         tool(
             "edit",
-            "Edit a UTF-8 project or tmp: file with one or more ordered replacements. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings.",
+            "Edit a UTF-8 project or tmp: file with path and one or more ordered replacements. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings. For several files send files ({path, edits} per file) instead of path and edits: each file applies all or nothing, the others are still written, and results follow call order; retry only entries with an error.",
             Value::object([
                 ("path", string()),
+                ("edits", replacements()),
                 (
-                    "edits",
+                    "files",
                     Value::object([
                         ("type", Value::string("array")),
                         ("minItems", Value::number(1)),
+                        ("maxItems", Value::number(super::edit::MAX_FILES)),
                         (
                             "items",
                             Value::object([
                                 ("type", Value::string("object")),
                                 (
                                     "properties",
-                                    Value::object([("old_text", string()), ("new_text", string())]),
+                                    Value::object([("path", string()), ("edits", replacements())]),
                                 ),
                                 (
                                     "required",
-                                    Value::Array(
-                                        ["old_text", "new_text"].map(Value::string).into(),
-                                    ),
+                                    Value::Array(["path", "edits"].map(Value::string).into()),
                                 ),
                                 ("additionalProperties", Value::Bool(false)),
                             ]),
@@ -223,7 +246,7 @@ fn base_definitions() -> Vec<Value> {
                     ]),
                 ),
             ]),
-            &["path", "edits"],
+            &[],
         ),
         routine(
             "bash",

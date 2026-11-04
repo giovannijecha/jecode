@@ -393,14 +393,45 @@ fn ordered_log_interleaves_messages_and_calls_and_survives_resume() {
         hunks: Vec::new(),
         ending_change: None,
         final_newline: None,
+        files: Vec::new(),
     };
     observer.tool_changed("a1", "c1", &change);
+    // A multi-file edit lists each file with its own counts.
+    let several = Value::object([(
+        "files",
+        Value::Array(
+            ["src/b.rs", "src/c.rs"]
+                .map(|path| Value::object([("path", Value::string(path))]))
+                .into(),
+        ),
+    )]);
+    observer.tool_started("a1", "c2", "edit", &several);
+    let file = |added| crate::file_change::Change::between(Some("a\n"), &"b\n".repeat(added));
+    let files = vec![
+        ("src/b.rs".to_owned(), file(1).unwrap()),
+        ("src/c.rs".to_owned(), file(2).unwrap()),
+    ];
+    let change = crate::file_change::Change::several(files).unwrap();
+    observer.tool_changed("a1", "c2", &change);
+    let record = observer.snapshot().remove(0);
+    assert_eq!(
+        record.get("files").and_then(Value::as_array).unwrap(),
+        &["src/a.rs", "src/b.rs", "src/c.rs"].map(Value::string)
+    );
+    let counts = record.get("tools").and_then(Value::as_array).unwrap()[1]
+        .get("change")
+        .unwrap();
+    assert_eq!(counts.get("added").and_then(Value::as_usize), Some(3));
+    let second = &counts.get("files").and_then(Value::as_array).unwrap()[1];
+    assert_eq!(second.get("path").and_then(Value::as_str), Some("src/c.rs"));
+    assert_eq!(second.get("added").and_then(Value::as_usize), Some(2));
+    observer.tool_finished("a1", "c2", "edit", "changed 2 files", &Value::object([]));
     observer.tool_finished("a1", "c1", "edit", "updated", &Value::object([]));
     observer.message("a1", "Done");
     let snapshot = observer.snapshot().remove(0);
     assert_eq!(
         log_entries(&snapshot),
-        ["assignment 1", "message 0", "tool 0", "message 1"]
+        ["assignment 1", "message 0", "tool 0", "tool 1", "message 1"]
     );
     let tool = &snapshot.get("tools").and_then(Value::as_array).unwrap()[0];
     let counts = tool.get("change").unwrap();

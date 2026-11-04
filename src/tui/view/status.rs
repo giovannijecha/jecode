@@ -408,7 +408,14 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
             ),
             None => labelled("Reading", file("path")),
         },
-        "edit" => labelled("Editing", file("path")),
+        "edit" => match crate::events::edited(arguments).as_slice() {
+            [] => labelled("Editing", file("path")),
+            [path] => labelled(
+                "Editing",
+                short(path.rsplit(['/', '\\']).next().unwrap_or(path)),
+            ),
+            paths => format!("Editing {} files", paths.len()),
+        },
         "write" => labelled("Writing", file("path")),
         "bash" => labelled("Running", short(field("command"))),
         "exec" => labelled("Starting", short(&crate::events::target(name, arguments))),
