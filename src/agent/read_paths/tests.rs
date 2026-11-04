@@ -53,6 +53,52 @@ fn several_files_are_read_in_order_and_each_reports_its_own_outcome() {
 }
 
 #[test]
+fn only_media_views_wait_for_a_single_read() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    let png = crate::attachments::tests::png(4, 3);
+    std::fs::write(directory.path().join("shot.png"), &png).unwrap();
+    let pool = agent.sessions().unwrap().store().attachments();
+    let attached = |name: &str, bytes: &[u8]| pool.import_bytes(name, bytes).unwrap().reference();
+    let text = attached("notes.txt", b"alpha\n");
+    let binary = attached("blob.bin", &[0, 1, 2, 3]);
+    let image = attached("shot.png", &png);
+    let result = read(&agent, paths(&[&text, &binary, &image, "shot.png"]));
+    let files = result.get("files").and_then(Value::as_array).unwrap();
+    let field = |index: usize, key: &str| {
+        files[index]
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    // Text pages arrive in this call, as the schema says.
+    assert!(
+        field(0, "content").contains("alpha"),
+        "{}",
+        files[0].encode()
+    );
+    assert_eq!(field(0, "error"), "");
+    // Other files return a path, which needs no second read either.
+    assert!(!field(1, "local_path").is_empty(), "{}", files[1].encode());
+    assert_eq!(field(1, "error"), "");
+    // Only a view has to wait, and it counts as not read.
+    for index in [2, 3] {
+        assert!(
+            field(index, "error").contains("read it alone with path"),
+            "{}",
+            files[index].encode()
+        );
+        assert!(files[index].get("view").is_none());
+    }
+}
+
+#[test]
 fn invalid_batches_fail_before_reading() {
     let directory = Directory::new();
     std::fs::write(directory.path().join("a.txt"), "alpha\n").unwrap();

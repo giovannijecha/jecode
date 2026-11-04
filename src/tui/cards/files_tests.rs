@@ -361,6 +361,31 @@ fn multi_path_reads_name_their_files_and_expand_under_each_path() {
 }
 
 #[test]
+fn a_binary_attachment_in_a_multi_path_read_keeps_its_note_on_expansion() {
+    let reference = "attachment:blob";
+    let args = Value::object([("paths", Value::Array(vec![Value::string(reference)]))]);
+    let note = "Jecode has not interpreted this file.";
+    let result = Value::object([(
+        "files",
+        Value::Array(vec![Value::object([
+            ("path", Value::string(reference)),
+            ("attachment", Value::object([])),
+            ("note", Value::string(note)),
+        ])]),
+    )]);
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = plain(&card(tool("read", &args, &result, &expanded), 80, false).rows);
+    assert_eq!(
+        rows[1..],
+        [format!("  │ {reference}"), format!("  └ {note}"),],
+        "{rows:#?}"
+    );
+}
+
+#[test]
 fn expanded_multi_path_reads_keep_every_row_clean_and_on_the_tree() {
     let hostile = "src/\x1b]0;x\x07evil.rs";
     let args = Value::object([(

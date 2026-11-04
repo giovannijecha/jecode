@@ -143,6 +143,7 @@ fn files(result: &Value, columns: usize) -> Vec<Line> {
             let mut source = read(&arguments, file, columns);
             origin = placed(&mut source, origin);
             rows.extend(source);
+            rows.extend(notices("read", file, columns, true));
         }
     }
     rows
