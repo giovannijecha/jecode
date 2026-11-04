@@ -29,20 +29,20 @@ fn saved(agent: &Agent, text: &str) -> String {
         .to_owned()
 }
 
-fn read(agent: &Agent, reference: &str) -> Value {
+pub(super) fn read(agent: &Agent, reference: &str) -> Value {
     agent.tools.execute(
         "read",
         &Value::object([("path", Value::string(reference))]).encode(),
     )
 }
 
-fn assert_reads(agent: &Agent, reference: &str, text: &str) {
+pub(super) fn assert_reads(agent: &Agent, reference: &str, text: &str) {
     let result = read(agent, reference);
     assert!(result.get("error").is_none(), "{reference}: {result:?}");
     assert!(result.encode().contains(text), "{reference}: {result:?}");
 }
 
-fn refusal(agent: &Agent, reference: &str) -> String {
+pub(super) fn refusal(agent: &Agent, reference: &str) -> String {
     let result = read(agent, reference);
     result
         .get("error")
@@ -154,7 +154,7 @@ fn resumed_conversation_still_resolves_its_tree() {
     assert_reads(&later, &main_reference, "before resume");
 }
 
-fn call(agent: &Agent, name: &str, fields: &[(&str, &str)]) -> Value {
+pub(super) fn call(agent: &Agent, name: &str, fields: &[(&str, &str)]) -> Value {
     let arguments = Value::Object(
         fields
             .iter()

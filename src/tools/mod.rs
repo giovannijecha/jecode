@@ -12,6 +12,7 @@ mod network;
 pub mod processes;
 pub(crate) mod schema;
 mod shell;
+mod temporary;
 mod writes;
 
 pub(crate) use files::read_source;
@@ -76,6 +77,8 @@ pub struct Tools {
     temporary: Option<crate::scratch::Area>,
     /// Temporary areas of the agents above this one, nearest first.
     inherited_temporary: Vec<crate::scratch::Area>,
+    /// This agent's collaborators, whose temporary files it can read.
+    collaborators: crate::collaboration::Observer,
     attachments: Option<crate::attachments::Pool>,
     processes: processes::Registry,
     checkpoints: Option<Arc<Session>>,
@@ -107,6 +110,7 @@ impl Tools {
             root,
             temporary: None,
             inherited_temporary: Vec::new(),
+            collaborators: crate::collaboration::Observer::default(),
             attachments: None,
             processes: processes::Registry::default(),
             checkpoints: None,
@@ -146,6 +150,7 @@ impl Tools {
         let Some(alias) = path.strip_prefix("tmp:").or(absolute.as_deref()) else {
             return Ok((self.root.clone(), arguments.clone()));
         };
+        temporary::own(path)?;
         let (root, path) = self.temporary()?.file(alias, create)?;
         let mut arguments = arguments.clone();
         if let Value::Object(fields) = &mut arguments {

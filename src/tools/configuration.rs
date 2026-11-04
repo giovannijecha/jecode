@@ -1,18 +1,21 @@
 //! Session-scoped stores, areas and homes that configure the tools.
 
 use super::{Tools, processes};
-use crate::json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 impl Tools {
     #[cfg(test)]
-    pub fn configure_output(&mut self, directory: PathBuf, redactor: crate::redact::Redactor) {
+    pub fn configure_output(
+        &mut self,
+        directory: std::path::PathBuf,
+        redactor: crate::redact::Redactor,
+    ) {
         self.outputs = crate::output::Store::new(directory, redactor);
     }
     #[cfg(test)]
     pub fn configure_session_output(
         &mut self,
-        directory: PathBuf,
+        directory: std::path::PathBuf,
         session: &str,
         redactor: crate::redact::Redactor,
     ) -> Result<(), String> {
@@ -34,31 +37,12 @@ impl Tools {
             .map(crate::scratch::Area::share)
             .collect();
     }
-
-    /// Read arguments. A tmp: file absent from this agent's area is read from
-    /// the nearest agent above it that has one; writes stay in its own area.
-    pub(super) fn read_arguments(&self, arguments: &Value) -> Result<(PathBuf, Value), String> {
-        let error = match self.file_arguments(arguments, false) {
-            Err(error) => error,
-            found => return found,
-        };
-        let Some((root, path)) = arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .and_then(|path| path.strip_prefix("tmp:"))
-            .and_then(|alias| {
-                self.inherited_temporary
-                    .iter()
-                    .find_map(|area| area.existing(alias))
-            })
-        else {
-            return Err(error);
-        };
-        let mut arguments = arguments.clone();
-        if let Value::Object(fields) = &mut arguments {
-            fields.insert("path".into(), Value::string(path.to_string_lossy()));
-        }
-        Ok((root, arguments))
+    /// The agent's collaborators, whose temporary files it reads.
+    pub(crate) fn configure_collaborators(
+        &mut self,
+        collaborators: crate::collaboration::Observer,
+    ) {
+        self.collaborators = collaborators;
     }
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
         self.project_map.include_credentials(redactor.clone());

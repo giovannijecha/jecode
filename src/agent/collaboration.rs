@@ -325,6 +325,8 @@ mod reference_tests;
 #[cfg(test)]
 mod resume_tests;
 #[cfg(test)]
+mod temporary_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod update_tests;

@@ -70,6 +70,8 @@ impl Agent {
         let redactor = client.redactor();
         let mut tools = tools;
         tools.include_credentials(redactor.clone());
+        let collaboration = crate::collaboration::Observer::default();
+        tools.configure_collaborators(collaboration.clone());
         let mut agent = Self {
             client,
             accounts: std::collections::BTreeMap::new(),
@@ -91,7 +93,7 @@ impl Agent {
             inbox: crate::inbox::Inbox::default(),
             routing_preferences: None,
             charges: Mutex::default(),
-            collaboration: crate::collaboration::Observer::default(),
+            collaboration,
             questions: crate::ask::Observer::default(),
             permissions: crate::permissions::Permissions::default(),
             child: false,

@@ -28,7 +28,11 @@ pub struct Info {
     pub skipped: usize,
 }
 
+mod delegated;
+#[cfg(test)]
+mod delegated_tests;
 mod removal;
+pub use delegated::find;
 pub(crate) use removal::Removal;
 
 impl Area {
@@ -151,21 +155,7 @@ impl Area {
     }
 
     pub fn file(&self, alias: &str, create_parents: bool) -> Result<(PathBuf, PathBuf), String> {
-        let relative = PathBuf::from(alias.replace('\\', "/"));
-        if relative.as_os_str().is_empty()
-            || relative.components().any(|part| match part {
-                Component::Normal(name) => {
-                    name.to_string_lossy().contains(':')
-                        || name.to_string_lossy().eq_ignore_ascii_case(MARKER)
-                }
-                _ => true,
-            })
-        {
-            return Err(
-                "tmp: must name a relative file without traversal or reserved metadata paths"
-                    .into(),
-            );
-        }
+        let relative = relative(alias)?;
         let root = self.ensure()?;
         let parts: Vec<_> = relative.components().collect();
         let mut path = root.clone();
@@ -263,6 +253,25 @@ fn private_directory(path: &Path) -> Result<(), String> {
     crate::disk::ensure_private_directory(path)
         .map(|_| ())
         .map_err(|error| format!("Could not prepare temporary area: {error}"))
+}
+
+/// A `tmp:` alias as a relative path inside an area.
+fn relative(alias: &str) -> Result<PathBuf, String> {
+    let relative = PathBuf::from(alias.replace('\\', "/"));
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|part| match part {
+            Component::Normal(name) => {
+                name.to_string_lossy().contains(':')
+                    || name.to_string_lossy().eq_ignore_ascii_case(MARKER)
+            }
+            _ => true,
+        })
+    {
+        return Err(
+            "tmp: must name a relative file without traversal or reserved metadata paths".into(),
+        );
+    }
+    Ok(relative)
 }
 
 fn inspect(path: &Path) -> Result<Metadata, String> {

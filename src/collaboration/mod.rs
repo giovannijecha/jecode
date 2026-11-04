@@ -9,6 +9,7 @@ mod restore;
 mod runtime;
 #[cfg(test)]
 mod snapshot_tests;
+mod temporary;
 #[cfg(test)]
 mod tests;
 mod tracked;
