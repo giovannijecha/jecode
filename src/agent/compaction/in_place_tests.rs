@@ -34,6 +34,23 @@ fn crowded(fixture: &HttpFixture, directory: &Directory) -> Agent {
     agent
 }
 
+/// Margin past the trigger, so two portions stay needed when the built-in
+/// prompt grows a little; the request still leaves room for the reply.
+fn crowded_past_the_trigger(fixture: &HttpFixture, directory: &Directory) -> Agent {
+    let agent = crowded(fixture, directory);
+    for index in 0..2 {
+        agent.messages.lock().unwrap().push(Value::object([
+            ("role", Value::string("assistant")),
+            (
+                "content",
+                Value::string(format!("Margin {index}: {}", "progress ".repeat(400))),
+            ),
+        ]));
+    }
+    assert!(agent.locked_estimate() + 8192 < CAPACITY);
+    agent
+}
+
 fn last_text(request: &crate::test_support::Request) -> String {
     request
         .body
@@ -104,19 +121,7 @@ fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
         (200, completion("Goal kept from portions.", vec![])),
         (200, completion("Finished.", vec![])),
     ]);
-    let mut agent = crowded(&fixture, &directory);
-    // Margin past the trigger, so two portions stay needed when the built-in
-    // prompt grows a little; the request still leaves room for the reply.
-    for index in 0..2 {
-        agent.messages.lock().unwrap().push(Value::object([
-            ("role", Value::string("assistant")),
-            (
-                "content",
-                Value::string(format!("Margin {index}: {}", "progress ".repeat(400))),
-            ),
-        ]));
-    }
-    assert!(agent.locked_estimate() + 8192 < CAPACITY);
+    let mut agent = crowded_past_the_trigger(&fixture, &directory);
     agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
     assert_eq!(requests.len(), 4);
@@ -129,4 +134,21 @@ fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
     );
     assert_eq!(agent.context.summary, "Goal kept from portions.");
     assert!(!directory.path().join("never.txt").exists());
+}
+
+#[test]
+fn repeated_empty_replies_fall_back_to_portions() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, completion("", vec![])),
+        (200, completion("", vec![])),
+        (200, completion("", vec![])),
+        (200, completion("Goal kept from portions.", vec![])),
+        (200, completion("Goal kept from portions.", vec![])),
+        (200, completion("Finished.", vec![])),
+    ]);
+    let mut agent = crowded_past_the_trigger(&fixture, &directory);
+    agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
+    assert_eq!(fixture.finish().len(), 6);
+    assert_eq!(agent.context.summary, "Goal kept from portions.");
 }

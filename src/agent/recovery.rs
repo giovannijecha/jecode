@@ -190,10 +190,14 @@ impl Agent {
                 if error.kind == FailureKind::Empty {
                     retries.empty_responses += 1;
                     if retries.empty_responses >= 3 {
-                        return Err(format!(
-                            "The backend returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
-                            self.redact(&error.message)
-                        ).into());
+                        // Stays `Empty`: a cached summary falls back to portions.
+                        return Err(Failure {
+                            message: format!(
+                                "The backend returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
+                                self.redact(&error.message)
+                            ),
+                            ..error
+                        });
                     }
                 }
                 retries.attempt = retries.attempt.saturating_add(1);
