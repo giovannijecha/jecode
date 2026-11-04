@@ -15,6 +15,16 @@ pub(super) fn parse(pattern: &str, basic: bool) -> Result<Node, String> {
     Ok(root)
 }
 
+/// One interval count; POSIX allows any implementation to stop here.
+fn repetitions(digits: &str) -> Result<usize, String> {
+    const RE_DUP_MAX: usize = 32_767;
+    digits
+        .parse()
+        .ok()
+        .filter(|count| *count <= RE_DUP_MAX)
+        .ok_or("regular expression too big".into())
+}
+
 struct Parser {
     chars: Vec<char>,
     at: usize,
@@ -80,7 +90,7 @@ impl Parser {
             } else if self.eat('?') {
                 (0, Some(1))
             } else if self.operator('{') {
-                match self.bounds() {
+                match self.bounds()? {
                     Some(bounds) => bounds,
                     None => return Ok(node),
                 }
@@ -95,22 +105,44 @@ impl Parser {
         }
     }
 
-    /// `{m}`, `{m,}` or `{m,n}`; anything else leaves `{` literal.
-    fn bounds(&mut self) -> Option<(usize, Option<usize>)> {
+    /// An interval at `{`: `{m}`, `{m,}`, `{,n}`, `{,}` or `{m,n}`. Digits and
+    /// commas that make none of these are an error. Other text after `{` is
+    /// literal in extended syntax and an error in basic syntax.
+    fn bounds(&mut self) -> Result<Option<(usize, Option<usize>)>, String> {
+        const INVALID: &str = "invalid content of \\{\\}";
         let open = self.at + if self.basic { 2 } else { 1 };
-        let close = self.chars[open..].iter().position(|ch| *ch == '}')? + open;
-        let inside_end = close - usize::from(self.basic);
-        if self.basic && self.chars[inside_end] != '\\' {
-            return None;
+        let rest = &self.chars[open..];
+        let close: &[char] = if self.basic { &['\\', '}'] } else { &['}'] };
+        let length = rest
+            .iter()
+            .take_while(|ch| ch.is_ascii_digit() || **ch == ',')
+            .count();
+        if !rest[length..].starts_with(close) {
+            if !self.basic {
+                return Ok(None);
+            }
+            let closed = rest.windows(2).any(|pair| pair == close);
+            return Err(if closed { INVALID } else { "unmatched \\{" }.into());
         }
-        let inside: String = self.chars[open..inside_end].iter().collect();
+        let inside: String = rest[..length].iter().collect();
         let (min, max) = match inside.split_once(',') {
-            None => (inside.parse().ok()?, Some(inside.parse().ok()?)),
-            Some((min, "")) => (min.parse().ok()?, None),
-            Some((min, max)) => (min.parse().ok()?, Some(max.parse().ok()?)),
+            None if inside.is_empty() => return Err(INVALID.into()),
+            None => (repetitions(&inside)?, Some(repetitions(&inside)?)),
+            Some((_, max)) if max.contains(',') => return Err(INVALID.into()),
+            Some((min, max)) => (
+                if min.is_empty() { 0 } else { repetitions(min)? },
+                if max.is_empty() {
+                    None
+                } else {
+                    Some(repetitions(max)?)
+                },
+            ),
         };
-        self.at = close + 1;
-        Some((min, max))
+        if max.is_some_and(|max| max < min) {
+            return Err(INVALID.into());
+        }
+        self.at = open + length + close.len();
+        Ok(Some((min, max)))
     }
 
     /// One atom. `first` says it starts its branch, the only place a basic `^`
@@ -124,8 +156,14 @@ impl Parser {
             return Ok(inner);
         }
         // A leading extended repetition repeats nothing, as in GNU grep.
-        if !self.basic && matches!(self.peek(), Some('*' | '+' | '?')) {
-            return Ok(Node::Sequence(Vec::new()));
+        if !self.basic {
+            let at = self.at;
+            if matches!(self.peek(), Some('*' | '+' | '?'))
+                || self.peek() == Some('{') && self.bounds()?.is_some()
+            {
+                self.at = at;
+                return Ok(Node::Sequence(Vec::new()));
+            }
         }
         let ch = self.chars[self.at];
         self.at += 1;

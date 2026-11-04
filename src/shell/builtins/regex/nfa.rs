@@ -196,9 +196,6 @@ impl Machine {
     }
 
     fn repeat(&mut self, inner: &Node, min: usize, max: Option<usize>) -> Result<Fragment, String> {
-        if max.is_some_and(|max| max < min) {
-            return Err("invalid regular expression repetition bounds".into());
-        }
         let start = self.state()?;
         let mut end = start;
         for _ in 0..min {

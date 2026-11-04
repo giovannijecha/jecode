@@ -109,6 +109,41 @@ fn a_leading_extended_repetition_repeats_nothing() {
 }
 
 #[test]
+fn intervals_follow_gnu_grep() {
+    selects(&[
+        ("b\na\naa\n", "-oE 'a{,1}'", "a\na\na\n"),
+        ("aaa\n", "-oE 'a{,}'", "aaa\n"),
+        ("aaa\n", "-oE 'a{2,}'", "aaa\n"),
+        ("aaab\n", "-oE 'a{1,2}b'", "aab\n"),
+        ("aab\n", "-o 'a\\{2\\}'", "aa\n"),
+        ("aab\n", "-o 'a\\{,1\\}b'", "ab\n"),
+        ("a{x}\n", "-E 'a{x}'", "a{x}\n"),
+        ("a{1\n", "-E 'a{1'", "a{1\n"),
+        ("a{1x}\n", "-E 'a{1x}'", "a{1x}\n"),
+        ("a{1,x}\n", "-E 'a{1,x}'", "a{1,x}\n"),
+        ("a{\n", "-E 'a{'", "a{\n"),
+        ("{\n", "-E '{'", "{\n"),
+        ("{1}a\na\n", "-E '{1}a'", "{1}a\na\n"),
+        ("a{1}\naa\n", "-E 'a\\{1\\}'", "a{1}\n"),
+        ("{1}a\na\n", "'\\{1\\}a'", "{1}a\n"),
+        ("a{2}\naa\n", "'a{2}'", "a{2}\n"),
+    ]);
+    selects_nothing(&[("aaa\n", "-oE 'a{2}{2}'")]);
+    refuses(&[
+        "-E 'a{2,1}'",
+        "-E 'a{}'",
+        "-E 'a{1,2,3}'",
+        "-E 'a{99999}'",
+        "-E 'a{99999999999999999999999}'",
+        "'a\\{2,1\\}'",
+        "'a\\{\\}'",
+        "'a\\{x\\}'",
+        "'a\\{1'",
+        "'a\\{99999\\}'",
+    ]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }
