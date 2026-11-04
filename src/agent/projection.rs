@@ -106,19 +106,10 @@ impl Agent {
                 .map_or(state.text.as_str(), |(base, _)| base)
                 .trim_end()
         });
-        if reports.is_empty()
-            && (latest == Some(base.trim_end()) || base.is_empty() && latest.is_none())
-        {
-            return None;
-        }
         if reports.is_empty() {
-            return Some(base);
+            return (latest != Some(base.trim_end())).then_some(base);
         }
-        Some(
-            format!("{base}\n\n{REPORTS}\n{}", reports.join("\n"))
-                .trim_start()
-                .to_owned(),
-        )
+        Some(format!("{base}\n\n{REPORTS}\n{}", reports.join("\n")))
     }
 
     pub(super) fn projected_context(

@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const PROMPT: &str = include_str!("PROMPT.md");
 
-/// Message-independent request instructions, read before messages are locked.
 /// Request instructions and collaborator reports, read before `messages` is locked.
 pub(super) struct Environment(String, pub(super) Vec<(String, String)>);
 
@@ -127,16 +126,22 @@ impl Agent {
     /// Reads the request instructions that do not depend on messages. Call it
     /// before locking `messages`: a collaborator receipt holds collaboration
     /// state while it appends to this conversation, so the lock order is
-    /// collaboration state, then messages.
+    /// collaboration state, then messages. One snapshot serves the instructions
+    /// and the reports, so they describe the same moment.
     pub(super) fn environment(&self) -> Environment {
+        let records = if self.child {
+            Vec::new()
+        } else {
+            self.collaboration.snapshot()
+        };
         Environment(
             join([
                 self.permission_instructions(),
                 self.temporary_instructions(),
                 self.checkpoint_instructions(),
-                self.collaboration_instructions(),
+                collaboration_instructions(&records),
             ]),
-            self.collaboration_reports(),
+            collaboration_reports(&records),
         )
     }
 
@@ -176,74 +181,66 @@ impl Agent {
         }
         text
     }
+}
 
-    fn collaboration_instructions(&self) -> String {
-        if self.child {
-            return String::new();
-        }
-        let records = self.collaboration.snapshot();
-        if records.is_empty() {
-            return String::new();
-        }
-        let mut lines = vec![
-            "Active collaborators in this session. Only you, the main agent, review their work. For each returned or failed report still awaiting review, inspect and verify the evidence, then call agent with action=review, id, report_version from the report, and a note recording your assessment. Inspection or a text summary does not record review. After any needed follow-up or integration, call agent with action=close to release the collaborator and remove it from the active list.".to_owned(),
-        ];
-        for record in records {
-            let field = |name| {
-                record
-                    .get(name)
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned()
-            };
-            let id = field("id");
-            let title = field("title");
-            let state = field("state");
-            let received = record
-                .get("received_version")
-                .and_then(Value::as_usize)
-                .unwrap_or(0);
-            let reviewed = record.get("reviewed") == Some(&Value::Bool(true));
-            let report_version = record
-                .get("report")
-                .and_then(|report| report.get("version"))
-                .and_then(Value::as_usize);
-            let review_state = match (state.as_str(), reviewed) {
-                ("returned" | "failed", false) => "awaiting main-agent review",
-                ("returned" | "failed", true) => "reviewed; close when finished",
-                ("running" | "stopping", _) => "working",
-                _ => "close when safe to release",
-            };
-            // Only transitions change this line: state persists at the position
-            // first sent, so progress text would grow every request. Reports
-            // join once through `collaboration_reports`.
-            lines.push(format!(
-                "{id} {title}: {state}, received assignment v{received}, report {}, {}",
-                report_version.map_or_else(|| "none".to_owned(), |version| format!("v{version}")),
-                review_state
-            ));
-        }
-        lines.join("\n")
+fn collaboration_instructions(records: &[Value]) -> String {
+    if records.is_empty() {
+        return String::new();
     }
+    let mut lines = vec![
+        "Active collaborators in this session. Only you, the main agent, review their work. For each returned or failed report still awaiting review, inspect and verify the evidence, then call agent with action=review, id, report_version from the report, and a note recording your assessment. Inspection or a text summary does not record review. After any needed follow-up or integration, call agent with action=close to release the collaborator and remove it from the active list.".to_owned(),
+    ];
+    for record in records {
+        let field = |name| {
+            record
+                .get(name)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        };
+        let id = field("id");
+        let title = field("title");
+        let state = field("state");
+        let received = record
+            .get("received_version")
+            .and_then(Value::as_usize)
+            .unwrap_or(0);
+        let reviewed = record.get("reviewed") == Some(&Value::Bool(true));
+        let report_version = record
+            .get("report")
+            .and_then(|report| report.get("version"))
+            .and_then(Value::as_usize);
+        let review_state = match (state.as_str(), reviewed) {
+            ("returned" | "failed", false) => "awaiting main-agent review",
+            ("returned" | "failed", true) => "reviewed; close when finished",
+            ("running" | "stopping", _) => "working",
+            _ => "close when safe to release",
+        };
+        // Only transitions change this line: state persists at the position
+        // first sent, so progress text would grow every request. Reports
+        // join once through `collaboration_reports`.
+        lines.push(format!(
+            "{id} {title}: {state}, received assignment v{received}, report {}, {}",
+            report_version.map_or_else(|| "none".to_owned(), |version| format!("v{version}")),
+            review_state
+        ));
+    }
+    lines.join("\n")
+}
 
-    /// Reports of active collaborators as `(marker, entry)`. Runtime state
-    /// carries each report once, where it arrived, rather than on every update.
-    fn collaboration_reports(&self) -> Vec<(String, String)> {
-        if self.child {
-            return Vec::new();
-        }
-        self.collaboration
-            .snapshot()
-            .iter()
-            .filter_map(|record| {
-                let id = record.get("id").and_then(Value::as_str)?;
-                let report = record.get("report")?;
-                let version = report.get("version").and_then(Value::as_usize)?;
-                let text = report.get("text").and_then(Value::as_str)?;
-                let marker = format!("{id} report v{version}:");
-                let entry = format!("{marker} {}", text.chars().take(2000).collect::<String>());
-                Some((marker, entry))
-            })
-            .collect()
-    }
+/// Reports of active collaborators as `(marker, entry)`. Runtime state
+/// carries each report once, where it arrived, rather than on every update.
+fn collaboration_reports(records: &[Value]) -> Vec<(String, String)> {
+    records
+        .iter()
+        .filter_map(|record| {
+            let id = record.get("id").and_then(Value::as_str)?;
+            let report = record.get("report")?;
+            let version = report.get("version").and_then(Value::as_usize)?;
+            let text = report.get("text").and_then(Value::as_str)?;
+            let marker = format!("{id} report v{version}:");
+            let entry = format!("{marker} {}", text.chars().take(2000).collect::<String>());
+            Some((marker, entry))
+        })
+        .collect()
 }
