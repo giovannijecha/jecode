@@ -66,6 +66,13 @@ split by the byte cap, pass `next_byte_offset` as `byte_offset`. `total_lines`
 appears at the end of the file. These are page limits, not a file-size limit,
 and paging does not apply to images or PDFs.
 
+Instead of `path`, `paths` reads up to 12 files in one call (not both). Each
+file uses the default window and the results come back in order, each with its
+own result or error, so one missing file does not stop the others. Paths
+outside the working folder fail and images or PDFs are not shown: read them
+alone with `path`, which also asks for access when needed. The combined result
+is capped at 96 KiB; later paths report that they were not read.
+
 Images and PDFs are recognized from their contents. The result returns an
 `attachment:ID` reference to a stored copy, which stays readable after the
 original changes or the temporary area is cleared. Other binary files and
@@ -75,8 +82,9 @@ invalid UTF-8 fail.
 
 | Reference | Content |
 | --- | --- |
-| `tmp:relative/path` | A file in the conversation's [temporary area](TEMPORARY.md). Also accepted by `write` and `edit`. |
-| `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | A command's complete saved stream. |
+| `tmp:relative/path` | A file in the conversation's [temporary area](TEMPORARY.md). Also accepted by `write` and `edit`. A read that finds nothing there falls back to the areas of the agents above, or for a main agent of its collaborators; if several match, the error names them. |
+| `tmp:AGENT:relative/path` | A file in one collaborator's temporary area, for example `tmp:a2:report.txt`. Read-only. |
+| `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | A command's complete saved stream, including one saved by the main agent or, for a main agent, by its collaborators. |
 | `history:N` | The original message at zero-based index `N`. |
 | `history:requests` | All your original requests, in order. |
 | `history:memory` | The current compaction summary. |
@@ -95,6 +103,12 @@ excluded. None of these references can be written.
 them in order and installs the result once. A top-level `old_text` and
 `new_text` pair is also accepted for compatibility; supplying both forms with
 content is an error.
+
+To change several files in one call, send `files: [{"path": "...", "edits":
+[...]}, ...]` instead of `path` (up to 12 entries, each file once, not combined
+with a top-level `path`). Each file is applied all or nothing like a single
+`edit`; a failed file does not stop the others, and the result lists each file
+in order with its own outcome or error. The call needs one permission decision.
 
 `edit` requires UTF-8 text without NUL bytes. `write` can replace an existing
 binary file with the supplied content. Both refuse read-only files and paths

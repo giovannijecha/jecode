@@ -15,10 +15,17 @@ The area is created on first use and moves with `JECODE_HOME`.
 - File tools accept `tmp:relative/path`, for example
   `{"path": "tmp:probes/check.sh", "content": "printf 'ok\\n'\n"}`. `write`
   creates missing parent directories inside the area.
-- Commands start in the project directory with `JECODE_TMP`, `TMPDIR`, `TEMP`
-  and `TMP` pointing to the area, so a command can write
-  `"$JECODE_TMP/report.txt"`. Programs that ignore those variables still need
-  explicit output paths.
+- Commands start in the project directory with `JECODE_TMP` and `TMPDIR`
+  pointing to the area, so a command can write `"$JECODE_TMP/report.txt"`.
+  `TEMP` and `TMP` point there too, except on Windows when the area's path is
+  260 characters or longer, as can happen for a collaborator's area under a long
+  home path; then they keep their inherited values. Programs that ignore those
+  variables still need explicit output paths.
+- A `read` of `tmp:path` that is missing from the agent's own area falls back to
+  the areas of the agents above it or, for a main agent, of its collaborators.
+  `tmp:<agent>:path`, for example `tmp:a2:report.txt`, names one collaborator's
+  file. Other agents' files are read-only; `write` and `edit` stay in the
+  agent's own area.
 - The `web` and `browser` tools save responses, crawl data, snapshots,
   screenshots, logs and unnamed browser profiles here.
 

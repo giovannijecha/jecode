@@ -116,9 +116,9 @@ from the edge, which drops after the facts.
 | State | Glyph | Label | Facts |
 | --- | --- | --- | --- |
 | Idle | — | empty row | — |
-| Working | blinking `>_` | activity, shimmering | `Esc interrupt · turn time · ↓ tokens` |
+| Working | blinking `>_` | activity, shimmering | `Esc interrupt · turn time · ↑ input tokens · ↓ generated tokens` |
 | Retry | blinking `>_` in `WARNING` | `Retrying in 4s` in `WARNING` | `Esc interrupt · turn time · attempt N · reason` |
-| Done | static `>_` in `GOOD` | `Done` | `turn time · N tools · ↓ tokens`, then the serving provider when reported |
+| Done | static `>_` in `GOOD` | `Done` | `turn time · N tools · ↑ input tokens · ↓ generated tokens`, then the serving provider when reported |
 | Stopped | `■` in `WARNING` | `Stopped` | `time · your next message continues from here` |
 | Failed | `✕` in `BAD` | `Failed` | `time · prompt restored` and a fixing keycap |
 | Result | `✓` in `GOOD` | subject, such as `Copied` | detail; a setting reads `old → new` with the new value `STRONG` |
