@@ -254,6 +254,44 @@ fn an_emptied_file_changed_though_it_wrote_no_bytes() {
     assert!(rows[0].ends_with("  1 file · +1 line"), "{rows:#?}");
 }
 
+#[test]
+fn an_empty_edit_without_a_diff_still_counts_as_changed() {
+    let files = [
+        (SESSION, Some(("all\n", ""))),
+        (TOKEN, Some(("same\n", "changed\n"))),
+    ];
+    let mut finished = call(&files, false, false);
+    finished.change = None;
+    finished.result = Some(Value::object([(
+        "files",
+        Value::Array(vec![
+            Value::object([
+                ("path", Value::string(SESSION)),
+                ("bytes_written", Value::number(0)),
+                ("changed", Value::Bool(true)),
+            ]),
+            Value::object([
+                ("path", Value::string(TOKEN)),
+                ("bytes_written", Value::number(0)),
+                ("changed", Value::Bool(false)),
+            ]),
+        ]),
+    )]));
+    for expanded in [false, true] {
+        finished.presentation.expanded = expanded;
+        let rows = plain(&card(&finished, 80, false).rows);
+        assert!(rows.iter().any(|row| row.contains("1 file")), "{rows:#?}");
+        assert!(
+            rows.contains(&format!("  {SESSION}  Applied 1 replacement")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.contains(&format!("  {TOKEN}  No changes")),
+            "{rows:#?}"
+        );
+    }
+}
+
 /// The call with the diffs of `dropped` lost to the diff limits: those files
 /// were written, and only their results remain.
 fn without_diffs(mut call: Call, dropped: &[&str]) -> Call {

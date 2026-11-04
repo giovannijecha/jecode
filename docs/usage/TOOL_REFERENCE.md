@@ -110,6 +110,10 @@ with a top-level `path`). Each file is applied all or nothing like a single
 `edit`; a failed file does not stop the others, and the result lists each file
 in order with its own outcome or error. The call needs one permission decision.
 
+Successful edits report `changed`: `true` when a replacement was installed,
+`false` when none was needed. Emptying a file still reports `true` even though
+`bytes_written` is zero.
+
 `edit` requires UTF-8 text without NUL bytes. `write` can replace an existing
 binary file with the supplied content. Both refuse read-only files and paths
 outside the allowed roots. Both return a `checkpoint` receipt; see

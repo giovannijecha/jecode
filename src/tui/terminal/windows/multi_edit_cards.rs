@@ -186,6 +186,31 @@ pub(super) fn console(terminal: &Terminal) {
         change: Some(&change),
         result: &result,
     };
+    let empty_arguments = Value::object([(
+        "files",
+        Value::Array(vec![entry("src/empty.rs"), entry("src/same.rs")]),
+    )]);
+    let empty_result = Value::object([(
+        "files",
+        Value::Array(vec![
+            Value::object([
+                ("path", Value::string("src/empty.rs")),
+                ("bytes_written", Value::number(0)),
+                ("changed", Value::Bool(true)),
+            ]),
+            Value::object([
+                ("path", Value::string("src/same.rs")),
+                ("bytes_written", Value::number(0)),
+                ("changed", Value::Bool(false)),
+            ]),
+        ]),
+    )]);
+    let empty = Call {
+        name: "edit",
+        arguments: &empty_arguments,
+        change: None,
+        result: &empty_result,
+    };
     let gated = Call {
         name: "edit",
         arguments: &arguments,
@@ -212,6 +237,17 @@ pub(super) fn console(terminal: &Terminal) {
                     "  src/window.rs · not changed · edit 1:",
                     "  tests/limit.rs  +1",
                     "2 + block();",
+                ],
+            );
+            shown(
+                terminal,
+                empty.rows(columns, height, expanded),
+                columns,
+                &[
+                    " UPDATE  src/empty.rs, src/same.rs",
+                    "1 file",
+                    "  src/empty.rs  Applied 1 replacement",
+                    "  src/same.rs  No changes",
                 ],
             );
             shown(

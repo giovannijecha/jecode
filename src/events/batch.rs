@@ -1,17 +1,22 @@
 //! A call that names several files, told as one line.
 use crate::json::Value;
 
-/// Whether an edit result changed its file. Emptying a file writes no bytes,
-/// as a replacement that changes nothing reports too, but only a real write
-/// saves a checkpoint first.
+/// Whether an edit result changed its file. New receipts say so explicitly;
+/// older ones retain the bytes/checkpoint fallback, which cannot distinguish
+/// an empty replacement without a saved checkpoint from a no-op.
 pub fn file_changed(result: &Value) -> bool {
     let checkpoint = result
         .get("checkpoint")
         .and_then(|checkpoint| checkpoint.get("status"))
         .and_then(Value::as_str);
     result.get("error").is_none()
-        && (result.get("bytes_written").and_then(Value::as_usize) > Some(0)
-            || matches!(checkpoint, Some("saved" | "partial")))
+        && match result.get("changed") {
+            Some(Value::Bool(changed)) => *changed,
+            _ => {
+                result.get("bytes_written").and_then(Value::as_usize) > Some(0)
+                    || matches!(checkpoint, Some("saved" | "partial"))
+            }
+        }
 }
 
 /// `changed 2 files; 1 failed`, `no files read; 2 not read`.

@@ -313,6 +313,47 @@ fn an_emptied_file_counts_as_changed_and_a_no_op_does_not() {
 }
 
 #[test]
+fn an_emptied_file_without_a_retained_diff_or_checkpoint_counts_as_changed() {
+    use crate::{cancel::Cancellation, tools::Begun};
+    let root = crate::test_support::Directory::new();
+    let source = "line\n".repeat(20_001);
+    std::fs::write(root.path().join("emptied.rs"), &source).unwrap();
+    std::fs::write(root.path().join("same.rs"), "same\n").unwrap();
+    let tools = crate::tools::Tools::new(root.path()).unwrap();
+    let file = |path: &str, old: &str, new: &str| {
+        Value::object([
+            ("path", Value::string(path)),
+            ("old_text", Value::string(old)),
+            ("new_text", Value::string(new)),
+        ])
+    };
+    let arguments = Value::object([(
+        "files",
+        Value::Array(vec![
+            file("emptied.rs", &source, ""),
+            file("same.rs", "same", "same"),
+        ]),
+    )]);
+    let outcome = tools.execute_begun(
+        Begun::default(),
+        "edit",
+        &arguments.encode(),
+        &Cancellation::default(),
+    );
+    assert!(outcome.change.is_none(), "diff unexpectedly retained");
+    let files = outcome
+        .result
+        .get("files")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(files[0].get("bytes_written"), Some(&Value::number(0)));
+    assert_eq!(files[0].get("changed"), Some(&Value::Bool(true)));
+    assert_eq!(files[1].get("changed"), Some(&Value::Bool(false)));
+    assert_eq!(tool_summary("edit", &outcome.result), "changed 1 file");
+    assert_eq!(std::fs::read(root.path().join("emptied.rs")).unwrap(), b"");
+}
+
+#[test]
 fn routine_description_overrides_command_and_blank_falls_back() {
     for (name, key, command, fallback) in [
         (
