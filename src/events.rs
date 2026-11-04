@@ -454,6 +454,18 @@ fn outcome_summary(name: &str, result: &Value) -> String {
     "complete".into()
 }
 
+/// Why a call never ran: denied, refused at this level, or stopped first.
+pub fn not_run(result: &Value) -> Option<&str> {
+    let outcome = result.get("outcome")?.as_str()?;
+    if !matches!(outcome, "denied" | "unavailable" | "not_executed") {
+        return None;
+    }
+    result
+        .get("reason")
+        .or_else(|| result.get("error"))?
+        .as_str()
+}
+
 /// The status of a persistent process result, if it is one.
 pub fn process_status(result: &Value) -> Option<&str> {
     result

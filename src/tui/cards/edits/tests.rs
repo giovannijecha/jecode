@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     cards::{Presentation, card as render},
-    theme::{BADGE_BAD, BADGE_EDIT},
+    theme::{BADGE_BAD, BADGE_EDIT, BADGE_WARN, WARNING},
 };
 use std::time::Duration;
 
@@ -209,6 +209,69 @@ fn a_failed_file_is_one_row_in_call_order_on_a_failed_card() {
             .count(),
         3
     );
+}
+
+/// A call the permission gate stopped before any file was touched.
+fn gated(outcome: &str, key: &str, reason: &str, expanded: bool) -> Call {
+    let mut gated = call(&three(), false, expanded);
+    gated.result = Some(Value::object([
+        ("outcome", Value::string(outcome)),
+        (key, Value::string(reason)),
+    ]));
+    gated.change = None;
+    gated
+}
+
+/// The card's words with wrapping and the tree gutter taken out.
+fn said(rows: &[String]) -> String {
+    rows.iter()
+        .map(|row| row.trim_start().trim_start_matches(['│', '└']).trim())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn a_call_that_never_ran_is_stopped_and_says_why() {
+    let refused = "Not available at the Read permission level: editing src/auth/session.ts, src/auth/token.ts, tests/auth/expiry.test.ts. Read allows reading and analysis inside the working folder; explain what you need and the user can change the level with /permissions.";
+    let denied = "The user denied editing src/auth/session.ts, src/auth/token.ts, tests/auth/expiry.test.ts; nothing ran. Continue without it or explain what it was for.";
+    let stopped = "Tool was not executed: the turn stopped before a permission decision";
+    for (outcome, key, reason) in [
+        ("unavailable", "reason", refused),
+        ("denied", "reason", denied),
+        ("not_executed", "error", stopped),
+    ] {
+        for columns in [44, 80, 100] {
+            let collapsed = card(&gated(outcome, key, reason, false), columns, true);
+            let rows = plain(&collapsed.rows);
+            assert_eq!(
+                collapsed.rows[0].spans[0].background,
+                Some(BADGE_WARN),
+                "{outcome}: {rows:#?}"
+            );
+            assert!(!rows.iter().any(|row| row.contains("No ")), "{rows:#?}");
+            let opening = reason.split(' ').next().unwrap();
+            assert_eq!(styled(&collapsed.rows, opening), Some(WARNING), "{rows:#?}");
+            assert!(rows.iter().all(|row| text::cells(row) <= columns));
+            // Clipped, the rest waits for Ctrl+O; expanded, all of it shows.
+            let whole = said(&rows).contains(reason);
+            assert_eq!(collapsed.hidden, !whole, "{rows:#?}");
+            assert_eq!(rows.iter().any(|row| row.contains("Ctrl+O")), !whole);
+            let opened = plain(&card(&gated(outcome, key, reason, true), columns, false).rows);
+            assert!(said(&opened).contains(reason), "{opened:#?}");
+            assert!(opened.iter().all(|row| text::cells(row) <= columns));
+        }
+    }
+    // Control characters in a named path stay out of every row, title join
+    // included.
+    let hostile = "The user denied editing a\x1b]0;x\x07.rs\nb.rs; nothing ran";
+    for columns in [80, 200] {
+        for expanded in [false, true] {
+            let call = gated("denied", "reason", hostile, expanded);
+            for row in plain(&card(&call, columns, false).rows) {
+                assert!(!row.contains(['\x1b', '\x07', '\n']), "{row:?}");
+            }
+        }
+    }
 }
 
 #[test]

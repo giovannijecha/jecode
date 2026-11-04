@@ -14,7 +14,7 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        theme::{BAD, DIM, GOOD, MUTED},
+        theme::{BAD, DIM, GOOD, MUTED, WARNING},
     },
 };
 
@@ -34,32 +34,37 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         .filter(|entry| entry.get("error").is_some())
         .count();
     let status = match Status::of(&tool) {
+        _ if tool.result.and_then(crate::events::not_run).is_some() => Status::Stopped,
         Status::Done if failed > 0 => Status::Failed,
         status => status,
     };
     let mut rows = title::rows("Update", &paths.join(", "), status, columns, expanded);
     let titled = rows.len();
-    let fact = preview(
-        fact(&tool, paths.len(), entries, failed),
-        columns.saturating_sub(4),
-        expanded,
-    );
+    let whole = fact(&tool, paths.len(), entries, failed);
+    let fact = preview(whole.clone(), columns.saturating_sub(4), expanded);
+    let clipped = fact.plain() != whole.plain();
     // The fact joins a one-row title when it fits; otherwise it hangs.
     match rows.as_mut_slice() {
-        [title] if text::cells(&title.plain()) + 2 + text::cells(&fact.plain()) <= columns => {
+        [title]
+            if text::cells(&title.plain()) + 2 + text::cells(&fact.plain()) <= columns
+                && !fact.plain().contains('\n') =>
+        {
             title.push("  ", MUTED);
             title.spans.extend(fact.spans);
         }
         _ => rows.extend(line_rows(&fact, columns, 1, "  ⎿ ", "    ", DIM)),
     }
     badge::hang(&mut rows[titled..], true);
-    let mut hidden = None;
+    // Ctrl+O shows the rest of a clipped fact, so its last row names the key.
+    let mut hidden = clipped.then(|| rows.len() - 1);
     if tool
         .result
         .is_some_and(|result| result.get("error").is_none())
     {
         let sections = sections(&tool, entries, paths.len() == 1, columns, expanded);
-        hidden = sections.hidden.map(|index| rows.len() + index);
+        if let Some(index) = sections.hidden {
+            hidden = Some(rows.len() + index);
+        }
         rows.extend(sections.rows);
     }
     if keycap && expanded {
@@ -82,7 +87,8 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
 }
 
 /// `3 files · +9 −1 lines`, ` · N failed` in `bad`; one file keeps today's
-/// fact, and a call that changed nothing says so on the failed card.
+/// fact, and a call that changed nothing says so on the failed card. A call
+/// that never ran gives its reason in `warning`, as any stopped call does.
 fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line {
     let Some(result) = tool.result else {
         let elapsed = summary::line(tool, Status::Running, None);
@@ -96,6 +102,9 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
         }
         return line;
     };
+    if let Some(reason) = crate::events::not_run(result) {
+        return Line::new(&text::clean(reason), WARNING);
+    }
     if result.get("error").is_some() {
         return summary::line(tool, Status::Failed, None);
     }
