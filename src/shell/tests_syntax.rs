@@ -85,6 +85,28 @@ fn head_and_tail_select_lines_from_files_and_pipes() {
 }
 
 #[test]
+fn head_and_tail_report_a_missing_file_and_go_on() {
+    let (directory, mut shell) = shell();
+    let script = "seq 1 2 > f; \
+        head -n1 f missing f > head_out 2> head_err; echo \"$?\" > head_status; \
+        tail -n1 missing f > tail_out 2> tail_err; echo \"$?\" > tail_status; \
+        head -n1 missing > alone 2> alone_err; echo \"$?\" > alone_status";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(
+        read(&directory, "head_out"),
+        "==> f <==\n1\n\n==> f <==\n1\n"
+    );
+    assert!(read(&directory, "head_err").contains("head: missing:"));
+    assert_eq!(read(&directory, "head_status"), "1\n");
+    assert_eq!(read(&directory, "tail_out"), "==> f <==\n2\n");
+    assert!(read(&directory, "tail_err").contains("tail: missing:"));
+    assert_eq!(read(&directory, "tail_status"), "1\n");
+    assert_eq!(read(&directory, "alone"), "");
+    assert!(read(&directory, "alone_err").contains("missing"));
+    assert_eq!(read(&directory, "alone_status"), "1\n");
+}
+
+#[test]
 fn missing_programs_name_the_built_ins() {
     let (directory, mut shell) = shell();
     assert_eq!(

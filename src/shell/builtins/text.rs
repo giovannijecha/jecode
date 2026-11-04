@@ -84,29 +84,45 @@ pub(super) fn head_tail(shell: &mut Shell, args: &[String], io: &Io) -> Outcome 
         operands.push("-");
     }
     let mut writer = &io.stdout;
+    let mut errors = String::new();
     let mut copy = || -> io::Result<()> {
-        for (index, operand) in operands.iter().enumerate() {
-            if operands.len() > 1 {
-                let gap = if index == 0 { "" } else { "\n" };
-                writeln!(writer, "{gap}==> {operand} <==")?;
-            }
+        let mut first = true;
+        for operand in &operands {
             let file = match *operand {
                 "-" => None,
-                path => Some(fs::File::open(shell.path(path)).map_err(|error| {
-                    io::Error::new(error.kind(), format!("{operand}: {error}"))
-                })?),
+                path => match fs::File::open(shell.path(path)) {
+                    Ok(file) => Some(file),
+                    Err(error) => {
+                        errors.push_str(&format!("{name}: {operand}: {error}\n"));
+                        continue;
+                    }
+                },
             };
+            if operands.len() > 1 {
+                let gap = if first { "" } else { "\n" };
+                writeln!(writer, "{gap}==> {operand} <==")?;
+            }
+            first = false;
             let source: Box<dyn Read + '_> = match &file {
                 Some(file) => Box::new(file),
                 None => Box::new(&io.stdin),
             };
             let mut lines = io::BufReader::new(source);
-            select(&mut lines, &mut writer, name == "head", from_line, number)?;
+            match select(&mut lines, &mut writer, name == "head", from_line, number) {
+                Err(error) if !closed(&error) => {
+                    errors.push_str(&format!("{name}: {operand}: {error}\n"));
+                }
+                result => result?,
+            }
         }
         writer.flush()
     };
     match copy() {
-        Ok(()) => ok(Vec::new()),
+        Ok(()) => Ok((
+            i32::from(!errors.is_empty()),
+            Vec::new(),
+            errors.into_bytes(),
+        )),
         Err(error) if closed(&error) => {
             shell.broken_output = true;
             Ok((1, Vec::new(), Vec::new()))
