@@ -15,6 +15,9 @@ use crate::tui::{
 const NOT_FOUND: &str = "edit 1: old text was not found; use exact current text from the supplied file context or read the file";
 const TWICE: &str = "edit 1: old text occurs more than once; include more exact surrounding text from the supplied file context or read the file";
 
+const REFUSED: &str = "Not available at the Read permission level: editing src/auth/session.ts, src/auth/token.ts, tests/auth/expiry.test.ts. Read allows reading and analysis inside the working folder; explain what you need and the user can change the level with /permissions.";
+const DENIED: &str = "The user denied editing src/auth/session.ts, src/auth/token.ts, tests/auth/expiry.test.ts; nothing ran. Continue without it or explain what it was for.";
+
 /// One file of the call: its replacement, or the error it failed with.
 struct File {
     path: &'static str,
@@ -239,6 +242,31 @@ fn call(files: &[File], running: bool, expanded: bool) -> Call {
     }
 }
 
+/// The three-file call stopped before any file was touched.
+fn gated(outcome: &str, reason: &str) -> Call {
+    let mut gated = call(&three(), false, false);
+    gated.result = Some(Value::object([
+        ("outcome", Value::string(outcome)),
+        ("reason", Value::string(reason)),
+    ]));
+    gated.change = None;
+    gated
+}
+
+/// The three-file call with the second diff, or every diff, over the limits.
+fn over_limits(all: bool) -> Call {
+    let mut over = call(&three(), false, false);
+    over.change = over.change.take().and_then(|change| {
+        let kept = change.files.into_iter().enumerate();
+        Change::several(
+            kept.filter(|(index, _)| !all && *index != 1)
+                .map(|(_, file)| file)
+                .collect(),
+        )
+    });
+    over
+}
+
 fn rows(call: &Call, columns: usize, keycap: bool) -> Vec<Line> {
     let summary = call
         .result
@@ -263,6 +291,15 @@ fn multi_edit() {
         .into_iter()
         .map(|file| failed(file.path, file.error.unwrap_or(NOT_FOUND)))
         .collect();
+    let emptied = vec![
+        three().swap_remove(0),
+        file(
+            "src/auth/legacy.ts",
+            &["export const LEGACY = true;", "export default LEGACY;"],
+            "export const LEGACY = true;\nexport default LEGACY;\n",
+            "",
+        ),
+    ];
     let states = [
         ("Collapsed, three files", call(&three(), false, false), true),
         ("Running", call(&three(), true, false), false),
@@ -276,6 +313,11 @@ fn multi_edit() {
         ("Nothing changed", call(&nothing, false, false), true),
         ("Nine files", call(&many(), false, false), true),
         ("Nine files expanded", call(&many(), false, true), true),
+        ("Refused at Read", gated("unavailable", REFUSED), true),
+        ("Denied", gated("denied", DENIED), true),
+        ("One file emptied", call(&emptied, false, false), true),
+        ("One diff over the limits", over_limits(false), true),
+        ("Every diff over the limits", over_limits(true), true),
     ];
     let mut painted = String::new();
     for columns in [44, 80, 100] {
