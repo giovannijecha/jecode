@@ -70,9 +70,11 @@ pub(super) fn expand(pattern: &[Item], cwd: &Path) -> Option<Vec<String>> {
         }
         prefixes = next;
     }
+    // Literal components are not checked until here. A link counts as itself,
+    // even when its target is gone.
     let found: Vec<String> = prefixes
         .into_iter()
-        .filter(|path| Path::new(path).is_absolute() || cwd.join(path).exists())
+        .filter(|path| std::fs::symlink_metadata(cwd.join(path)).is_ok())
         .collect();
     (!found.is_empty()).then_some(found)
 }

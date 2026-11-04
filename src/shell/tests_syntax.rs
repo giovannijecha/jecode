@@ -334,6 +334,40 @@ fn background_lists_leave_out_bodies_of_earlier_commands() {
 }
 
 #[test]
+fn patterns_list_only_paths_that_exist_and_keep_dangling_links() {
+    let (directory, mut shell) = shell();
+    let root = directory.path();
+    fs::create_dir_all(root.join("tree/with")).unwrap();
+    fs::create_dir_all(root.join("tree/without")).unwrap();
+    fs::write(root.join("tree/with/wanted"), "").unwrap();
+    let absolute = root.display().to_string().replace('\\', "/");
+    assert_eq!(
+        shell.run(&format!(
+            "echo '{absolute}'/tree/*/wanted > absolute; echo tree/*/wanted > relative"
+        )),
+        0
+    );
+    assert_eq!(
+        read(&directory, "absolute"),
+        format!("{absolute}/tree/with/wanted\n")
+    );
+    assert_eq!(read(&directory, "relative"), "tree/with/wanted\n");
+
+    fs::create_dir(root.join("links")).unwrap();
+    fs::create_dir(root.join("gone")).unwrap();
+    fs::write(root.join("links/real"), "").unwrap();
+    super::tests_grep::directory_link(&root.join("gone"), &root.join("links/dangling"));
+    fs::remove_dir(root.join("gone")).unwrap();
+    let script = "cd links; echo * > ../all; ls * > ../listed; echo \"$?\" > ../status; \
+        ls dangling > ../named";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "all"), "dangling real\n");
+    assert_eq!(read(&directory, "listed"), "dangling\nreal\n");
+    assert_eq!(read(&directory, "status"), "0\n");
+    assert_eq!(read(&directory, "named"), "dangling\n");
+}
+
+#[test]
 fn unquoted_patterns_expand_to_sorted_paths() {
     let (directory, mut shell) = shell();
     let script = "mkdir -p src/nested test; touch src/b.js src/a.js src/c.rs src/.hidden.js src/nested/d.js test/x.test.js; \

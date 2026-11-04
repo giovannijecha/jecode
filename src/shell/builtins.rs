@@ -197,7 +197,7 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
                         text.push_str(&entry);
                         text.push('\n');
                     }
-                } else if full.exists() {
+                } else if fs::symlink_metadata(&full).is_ok() {
                     text.push_str(path);
                     text.push('\n');
                 } else {
