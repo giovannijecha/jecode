@@ -206,15 +206,16 @@ impl Parser {
         }
     }
 
-    /// `[:name:]` inside a bracket expression.
+    /// `[:name:]` inside a bracket expression, with `at` on its first colon.
     fn posix(&mut self) -> Result<Item, String> {
-        let rest: String = self.chars[self.at..].iter().collect();
+        let rest = &self.chars[self.at + 1..];
         let end = rest
-            .find(":]")
+            .windows(2)
+            .position(|pair| pair == [':', ']'])
             .ok_or("unterminated character class in pattern")?;
-        let name = &rest[1..end];
-        self.at += end + 2;
-        let test: fn(char) -> bool = match name {
+        let name: String = rest[..end].iter().collect();
+        self.at += end + 3;
+        let test: fn(char) -> bool = match name.as_str() {
             "alpha" => char::is_alphabetic,
             "digit" => |ch| ch.is_ascii_digit(),
             "alnum" => char::is_alphanumeric,

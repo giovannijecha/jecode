@@ -82,6 +82,11 @@ fn word_matches_only_need_no_word_character_beside_them() {
 }
 
 #[test]
+fn unterminated_named_classes_are_errors() {
+    refuses(&["'[[:]'", "'[[:a]'", "'[[:]]'", "'[[:foo:]]'", "'[a'"]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }
