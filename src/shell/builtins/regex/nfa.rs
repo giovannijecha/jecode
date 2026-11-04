@@ -1,7 +1,7 @@
 //! Thompson-style states. One state keeps the earliest start that reached it;
 //! an earlier start always dominates a later one with the same future path.
 
-use super::{Boundary, Class, Item, Node, word};
+use super::{Boundary, Class, Item, Node, decode, previous, word};
 use std::collections::VecDeque;
 
 const MAX_STATES: usize = 100_000;
@@ -33,6 +33,13 @@ enum Kind {
     Boundary(Boundary),
 }
 
+/// What zero-width assertions can see at one place in the text.
+struct Position {
+    first: bool,
+    before: Option<char>,
+    after: Option<char>,
+}
+
 struct Fragment {
     start: usize,
     end: usize,
@@ -53,7 +60,7 @@ impl Machine {
 
     pub(super) fn find(
         &self,
-        text: &[char],
+        text: &[u8],
         from: usize,
         insensitive: bool,
     ) -> Option<(usize, usize)> {
@@ -63,9 +70,17 @@ impl Machine {
         let mut active = vec![NONE; self.states.len()];
         let mut queue = VecDeque::new();
         let mut best: Option<(usize, usize)> = None;
-        for at in from..=text.len() {
+        let mut before = previous(text, from);
+        let mut at = from;
+        loop {
+            let current = decode(text, at);
             Self::add(&mut active, &mut queue, self.start, at);
-            self.closure(&mut active, &mut queue, text, at);
+            let position = Position {
+                first: at == 0,
+                before,
+                after: current.map(|(ch, _)| ch),
+            };
+            self.closure(&mut active, &mut queue, &position);
             let start = active[self.accept];
             if start != NONE && best.is_none_or(|(old, _)| start <= old) {
                 best = Some((start, at));
@@ -75,7 +90,7 @@ impl Machine {
             {
                 return best;
             }
-            let Some(&ch) = text.get(at) else { break };
+            let Some((ch, length)) = current else { break };
             let mut next = vec![NONE; self.states.len()];
             for (state, start) in active.iter().copied().enumerate() {
                 if start == NONE {
@@ -88,21 +103,23 @@ impl Machine {
                 }
             }
             active = next;
+            before = Some(ch);
+            at += length;
         }
         best
     }
 
-    fn closure(&self, active: &mut [usize], queue: &mut VecDeque<usize>, text: &[char], at: usize) {
+    fn closure(&self, active: &mut [usize], queue: &mut VecDeque<usize>, position: &Position) {
         while let Some(state) = queue.pop_front() {
             let start = active[state];
             for edge in &self.states[state].edges {
                 let passes = match edge.kind {
                     Kind::Empty => true,
-                    Kind::Start => at == 0,
-                    Kind::End => at == text.len(),
+                    Kind::Start => position.first,
+                    Kind::End => position.after.is_none(),
                     Kind::Boundary(boundary) => {
-                        let before = at > 0 && word(text[at - 1]);
-                        let after = text.get(at).is_some_and(|ch| word(*ch));
+                        let before = position.before.is_some_and(word);
+                        let after = position.after.is_some_and(word);
                         match boundary {
                             Boundary::Word(wanted) => (before != after) == wanted,
                             Boundary::Start => !before && after,

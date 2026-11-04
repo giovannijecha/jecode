@@ -1,6 +1,7 @@
-//! Searches one input line by line and prints what `grep` selected.
+//! Searches one input line by line and prints what `grep` selected. Lines are
+//! bytes: they are matched as UTF-8 where valid and printed as they were read.
 
-use super::super::regex::Regex;
+use super::super::regex::{self, Regex};
 use super::super::*;
 use super::options::{Binary, Options};
 use std::collections::VecDeque;
@@ -17,7 +18,7 @@ pub(super) fn search(
 ) -> io::Result<bool> {
     let mut reader = BufReader::new(source);
     let mut bytes = Vec::new();
-    let mut before: VecDeque<(usize, String)> = VecDeque::new();
+    let mut before: VecDeque<(usize, Vec<u8>)> = VecDeque::new();
     let (mut number, mut count, mut after, mut binary) = (0usize, 0usize, 0usize, false);
     let mut last: Option<usize> = None;
     let lines_shown = !options.quiet && !options.count && options.listed.is_none();
@@ -35,10 +36,8 @@ pub(super) fn search(
             count = 0;
             break;
         }
-        let line = String::from_utf8_lossy(&bytes);
-        let line = line.trim_end_matches('\n').trim_end_matches('\r');
-        let chars: Vec<char> = line.chars().collect();
-        let hit = regex.find(&chars, 0).is_some() != options.invert;
+        let line = content(&bytes);
+        let hit = regex.find(line, 0).is_some() != options.invert;
         if hit && options.max.is_none_or(|max| count < max) {
             count += 1;
             if options.quiet {
@@ -54,23 +53,22 @@ pub(super) fn search(
             }
             for (line_number, text) in before.drain(..) {
                 prefix(writer, options, name, names, line_number, '-')?;
-                writeln!(writer, "{text}")?;
+                terminated(writer, &text)?;
             }
             if options.only && !options.invert {
                 let mut from = 0;
-                while let Some((start, end)) = regex.find(&chars, from) {
+                while let Some((start, end)) = regex.find(line, from) {
                     if end > start {
                         prefix(writer, options, name, names, number, ':')?;
-                        writeln!(writer, "{}", chars[start..end].iter().collect::<String>())?;
-                    }
-                    from = end.max(start + 1);
-                    if from > chars.len() {
-                        break;
+                        terminated(writer, &line[start..end])?;
+                        from = end;
+                    } else {
+                        from = regex::step(line, end);
                     }
                 }
             } else if !options.only {
                 prefix(writer, options, name, names, number, ':')?;
-                writeln!(writer, "{line}")?;
+                terminated(writer, line)?;
             }
             last = Some(number);
             after = options.after;
@@ -82,7 +80,7 @@ pub(super) fn search(
         if after > 0 {
             after -= 1;
             prefix(writer, options, name, names, number, '-')?;
-            writeln!(writer, "{line}")?;
+            terminated(writer, line)?;
             last = Some(number);
         } else if options.before > 0 {
             if before.len() == options.before {
@@ -104,6 +102,21 @@ pub(super) fn search(
         writeln!(writer, "Binary file {name} matches")?;
     }
     Ok(count > 0)
+}
+
+/// A line without its line ending.
+fn content(line: &[u8]) -> &[u8] {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    let end = line
+        .iter()
+        .rposition(|byte| *byte != b'\r')
+        .map_or(0, |last| last + 1);
+    &line[..end]
+}
+
+fn terminated(writer: &mut dyn Write, text: &[u8]) -> io::Result<()> {
+    writer.write_all(text)?;
+    writer.write_all(b"\n")
 }
 
 fn prefix(

@@ -67,6 +67,9 @@ only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
 - `grep` supports basic and extended regular expressions, fixed strings, common
   selection and context options, and recursive file search. Perl regular
   expressions (`-P`) are unsupported.
+- `grep` prints the original bytes of a line, in any encoding, except for its
+  line ending: carriage returns before the newline are neither matched nor
+  printed.
 - `grep -r` follows a link named as an operand and skips links and junctions
   met during the walk; `-R` follows them too and stops at loops.
 - `grep` treats input holding a NUL byte as binary and reports only that it

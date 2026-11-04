@@ -3,7 +3,7 @@ use super::{Edges, Regex, Syntax};
 fn found(pattern: &str, text: &str) -> Option<(usize, usize)> {
     Regex::new(&[pattern], Syntax::Extended, Edges::Any, false)
         .unwrap()
-        .find(&text.chars().collect::<Vec<_>>(), 0)
+        .find(text.as_bytes(), 0)
 }
 
 #[test]

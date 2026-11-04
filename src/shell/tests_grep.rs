@@ -184,6 +184,33 @@ fn binary_input_follows_the_chosen_mode() {
 }
 
 #[test]
+fn grep_writes_the_original_bytes_of_a_line() {
+    let (directory, mut shell) = shell();
+    fs::write(
+        directory.path().join("latin1"),
+        b"caf\xe9 foo\nna\xefve\n\xff\xfe\n",
+    )
+    .unwrap();
+    fs::write(directory.path().join("utf8"), "ℹxé\n").unwrap();
+    let script = "grep -v foo latin1 > kept; grep -o 'caf.' latin1 > only; \
+        grep -n ve latin1 > numbered; grep -B1 ve latin1 > context; \
+        grep -A1 foo latin1 > after; grep -o . utf8 > characters; \
+        grep -o 'x*' utf8 > empty_steps; grep -w 'é' utf8 > word; \
+        grep -o '\\bx' latin1 utf8 > boundary";
+    shell.run(script);
+    let bytes = |name: &str| fs::read(directory.path().join(name)).unwrap();
+    assert_eq!(bytes("kept"), b"na\xefve\n\xff\xfe\n");
+    assert_eq!(bytes("only"), b"caf\xe9\n");
+    assert_eq!(bytes("numbered"), b"2:na\xefve\n");
+    assert_eq!(bytes("context"), b"caf\xe9 foo\nna\xefve\n");
+    assert_eq!(bytes("after"), b"caf\xe9 foo\nna\xefve\n");
+    assert_eq!(bytes("characters"), "ℹ\nx\né\n".as_bytes());
+    assert_eq!(bytes("empty_steps"), b"x\n");
+    assert_eq!(bytes("word"), b"");
+    assert_eq!(bytes("boundary"), b"");
+}
+
+#[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
 }

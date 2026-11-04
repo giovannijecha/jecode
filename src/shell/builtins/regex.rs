@@ -104,10 +104,43 @@ impl Regex {
         })
     }
 
-    /// The first match in `text` as a character range.
-    pub(super) fn find(&self, text: &[char], from: usize) -> Option<(usize, usize)> {
+    /// The first match in `text` at or after byte `from`, as a byte range.
+    pub(super) fn find(&self, text: &[u8], from: usize) -> Option<(usize, usize)> {
         self.machine.find(text, from, self.insensitive)
     }
+}
+
+/// The byte after one character of `text` at `at`, to step past an empty match.
+pub(super) fn step(text: &[u8], at: usize) -> usize {
+    at + decode(text, at).map_or(1, |(_, length)| length)
+}
+
+/// The character at byte `at` and its length. A byte that is not valid UTF-8
+/// reads as one U+FFFD, so lines in any encoding stay searchable.
+fn decode(text: &[u8], at: usize) -> Option<(char, usize)> {
+    let first = *text.get(at)?;
+    if first.is_ascii() {
+        return Some((first as char, 1));
+    }
+    let length = match first {
+        0xC2..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF4 => 4,
+        _ => 1,
+    };
+    let decoded = text
+        .get(at..at + length)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(|text| text.chars().next());
+    Some(decoded.map_or((char::REPLACEMENT_CHARACTER, 1), |ch| (ch, length)))
+}
+
+/// The character ending at byte `at`.
+fn previous(text: &[u8], at: usize) -> Option<char> {
+    (1..=at.min(4))
+        .rev()
+        .find_map(|length| decode(text, at - length).filter(|(_, found)| *found == length))
+        .map(|(ch, _)| ch)
 }
 
 fn word(ch: char) -> bool {
