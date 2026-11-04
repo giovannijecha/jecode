@@ -207,6 +207,12 @@ fn bracket_expressions_follow_posix() {
 }
 
 #[test]
+fn a_trailing_backslash_is_an_error() {
+    refuses(&["'a\\'", "-E 'a\\'"]);
+    selects(&[("a\\\n", "-F 'a\\'", "a\\\n")]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }

@@ -207,7 +207,7 @@ impl Parser {
 
     fn escape(&mut self) -> Result<Node, String> {
         let Some(ch) = self.peek() else {
-            return Ok(Node::Char('\\'));
+            return Err("trailing backslash in pattern".into());
         };
         self.at += 1;
         let named = |test: fn(char) -> bool, negated| {
