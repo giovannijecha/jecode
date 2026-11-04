@@ -107,6 +107,8 @@ impl Machine {
                             Boundary::Word(wanted) => (before != after) == wanted,
                             Boundary::Start => !before && after,
                             Boundary::End => before && !after,
+                            Boundary::NoWordBefore => !before,
+                            Boundary::NoWordAfter => !after,
                         }
                     }
                     _ => false,

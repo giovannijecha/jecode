@@ -50,6 +50,10 @@ enum Boundary {
     Word(bool),
     Start,
     End,
+    /// The edges of a `-w` match, which may itself start or end with a
+    /// non-word character, unlike `\b`.
+    NoWordBefore,
+    NoWordAfter,
 }
 
 #[derive(Clone)]
@@ -89,9 +93,9 @@ impl Regex {
             Edges::Any => root,
             Edges::Line => Node::Sequence(vec![Node::Start, root, Node::End]),
             Edges::Word => Node::Sequence(vec![
-                Node::Boundary(Boundary::Word(true)),
+                Node::Boundary(Boundary::NoWordBefore),
                 root,
-                Node::Boundary(Boundary::Word(true)),
+                Node::Boundary(Boundary::NoWordAfter),
             ]),
         };
         Ok(Self {

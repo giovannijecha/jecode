@@ -63,6 +63,25 @@ fn basic_anchors_and_star_depend_on_their_position() {
 }
 
 #[test]
+fn word_matches_only_need_no_word_character_beside_them() {
+    selects(&[
+        ("fn main() {\n", "-wF 'main()'", "fn main() {\n"),
+        ("foo-bar\n", "-w foo", "foo-bar\n"),
+        ("xfoo foo\n", "-wo foo", "foo\n"),
+        ("foofoo foo\n", "-wo foo", "foo\n"),
+        ("foobar foo\n", "-wo 'foo.*'", "foobar foo\n"),
+        ("abc abcd\n", "-woE 'abc|abcd'", "abc\nabcd\n"),
+        ("a  b\n", "-w ''", "a  b\n"),
+        ("\n", "-w ''", "\n"),
+    ]);
+    selects_nothing(&[
+        ("foo_bar\n", "-w foo"),
+        ("a b\n", "-w ''"),
+        ("a b\n", "-w 'x*'"),
+    ]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }
