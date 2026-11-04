@@ -65,7 +65,7 @@ fn failure(message: &str) -> Value {
 
 /// Media are shown to the model only after a single read; other attachments
 /// return their text page or path in this call.
-fn shown_alone(result: Value) -> Value {
+pub(super) fn shown_alone(result: Value) -> Value {
     if result.get("view").is_some() {
         return failure("Media file: read it alone with path to view it");
     }

@@ -61,14 +61,19 @@ impl Agent {
         Ok(())
     }
 
-    fn execute_one(
+    pub(super) fn execute_one(
         &mut self,
         call: &ToolCall,
         remaining: &[ToolCall],
         events: &mut impl EventSink,
     ) -> Result<(), String> {
+        if call.name == "steps" {
+            return self.execute_steps(call, remaining, events);
+        }
         let clock = Clock::new();
-        if let Err(error) = self.checkpoint(Stage::Tool(call.id.clone())) {
+        // The session knows the model's call, not the steps it expands to.
+        let pending = self.chain.as_ref().map_or(&call.id, |chain| &chain.id);
+        if let Err(error) = self.checkpoint(Stage::Tool(pending.clone())) {
             self.cancel_calls(std::slice::from_ref(call));
             self.cancel_calls(remaining);
             return Err(error);
@@ -134,9 +139,17 @@ impl Agent {
         self.record_tool_timing(call, timing);
         let change = outcome.change.map(|change| change.redacted(&self.redactor));
         if let Some(change) = &change {
-            self.record_tool_change(call, change);
+            if let Some(chain) = &mut self.chain {
+                chain.changes.push((call.id.clone(), change.clone()));
+            } else {
+                self.record_tool_change(call, None, change);
+            }
         }
-        if let Err(error) = self.checkpoint(Stage::ToolFinished) {
+        // Between steps the model's call stays pending, so a crash there reports
+        // an unknown outcome rather than a call that never started.
+        if self.chain.is_none()
+            && let Err(error) = self.checkpoint(Stage::ToolFinished)
+        {
             self.cancel_calls(remaining);
             return Err(error);
         }
@@ -220,7 +233,7 @@ impl Agent {
         Ok(())
     }
 
-    fn started_event(&self, call: &ToolCall) -> Event {
+    pub(super) fn started_event(&self, call: &ToolCall) -> Event {
         let mut arguments =
             json::parse(&call.arguments).unwrap_or_else(|_| Value::string(&call.arguments));
         if call.name == "mcp"
@@ -255,14 +268,23 @@ impl Agent {
         }
     }
 
-    fn record_tool_change(&self, call: &ToolCall, change: &crate::file_change::Change) {
+    pub(super) fn record_tool_change(
+        &self,
+        call: &ToolCall,
+        step: Option<&str>,
+        change: &crate::file_change::Change,
+    ) {
         let after_message = self.messages.lock().unwrap().len();
-        self.events.lock().unwrap().push(Value::object([
+        let mut event = Value::object([
             ("type", Value::string("tool_change")),
             ("after_message", Value::number(after_message)),
             ("tool_call_id", Value::string(self.redact(&call.id))),
             ("change", change.value()),
-        ]));
+        ]);
+        if let (Some(step), Value::Object(fields)) = (step, &mut event) {
+            fields.insert("step".into(), Value::string(self.redact(step)));
+        }
+        self.events.lock().unwrap().push(event);
     }
 
     pub(super) fn finished_event(&self, call: &ToolCall, result: &Value) -> Event {

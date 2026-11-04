@@ -7,7 +7,7 @@ writing [skills](SKILLS.md).
 
 ## Arguments
 
-Every tool accepts an optional boolean `parallel`. The routine tools `read`,
+Every tool except `steps` accepts an optional boolean `parallel`. The routine tools `read`,
 `list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser`, `mcp` and `lsp` also
 accept two display-only strings: `work`, a short label that groups related calls
 into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
@@ -33,6 +33,24 @@ Neither changes what the call does.
 | `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
 | `ask_user` | `questions` | See [Questions and plans](QUESTIONS_AND_PLANS.md#question-format). |
 | `todo_list` | `action` | See [Questions and plans](QUESTIONS_AND_PLANS.md#plan-format). |
+| `steps` | `steps` | See [below](#steps). |
+
+## Steps
+
+`steps` runs up to 12 tools in order with one call, so the model does not pay a
+request between calls that do not need each other's results. Each entry has
+`tool` and `arguments`, the same arguments as that tool alone, and keeps its own
+permission check, checkpoint and card.
+
+The call has one result, a `steps` array in the same order. Each entry names its
+`tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
+fails on an `error`, a refused or unknown `outcome`, a timeout, a cancellation, a
+non-zero exit or, for `edit`, any file that failed; a multi-file `read` reports
+each path and goes on.
+`ask_user` and `steps` cannot be steps. Media files need a `read` of their own,
+because the model is shown them only after a single read. If Jecode closes during
+the call, its outcome is unknown and the model is told to check before repeating
+it.
 
 ## Scheduling
 

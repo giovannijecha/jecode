@@ -106,6 +106,7 @@ fn build_definitions() -> Value {
     tools.push(mcp::definition());
     tools.push(lsp::definition());
     tools.push(collaboration::definition());
+    tools.push(work::steps());
     tools.push(work::todo());
     tools.push(work::ask_user());
     Value::Array(tools)

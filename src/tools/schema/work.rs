@@ -19,6 +19,49 @@ fn object(properties: Value, required: &[&str]) -> Value {
     ])
 }
 
+pub(super) fn steps() -> Value {
+    let step = object(
+        Value::object([
+            ("tool", string("The tool to run")),
+            (
+                "arguments",
+                Value::object([
+                    ("type", Value::string("object")),
+                    (
+                        "description",
+                        Value::string("The same arguments as that tool alone"),
+                    ),
+                ]),
+            ),
+        ]),
+        &["tool", "arguments"],
+    );
+    Value::object([
+        ("name", Value::string("steps")),
+        (
+            "description",
+            Value::string(
+                "Run several tools in order with one call, whenever you can already write the next calls without seeing earlier results: edit then bash to verify, several edits, todo_list then read, or read plus search. Every separate call sends the whole conversation again, so prefer this over consecutive calls. Each step keeps its own permission check, checkpoint and card. Results return in order. The first failed or refused step, including a command with a non-zero exit, stops the rest, which report not_run. ask_user and steps cannot be steps; media files need a read of their own.",
+            ),
+        ),
+        (
+            "parameters",
+            object(
+                Value::object([(
+                    "steps",
+                    Value::object([
+                        ("type", Value::string("array")),
+                        ("minItems", Value::number(1)),
+                        ("maxItems", Value::number(crate::agent::steps::MAX_STEPS)),
+                        ("items", step),
+                    ]),
+                )]),
+                &["steps"],
+            ),
+        ),
+    ])
+}
+
 pub(super) fn todo() -> Value {
     let status = Value::object([
         ("type", Value::string("string")),

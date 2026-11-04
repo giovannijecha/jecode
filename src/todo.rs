@@ -282,6 +282,25 @@ fn parse_tasks(value: &Value) -> Result<Vec<Task>, String> {
 }
 
 /// Find the newest successful set result, including results removed from model context.
+/// The plan a successful `todo_list` result carries.
+pub fn plan_in(result: &Value) -> Option<Plan> {
+    if result.get("error").is_some() {
+        return None;
+    }
+    Plan::parse(result).ok().filter(|plan| plan.revision > 0)
+}
+
+/// The latest plan among the steps of one `steps` result.
+fn plan_in_steps(result: &Value) -> Option<Plan> {
+    result
+        .get("steps")?
+        .as_array()?
+        .iter()
+        .rev()
+        .filter(|entry| entry.get("tool").and_then(Value::as_str) == Some("todo_list"))
+        .find_map(|entry| plan_in(entry.get("result")?))
+}
+
 pub fn latest(messages: &[Value]) -> Option<Plan> {
     let mut results: BTreeMap<String, &Value> = BTreeMap::new();
     for message in messages.iter().rev() {
@@ -297,6 +316,17 @@ pub fn latest(messages: &[Value]) -> Option<Plan> {
                         let Ok(call) = crate::conversation::ToolCall::parse(call) else {
                             continue;
                         };
+                        if call.name == "steps" {
+                            let plan = results
+                                .get(&call.id)
+                                .and_then(|message| message.get("content")?.as_str())
+                                .and_then(|content| json::parse(content).ok())
+                                .and_then(|result| plan_in_steps(&result));
+                            if plan.is_some() {
+                                return plan;
+                            }
+                            continue;
+                        }
                         if call.name != "todo_list"
                             || json::parse(&call.arguments).ok().is_none_or(|args| {
                                 args.get("action").and_then(Value::as_str) != Some("set")

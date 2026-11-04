@@ -17,6 +17,10 @@ of them. Exact arguments and limits are in the
   at the same time. The model can also mark other adjacent calls as independent
   to run them in parallel, at most four at once. Results always enter the
   conversation in the original call order.
+- The model can send several tools as one [`steps`](TOOL_REFERENCE.md#steps)
+  call when later ones do not need earlier results, such as an edit followed by
+  the tests. You still see one card and one permission check per step, and it
+  saves the request that would otherwise resend the conversation between them.
 - Jecode sets no limit on turn length, model requests or tool calls. A turn ends
   when the model answers without calling a tool, when you stop it, or on an
   error that needs you. See [Long-running work](LONG_WORK.md).
@@ -42,6 +46,7 @@ of them. Exact arguments and limits are in the
 | `agent` | Delegate work to [collaborators](COLLABORATION.md). Main agent only. |
 | `ask_user` | Ask you up to four [questions](QUESTIONS_AND_PLANS.md) and wait for answers. Main agent only. |
 | `todo_list` | Keep a [plan](QUESTIONS_AND_PLANS.md#plans) for the conversation. |
+| `steps` | Run several of these tools in order with [one call](TOOL_REFERENCE.md#steps). |
 
 Collaborators get every tool except `agent` and `ask_user`.
 
