@@ -46,6 +46,7 @@ fn workspace_policy_names_only_root_session_scratch_and_approved_cwd() {
     assert_eq!(paths("read"), expected);
     assert_eq!(paths("write"), expected);
     assert!(paths("deny").is_empty());
+    assert!(paths("enumerate").is_empty());
     assert_eq!(encoded.get("network"), Some(&Value::Bool(true)));
 }
 
@@ -307,4 +308,70 @@ fn node_manager_homes_are_read_only_and_passed_by_name() {
     assert_eq!(variable("VOLTA_HOME"), Some(volta.clone().into_os_string()));
     assert_eq!(variable("NVM_HOME"), Some("explicit".into()));
     assert_eq!(variable("FNM_DIR"), None);
+}
+
+#[test]
+fn installed_node_makes_only_its_drive_roots_enumerable() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let empty = home.path().join("bin");
+    let nodejs = home.path().join("nodejs");
+    for path in [&empty, &nodejs] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    std::fs::write(empty.join("node.cmd"), "").unwrap();
+    let search = std::env::join_paths([&empty, &nodejs]).unwrap();
+    let workspace = || {
+        Policy::for_command(Level::Workspace, project.path(), None, None)
+            .unwrap()
+            .unwrap()
+    };
+    let roots = |policy: &Policy| {
+        let encoded = crate::json::parse(&policy.encode()).unwrap();
+        encoded
+            .get("enumerate")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| PathBuf::from(path.as_str().unwrap()))
+            .collect::<Vec<_>>()
+    };
+
+    // Without Node.js nothing becomes listable.
+    let mut absent = workspace();
+    absent
+        .allow_node_tools_from(
+            |name| (name == "PATH").then(|| empty.clone().into_os_string()),
+            None,
+        )
+        .unwrap();
+    assert!(roots(&absent).is_empty());
+
+    // A runtime on PATH is detected but not granted; only drive roots list.
+    std::fs::write(nodejs.join("node.exe"), "").unwrap();
+    let mut installed = workspace();
+    installed
+        .allow_node_tools_from(|name| (name == "PATH").then(|| search.clone()), None)
+        .unwrap();
+    assert_eq!(installed.read.len(), 1);
+    assert_eq!(installed.write.len(), 1);
+    let listed = roots(&installed);
+    assert!(!listed.is_empty());
+    for root in &listed {
+        assert!(root.has_root() && root.parent().is_none(), "{root:?}");
+    }
+    for path in [project.path(), nodejs.as_path()] {
+        let root = std::fs::canonicalize(path).unwrap();
+        let root = PathBuf::from(crate::permissions::plain(root.ancestors().last().unwrap()));
+        assert!(listed.contains(&root), "{listed:?} lacks {root:?}");
+    }
+    for (index, root) in listed.iter().enumerate() {
+        assert!(
+            !listed[index + 1..]
+                .iter()
+                .any(|other| other.as_os_str().eq_ignore_ascii_case(root.as_os_str())),
+            "{listed:?}"
+        );
+    }
 }

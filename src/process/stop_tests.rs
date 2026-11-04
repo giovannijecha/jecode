@@ -99,7 +99,7 @@ fn malformed_sandbox_policy_never_starts_the_command() {
         ),
         // Escapes are decoded before the paths are validated.
         (
-            r#"{"deny":[],"network":true,"read":["\u0041:relative"],"write":[]}"#,
+            r#"{"deny":[],"enumerate":[],"network":true,"read":["\u0041:relative"],"write":[]}"#,
             "Sandbox paths must be canonical and absolute",
         ),
     ] {

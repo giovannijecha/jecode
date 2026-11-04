@@ -19,6 +19,8 @@ pub struct Policy {
     git_config: Option<PathBuf>,
     /// Real toolchain homes passed to the confined process by name.
     runtime_homes: Vec<(&'static str, PathBuf)>,
+    /// Installed Node.js runtime locations. Empty when Node.js is absent.
+    node_paths: Vec<PathBuf>,
 }
 
 impl Policy {
@@ -55,6 +57,7 @@ impl Policy {
             cargo_home: None,
             git_config: None,
             runtime_homes: Vec::new(),
+            node_paths: Vec::new(),
         };
         if let Some(temporary) = temporary {
             let temporary = canonical_directory(temporary)?;
@@ -126,7 +129,9 @@ impl Policy {
 
     /// Node version managers keep runtimes in the user profile, but a confined
     /// process sees its own container as LOCALAPPDATA. Pass each manager's real
-    /// home and grant it read-only, so shims resolve the selected runtime.
+    /// home and grant it read-only, so shims resolve the selected runtime. Any
+    /// installed runtime, including the first `node.exe` on PATH, also needs
+    /// its drive roots enumerable; see `enumerable_roots`.
     pub fn allow_installed_node_tools(
         &mut self,
         protected_home: Option<&Path>,
@@ -156,9 +161,52 @@ impl Policy {
                 continue;
             };
             self.allow_existing_read_directory(&path, protected_home)?;
+            self.add_node_path(&path);
             self.runtime_homes.push((name, path));
         }
+        if let Some(directory) = variable("PATH").and_then(|path| {
+            std::env::split_paths(&path)
+                .find(|directory| directory.is_absolute() && directory.join("node.exe").is_file())
+        }) {
+            self.add_node_path(&directory);
+        }
         Ok(())
+    }
+
+    /// Both spellings matter: a linked install resolves through the link's
+    /// drive and then through its target's drive.
+    fn add_node_path(&mut self, path: &Path) {
+        self.node_paths.push(path.to_path_buf());
+        if let Ok(target) = std::fs::canonicalize(path) {
+            self.node_paths.push(target);
+        }
+    }
+
+    /// Node.js resolves module and script paths by checking every component
+    /// from the drive root, and the root is the one component confinement
+    /// leaves unreadable. The Windows policy can grant listing only for a
+    /// whole tree, so when Node.js is installed the drives holding writable
+    /// folders and the runtime become listable: names and metadata, never
+    /// file contents or writes.
+    #[cfg(any(windows, test))]
+    fn enumerable_roots(&self) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if self.node_paths.is_empty() {
+            return roots;
+        }
+        for path in self.write.iter().chain(&self.node_paths) {
+            let Some(root) = path.ancestors().last().filter(|root| root.has_root()) else {
+                continue;
+            };
+            let root = PathBuf::from(crate::permissions::plain(root));
+            if !roots
+                .iter()
+                .any(|known| known.as_os_str().eq_ignore_ascii_case(root.as_os_str()))
+            {
+                roots.push(root);
+            }
+        }
+        roots
     }
 
     fn allow_existing_read_directory(
@@ -188,6 +236,7 @@ impl Policy {
             ("read", paths(&self.read)),
             ("write", paths(&self.write)),
             ("deny", Value::Array(Vec::new())),
+            ("enumerate", paths(&self.enumerable_roots())),
             ("network", Value::Bool(true)),
         ])
         .encode()
@@ -328,3 +377,5 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, windows))]
+mod windows_tests;

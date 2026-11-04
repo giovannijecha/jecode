@@ -167,9 +167,10 @@ Record actual server versions and executed platforms when reporting results.
 
 The normal suite launches an original Rust probe inside the Workspace
 confinement and checks permitted and denied file operations, inherited
-confinement in descendants and rejection of interactive terminals. PowerShell
-and .NET compatibility checks are opt-in because Windows cannot start some
-programs inside the confinement from a service session (see
+confinement in descendants, drive-root listing only for an installed Node.js
+runtime, and rejection of interactive terminals. PowerShell and .NET
+compatibility checks are opt-in because Windows cannot start some programs
+inside the confinement from a service session (see
 [Permissions](../usage/PERMISSIONS.md#platform-limits)). Run them from an
 interactive user session:
 
