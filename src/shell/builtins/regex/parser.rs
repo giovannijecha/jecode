@@ -7,12 +7,9 @@ pub(super) fn parse(pattern: &str, basic: bool) -> Result<Node, String> {
         chars: pattern.chars().collect(),
         at: 0,
         basic,
+        groups: 0,
     };
-    let root = parser.alternatives()?;
-    if parser.at < parser.chars.len() {
-        return Err(format!("unmatched ) in pattern: {pattern}"));
-    }
-    Ok(root)
+    parser.alternatives()
 }
 
 /// One interval count; POSIX allows any implementation to stop here.
@@ -31,6 +28,8 @@ struct Parser {
     /// Basic syntax writes the operators `( ) { } | + ?` with a backslash and
     /// treats them as literal without one; extended syntax is the reverse.
     basic: bool,
+    /// How many groups are open here.
+    groups: usize,
 }
 
 impl Parser {
@@ -69,7 +68,16 @@ impl Parser {
 
     fn sequence(&mut self) -> Result<Node, String> {
         let mut nodes = Vec::new();
-        while self.peek().is_some() && !self.operator('|') && !self.operator(')') {
+        while self.peek().is_some() && !self.operator('|') {
+            if self.operator(')') {
+                if self.groups > 0 {
+                    break;
+                }
+                // With no open group, an extended `)` is an ordinary character.
+                if self.basic {
+                    return Err("unmatched ) or \\) in pattern".into());
+                }
+            }
             let atom = self.atom(nodes.is_empty())?;
             // A basic `*` after a leading `^` is a literal, not its repetition.
             nodes.push(if self.basic && matches!(atom, Node::Start) {
@@ -145,7 +153,9 @@ impl Parser {
     /// anchors. Basic `$` anchors only at the end of its branch.
     fn atom(&mut self, first: bool) -> Result<Node, String> {
         if self.eat('(') {
+            self.groups += 1;
             let inner = self.alternatives()?;
+            self.groups -= 1;
             if !self.eat(')') {
                 return Err("unmatched ( in pattern".into());
             }

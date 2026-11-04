@@ -153,6 +153,17 @@ fn a_question_mark_after_a_repetition_makes_it_optional() {
 }
 
 #[test]
+fn an_unmatched_extended_closing_parenthesis_is_literal() {
+    selects(&[
+        ("a)\na\n", "-E 'a)'", "a)\n"),
+        ("a)\nb\n", "-E 'a)|b'", "a)\nb\n"),
+        ("a)\na\n", "-E '(a))'", "a)\n"),
+        (")\n", "-E ')'", ")\n"),
+    ]);
+    refuses(&["-E ')('", "-E '(a'", "'a\\)'"]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }
