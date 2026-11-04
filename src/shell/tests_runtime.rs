@@ -297,6 +297,37 @@ fn completed_reader_does_not_cancel_redirected_work() {
 }
 
 #[test]
+fn a_background_here_document_outlives_its_shell() {
+    let directory = crate::test_support::Directory::new();
+    let body = "here document line\n".repeat(200_000);
+    let script = format!("cat <<EOF > copy &\n{body}EOF\n");
+    // A script this long only fits in a file on every platform.
+    let script_file = directory.path().join("script");
+    fs::write(&script_file, script).unwrap();
+    let mut child = Command::new(executable().unwrap())
+        .arg(ENTRY)
+        .arg(&script_file)
+        .current_dir(directory.path())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let copied = fs::metadata(directory.path().join("copy")).map_or(0, |copy| copy.len());
+        if copied == body.len() as u64 {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "copied {copied} of {} bytes",
+            body.len()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
 fn substitution_inherits_the_active_compound_error_stream() {
     let (directory, mut shell) = shell();
     assert_eq!(

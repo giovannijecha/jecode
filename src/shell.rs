@@ -93,7 +93,9 @@ pub fn run_entry(args: impl Iterator<Item = OsString>) -> i32 {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
     shell.arg_zero = arg_zero;
-    shell.run(&script)
+    let status = shell.run(&script);
+    process::join_writers();
+    status
 }
 
 struct Shell {

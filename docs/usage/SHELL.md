@@ -34,7 +34,8 @@ interactive terminal; see [Tools](TOOLS.md#commands).
   an unquoted delimiter expands variables and command substitutions. A descriptor
   number counts only directly before `>`, so `echo 1 > file` writes `1`. `/dev/null`
   works on every platform. A redirection alone, such as `> file`, creates or
-  truncates the file.
+  truncates the file. The shell does not exit until a background command has read
+  its here-document or closed its standard input.
 - **Control flow.** `if … then … elif … else … fi`, `for NAME in WORDS; do …;
   done`, `for ((NAME=START; NAME<LIMIT; NAME++)); do …; done`, `while` and
   `until` loops, and `( … )` subshells. They nest, accept redirections after

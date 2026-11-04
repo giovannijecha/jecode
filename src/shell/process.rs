@@ -1,6 +1,20 @@
 use super::*;
+use std::sync::{Mutex, PoisonError};
+use std::thread::JoinHandle;
 
 type Assignments = Vec<(String, String)>;
+
+/// Threads feeding here-documents. A background command can still be reading
+/// when the shell's own work ends, and these threads die with the process.
+static WRITERS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// Waits until every here-document has been read, or its reader has gone.
+pub(super) fn join_writers() {
+    let writers = std::mem::take(&mut *WRITERS.lock().unwrap_or_else(PoisonError::into_inner));
+    for writer in writers {
+        let _ = writer.join();
+    }
+}
 
 impl Shell {
     pub(super) fn simple(&mut self, simple: &Simple, io: &Io) -> i32 {
@@ -132,9 +146,12 @@ impl Shell {
                 // before the command starts reading.
                 let (reader, mut writer) = io::pipe().map_err(|error| error.to_string())?;
                 let text = format!("{}{newline}", self.text(&redirect.target, &io)?);
-                std::thread::spawn(move || {
+                let feeding = std::thread::spawn(move || {
                     let _ = io::Write::write_all(&mut writer, text.as_bytes());
                 });
+                let mut writers = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
+                writers.retain(|writer| !writer.is_finished());
+                writers.push(feeding);
                 io.stdin = Source::Pipe(reader);
                 continue;
             }
