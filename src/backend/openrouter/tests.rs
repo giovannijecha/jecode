@@ -100,19 +100,28 @@ fn automatic_cache_control_is_scoped_to_claude_agent_requests() {
     client
         .set_model("anthropic/claude-sonnet-4.5".into())
         .unwrap();
-    client.complete(&[]).unwrap();
-    client.sample(&[], false, None, &mut |_| Ok(())).unwrap();
+    let hello = [hello()];
+    client.complete(&hello).unwrap();
+    client.sample(&hello, false, None, &mut |_| Ok(())).unwrap();
     client.set_model("openai/gpt-5".into()).unwrap();
-    client.complete(&[]).unwrap();
+    client.complete(&hello).unwrap();
     let requests = fixture.finish();
-    assert_eq!(
-        requests[0].body.get("cache_control"),
-        Some(&Value::object([("type", Value::string("ephemeral"))]))
-    );
+    assert!(requests[0].body.encode().contains("cache_control"));
     assert!(requests[0].body.get("tools").is_some());
-    assert!(requests[1].body.get("cache_control").is_none());
+    assert!(!requests[1].body.encode().contains("cache_control"));
     assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("cache_control").is_none());
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.body.get("cache_control").is_none())
+    );
+}
+
+fn hello() -> Value {
+    Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Hello")),
+    ])
 }
 
 #[test]
@@ -126,22 +135,24 @@ fn automatic_cache_control_accepts_claude_alias_only_for_agent_requests() {
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     let alias = "~anthropic/claude-sonnet-latest";
     client.set_model(alias.into()).unwrap();
-    client.complete(&[]).unwrap();
-    client.sample(&[], false, None, &mut |_| Ok(())).unwrap();
+    let hello = [hello()];
+    client.complete(&hello).unwrap();
+    client.sample(&hello, false, None, &mut |_| Ok(())).unwrap();
     client.set_model("~openai/gpt-latest".into()).unwrap();
-    client.complete(&[]).unwrap();
+    client.complete(&hello).unwrap();
 
     let requests = fixture.finish();
     assert_eq!(requests[0].body.get("model"), Some(&Value::string(alias)));
-    assert_eq!(
-        requests[0].body.get("cache_control"),
-        Some(&Value::object([("type", Value::string("ephemeral"))]))
-    );
+    assert!(requests[0].body.encode().contains("cache_control"));
     assert!(requests[0].body.get("tools").is_some());
-    assert!(requests[1].body.get("cache_control").is_none());
+    assert!(!requests[1].body.encode().contains("cache_control"));
     assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("cache_control").is_none());
     assert!(requests[2].body.get("tools").is_some());
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.body.get("cache_control").is_none())
+    );
 }
 
 #[test]

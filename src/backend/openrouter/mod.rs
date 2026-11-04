@@ -315,16 +315,14 @@ impl OpenRouter {
                 .strip_prefix('~')
                 .unwrap_or(&self.model)
                 .starts_with("anthropic/claude-");
-        let explicit_cache = with_tools && (claude_cache || cache::supports_openai(&self.model));
         // Runtime state keeps its first position, so the whole request is durable.
-        let marked = explicit_cache && !messages.is_empty();
-        // Only Claude takes a cache lifetime; OpenAI markers stay plain.
-        let marker = cache::marker(if claude_cache {
-            retention
-        } else {
-            crate::backend::CacheRetention::Short
-        });
-        if marked {
+        if with_tools && (claude_cache || cache::supports_openai(&self.model)) {
+            // Only Claude takes a cache lifetime; OpenAI markers stay plain.
+            let marker = cache::marker(if claude_cache {
+                retention
+            } else {
+                crate::backend::CacheRetention::Short
+            });
             cache::mark_recent(&mut messages, &marker);
         }
         let mut body = Value::object([
@@ -348,10 +346,6 @@ impl OpenRouter {
                     })
                     .collect();
                 fields.insert("tools".into(), Value::Array(wrapped));
-                // OpenRouter supports automatic top-level breakpoints for Claude.
-                if claude_cache && !marked {
-                    fields.insert("cache_control".into(), marker);
-                }
             }
             if let Some(tokens) = output_tokens {
                 fields.insert("max_completion_tokens".into(), Value::number(tokens));
