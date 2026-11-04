@@ -10,10 +10,16 @@ impl App {
             &settings.model,
             settings.effort,
             settings.auto_compact,
+            settings.cache_retention,
             &settings.routing_for(&settings.model),
             settings.default_permissions,
             self.config.store.path(),
         )
+    }
+
+    pub(in crate::tui) fn context_menu(&self) -> Selector {
+        let settings = &self.config.settings;
+        Selector::context_settings(settings.auto_compact, settings.cache_retention)
     }
 
     pub(in crate::tui) fn models_menu(&self, defaults: bool) -> Selector {

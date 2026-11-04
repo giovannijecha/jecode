@@ -178,6 +178,7 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
                 "provider/model",
                 Effort::Default,
                 80,
+                Default::default(),
                 &crate::backend::openrouter::Routing::Auto,
                 Default::default(),
                 std::path::Path::new("fixture/config.json"),
@@ -206,7 +207,8 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
             let shown = if height == 12 {
                 short
             } else {
-                "Auto-compact at"
+                // The Settings row, and the breadcrumb above Auto-compact.
+                "Context"
             };
             assert!(rows.iter().any(|row| row.contains(shown)), "{rows:#?}");
         }
@@ -225,7 +227,7 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
     assert_eq!(rows[row], "› 80% of the context window");
     assert_eq!(column, 4);
     assert!(rows[row - 1].starts_with("─ Threshold ─"));
-    assert!(rows[row + 1].starts_with("─ Settings › Auto-compact at "));
+    assert!(rows[row + 1].starts_with("─ Context › Auto-compact at "));
     assert!(rows[row + 1].ends_with(" this and new conversations ─"));
     assert_eq!(rows[row + 2], "   Enter  save    Esc  back");
     assert_eq!(rows.len(), row + 3);

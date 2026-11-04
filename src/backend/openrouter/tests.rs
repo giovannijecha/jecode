@@ -247,13 +247,25 @@ fn growing_tool_batches_keep_the_prior_explicit_boundary() {
             ("content", Value::string("Anchored request state")),
         ]));
         client
-            .sample_owned(messages.clone(), Effort::Default, true, None, &mut |_| {
-                Ok(())
-            })
+            .sample_owned(
+                messages.clone(),
+                Effort::Default,
+                true,
+                None,
+                Default::default(),
+                &mut |_| Ok(()),
+            )
             .unwrap();
         batch(&mut messages, 1);
         client
-            .sample_owned(messages, Effort::Default, true, None, &mut |_| Ok(()))
+            .sample_owned(
+                messages,
+                Effort::Default,
+                true,
+                None,
+                Default::default(),
+                &mut |_| Ok(()),
+            )
             .unwrap();
         let requests = fixture.finish();
         let first = requests[0]
@@ -337,4 +349,46 @@ fn incomplete_and_malformed_tool_calls_are_rejected_before_execution() {
         assert!(parse_completion(json::parse(response).unwrap()).is_err());
     }
     assert!(OpenRouter::new("bad\nheader".into(), "fixture/model".into()).is_err());
+}
+
+#[test]
+fn one_hour_retention_reaches_only_claude_breakpoints() {
+    let response = crate::test_support::completion("ok", vec![]);
+    let fixture = HttpFixture::new(vec![(200, response.clone()), (200, response)]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    let messages = [
+        Value::object([
+            ("role", Value::string("system")),
+            ("content", Value::string("Instructions")),
+            ("jecode_cache_retention", Value::string("1h")),
+        ]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Question")),
+        ]),
+    ];
+    for model in ["anthropic/claude-sonnet-4.5", "openai/gpt-6"] {
+        client.set_model(model.into()).unwrap();
+        crate::backend::Backend::sample(&client, &messages, true, None, None, &mut |_| Ok(()))
+            .unwrap();
+    }
+    let requests = fixture.finish();
+    let markers = |index: usize| {
+        let body = &requests[index].body;
+        assert!(!body.encode().contains("jecode_cache_retention"));
+        body.get("messages")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(|message| message.get("content")?.as_array()?[0].get("cache_control"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let long = Value::object([
+        ("type", Value::string("ephemeral")),
+        ("ttl", Value::string("1h")),
+    ]);
+    let short = Value::object([("type", Value::string("ephemeral"))]);
+    assert_eq!(markers(0), [long.clone(), long]);
+    assert_eq!(markers(1), [short.clone(), short]);
 }

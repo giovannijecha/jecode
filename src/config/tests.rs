@@ -429,3 +429,33 @@ fn routing_preference_is_scoped_to_its_backend_even_for_the_same_model_id() {
         Routing::Endpoint("openrouter-endpoint".into())
     );
 }
+
+#[test]
+fn prompt_cache_defaults_to_five_minutes_persists_and_rejects_unknown_values() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#;
+    fs::write(store.path(), legacy).unwrap();
+    let mut saved = store.load().unwrap().unwrap();
+    assert_eq!(saved.cache_retention, CacheRetention::Short);
+    saved.cache_retention = CacheRetention::Long;
+    store.save(&saved).unwrap();
+    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    assert_eq!(
+        document.get("context").unwrap().get("prompt_cache"),
+        Some(&Value::string("1h"))
+    );
+    assert_eq!(
+        store.load().unwrap().unwrap().cache_retention,
+        CacheRetention::Long
+    );
+    for value in ["\"1d\"", "\"\"", "60", "null"] {
+        let text = format!(
+            r#"{{"openrouter":{{"api_key":"isolated-fixture-key","model":"fixture/model"}},"context":{{"prompt_cache":{value}}}}}"#
+        );
+        fs::write(store.path(), &text).unwrap();
+        let error = store.load().err().unwrap();
+        assert!(error.contains("context.prompt_cache"), "{error}");
+        assert!(!error.contains("isolated-fixture-key"));
+    }
+}

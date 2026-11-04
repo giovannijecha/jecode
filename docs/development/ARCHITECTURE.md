@@ -333,10 +333,14 @@ credential environment variables of every available backend before launch.
 | `backend/openai/` | Stateless Responses requests with an API key (`openai-api`) or ChatGPT account (`openai`) | [OpenAI backend](OPENAI.md) |
 | `backend/anthropic/` | Streamed Messages requests with an API key (`anthropic-api`) or Claude compatibility account (`anthropic`) | [Anthropic backend](ANTHROPIC.md) |
 
-Caching follows each provider's model. Anthropic requests mark the stable system
-block and recent durable user-message boundaries. Through OpenRouter, requests
+Caching follows each provider's model. Anthropic requests cache the built-in
+prompt, shared by every conversation, for one hour on its own breakpoint, and
+mark recent durable user-message boundaries. Through OpenRouter, requests
 to models that accept explicit cache markers (`backend/openrouter/cache.rs`)
-mark up to four recent durable user or tool-batch boundaries. The ChatGPT route
+mark up to four recent durable user or tool-batch boundaries. The saved
+**Prompt cache** lifetime (`backend/retention.rs`) reaches adapters as a
+request-only field of the system message, read at every request, so Claude
+breakpoints on Anthropic and OpenRouter take a one-hour TTL when chosen. The ChatGPT route
 relies on implicit caching with a stable per-conversation key. Reported cache
 reads and writes stay separate from charged cost.
 

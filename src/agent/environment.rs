@@ -1,5 +1,8 @@
 use super::Agent;
+use crate::backend::{CacheRetention, retention};
 use crate::json::Value;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const PROMPT: &str = include_str!("PROMPT.md");
 
@@ -88,8 +91,30 @@ impl Agent {
                 "jecode_cache_prefix".into(),
                 Value::number(PROMPT.trim().len()),
             );
+            let retention = self.cache_retention();
+            if retention != CacheRetention::default() {
+                fields.insert(retention::MARKER.into(), Value::string(retention.id()));
+            }
         }
         message
+    }
+
+    /// A user preference read at every request, like auto-compact.
+    pub fn set_cache_retention(&self, retention: CacheRetention) {
+        self.cache_retention
+            .store(retention == CacheRetention::Long, Ordering::Relaxed);
+    }
+
+    pub fn cache_retention(&self) -> CacheRetention {
+        if self.cache_retention.load(Ordering::Relaxed) {
+            CacheRetention::Long
+        } else {
+            CacheRetention::Short
+        }
+    }
+
+    pub(crate) fn cache_retention_preference(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cache_retention)
     }
 
     #[cfg(test)]

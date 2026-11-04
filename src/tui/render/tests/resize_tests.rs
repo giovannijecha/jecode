@@ -244,6 +244,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         "fixture/model",
         crate::effort::Effort::Default,
         80,
+        Default::default(),
         &crate::backend::openrouter::Routing::Auto,
         Default::default(),
         std::path::Path::new("fixture/config.json"),

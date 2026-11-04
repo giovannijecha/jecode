@@ -8,10 +8,12 @@ mod failure;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
 mod providers;
+pub(crate) mod retention;
 mod retry;
 pub(crate) mod unconfigured;
 pub(crate) use charges::{price, quantity};
 pub use providers::{available, info};
+pub use retention::CacheRetention;
 
 use crate::attachments::{Inputs, Pool};
 use crate::cancel::Cancellation;

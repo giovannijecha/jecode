@@ -81,6 +81,7 @@ impl Backend for OpenRouter {
         emit: &mut dyn FnMut(backend::Update) -> Result<(), String>,
     ) -> Result<backend::Completion, backend::Failure> {
         let origin = Origin::with_account(self.id(), self.model(), self.account());
+        let retention = backend::CacheRetention::requested(messages);
         let projected: Vec<_> = messages
             .iter()
             .map(|message| {
@@ -88,6 +89,7 @@ impl Backend for OpenRouter {
                 if let Value::Object(fields) = &mut projected {
                     fields.remove("jecode_request_state");
                     fields.remove("jecode_cache_prefix");
+                    fields.remove(backend::retention::MARKER);
                 }
                 projected
             })
@@ -96,8 +98,14 @@ impl Backend for OpenRouter {
         let request = super::attachments::materialize(projected, pool, self.inputs())
             .map_err(backend::Failure::from)?;
         let mut forward = |update| emit(update);
-        let mut completion =
-            self.sample_owned(request, effort, with_tools, output_tokens, &mut forward)?;
+        let mut completion = self.sample_owned(
+            request,
+            effort,
+            with_tools,
+            output_tokens,
+            retention,
+            &mut forward,
+        )?;
         super::calls::response(&mut completion.message, &completion.calls);
         if let Err(error) = super::annotations::store(&mut completion.message, pool) {
             if let Value::Object(fields) = &mut completion.message {

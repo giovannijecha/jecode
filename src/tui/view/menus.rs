@@ -234,7 +234,8 @@ fn aside(menu: &Selector) -> Line {
         } => format!("paused at {}", level.name()),
         Purpose::Remembered { .. } => "this conversation".into(),
         Purpose::Key(_) => "~/.jecode/config.json".into(),
-        Purpose::AutoCompact => "this and new conversations".into(),
+        Purpose::AutoCompact | Purpose::Context => "this and new conversations".into(),
+        Purpose::PromptCache => "Claude models".into(),
         Purpose::Mcp(McpPanel::List) => menu.message.clone(),
         Purpose::Mcp(McpPanel::Tools) => count("tool"),
         Purpose::Lsp(LspPanel::List) => menu.message.clone(),
@@ -313,7 +314,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
         Purpose::Lsp(LspPanel::Checking) => close.to_vec(),
         Purpose::Loading if menu.title == "Sign out" => vec![],
         Purpose::Loading => close.to_vec(),
-        Purpose::Settings => vec![
+        Purpose::Settings | Purpose::Context => vec![
             key("↑↓", "move").optional(),
             key("Enter", "change"),
             close[0],
@@ -466,7 +467,7 @@ fn option(menu: &Selector, hit: &Hit, on: bool, names: usize, columns: usize) ->
     let column = names.max(text::cells(&name) + 2);
     // Saved settings read as values; other facts describe the option.
     let tone = match &menu.purpose {
-        Purpose::Settings => BODY,
+        Purpose::Settings | Purpose::Context => BODY,
         Purpose::Mcp(McpPanel::List) => match value.choice {
             Choice::Mcp(_, Some(health)) => health.style(),
             _ => MUTED,

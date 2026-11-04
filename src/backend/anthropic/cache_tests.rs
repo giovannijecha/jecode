@@ -316,3 +316,70 @@ fn shared_instructions_are_cached_apart_from_the_folder_part() {
     );
     assert!(!encoded.contains("jecode_cache_prefix"));
 }
+
+#[test]
+fn one_hour_retention_extends_every_breakpoint() {
+    let shared = "Shared agent prompt.";
+    let content = format!("{shared}\n\nEnvironment:\n{{}}");
+    let short = Value::object([("type", Value::string("ephemeral"))]);
+    let long = Value::object([
+        ("type", Value::string("ephemeral")),
+        ("ttl", Value::string("1h")),
+    ]);
+    for (retention, expected) in [(None, short), (Some("1h"), long.clone())] {
+        let mut system = Value::object([
+            ("role", Value::string("system")),
+            ("content", Value::string(&content)),
+            ("jecode_cache_prefix", Value::number(shared.len())),
+        ]);
+        if let (Some(retention), Value::Object(fields)) = (retention, &mut system) {
+            fields.insert("jecode_cache_retention".into(), Value::string(retention));
+        }
+        let mut messages = vec![system];
+        for index in 0..6 {
+            let role = if index % 2 == 0 { "user" } else { "assistant" };
+            messages.push(Value::object([
+                ("role", Value::string(role)),
+                ("content", Value::string(format!("Turn {index}"))),
+            ]));
+        }
+        let request = wire::request(
+            "model-a",
+            Effort::Default,
+            &messages,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        // The shared block is always long-lived; it precedes every other
+        // breakpoint in the prompt, as mixed lifetimes require.
+        let mut system = Vec::new();
+        collect_controls(request.get("system").unwrap(), &mut system);
+        assert_eq!(system, std::slice::from_ref(&long));
+        let mut rest = vec![request.get("cache_control").unwrap().clone()];
+        collect_controls(request.get("messages").unwrap(), &mut rest);
+        assert_eq!(rest.len(), 3, "{rest:?}");
+        assert!(rest.iter().all(|control| *control == expected), "{rest:?}");
+        assert!(!request.encode().contains("jecode_cache_retention"));
+    }
+}
+
+fn collect_controls(value: &Value, found: &mut Vec<Value>) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if key == "cache_control" {
+                    found.push(value.clone());
+                } else {
+                    collect_controls(value, found);
+                }
+            }
+        }
+        Value::Array(values) => values
+            .iter()
+            .for_each(|value| collect_controls(value, found)),
+        _ => {}
+    }
+}

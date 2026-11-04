@@ -1,6 +1,7 @@
 //! Canonical transcript and attachment mapping for Messages.
 
 use crate::attachments::{self, Attachment, Kind, Pool, base64};
+use crate::backend::CacheRetention;
 use crate::conversation::ToolCall;
 use crate::effort::Effort;
 use crate::json::Value;
@@ -85,6 +86,12 @@ fn build_request(
     let mut latest_state = None;
     // The system block every conversation shares, cached on its own.
     let mut shared = None;
+    // With one-hour retention every breakpoint lasts an hour, so a break
+    // longer than five minutes still resumes from the last request's end.
+    let control = match CacheRetention::requested(messages) {
+        CacheRetention::Short => ephemeral(),
+        CacheRetention::Long => long_lived(),
+    };
     for (index, message) in messages.iter().enumerate() {
         let role = message.get("role").and_then(Value::as_str);
         if role != Some("tool") && !results.is_empty() {
@@ -171,7 +178,8 @@ fn build_request(
     let slots = 2;
     let mut marked = 0;
     for message in wire[..marked_end].iter_mut().rev() {
-        if message.get("role").and_then(Value::as_str) == Some("user") && cache_breakpoint(message)
+        if message.get("role").and_then(Value::as_str) == Some("user")
+            && cache_breakpoint(message, &control)
         {
             marked += 1;
             if marked == slots {
@@ -194,7 +202,7 @@ fn build_request(
     // folder-specific remainder is covered by the history breakpoints.
     let marked = match shared {
         Some(index) => system.get_mut(index).map(|block| (block, long_lived())),
-        None => system.last_mut().map(|block| (block, ephemeral())),
+        None => system.last_mut().map(|block| (block, control.clone())),
     };
     if let Some((Value::Object(block), control)) = marked {
         block.insert("cache_control".into(), control);
@@ -216,7 +224,7 @@ fn build_request(
     if !subscription && empty_system {
         fields.remove("system");
     }
-    fields.insert("cache_control".into(), ephemeral());
+    fields.insert("cache_control".into(), control);
     match effort {
         Effort::Default => {}
         Effort::None => {
@@ -298,7 +306,7 @@ fn supports_mid_system(model: &str) -> bool {
     })
 }
 
-fn cache_breakpoint(message: &mut Value) -> bool {
+fn cache_breakpoint(message: &mut Value, control: &Value) -> bool {
     let Value::Object(fields) = message else {
         return false;
     };
@@ -311,7 +319,7 @@ fn cache_breakpoint(message: &mut Value) -> bool {
             *content = Value::Array(vec![Value::object([
                 ("type", Value::string("text")),
                 ("text", Value::string(text)),
-                ("cache_control", ephemeral()),
+                ("cache_control", control.clone()),
             ])]);
             true
         }
@@ -328,7 +336,7 @@ fn cache_breakpoint(message: &mut Value) -> bool {
             }) else {
                 return false;
             };
-            block.insert("cache_control".into(), ephemeral());
+            block.insert("cache_control".into(), control.clone());
             true
         }
         _ => false,

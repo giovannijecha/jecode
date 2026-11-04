@@ -32,7 +32,11 @@ fn open(app: &mut App) {
     app.dispatch("/settings".into()).unwrap();
     app.input(Decoded::Text("5".into())).unwrap();
     let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(menu.purpose, selector::Purpose::Context));
+    app.input(Decoded::Text("1".into())).unwrap();
+    let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::AutoCompact));
+    assert_eq!(menu.parent, Some("Context"));
 }
 
 /// The active engine, the saved file and the footer agree on one value.
@@ -72,9 +76,10 @@ fn a_saved_threshold_applies_to_this_and_new_conversations() {
         .set("55%".into());
     enter(&mut app);
     assert_preference(&app, 55);
+    // Saving returns to Context on the same row; Esc then returns to Settings.
     let menu = app.state.selector.as_ref().unwrap();
-    assert!(matches!(menu.purpose, selector::Purpose::Settings));
-    assert_eq!(menu.selected, 4);
+    assert!(matches!(menu.purpose, selector::Purpose::Context));
+    assert_eq!(menu.selected, 0);
     let rows = view::frame(&app.state, "fixture/model", "directory")
         .live
         .iter()
@@ -90,6 +95,17 @@ fn a_saved_threshold_applies_to_this_and_new_conversations() {
     let notice = app.state.notice.as_ref().unwrap();
     assert!(notice.text.contains("Auto-compact: 80% → 55%"));
     assert!(notice.change);
+    app.close_selector();
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(menu.purpose, selector::Purpose::Settings));
+    assert_eq!(menu.selected, 4);
+    let rows = view::frame(&app.state, "fixture/model", "directory")
+        .live
+        .iter()
+        .map(|line| line.plain())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rows.contains("Context") && rows.contains("55% · 5 minutes"));
     app.close_selector();
     assert_eq!(app.state.editor.text, "kept draft");
     app.state.editor.take();
@@ -107,9 +123,13 @@ fn cancelling_or_a_failed_save_keeps_the_previous_threshold_active_and_saved() {
     app.state.selector.as_mut().unwrap().editor.set("40".into());
     app.close_selector();
     let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(menu.purpose, selector::Purpose::Context));
+    assert_eq!(menu.selected, 0);
+    assert_preference(&app, 80);
+    app.close_selector();
+    let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::Settings));
     assert_eq!(menu.selected, 4);
-    assert_preference(&app, 80);
     app.close_selector();
     let path = app.config.store.path().to_path_buf();
     let original = std::fs::read(&path).unwrap();

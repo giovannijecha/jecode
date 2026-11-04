@@ -17,7 +17,10 @@ pub enum Setting {
     Effort,
     Routing,
     Permissions,
+    /// Opens Auto-compact and Prompt cache, which live under it.
+    Context,
     AutoCompact,
+    PromptCache,
     Providers,
     Mcp,
     Lsp,
@@ -45,6 +48,7 @@ pub enum Choice {
     ManageUsage,
     ApiKey(&'static str),
     Level(crate::permissions::Level),
+    Retention(crate::backend::CacheRetention),
     Remembered,
     Grant(usize),
     Mcp(usize, Option<super::mcp::Health>),
@@ -95,6 +99,8 @@ pub enum Purpose {
         defaults: bool,
     },
     Settings,
+    /// Settings › Context: the saved context and cache preferences.
+    Context,
     /// Routing for the conversation, or the saved default for `model`.
     Routing {
         defaults: bool,
@@ -106,6 +112,8 @@ pub enum Purpose {
     Key(&'static str),
     /// Percentage input for the automatic compaction threshold.
     AutoCompact,
+    /// How long Claude prompt caches last.
+    PromptCache,
     Loading,
     Sessions {
         current: Option<usize>,
@@ -170,6 +178,7 @@ fn restates(id: &str, name: &str) -> bool {
 }
 
 const SETTINGS: &str = "Settings";
+const CONTEXT: &str = "Context";
 
 impl Selector {
     pub(in crate::tui) fn new(title: &str, purpose: Purpose, options: Vec<OptionRow>) -> Self {
@@ -191,6 +200,10 @@ impl Selector {
     }
     fn under_settings(mut self, defaults: bool) -> Self {
         self.parent = defaults.then_some(SETTINGS);
+        self
+    }
+    fn under_context(mut self) -> Self {
+        self.parent = Some(CONTEXT);
         self
     }
     /// A panel that waits for `message`, titled after what it will show.
@@ -349,8 +362,7 @@ impl Selector {
         menu
     }
     pub fn auto_compact(current: u8) -> Self {
-        let mut menu =
-            Self::new("Auto-compact at", Purpose::AutoCompact, vec![]).under_settings(true);
+        let mut menu = Self::new("Auto-compact at", Purpose::AutoCompact, vec![]).under_context();
         menu.editor.set(current.to_string().into());
         menu
     }

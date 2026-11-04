@@ -125,6 +125,7 @@ fn launch(
         agent.register_backend(services);
     }
     agent.set_auto_compact(settings.auto_compact);
+    agent.set_cache_retention(settings.cache_retention);
     agent
         .permissions()
         .set_default(settings.default_permissions);

@@ -226,8 +226,10 @@ pub fn project(message: &Value, current: &Origin) -> Value {
     if fields.get("jecode_request_state") == Some(&Value::Bool(true)) {
         projected.insert("jecode_request_state".into(), Value::Bool(true));
     }
-    if let Some(prefix) = fields.get("jecode_cache_prefix") {
-        projected.insert("jecode_cache_prefix".into(), prefix.clone());
+    for key in ["jecode_cache_prefix", crate::backend::retention::MARKER] {
+        if let Some(value) = fields.get(key) {
+            projected.insert(key.into(), value.clone());
+        }
     }
     match fields.get(ENVELOPE) {
         Some(Value::Object(envelope))

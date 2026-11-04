@@ -241,6 +241,7 @@ impl Agent {
         child.permissions = self.permissions.for_agent(id);
         child.accounts = self.accounts.clone();
         child.auto_compact = self.auto_compact_preference();
+        child.cache_retention = self.cache_retention_preference();
         child.routing_preferences = self.routing_preferences.clone();
         child.redactor.include(self.redactor.clone());
         if mode == Mode::Isolated {

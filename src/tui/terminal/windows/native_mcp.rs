@@ -73,6 +73,7 @@ pub(super) fn console() {
             "fixture/model",
             Effort::Default,
             80,
+            Default::default(),
             &Routing::Auto,
             Default::default(),
             Path::new("C:/fixture/config.json"),

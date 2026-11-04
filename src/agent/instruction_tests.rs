@@ -167,3 +167,35 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
         }
     }
 }
+
+#[test]
+fn one_hour_prompt_cache_reaches_claude_breakpoints_from_the_next_request() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, completion("First", vec![])),
+        (200, completion("Second", vec![])),
+    ]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client
+        .set_model("anthropic/claude-sonnet-4.5".into())
+        .unwrap();
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    agent.run_turn("First request", &mut |_| Ok(())).unwrap();
+    // A running conversation's shared preference changes like auto-compact.
+    agent
+        .cache_retention_preference()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        agent.cache_retention(),
+        crate::backend::CacheRetention::Long
+    );
+    agent.run_turn("Second request", &mut |_| Ok(())).unwrap();
+    let requests = fixture.finish();
+    let lifetimes = |index: usize| {
+        let encoded = requests[index].body.encode();
+        assert!(!encoded.contains("jecode_cache_retention"));
+        encoded.matches("\"ttl\":\"1h\"").count()
+    };
+    assert_eq!(lifetimes(0), 0);
+    assert!(lifetimes(1) >= 2, "{}", requests[1].body.encode());
+}

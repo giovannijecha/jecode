@@ -489,6 +489,8 @@ mod persistence_smoke;
 #[cfg(test)]
 mod persistence_tests;
 #[cfg(test)]
+mod prompt_cache_tests;
+#[cfg(test)]
 mod recent_tests;
 #[cfg(test)]
 mod routing_tests;

@@ -209,6 +209,10 @@ impl Store {
             "auto_compact_percent".into(),
             Value::number(settings.auto_compact),
         );
+        context.insert(
+            "prompt_cache".into(),
+            Value::string(settings.cache_retention.id()),
+        );
         let permissions = root
             .entry("permissions".into())
             .or_insert_with(|| Value::object([]));
