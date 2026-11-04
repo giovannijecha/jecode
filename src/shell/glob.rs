@@ -104,6 +104,7 @@ enum Token {
 struct Set {
     negated: bool,
     ranges: Vec<(char, char)>,
+    named: Vec<fn(char) -> bool>,
 }
 
 impl Token {
@@ -113,10 +114,12 @@ impl Token {
             Self::One => true,
             Self::Char(expected) => ch == *expected,
             Self::Set(set) => {
-                set.ranges
+                let member = set
+                    .ranges
                     .iter()
                     .any(|(low, high)| (*low..=*high).contains(&ch))
-                    != set.negated
+                    || set.named.iter().any(|test| test(ch));
+                member != set.negated
             }
         }
     }
@@ -150,11 +153,25 @@ fn set(pattern: &[Item]) -> Option<(Set, usize)> {
     let negated = matches!(pattern.first(), Some(Item::Literal('!' | '^')));
     let first = usize::from(negated);
     let mut ranges = Vec::new();
+    let mut named = Vec::new();
     let mut at = first;
     loop {
         let item = *pattern.get(at)?;
         if item == Item::Meta(']') && at > first {
-            return Some((Set { negated, ranges }, at + 1));
+            let set = Set {
+                negated,
+                ranges,
+                named,
+            };
+            return Some((set, at + 1));
+        }
+        if item == Item::Meta('[')
+            && pattern.get(at + 1) == Some(&Item::Literal(':'))
+            && let Some((test, length)) = class_item(&pattern[at + 2..])
+        {
+            named.push(test);
+            at += 2 + length;
+            continue;
         }
         let low = character(item);
         match (pattern.get(at + 1), pattern.get(at + 2)) {
@@ -168,6 +185,35 @@ fn set(pattern: &[Item]) -> Option<(Set, usize)> {
             }
         }
     }
+}
+
+/// `name:]` after `[:`, with how many items it spans. An unknown name matches
+/// nothing, so the pattern stays literal as in Bash.
+fn class_item(pattern: &[Item]) -> Option<(fn(char) -> bool, usize)> {
+    let end = pattern
+        .windows(2)
+        .position(|pair| pair == [Item::Literal(':'), Item::Meta(']')])?;
+    let name: String = pattern[..end].iter().copied().map(character).collect();
+    Some((named_class(&name).unwrap_or(|_| false), end + 2))
+}
+
+/// The test of a POSIX class such as `alpha`, for path and grep patterns.
+pub(super) fn named_class(name: &str) -> Option<fn(char) -> bool> {
+    Some(match name {
+        "alpha" => char::is_alphabetic,
+        "digit" => |ch| ch.is_ascii_digit(),
+        "alnum" => char::is_alphanumeric,
+        "space" => char::is_whitespace,
+        "upper" => char::is_uppercase,
+        "lower" => char::is_lowercase,
+        "punct" => |ch| ch.is_ascii_punctuation(),
+        "xdigit" => |ch| ch.is_ascii_hexdigit(),
+        "blank" => |ch| ch == ' ' || ch == '\t',
+        "cntrl" => char::is_control,
+        "print" => |ch| !ch.is_control(),
+        "graph" => |ch| !ch.is_control() && !ch.is_whitespace(),
+        _ => return None,
+    })
 }
 
 fn character(item: Item) -> char {

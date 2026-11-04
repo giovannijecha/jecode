@@ -325,21 +325,8 @@ impl Parser {
             .ok_or(UNMATCHED_BRACKET)?;
         let name: String = rest[..end].iter().collect();
         self.at += end + 3;
-        let test: fn(char) -> bool = match name.as_str() {
-            "alpha" => char::is_alphabetic,
-            "digit" => |ch| ch.is_ascii_digit(),
-            "alnum" => char::is_alphanumeric,
-            "space" => char::is_whitespace,
-            "upper" => char::is_uppercase,
-            "lower" => char::is_lowercase,
-            "punct" => |ch| ch.is_ascii_punctuation(),
-            "xdigit" => |ch| ch.is_ascii_hexdigit(),
-            "blank" => |ch| ch == ' ' || ch == '\t',
-            "cntrl" => char::is_control,
-            "print" => |ch| !ch.is_control(),
-            "graph" => |ch| !ch.is_control() && !ch.is_whitespace(),
-            _ => return Err(format!("unknown character class [:{name}:]")),
-        };
+        let test = crate::shell::glob::named_class(&name)
+            .ok_or_else(|| format!("unknown character class [:{name}:]"))?;
         Ok(Item::Named(test, false))
     }
 }

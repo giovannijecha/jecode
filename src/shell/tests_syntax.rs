@@ -415,6 +415,24 @@ fn many_stars_on_a_long_name_stay_fast() {
 }
 
 #[test]
+fn patterns_accept_named_classes() {
+    let (directory, mut shell) = shell();
+    let script = "mkdir h; cd h; echo x > a; echo x > 1; echo x > B; \
+        echo [[:alpha:]] > ../alpha; echo [[:digit:]] > ../digit; \
+        echo [![:alpha:]] > ../negated; echo [[:alpha:][:digit:]] > ../both; \
+        echo [[:digit:]x] > ../mixed; echo [[:foo:]] > ../unknown; \
+        cd ..; grep -rl --include='[[:alpha:]]' x h > listed";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "alpha"), "B a\n");
+    assert_eq!(read(&directory, "digit"), "1\n");
+    assert_eq!(read(&directory, "negated"), "1\n");
+    assert_eq!(read(&directory, "both"), "1 B a\n");
+    assert_eq!(read(&directory, "mixed"), "1\n");
+    assert_eq!(read(&directory, "unknown"), "[[:foo:]]\n");
+    assert_eq!(read(&directory, "listed"), "h/B\nh/a\n");
+}
+
+#[test]
 fn unquoted_patterns_expand_to_sorted_paths() {
     let (directory, mut shell) = shell();
     let script = "mkdir -p src/nested test; touch src/b.js src/a.js src/c.rs src/.hidden.js src/nested/d.js test/x.test.js; \
