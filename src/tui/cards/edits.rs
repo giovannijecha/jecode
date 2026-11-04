@@ -14,7 +14,7 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        theme::{BAD, DIM, GOOD, MUTED, WARNING},
+        theme::{BAD, DIM, MUTED, WARNING},
     },
 };
 
@@ -137,7 +137,7 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
             .filter(|change| !unknown && change.added + change.removed > 0)
         {
             line.push(" · ", MUTED);
-            line = line.append(counts(change.added, change.removed, true));
+            line = line.append(summary::changed(change));
         }
         line
     };
@@ -255,7 +255,7 @@ fn tail(written: bool, change: Option<&Change>, arguments: Option<&Value>) -> Li
     match change {
         _ if !written => Line::new("No changes", MUTED),
         Some(change) if change.added + change.removed > 0 => {
-            counts(change.added, change.removed, false)
+            summary::counts(change.added, change.removed)
         }
         Some(change) => Line::new(&diff::summary(change), MUTED),
         None => Line::new(&replacements(arguments), MUTED),
@@ -285,24 +285,6 @@ fn failure(path: &str, error: &str, columns: usize, expanded: bool, origin: usiz
                 .shortened(columns)
         })
         .collect()
-}
-
-/// `+2 −1`, zero sides dropped; `unit` adds ` lines`.
-fn counts(added: usize, removed: usize, unit: bool) -> Line {
-    let mut line = Line::default();
-    if added > 0 {
-        line.push(&format!("+{added}"), GOOD);
-    }
-    if removed > 0 {
-        if added > 0 {
-            line.push(" ", MUTED);
-        }
-        line.push(&format!("−{removed}"), BAD);
-    }
-    if unit {
-        line.push(&format!(" {}", super::plural(added + removed)), MUTED);
-    }
-    line
 }
 
 /// A file written without a full-file diff names how many replacements it took.

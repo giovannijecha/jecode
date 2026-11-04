@@ -187,20 +187,26 @@ pub(super) fn changed(change: &Change) -> Line {
     if change.added == 0 && change.removed == 0 {
         return Line::new(&diff::summary(change), MUTED);
     }
-    let mut line = Line::default();
-    if change.added > 0 {
-        line.push(&format!("+{}", change.added), GOOD);
-    }
-    if change.removed > 0 {
-        if change.added > 0 {
-            line.push(" ", MUTED);
-        }
-        line.push(&format!("−{}", change.removed), BAD);
-    }
+    let mut line = counts(change.added, change.removed);
     line.push(
         &format!(" {}", plural(change.added + change.removed)),
         MUTED,
     );
+    line
+}
+
+/// `+2 −1`, a zero side dropped.
+pub(super) fn counts(added: usize, removed: usize) -> Line {
+    let mut line = Line::default();
+    if added > 0 {
+        line.push(&format!("+{added}"), GOOD);
+    }
+    if removed > 0 {
+        if added > 0 {
+            line.push(" ", MUTED);
+        }
+        line.push(&format!("−{removed}"), BAD);
+    }
     line
 }
 
