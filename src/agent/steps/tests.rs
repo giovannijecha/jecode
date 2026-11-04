@@ -93,6 +93,20 @@ fn steps_run_in_order_and_answer_the_one_call() {
 }
 
 #[test]
+fn a_media_read_in_steps_asks_to_be_read_alone() {
+    let call = ToolCall {
+        id: "chain_s1".into(),
+        name: "read".into(),
+        arguments: "{}".into(),
+    };
+    let media = Value::object([("view", Value::string("image"))]);
+    let answer = combined(&[call], &[("chain_s1".into(), media)]);
+    let result = entries(&answer)[0].get("result").unwrap();
+    assert!(result.get("view").is_none(), "no view would ever follow");
+    assert!(result.encode().contains("read it alone"), "{result:?}");
+}
+
+#[test]
 fn a_saved_session_shows_a_card_per_step_that_ran_with_its_change() {
     let project = Directory::new();
     let home = Directory::new();
