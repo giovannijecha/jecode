@@ -342,20 +342,27 @@ fn commands_get_temp_and_tmp_only_for_a_path_windows_accepts() {
         names.sort();
         names
     };
-    // MAX_PATH characters fit; one more does not.
+    // A 260-unit path needs a separator and NUL, overflowing a 261-unit buffer.
     let path = |length: usize| {
         let drive = if cfg!(windows) { "C:/" } else { "/" };
         PathBuf::from(format!("{drive}{}", "a".repeat(length - drive.len())))
     };
+    let non_bmp = |length: usize| {
+        let drive = if cfg!(windows) { "C:/" } else { "/" };
+        PathBuf::from(format!("{drive}{}🦀", "a".repeat(length - drive.len() - 2)))
+    };
     let all = ["JECODE_TMP", "TEMP", "TMP", "TMPDIR"];
-    assert_eq!(exported(&path(260)), all);
-    let long = path(261);
+    assert_eq!(exported(&path(259)), all);
+    let long = path(260);
     let kept: &[&str] = if cfg!(windows) {
         &["JECODE_TMP", "TMPDIR"]
     } else {
         &all
     };
     assert_eq!(exported(&long), kept);
+    assert_eq!(exported(&path(261)), kept);
+    assert_eq!(exported(&non_bmp(259)), all);
+    assert_eq!(exported(&non_bmp(260)), kept);
     let instructions = Area::new(long, PathBuf::from("/project"), "123-7-0")
         .unwrap()
         .instructions();

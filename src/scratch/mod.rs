@@ -293,18 +293,18 @@ pub fn export(command: &mut std::process::Command, root: &Path) {
 }
 
 /// The variables that name an area, given its environment path. Windows
-/// programs read TEMP and TMP through GetTempPathW, which returns at most
-/// MAX_PATH + 1 characters with the separator it appends; with a longer TMP,
-/// a program cmd.exe starts stays suspended, as Volta's node shim does. An
-/// area that deep, such as a collaborator's under a long home, keeps the
-/// inherited TEMP and TMP.
+/// programs read TEMP and TMP through GetTempPathW, which appends a separator;
+/// a 260-unit path exceeds its MAX_PATH + 1 buffer once the NUL is included.
+/// With such a TMP, a program cmd.exe starts stays suspended, as Volta's node
+/// shim does. An area that deep, such as a collaborator's under a long home,
+/// keeps the inherited TEMP and TMP.
 fn variables(value: &Path) -> &'static [&'static str] {
     const ALL: &[&str] = &["JECODE_TMP", "TMPDIR", "TEMP", "TMP"];
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
         const MAX_PATH: usize = 260;
-        if value.as_os_str().encode_wide().count() > MAX_PATH {
+        if value.as_os_str().encode_wide().count() >= MAX_PATH {
             return &ALL[..2];
         }
     }
