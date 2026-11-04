@@ -3,7 +3,7 @@ use crate::json;
 
 fn tool(index: usize) -> Value {
     json::parse(&format!(
-        r#"{{"id":"call_{index}","name":"bash","arguments":{{"command":"node --test test/{index}.mjs","work":"Checks"}},"result":{{"exit_code":0,"stdout":"{}"}}}}"#,
+        r#"{{"id":"call_{index}","name":"bash","state":"done","text":"exit 0","arguments":{{"command":"node --test test/{index}.mjs","work":"Checks"}},"result":{{"exit_code":0,"stdout":"{}"}}}}"#,
         "x".repeat(4000)
     ))
     .unwrap()
@@ -123,6 +123,39 @@ fn inspect_adds_recent_work_as_short_lines() {
         Some("Implement the camera")
     );
     assert!(view.encode().len() < 4096);
+}
+
+#[test]
+fn recent_tools_state_what_each_call_recorded() {
+    let line = |name: &str, state: &str, text: &str, arguments: &str| {
+        tool_line(
+            &json::parse(&format!(
+                r#"{{"name":"{name}","state":"{state}","text":"{text}","arguments":{arguments}}}"#
+            ))
+            .unwrap(),
+        )
+    };
+    assert_eq!(
+        line("bash", "done", "timed out", r#"{"command":"cargo test"}"#),
+        "bash cargo test → timed out"
+    );
+    assert_eq!(
+        line("bash", "running", "", r#"{"command":"cargo build"}"#),
+        "bash cargo build → running"
+    );
+    assert_eq!(
+        line(
+            "edit",
+            "done",
+            "changed 1 file; 1 failed",
+            r#"{"files":[{"path":"a.rs","edits":[]},{"path":"b.rs","edits":[]}]}"#
+        ),
+        "edit a.rs, b.rs → changed 1 file; 1 failed"
+    );
+    assert_eq!(
+        line("todo_list", "done", "complete", r#"{"action":"get"}"#),
+        "todo_list get → complete"
+    );
 }
 
 #[test]

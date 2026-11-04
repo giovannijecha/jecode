@@ -124,43 +124,25 @@ pub(super) fn record(record: &Value, detail: bool) -> Value {
     )
 }
 
-/// One line per tool call: name, main argument and outcome.
+/// One line per tool call: name, target and the summary recorded when it
+/// finished, or its state until then, so a timed-out or partly failed call
+/// never reads as a success.
 fn tool_line(tool: &Value) -> String {
-    let name = tool.get("name").and_then(Value::as_str).unwrap_or("tool");
-    let arguments = tool.get("arguments");
-    let target = ["path", "command", "action", "url", "query", "pattern"]
-        .iter()
-        .find_map(|key| arguments?.get(key)?.as_str())
-        .map(str::to_owned)
-        .or_else(|| {
-            let executable = arguments?.get("executable")?.as_str()?;
-            let args = arguments?
-                .get("args")
-                .and_then(Value::as_array)
-                .map(|args| {
-                    args.iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .unwrap_or_default();
-            Some(format!("{executable} {args}"))
-        })
+    let field = |key| tool.get(key).and_then(Value::as_str).unwrap_or("");
+    let name = match field("name") {
+        "" => "tool",
+        name => name,
+    };
+    let target = tool
+        .get("arguments")
+        .map(|arguments| crate::events::target(name, arguments))
         .unwrap_or_default();
-    let result = tool.get("result");
-    let outcome = if let Some(error) = result.and_then(|result| result.get("error")?.as_str()) {
-        format!("error: {error}")
-    } else if let Some(Value::Number(code)) = result.and_then(|result| result.get("exit_code")) {
-        format!("exit {code}")
-    } else if let Some(status) = result.and_then(|result| result.get("status")?.as_str()) {
-        status.to_owned()
-    } else if let Some(text) = result.and_then(Value::as_str) {
-        text.to_owned()
-    } else {
-        "ok".to_owned()
+    let outcome = match field("text") {
+        "" => field("state"),
+        text => text,
     };
     clip(
-        &format!("{name} {} → {}", clip(&target, LINE / 2), outcome)
+        &format!("{name} {} → {outcome}", clip(&target, LINE / 2))
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" "),
