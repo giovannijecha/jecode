@@ -136,15 +136,15 @@ impl Parser {
                 Node::End
             }
             '[' => Node::Class(self.class()?),
-            '\\' => self.escape(),
+            '\\' => self.escape()?,
             // A quantifier with nothing to repeat is an ordinary character.
             _ => Node::Char(ch),
         })
     }
 
-    fn escape(&mut self) -> Node {
+    fn escape(&mut self) -> Result<Node, String> {
         let Some(ch) = self.peek() else {
-            return Node::Char('\\');
+            return Ok(Node::Char('\\'));
         };
         self.at += 1;
         let named = |test: fn(char) -> bool, negated| {
@@ -153,7 +153,10 @@ impl Parser {
                 items: vec![Item::Named(test, negated)],
             })
         };
-        match ch {
+        Ok(match ch {
+            '1'..='9' => {
+                return Err(format!("back-references such as \\{ch} are unsupported"));
+            }
             'd' | 'D' => named(|ch| ch.is_ascii_digit(), ch == 'D'),
             'w' | 'W' => named(word, ch == 'W'),
             's' | 'S' => named(char::is_whitespace, ch == 'S'),
@@ -163,7 +166,7 @@ impl Parser {
             't' => Node::Char('\t'),
             'n' => Node::Char('\n'),
             _ => Node::Char(ch),
-        }
+        })
     }
 
     fn class(&mut self) -> Result<Class, String> {
@@ -185,7 +188,7 @@ impl Parser {
                     items.push(self.posix()?);
                     continue;
                 }
-                '\\' => match self.escape() {
+                '\\' => match self.escape()? {
                     Node::Class(class) => {
                         items.extend(class.items);
                         continue;

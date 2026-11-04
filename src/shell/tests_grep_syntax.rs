@@ -87,6 +87,16 @@ fn unterminated_named_classes_are_errors() {
 }
 
 #[test]
+fn back_references_are_refused_by_name() {
+    refuses(&["-E '(a)\\1'", "'\\(a\\)\\1'", "'\\9'"]);
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("grep -E '(a)\\1' missing 2> err"), 2);
+    let error = fs::read_to_string(directory.path().join("err")).unwrap();
+    assert!(error.contains("back-references"), "{error}");
+    selects(&[("\\1\n1\n", "-F '\\1'", "\\1\n")]);
+}
+
+#[test]
 fn each_pattern_stands_alone() {
     refuses(&["'a\\)'", "'\\(a'", "-E -e 'a(' -e 'b)'"]);
 }
