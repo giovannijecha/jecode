@@ -170,6 +170,15 @@ impl Shell {
         Ok(self.fields(word, io)?.join(" "))
     }
 
+    /// A word's expansions as one string, without pathname expansion.
+    fn text(&self, word: &Word, io: &Io) -> Result<String, String> {
+        let mut text = String::new();
+        for part in &word.0 {
+            self.expand_part(part, &mut text, io)?;
+        }
+        Ok(text)
+    }
+
     /// Expands words into arguments; `"$@"` yields one per positional argument.
     fn words(&self, words: &[Word], io: &Io) -> Result<Vec<String>, String> {
         let mut result = Vec::with_capacity(words.len());

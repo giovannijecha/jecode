@@ -59,6 +59,28 @@ fn redirection_alone_creates_or_truncates_the_file() {
 }
 
 #[test]
+fn redirection_targets_and_here_strings_are_not_argument_lists() {
+    let (directory, mut shell) = shell();
+    let script = "touch a1 a2; (echo x > a*) 2> err; echo \"$?\" > status; \
+        touch only1; echo y > only*; cat < only* > read_back; \
+        (cat < a*) 2> input_err; echo \"$?\" > input_status; \
+        cat <<< a* > here_string; cat <<EOF > here_document\na*\nEOF\n";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "status"), "1\n");
+    let error = read(&directory, "err");
+    assert!(error.contains("ambiguous redirect"), "{error}");
+    assert_eq!(read(&directory, "a1"), "");
+    assert_eq!(read(&directory, "a2"), "");
+    assert!(!directory.path().join("a1 a2").exists());
+    assert_eq!(read(&directory, "only1"), "y\n");
+    assert_eq!(read(&directory, "read_back"), "y\n");
+    assert_eq!(read(&directory, "input_status"), "1\n");
+    assert!(read(&directory, "input_err").contains("ambiguous redirect"));
+    assert_eq!(read(&directory, "here_string"), "a*\n");
+    assert_eq!(read(&directory, "here_document"), "a*\n");
+}
+
+#[test]
 fn variable_names_follow_the_platform_environment() {
     let mut variables = Variables::default();
     variables.set("Path", "first".into());

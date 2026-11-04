@@ -43,6 +43,8 @@ interactive terminal; see [Tools](TOOLS.md#commands).
   so `find . -exec cmd {} \;` and `HEAD@{1}` work.
 - **Path patterns.** Unquoted `*`, `?` and bracket classes expand to matching
   paths. A pattern without matches stays literal; quoted patterns stay literal.
+  A redirection target may be a pattern that matches one path; several matches
+  are an `ambiguous redirect` error. Here-strings are not expanded as patterns.
 
 On Windows, variable names are case-insensitive like the environment, so `$PATH`
 reads `Path`.

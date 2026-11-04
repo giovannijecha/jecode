@@ -101,6 +101,16 @@ impl Shell {
         Ok((args, local_env))
     }
 
+    /// A redirection's path. As in Bash, a pattern may match one path; a
+    /// redirection cannot open several.
+    fn redirection_path(&self, word: &Word, io: &Io) -> Result<String, String> {
+        let mut fields = self.fields(word, io)?;
+        if fields.len() == 1 {
+            return Ok(fields.remove(0));
+        }
+        Err(format!("{}: ambiguous redirect", fields.join(" ")))
+    }
+
     /// Applies redirections in order to a copy of `io`.
     pub(super) fn redirected(&self, io: &Io, redirects: &[Redirect]) -> Result<Io, String> {
         let mut io = io.try_clone()?;
@@ -113,7 +123,6 @@ impl Shell {
                 io.stderr = io.stdout.try_clone().map_err(|error| error.to_string())?;
                 continue;
             }
-            let target = self.expand(&redirect.target, &io)?;
             if let Some(newline) = match redirect.mode {
                 "<<" => Some(""),
                 "<<<" => Some("\n"),
@@ -122,13 +131,14 @@ impl Shell {
                 // A writer thread keeps a long body from filling the pipe
                 // before the command starts reading.
                 let (reader, mut writer) = io::pipe().map_err(|error| error.to_string())?;
-                let text = format!("{target}{newline}");
+                let text = format!("{}{newline}", self.text(&redirect.target, &io)?);
                 std::thread::spawn(move || {
                     let _ = io::Write::write_all(&mut writer, text.as_bytes());
                 });
                 io.stdin = Source::Pipe(reader);
                 continue;
             }
+            let target = self.redirection_path(&redirect.target, &io)?;
             if redirect.mode == "<" {
                 io.stdin = if target == "/dev/null" {
                     Source::Null
