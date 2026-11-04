@@ -16,7 +16,7 @@ pub struct Area {
     path: PathBuf,
     project: PathBuf,
     session: String,
-    establishment: std::sync::Mutex<()>,
+    establishment: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
 #[derive(Debug)]
@@ -44,7 +44,7 @@ impl Area {
             path,
             project,
             session: session.into(),
-            establishment: std::sync::Mutex::new(()),
+            establishment: std::sync::Arc::new(std::sync::Mutex::new(())),
         })
     }
 
@@ -54,7 +54,7 @@ impl Area {
             path: self.path.clone(),
             project: self.project.clone(),
             session: self.session.clone(),
-            establishment: std::sync::Mutex::new(()),
+            establishment: std::sync::Arc::clone(&self.establishment),
         }
     }
 

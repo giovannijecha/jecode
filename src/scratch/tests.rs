@@ -35,6 +35,33 @@ fn simultaneous_first_uses_publish_one_complete_ownership_record() {
     assert_eq!(temporary.info().unwrap().files, 8);
 }
 
+#[test]
+fn shared_areas_coordinate_concurrent_first_uses() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let temporary = area(&home, &project, "123-1-1");
+    let shared: Vec<_> = (0..8).map(|_| temporary.share()).collect();
+    let barrier = std::sync::Barrier::new(shared.len());
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = shared
+            .into_iter()
+            .enumerate()
+            .map(|(index, copy)| {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    let (_, file) = copy.file(&format!("shared/{index}.txt"), true).unwrap();
+                    fs::write(file, "complete").unwrap();
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    assert_eq!(temporary.info().unwrap().files, 8);
+}
+
 fn call(tools: &Tools, name: &str, entries: &[(&str, &str)]) -> Value {
     let arguments = Value::Object(
         entries
