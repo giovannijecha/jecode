@@ -29,6 +29,11 @@ pub(super) fn collect(
         }
         return;
     }
+    let name = operand.trim_end_matches('/');
+    let any_suffix = |glob: &str| suffixes(name).any(|name| name_matches(glob, name));
+    if !implicit && excluded_directory(options, any_suffix) {
+        return;
+    }
     if !options.recursive {
         errors.push(format!("grep: {operand}: Is a directory"));
         return;
@@ -104,12 +109,7 @@ impl Walk<'_> {
             };
             match target {
                 Target::Directory => {
-                    if !self
-                        .options
-                        .exclude_dir
-                        .iter()
-                        .any(|glob| name_matches(glob, &name))
-                    {
+                    if !excluded_directory(self.options, |glob| name_matches(glob, &name)) {
                         self.directory(&child, false);
                     }
                 }
@@ -144,6 +144,14 @@ fn included(options: &Options, matches: impl Fn(&str) -> bool) -> bool {
         (None, Some((include, _))) => !include,
         (None, None) => true,
     }
+}
+
+/// Whether a pattern of `--exclude-dir`, which may end in slashes, `matches`.
+fn excluded_directory(options: &Options, matches: impl Fn(&str) -> bool) -> bool {
+    options
+        .exclude_dir
+        .iter()
+        .any(|glob| matches(glob.trim_end_matches('/')))
 }
 
 /// An operand's whole name and each trailing part of it after a slash, which is

@@ -327,6 +327,34 @@ fn file_filters_apply_to_operands_and_the_last_match_wins() {
 }
 
 #[test]
+fn excluded_directories_ignore_trailing_slashes_and_cover_operands() {
+    let (directory, mut shell) = shell();
+    fs::create_dir_all(directory.path().join("tree/build")).unwrap();
+    fs::create_dir_all(directory.path().join("tree/src")).unwrap();
+    fs::write(directory.path().join("tree/build/d"), "hit\n").unwrap();
+    fs::write(directory.path().join("tree/src/c"), "hit\n").unwrap();
+    for (args, status, expected) in [
+        ("-r hit tree --exclude-dir=build/", 0, "tree/src/c:hit\n"),
+        ("-r hit tree --exclude-dir=build", 0, "tree/src/c:hit\n"),
+        (
+            "-r hit tree --exclude-dir=tree/build",
+            0,
+            "tree/build/d:hit\ntree/src/c:hit\n",
+        ),
+        ("-r hit tree/build --exclude-dir=build", 1, ""),
+        ("-r hit tree/build/ --exclude-dir=build", 1, ""),
+        ("hit tree/build --exclude-dir=build", 1, ""),
+    ] {
+        let found = shell.run(&format!("grep {args} > out 2> err"));
+        assert_eq!(
+            (found, read(&directory, "out").as_str()),
+            (status, expected),
+            "grep {args}"
+        );
+    }
+}
+
+#[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
 }
