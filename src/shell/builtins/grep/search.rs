@@ -121,8 +121,10 @@ pub(super) fn search(
             }
             *printed = true;
             for (line_number, text) in before.drain(..) {
-                prefix(writer, options, name, names, line_number, '-')?;
-                terminated(writer, &text)?;
+                if !options.only {
+                    prefix(writer, options, name, names, line_number, '-')?;
+                    terminated(writer, &text)?;
+                }
             }
             if options.only && !options.invert {
                 let mut from = 0;
@@ -148,8 +150,10 @@ pub(super) fn search(
         }
         if after > 0 {
             after -= 1;
-            prefix(writer, options, name, names, number, '-')?;
-            terminated(writer, line)?;
+            if !options.only {
+                prefix(writer, options, name, names, number, '-')?;
+                terminated(writer, line)?;
+            }
             last = Some(number);
         } else if context_before > 0 {
             if before.len() == context_before {

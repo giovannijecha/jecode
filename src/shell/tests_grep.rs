@@ -379,6 +379,19 @@ fn context_groups_are_separated_across_files_and_for_zero_lines() {
 }
 
 #[test]
+fn only_matching_prints_no_context_lines() {
+    assert_eq!(
+        over("a\nb\nc\na\n", "-o -A1 a"),
+        (0, "a\n--\na\n".to_owned())
+    );
+    assert_eq!(
+        over("a\nb\nc\na\n", "-o -B1 a"),
+        (0, "a\n--\na\n".to_owned())
+    );
+    assert_eq!(over("a\nb\na\n", "-o -C1 a"), (0, "a\na\n".to_owned()));
+}
+
+#[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
 }
