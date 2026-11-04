@@ -13,36 +13,18 @@ fn npm_launcher_native_tui() {
     assert!(node.is_absolute() && node.is_file());
     assert!(launcher.is_absolute() && launcher.is_file());
     let directory = Directory::new();
-    let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n{}\n'@\n[JecodeTestPty]::RunNpm('{}', '{}', '{}')\n",
-        native_pty_source(),
-        include_str!("native_npm.cs"),
-        node.to_string_lossy().replace('\'', "''"),
-        launcher.to_string_lossy().replace('\'', "''"),
-        directory.path().to_string_lossy().replace('\'', "''"),
-    );
-    let entry = "$ErrorActionPreference = 'Stop'; $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false, $true), $false); try { & ([ScriptBlock]::Create($reader.ReadToEnd())) } finally { $reader.Dispose() }";
-    let result = process::run_observed(
-        Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                entry,
-            ])
-            .env("TEMP", directory.path())
-            .env("TMP", directory.path())
-            .env_remove("OPENROUTER_API_KEY")
-            .env_remove("OPENROUTER_MODEL"),
-        Some(script.into_bytes()),
+    let result = native_script::pty(
+        format!("{}\n{}", native_pty_source(), include_str!("native_npm.cs")),
+        "RunNpm",
+        &[
+            &node.to_string_lossy(),
+            &launcher.to_string_lossy(),
+            &directory.path().to_string_lossy(),
+        ],
+        &directory,
         Duration::from_secs(60),
-        64 * 1024,
-        &Cancellation::default(),
-        None,
-        &mut |_| Ok(()),
-    )
-    .unwrap();
+        true,
+    );
     assert_eq!(
         result.exit_code,
         Some(0),
