@@ -298,13 +298,13 @@ pub fn export(command: &mut std::process::Command, root: &Path) {
 /// With such a TMP, a program cmd.exe starts stays suspended, as Volta's node
 /// shim does. An area that deep, such as a collaborator's under a long home,
 /// keeps the inherited TEMP and TMP.
-fn variables(value: &Path) -> &'static [&'static str] {
+fn variables(_value: &Path) -> &'static [&'static str] {
     const ALL: &[&str] = &["JECODE_TMP", "TMPDIR", "TEMP", "TMP"];
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
         const MAX_PATH: usize = 260;
-        if value.as_os_str().encode_wide().count() >= MAX_PATH {
+        if _value.as_os_str().encode_wide().count() >= MAX_PATH {
             return &ALL[..2];
         }
     }
