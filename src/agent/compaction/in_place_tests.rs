@@ -61,6 +61,14 @@ fn proactive_compaction_summarizes_over_the_cached_conversation() {
     // with the same tool catalog, so its prefix is the cached one.
     let summary = &requests[0];
     assert!(summary.body.get("tools").is_some());
+    assert_eq!(
+        summary
+            .body
+            .get("max_completion_tokens")
+            .and_then(Value::as_usize),
+        Some(4096),
+        "summary output must fit the model's declared maximum"
+    );
     assert!(last_text(summary).starts_with("Context checkpoint: Jecode is compacting"));
     assert!(summary.body.encode().contains("Step 0: progress"));
     assert_eq!(agent.context.summary, "Goal kept; next action: finish.");

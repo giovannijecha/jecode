@@ -52,12 +52,14 @@ impl Agent {
             .unwrap_or(limits.context);
         let output_tokens = (capacity / 8)
             .clamp(2_048, 8_192)
-            .max(self.context.summary_output_tokens);
-        if request
-            .estimated_tokens
-            .saturating_add(output_tokens)
-            .saturating_add(1024)
-            > capacity
+            .max(self.context.summary_output_tokens)
+            .min(limits.output.unwrap_or(capacity));
+        if output_tokens == 0
+            || request
+                .estimated_tokens
+                .saturating_add(output_tokens)
+                .saturating_add(1024)
+                > capacity
         {
             return Ok(None);
         }
