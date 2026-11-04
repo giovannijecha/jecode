@@ -7,7 +7,7 @@ use crate::tui::{
     line::Line,
     syntax::Highlighter,
     text,
-    theme::{BAD, BODY, CODE_TEXT, DIM, LIT, MUTED, Style, WARNING},
+    theme::{BAD, BODY, CODE_TEXT, DIM, LIT, MUTED, Style},
 };
 
 pub(super) fn description<'a>(tool: &Tool<'a>) -> &'a str {
@@ -240,7 +240,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
     if let Some(result) = tool.result {
         if let Some(reason) = crate::events::not_run(result) {
             rows.extend(line_rows(
-                &Line::new(&text::clean(reason), WARNING),
+                &Line::new(&text::clean(reason), MUTED),
                 columns,
                 3,
                 "    ",

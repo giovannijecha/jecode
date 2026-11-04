@@ -14,7 +14,7 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        theme::{BAD, DIM, MUTED, WARNING},
+        theme::{BAD, DIM, MUTED},
     },
 };
 
@@ -88,7 +88,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
 
 /// `3 files · +9 −1 lines`, ` · N failed` in `bad`; one file keeps today's
 /// fact, and a call that changed nothing says so on the failed card. A call
-/// that never ran gives its reason in `warning`, as any stopped call does.
+/// that never ran gives its reason in `muted`: the badge carries the state.
 fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line {
     let Some(result) = tool.result else {
         let elapsed = summary::line(tool, Status::Running, None);
@@ -103,7 +103,7 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
         return line;
     };
     if let Some(reason) = crate::events::not_run(result) {
-        return Line::new(&text::clean(reason), WARNING);
+        return Line::new(&text::clean(reason), MUTED);
     }
     if result.get("error").is_some() {
         return summary::line(tool, Status::Failed, None);

@@ -235,13 +235,16 @@ fn multi_path_reads_count_the_files_they_could_not_read() {
 
 #[test]
 fn a_call_that_never_ran_says_why_instead_of_how_it_finished() {
-    for outcome in ["denied", "unavailable"] {
+    for (outcome, says) in [
+        ("denied", "Denied · nothing ran; the agent was told"),
+        ("unavailable", "Nothing ran"),
+    ] {
         let result = Value::object([
             ("outcome", Value::string(outcome)),
             ("reason", Value::string("Nothing ran")),
         ]);
         for name in ["edit", "read", "write", "bash", "exec", "list", "web"] {
-            assert_eq!(tool_summary(name, &result), "Nothing ran", "{name}");
+            assert_eq!(tool_summary(name, &result), says, "{name}");
         }
     }
     // Each still reports through its own route.

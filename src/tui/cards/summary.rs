@@ -17,7 +17,7 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         return running(tool);
     };
     if let Some(reason) = crate::events::not_run(result) {
-        return Line::new(&short_error(reason), WARNING);
+        return Line::new(&short_error(reason), MUTED);
     }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return Line::new(&short_error(error), BAD);

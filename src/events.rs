@@ -443,16 +443,18 @@ fn outcome_summary(name: &str, result: &Value) -> String {
     "complete".into()
 }
 
-/// Why a call never ran: denied, refused at this level, or stopped first.
+/// Why a call never ran: denied, refused at this level, or stopped first. A
+/// denial was the reader's own decision, and its `reason` tells the model how
+/// to continue, so it reads as the decision.
 pub fn not_run(result: &Value) -> Option<&str> {
-    let outcome = result.get("outcome")?.as_str()?;
-    if !matches!(outcome, "denied" | "unavailable" | "not_executed") {
-        return None;
+    match result.get("outcome")?.as_str()? {
+        "denied" => Some("Denied · nothing ran; the agent was told"),
+        "unavailable" | "not_executed" => result
+            .get("reason")
+            .or_else(|| result.get("error"))?
+            .as_str(),
+        _ => None,
     }
-    result
-        .get("reason")
-        .or_else(|| result.get("error"))?
-        .as_str()
 }
 
 /// The status of a persistent process result, if it is one.

@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     cards::{Presentation, card as render},
-    theme::{BADGE_BAD, BADGE_EDIT, BADGE_WARN, WARNING},
+    theme::{BADGE_BAD, BADGE_EDIT, BADGE_WARN, MUTED},
 };
 use std::time::Duration;
 
@@ -363,10 +363,12 @@ fn a_call_that_never_ran_is_stopped_and_says_why() {
     let refused = "Not available at the Read permission level: editing src/auth/session.ts, src/auth/token.ts, tests/auth/expiry.test.ts. Read allows reading and analysis inside the working folder; explain what you need and the user can change the level with /permissions.";
     let denied = "The user denied editing src/auth/session.ts, src/auth/token.ts, tests/auth/expiry.test.ts; nothing ran. Continue without it or explain what it was for.";
     let stopped = "Tool was not executed: the turn stopped before a permission decision";
-    for (outcome, key, reason) in [
-        ("unavailable", "reason", refused),
-        ("denied", "reason", denied),
-        ("not_executed", "error", stopped),
+    // A denial reads as the person's decision; its reason is for the model.
+    let told = "Denied · nothing ran; the agent was told";
+    for (outcome, key, reason, says) in [
+        ("unavailable", "reason", refused, refused),
+        ("denied", "reason", denied, told),
+        ("not_executed", "error", stopped, stopped),
     ] {
         for columns in [44, 80, 100] {
             let collapsed = card(&gated(outcome, key, reason, false), columns, true);
@@ -377,24 +379,29 @@ fn a_call_that_never_ran_is_stopped_and_says_why() {
                 "{outcome}: {rows:#?}"
             );
             assert!(!rows.iter().any(|row| row.contains("No ")), "{rows:#?}");
-            let opening = reason.split(' ').next().unwrap();
-            assert_eq!(styled(&collapsed.rows, opening), Some(WARNING), "{rows:#?}");
+            let opening = says.split(' ').next().unwrap();
+            // The badge carries the state, so the words stay quiet.
+            assert_eq!(styled(&collapsed.rows, opening), Some(MUTED), "{rows:#?}");
             assert!(rows.iter().all(|row| text::cells(row) <= columns));
             // Clipped, the rest waits for Ctrl+O; expanded, all of it shows.
-            let whole = said(&rows).contains(reason);
+            let whole = said(&rows).contains(says);
             assert_eq!(collapsed.hidden, !whole, "{rows:#?}");
             assert_eq!(rows.iter().any(|row| row.contains("Ctrl+O")), !whole);
             let opened = plain(&card(&gated(outcome, key, reason, true), columns, false).rows);
-            assert!(said(&opened).contains(reason), "{opened:#?}");
+            assert!(said(&opened).contains(says), "{opened:#?}");
+            assert!(
+                !said(&opened).contains("Continue without it"),
+                "{opened:#?}"
+            );
             assert!(opened.iter().all(|row| text::cells(row) <= columns));
         }
     }
     // Control characters in a named path stay out of every row, title join
     // included.
-    let hostile = "The user denied editing a\x1b]0;x\x07.rs\nb.rs; nothing ran";
+    let hostile = "Not available: editing a\x1b]0;x\x07.rs\nb.rs; nothing ran";
     for columns in [80, 200] {
         for expanded in [false, true] {
-            let call = gated("denied", "reason", hostile, expanded);
+            let call = gated("unavailable", "reason", hostile, expanded);
             for row in plain(&card(&call, columns, false).rows) {
                 assert!(!row.contains(['\x1b', '\x07', '\n']), "{row:?}");
             }
