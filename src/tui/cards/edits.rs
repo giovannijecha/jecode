@@ -125,11 +125,21 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
             None => Line::new(&replacements(tool.arguments.get("files")), MUTED),
         }
     } else {
-        let (added, removed) = tool
-            .change
-            .map_or((0, 0), |change| (change.added, change.removed));
         let noun = if written == 1 { "file" } else { "files" };
-        Line::new(&format!("{written} {noun} · "), MUTED).append(counts(added, removed, true))
+        let mut line = Line::new(&format!("{written} {noun}"), MUTED);
+        // A file over the diff limits has no counts, and a sum of the others
+        // would read as the whole call.
+        let unknown = entries
+            .iter()
+            .any(|entry| change_of(tool, entry).is_none() && crate::events::file_changed(entry));
+        if let Some(change) = tool
+            .change
+            .filter(|change| !unknown && change.added + change.removed > 0)
+        {
+            line.push(" · ", MUTED);
+            line = line.append(counts(change.added, change.removed, true));
+        }
+        line
     };
     if failed > 0 {
         line.push(&format!(" · {failed} failed"), BAD);
@@ -156,7 +166,8 @@ fn sections(
     let mut hidden = None;
     let mut origin = 2;
     let mut opened = 0;
-    let (mut more, mut more_rows) = (0, 0);
+    // Rows stay known only while every counted file kept its diff.
+    let (mut more, mut more_rows) = (0, Some(0));
     for entry in entries {
         let path = field(entry, "path");
         if let Some(error) = entry.get("error").and_then(Value::as_str) {
@@ -180,7 +191,9 @@ fn sections(
         if !written || (!expanded && opened == OPEN_DIFFS) {
             if written {
                 more += 1;
-                more_rows += change.map_or(0, |change| change.hunks.iter().map(Vec::len).sum());
+                more_rows = more_rows
+                    .zip(change)
+                    .map(|(rows, change)| rows + change.hunks.iter().map(Vec::len).sum::<usize>());
             }
             rows.extend(notices);
             continue;
@@ -222,7 +235,13 @@ fn sections(
     }
     if more > 0 {
         let noun = if more == 1 { "diff" } else { "diffs" };
-        let label = Line::new(&format!("+{more} {noun} · {more_rows} rows"), DIM);
+        let mut label = format!("+{more} {noun}");
+        match more_rows {
+            None | Some(0) => {}
+            Some(1) => label.push_str(" · 1 row"),
+            Some(count) => label.push_str(&format!(" · {count} rows")),
+        }
+        let label = Line::new(&label, DIM);
         rows.extend(line_rows(&label, columns, origin, "  ", "  ", DIM));
         hidden = Some(rows.len() - 1);
     }
@@ -289,9 +308,6 @@ fn counts(added: usize, removed: usize, unit: bool) -> Line {
             line.push(" ", MUTED);
         }
         line.push(&format!("−{removed}"), BAD);
-    }
-    if added + removed == 0 {
-        line.push("0", MUTED);
     }
     if unit {
         line.push(&format!(" {}", super::plural(added + removed)), MUTED);

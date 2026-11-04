@@ -254,6 +254,91 @@ fn an_emptied_file_changed_though_it_wrote_no_bytes() {
     assert!(rows[0].ends_with("  1 file · +1 line"), "{rows:#?}");
 }
 
+/// The call with the diffs of `dropped` lost to the diff limits: those files
+/// were written, and only their results remain.
+fn without_diffs(mut call: Call, dropped: &[&str]) -> Call {
+    call.change = call.change.take().and_then(|change| {
+        Change::several(
+            change
+                .files
+                .into_iter()
+                .filter(|(path, _)| !dropped.contains(&path.as_str()))
+                .collect(),
+        )
+    });
+    call
+}
+
+#[test]
+fn counts_a_lost_diff_cannot_support_are_left_out() {
+    let lost = |dropped: &[&str]| {
+        plain(
+            &card(
+                &without_diffs(call(&three(), false, false), dropped),
+                100,
+                false,
+            )
+            .rows,
+        )
+    };
+    // No diff kept: the call names how many files, not `0 lines`.
+    let rows = lost(&[SESSION, TOKEN, TEST]);
+    assert!(rows[0].ends_with("  3 files"), "{rows:#?}");
+    assert!(
+        rows.contains(&format!("  {SESSION}  Applied 1 replacement")),
+        "{rows:#?}"
+    );
+    // One diff lost: a sum of the others would read as the whole call.
+    let rows = lost(&[TOKEN]);
+    assert!(rows[0].ends_with("  3 files"), "{rows:#?}");
+    assert!(rows.contains(&format!("  {SESSION}  +1 −1")), "{rows:#?}");
+    assert!(
+        rows.contains(&format!("  {TOKEN}  Applied 1 replacement")),
+        "{rows:#?}"
+    );
+    // Line endings change no lines: the sum is known, and nothing to show.
+    let endings = [
+        (SESSION, Some(("a\n", "a\r\n"))),
+        (TOKEN, Some(("x\n", "x\r\n"))),
+    ];
+    let rows = plain(&card(&call(&endings, false, false), 100, false).rows);
+    assert!(rows[0].ends_with("  2 files"), "{rows:#?}");
+    assert!(
+        rows.contains(&format!("  {SESSION}  Changed line endings · LF → CRLF")),
+        "{rows:#?}"
+    );
+    let mixed = [endings[0], (TOKEN, Some(("x\n", "x\ny\n")))];
+    let rows = plain(&card(&call(&mixed, false, false), 100, false).rows);
+    assert!(rows[0].ends_with("  2 files · +1 line"), "{rows:#?}");
+}
+
+#[test]
+fn the_hidden_diff_row_counts_only_rows_it_knows() {
+    let files: Vec<File<'_>> = ["a.rs", "b.rs", "c.rs", "d.rs", "e.rs"]
+        .into_iter()
+        .map(|path| (path, Some(("k\nold\n", "k\nnew\n"))))
+        .collect();
+    let last = |call: &Call| {
+        let card = card(call, 80, false);
+        assert!(card.hidden);
+        plain(&card.rows).last().unwrap().clone()
+    };
+    assert_eq!(last(&call(&files, false, false)), "  +2 diffs · 6 rows");
+    let lost = |dropped: &[&str]| last(&without_diffs(call(&files, false, false), dropped));
+    assert_eq!(lost(&["d.rs"]), "  +2 diffs");
+    assert_eq!(lost(&["d.rs", "e.rs"]), "  +2 diffs");
+    let mut few = files[..4].to_vec();
+    assert_eq!(
+        last(&without_diffs(call(&few, false, false), &["d.rs"])),
+        "  +1 diff"
+    );
+    // Changed line endings keep no rows, and a lone row is one row.
+    few[3] = ("d.rs", Some(("x\n", "x\r\n")));
+    assert_eq!(last(&call(&few, false, false)), "  +1 diff");
+    few[3] = ("d.rs", Some(("x\n", "")));
+    assert_eq!(last(&call(&few, false, false)), "  +1 diff · 1 row");
+}
+
 /// A call the permission gate stopped before any file was touched.
 fn gated(outcome: &str, key: &str, reason: &str, expanded: bool) -> Call {
     let mut gated = call(&three(), false, expanded);
