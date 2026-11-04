@@ -109,14 +109,17 @@ pub(super) fn edit_with_change(
         updated.replace_range(position..position + old.len(), new);
     }
     if updated == content {
-        return Ok((written(0, None), None));
+        return Ok((edited(0, None, false), None));
     }
     let outcome = replace_protected(guard, &path, &content, &updated, cancellation);
     if let Err(error) = outcome.result {
         return Ok((failed(error, outcome.checkpoint), None));
     }
     let change = crate::file_change::Change::between(Some(&content), &updated);
-    Ok((written(updated.len() as u64, outcome.checkpoint), change))
+    Ok((
+        edited(updated.len() as u64, outcome.checkpoint, true),
+        change,
+    ))
 }
 
 fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> String {
@@ -198,6 +201,16 @@ fn written(bytes: u64, checkpoint: Option<Value>) -> Value {
     let mut result = Value::object([("bytes_written", Value::number(bytes))]);
     if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
         fields.insert("checkpoint".into(), checkpoint);
+    }
+    result
+}
+
+/// Edit receipts say whether a replacement happened, even when it emptied
+/// the file and wrote zero bytes. Write receipts retain their old shape.
+fn edited(bytes: u64, checkpoint: Option<Value>, changed: bool) -> Value {
+    let mut result = written(bytes, checkpoint);
+    if let Value::Object(fields) = &mut result {
+        fields.insert("changed".into(), Value::Bool(changed));
     }
     result
 }

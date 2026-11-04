@@ -93,11 +93,7 @@ pub(super) fn command(
         }
     }
     if let Some(temporary) = temporary {
-        let temporary = crate::scratch::environment_path(temporary);
-        command
-            .env("JECODE_TMP", &temporary)
-            .env("TMPDIR", &temporary);
-        command.env("TEMP", &temporary).env("TMP", &temporary);
+        crate::scratch::export(&mut command, temporary);
     }
     let input = match arguments.get("stdin") {
         None => None,

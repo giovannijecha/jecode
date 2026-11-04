@@ -102,8 +102,9 @@ model's interpretation, not verified facts.
 platform. It is not GNU Bash and never starts an installed shell; see
 [Command language](SHELL.md) for what it supports. `exec` runs one program with
 exact arguments and no shell parsing. Both start in the working folder and
-receive `JECODE_TMP`, `TMPDIR`, `TEMP` and `TMP` pointing to the conversation's
-[temporary area](TEMPORARY.md). Provider credentials are removed from their
+receive `JECODE_TMP` and `TMPDIR` pointing to the conversation's
+[temporary area](TEMPORARY.md), and `TEMP` and `TMP` too, except on Windows
+when its path is 260 characters or longer. Provider credentials are removed from their
 environment.
 
 Commands have no timeout unless the model sets one. Each result includes the

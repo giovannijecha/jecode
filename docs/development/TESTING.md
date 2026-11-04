@@ -167,9 +167,10 @@ Record actual server versions and executed platforms when reporting results.
 
 The normal suite launches an original Rust probe inside the Workspace
 confinement and checks permitted and denied file operations, inherited
-confinement in descendants and rejection of interactive terminals. PowerShell
-and .NET compatibility checks are opt-in because Windows cannot start some
-programs inside the confinement from a service session (see
+confinement in descendants, drive-root listing only for an installed Node.js
+runtime, and rejection of interactive terminals. PowerShell and .NET
+compatibility checks are opt-in because Windows cannot start some programs
+inside the confinement from a service session (see
 [Permissions](../usage/PERMISSIONS.md#platform-limits)). Run them from an
 interactive user session:
 
@@ -334,4 +335,5 @@ Windows and Linux jobs run on maintainer-hosted runners with fresh checkouts and
 one-job credentials; the host rejects fork code before workflow steps run.
 These jobs queue while the maintainer's machine is offline, and a queued or
 skipped job is not a successful verification. macOS runs on GitHub's hosted
-`macos-15` runner.
+`macos-26` ARM64 runner for native terminal checks and the `darwin-arm64`
+npm artifact.

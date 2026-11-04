@@ -426,13 +426,14 @@ fn a_message_sent_during_a_turn_joins_it_with_its_attachment() {
         .filter_map(|message| message.get("role").and_then(Value::as_str))
         .filter(|role| *role != "system")
         .collect();
-    assert_eq!(roles, ["user", "assistant", "user", "user"]);
-    assert!(messages[messages.len() - 2].encode().contains("image_url"));
-    assert!(
+    // State stays after the first request, where it was first sent.
+    assert_eq!(roles, ["user", "user", "assistant", "user"]);
+    assert!(messages[messages.len() - 1].encode().contains("image_url"));
+    assert_eq!(
         messages
-            .last()
-            .unwrap()
-            .encode()
-            .contains("Jecode session state")
+            .iter()
+            .filter(|message| crate::test_support::is_request_state(message))
+            .count(),
+        1
     );
 }

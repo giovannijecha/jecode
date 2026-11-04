@@ -122,6 +122,9 @@ pub(super) fn request_with_catalog(
                 ("tools", Value::Array(wrapped)),
             ])]),
         );
+        // Without this the ChatGPT route returns one call per response, so
+        // independent reads and edits each cost a full request.
+        fields.insert("parallel_tool_calls".into(), Value::Bool(true));
     }
     Ok(request)
 }
@@ -150,7 +153,25 @@ fn assistant(message: &Value, input: &mut Vec<Value>) -> Result<(), String> {
     if let Some(items) = message.get("openai_items").and_then(Value::as_array) {
         // Native output is replayed only after the origin projection matches.
         // It includes reasoning, assistant phases, and function calls in order.
-        input.extend(items.iter().cloned());
+        let calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .unwrap_or(&[]);
+        for mut item in items.iter().cloned() {
+            // Canonical arguments include any JSON-text containers decoded
+            // before execution; encrypted reasoning and native metadata stay verbatim.
+            if item.get("type").and_then(Value::as_str) == Some("function_call")
+                && let Some(call) = calls
+                    .iter()
+                    .find(|call| call.get("id") == item.get("call_id"))
+            {
+                let call = ToolCall::parse(call)?;
+                if let Value::Object(fields) = &mut item {
+                    fields.insert("arguments".into(), Value::string(call.arguments));
+                }
+            }
+            input.push(item);
+        }
         return Ok(());
     }
     let content = message.get("content").and_then(Value::as_str).unwrap_or("");

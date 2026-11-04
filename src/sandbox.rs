@@ -17,6 +17,10 @@ pub struct Policy {
     write: Vec<PathBuf>,
     cargo_home: Option<PathBuf>,
     git_config: Option<PathBuf>,
+    /// Real toolchain homes passed to the confined process by name.
+    runtime_homes: Vec<(&'static str, PathBuf)>,
+    /// Installed Node.js runtime locations. Empty when Node.js is absent.
+    node_paths: Vec<PathBuf>,
 }
 
 impl Policy {
@@ -52,6 +56,8 @@ impl Policy {
             write: vec![root.clone()],
             cargo_home: None,
             git_config: None,
+            runtime_homes: Vec::new(),
+            node_paths: Vec::new(),
         };
         if let Some(temporary) = temporary {
             let temporary = canonical_directory(temporary)?;
@@ -121,6 +127,115 @@ impl Policy {
         Ok(())
     }
 
+    /// Node version managers keep runtimes in the user profile, but a confined
+    /// process sees its own container as LOCALAPPDATA. Pass each manager's real
+    /// home and grant it read-only, so shims resolve the selected runtime. Any
+    /// installed runtime, including the first `node.exe` on PATH, also needs
+    /// its drive roots enumerable; see `enumerable_roots`.
+    pub fn allow_installed_node_tools(
+        &mut self,
+        protected_home: Option<&Path>,
+    ) -> Result<(), String> {
+        self.allow_node_tools_from(|name| std::env::var_os(name), protected_home)
+    }
+
+    fn allow_node_tools_from(
+        &mut self,
+        variable: impl Fn(&str) -> Option<OsString>,
+        protected_home: Option<&Path>,
+    ) -> Result<(), String> {
+        let local = variable("LOCALAPPDATA").map(PathBuf::from);
+        let homes = [
+            (
+                "VOLTA_HOME",
+                variable("VOLTA_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| local.map(|local| local.join("Volta"))),
+            ),
+            ("NVM_HOME", variable("NVM_HOME").map(PathBuf::from)),
+            ("NVM_SYMLINK", variable("NVM_SYMLINK").map(PathBuf::from)),
+            ("FNM_DIR", variable("FNM_DIR").map(PathBuf::from)),
+        ];
+        let mut manager_paths = Vec::new();
+        for (name, path) in homes {
+            let Some(path) = path.filter(|path| path.is_absolute() && path.is_dir()) else {
+                continue;
+            };
+            self.allow_existing_read_directory(&path, protected_home)?;
+            manager_paths.push(path.clone());
+            self.runtime_homes.push((name, path));
+        }
+        if let Some(directory) = variable("PATH").and_then(|path| {
+            std::env::split_paths(&path)
+                .find(|directory| directory.is_absolute() && directory.join("node.exe").is_file())
+        }) {
+            self.add_node_path(&directory);
+            // A file link can place node.exe on another drive even when its
+            // PATH directory is not itself linked.
+            if let Ok(target) = std::fs::canonicalize(directory.join("node.exe"))
+                && let Some(parent) = target.parent()
+            {
+                self.add_node_path(parent);
+            }
+            // Version managers can keep the selected runtime away from the
+            // executable on PATH. Their drives are needed only with Node.
+            for path in manager_paths {
+                self.add_node_path(&path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Both spellings matter: a linked install resolves through the link's
+    /// drive and then through its target's drive.
+    fn add_node_path(&mut self, path: &Path) {
+        self.node_paths.push(path.to_path_buf());
+        if let Ok(target) = std::fs::canonicalize(path) {
+            self.node_paths.push(target);
+        }
+    }
+
+    /// Node.js resolves module and script paths by checking every component
+    /// from the drive root, and the root is the one component confinement
+    /// leaves unreadable. The Windows policy can grant listing only for a
+    /// whole tree, so when Node.js is installed the drives holding writable
+    /// folders and the runtime become listable: names and metadata, never
+    /// file contents or writes. Windows lets a listing entry replace a grant
+    /// for the same path, so a granted root stays out of the list, and the
+    /// native adapter accepts only the canonical separator.
+    #[cfg(any(windows, test))]
+    fn enumerable_roots(&self) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if self.node_paths.is_empty() {
+            return roots;
+        }
+        let plain = |path: &Path| {
+            PathBuf::from(
+                crate::permissions::plain(path).replace('/', std::path::MAIN_SEPARATOR_STR),
+            )
+        };
+        let granted: Vec<PathBuf> = self
+            .read
+            .iter()
+            .chain(&self.write)
+            .map(|path| plain(path))
+            .collect();
+        for path in self.write.iter().chain(&self.node_paths) {
+            let Some(root) = path.ancestors().last().filter(|root| root.has_root()) else {
+                continue;
+            };
+            let root = plain(root);
+            if !granted
+                .iter()
+                .chain(&roots)
+                .any(|known| known.as_os_str().eq_ignore_ascii_case(root.as_os_str()))
+            {
+                roots.push(root);
+            }
+        }
+        roots
+    }
+
     fn allow_existing_read_directory(
         &mut self,
         path: &Path,
@@ -148,6 +263,7 @@ impl Policy {
             ("read", paths(&self.read)),
             ("write", paths(&self.write)),
             ("deny", Value::Array(Vec::new())),
+            ("enumerate", paths(&self.enumerable_roots())),
             ("network", Value::Bool(true)),
         ])
         .encode()
@@ -205,6 +321,14 @@ fn confined_environment(
         })
     {
         command.env("GIT_CONFIG_GLOBAL", crate::permissions::plain(git_config));
+    }
+    for (name, home) in &policy.runtime_homes {
+        if !explicit
+            .iter()
+            .any(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(name))
+        {
+            command.env(name, home);
+        }
     }
 }
 
@@ -280,3 +404,5 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, windows))]
+mod windows_tests;

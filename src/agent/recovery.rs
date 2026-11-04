@@ -7,6 +7,32 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
+/// What a provider request is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Purpose {
+    /// The conversation: tool definitions, the selected effort and live usage.
+    Conversation,
+    /// A summary over the conversation's own request: the same definitions and
+    /// effort keep the provider's cached prefix; recorded as maintenance.
+    CachedSummary,
+    /// Standalone maintenance without tools, at maintenance effort.
+    Maintenance,
+}
+
+impl Purpose {
+    fn tools(self) -> bool {
+        self != Self::Maintenance
+    }
+
+    fn label(self) -> &'static str {
+        if self == Self::Conversation {
+            "completion"
+        } else {
+            "context_compaction"
+        }
+    }
+}
+
 /// Retry state shared by the attempts of one request.
 #[derive(Default)]
 pub(super) struct Retries {
@@ -18,7 +44,7 @@ impl Agent {
     pub(super) fn complete_retry(
         &self,
         messages: &[Value],
-        tools: bool,
+        purpose: Purpose,
         output_tokens: Option<usize>,
         emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
@@ -26,7 +52,7 @@ impl Agent {
         loop {
             if let Some(completion) = self.complete_attempt(
                 messages,
-                tools,
+                purpose,
                 output_tokens,
                 &mut retries,
                 RequestTiming::start(),
@@ -42,7 +68,7 @@ impl Agent {
     pub(super) fn complete_attempt(
         &self,
         messages: &[Value],
-        tools: bool,
+        purpose: Purpose,
         output_tokens: Option<usize>,
         retries: &mut Retries,
         mut timing: RequestTiming,
@@ -54,6 +80,7 @@ impl Agent {
         let mut partial = String::new();
         let mut reported_usage = Usage::default();
         let mut has_usage = false;
+        let tools = purpose.tools();
         let effort = if tools {
             self.effort()
         } else {
@@ -99,7 +126,7 @@ impl Agent {
                     Update::Usage(usage) => {
                         has_usage = true;
                         reported_usage.update(usage);
-                        if tools
+                        if purpose == Purpose::Conversation
                             && self
                                 .context
                                 .reported
@@ -120,7 +147,7 @@ impl Agent {
                 if let Some(usage) = completion.usage {
                     has_usage = true;
                     reported_usage.update(usage);
-                    if tools
+                    if purpose == Purpose::Conversation
                         && self
                             .context
                             .reported
@@ -137,11 +164,7 @@ impl Agent {
             }
         }
         self.record_request_timing(
-            if tools {
-                "completion"
-            } else {
-                "context_compaction"
-            },
+            purpose.label(),
             retries.attempt.saturating_add(1),
             timing,
             effort,
@@ -159,31 +182,28 @@ impl Agent {
             emit(Event::Streaming { text })?;
         }
         match result {
-            Ok(completion) => Ok(Some(completion)),
+            Ok(mut completion) => {
+                decode_json_text_arguments(&mut completion);
+                Ok(Some(completion))
+            }
             Err(error) if matches!(error.kind, FailureKind::Temporary | FailureKind::Empty) => {
                 if error.kind == FailureKind::Empty {
                     retries.empty_responses += 1;
                     if retries.empty_responses >= 3 {
-                        return Err(format!(
-                            "The backend returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
-                            self.redact(&error.message)
-                        ).into());
+                        // Stays `Empty`: a cached summary falls back to portions.
+                        return Err(Failure {
+                            message: format!(
+                                "The backend returned three empty responses. No tools from these responses were executed; the original session is preserved. {}",
+                                self.redact(&error.message)
+                            ),
+                            ..error
+                        });
                     }
                 }
                 retries.attempt = retries.attempt.saturating_add(1);
                 let attempt = retries.attempt;
                 let delay = retry_delay(attempt, error.retry_after, cfg!(test));
-                self.record_recovery(
-                    if tools {
-                        "completion"
-                    } else {
-                        "context_compaction"
-                    },
-                    attempt,
-                    delay,
-                    &error.message,
-                    &partial,
-                )?;
+                self.record_recovery(purpose.label(), attempt, delay, &error.message, &partial)?;
                 emit(Event::Recovering {
                     attempt,
                     delay,
@@ -304,6 +324,35 @@ impl Agent {
             usage,
             after_message,
         ));
+    }
+}
+
+/// Decodes JSON-text arrays and objects where a tool's schema expects them
+/// (`tools::coerce`), in the calls to run and in the stored message alike.
+fn decode_json_text_arguments(completion: &mut Completion) {
+    for call in &mut completion.calls {
+        let Some(decoded) = crate::tools::coerce::arguments(&call.name, &call.arguments) else {
+            continue;
+        };
+        if let Value::Object(fields) = &mut completion.message
+            && let Some(Value::Array(stored)) = fields.get_mut("tool_calls")
+        {
+            for entry in stored {
+                if entry.get("id").and_then(Value::as_str) != Some(call.id.as_str()) {
+                    continue;
+                }
+                let target = match entry {
+                    Value::Object(entry) if entry.contains_key("function") => {
+                        entry.get_mut("function")
+                    }
+                    entry => Some(entry),
+                };
+                if let Some(Value::Object(target)) = target {
+                    target.insert("arguments".into(), Value::string(&decoded));
+                }
+            }
+        }
+        call.arguments = decoded;
     }
 }
 

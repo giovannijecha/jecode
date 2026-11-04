@@ -16,6 +16,9 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
     let Some(result) = tool.result else {
         return running(tool);
     };
+    if let Some(reason) = crate::events::not_run(result) {
+        return Line::new(&short_error(reason), MUTED);
+    }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return Line::new(&short_error(error), BAD);
     }
@@ -177,7 +180,7 @@ fn command(result: &Value, failed: bool, elapsed: Option<Duration>, expanded: bo
     }
 }
 
-fn changed(change: &Change) -> Line {
+pub(super) fn changed(change: &Change) -> Line {
     if change.created {
         return Line::new(
             &format!("New file · {} {}", change.added, plural(change.added)),
@@ -187,16 +190,7 @@ fn changed(change: &Change) -> Line {
     if change.added == 0 && change.removed == 0 {
         return Line::new(&diff::summary(change), MUTED);
     }
-    let mut line = Line::default();
-    if change.added > 0 {
-        line.push(&format!("+{}", change.added), GOOD);
-    }
-    if change.removed > 0 {
-        if change.added > 0 {
-            line.push(" ", MUTED);
-        }
-        line.push(&format!("−{}", change.removed), BAD);
-    }
+    let mut line = counts(change.added, change.removed);
     line.push(
         &format!(" {}", plural(change.added + change.removed)),
         MUTED,
@@ -204,7 +198,51 @@ fn changed(change: &Change) -> Line {
     line
 }
 
+/// `+2 −1`, a zero side dropped.
+pub(super) fn counts(added: usize, removed: usize) -> Line {
+    let mut line = Line::default();
+    if added > 0 {
+        line.push(&format!("+{added}"), GOOD);
+    }
+    if removed > 0 {
+        if added > 0 {
+            line.push(" ", MUTED);
+        }
+        line.push(&format!("−{removed}"), BAD);
+    }
+    line
+}
+
+/// The paths of a multi-path read, as given.
+pub(super) fn paths(arguments: &Value) -> String {
+    arguments
+        .get("paths")
+        .and_then(Value::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub(super) fn read(arguments: &Value, result: &Value) -> String {
+    if let Some(files) = result.get("files").and_then(Value::as_array) {
+        let failed = files
+            .iter()
+            .filter(|file| file.get("error").is_some())
+            .count();
+        let read = files.len() - failed;
+        let lines = files.iter().map(lines).sum::<usize>();
+        let mut summary = format!(
+            "{read} {} · {lines} {}",
+            if read == 1 { "file" } else { "files" },
+            if lines == 1 { "line" } else { "lines" }
+        );
+        if failed > 0 {
+            summary.push_str(&format!(" · {failed} not read"));
+        }
+        return summary;
+    }
     if let Some(view) = result.get("view").and_then(Value::as_str) {
         let mut summary = format!("Opened {}", if view == "pdf" { "PDF" } else { view });
         if let Some(attachment) = result.get("attachment") {

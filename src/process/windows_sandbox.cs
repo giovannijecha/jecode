@@ -4,6 +4,7 @@ internal sealed class JecodeWindowsSandbox : System.IDisposable {
     const int SecurityEnvironmentAttribute = 0x00020023;
     const uint TerminateOnClose = 1;
     const ulong FileSystemDeny = 1;
+    const ulong FileSystemEnumerate = 4;
     const ulong NetworkIngress = 8;
 
     [System.Runtime.InteropServices.DllImport("processmodel.dll", ExactSpelling = true)]
@@ -31,15 +32,19 @@ internal sealed class JecodeWindowsSandbox : System.IDisposable {
     public static JecodeWindowsSandbox Prepare(string json) {
         if (System.String.IsNullOrEmpty(json)) return null;
         var policy = JecodeWindowsSandboxPolicy.Read(json);
-        if (policy == null || policy.Count != 4 || !policy.ContainsKey("read") ||
+        if (policy == null || policy.Count != 5 || !policy.ContainsKey("read") ||
             !policy.ContainsKey("write") || !policy.ContainsKey("deny") ||
+            !policy.ContainsKey("enumerate") ||
             !policy.ContainsKey("network") || !(policy["network"] is bool) ||
             !(bool)policy["network"])
             throw new System.IO.InvalidDataException("Invalid Windows sandbox policy");
         var read = Paths(policy["read"]);
         var write = Paths(policy["write"]);
         var deny = Paths(policy["deny"]);
-        RequireNativeSupport();
+        var enumerate = Paths(policy["enumerate"]);
+        // Listing-only roots help Node.js resolve paths but are not required:
+        // a host without them keeps the narrower policy.
+        if ((RequireNativeSupport() & FileSystemEnumerate) == 0) enumerate = new string[0];
         var sandbox = new JecodeWindowsSandbox();
         try {
             // A write grant already includes read access. Keep the two native
@@ -49,7 +54,7 @@ internal sealed class JecodeWindowsSandbox : System.IDisposable {
             var readOnly = new System.Collections.Generic.List<string>();
             foreach (string path in read) if (!writable.Contains(path)) readOnly.Add(path);
             byte[] specification = JecodeWindowsSandboxSpec.Encode(
-                readOnly.ToArray(), write, deny);
+                readOnly.ToArray(), write, deny, enumerate);
             int result = CreateProcessSecurityEnvironment(specification,
                 checked((uint)specification.Length), TerminateOnClose, out sandbox.environment);
             if (result < 0 || sandbox.environment == System.IntPtr.Zero)
@@ -65,7 +70,7 @@ internal sealed class JecodeWindowsSandbox : System.IDisposable {
         }
     }
 
-    static void RequireNativeSupport() {
+    static ulong RequireNativeSupport() {
         try {
             byte available;
             uint minor;
@@ -79,6 +84,7 @@ internal sealed class JecodeWindowsSandbox : System.IDisposable {
                 (FileSystemDeny | NetworkIngress))
                 throw new System.PlatformNotSupportedException(
                     "Windows Process Security Environment lacks filesystem deny or ingress policy");
+            return support;
         } catch (System.DllNotFoundException error) {
             throw new System.PlatformNotSupportedException(
                 "Workspace command confinement requires a compatible Windows Process Security Environment", error);

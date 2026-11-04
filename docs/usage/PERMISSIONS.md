@@ -70,7 +70,9 @@ In the TUI, type `1`, `2` or `3`, or move with the arrow keys and press Enter.
 Nothing is selected when the request appears, so a stray Enter does nothing, and
 pasted text never answers it. If the request arrives while you are typing, your
 keys keep going to the draft until you pause or press an arrow key or Tab.
-Ctrl+C stops the turn. Requests appear one at a time.
+Ctrl+C stops the turn. Requests appear one at a time. A call too long for the
+space shows `PgUp/PgDn` with the number of lines out of view: nothing is cut,
+and the choices stay on screen while you read it.
 
 Approving never switches the conversation to Full. To review approvals, open
 `/permissions` → **Remembered** and press Ctrl+D on one to revoke it. Read and
@@ -91,6 +93,15 @@ filesystem policy on the command and every process it starts:
 - The working folder and the conversation's temporary area are writable.
 - Installed Rust toolchain data is readable, and Cargo's cache is redirected to
   the temporary area.
+- Node.js runtimes installed through Volta, nvm-windows or fnm are readable.
+  When `node.exe` is on `PATH`, including a version-manager shim, commands can
+  also list the drives that hold the writable folders, the executable and
+  configured manager homes, because Node.js checks each drive root while
+  resolving script and module paths. Windows grants this listing for a whole
+  drive: a command can see the names and metadata of files and folders there,
+  including your user profile and the Jecode home, but cannot read their
+  contents or write outside the writable folders. On Windows builds without
+  listing-only support, Node.js scripts need Full.
 - The rest of the Jecode home, including configuration, credentials and other
   conversations, is outside the writable area.
 - Commands inherit only a fixed set of operating-system and toolchain
@@ -111,12 +122,19 @@ commands. Start Jecode in a narrower project directory, or choose Full.
 - **Windows hosts without the required support** (Process Security Environment
   1.1 with filesystem and network policies) also refuse Workspace commands.
   There is no automatic fallback to Full on any platform.
+- **Deep paths on Windows.** Working or session temporary paths can exceed the
+  native adapter's legacy Windows path limits and prevent Workspace commands
+  from starting. Use a shorter project or configuration location.
 - **Interactive terminals** (`exec` with `tty: true`) require Full on every
   platform.
 - **Browser control** requires Full, because browser file access and downloads
   are not confined. Closing or stopping a browser the conversation already
   started works at any level. In Read and Workspace, use the `web` tool for
   network retrieval.
+- **Links on Windows.** A confined command cannot create junctions, even inside
+  the working folder. Installs that link a folder, such as an npm `file:`
+  dependency, fail with `EPERM`. Use npm's `--install-links` to copy instead, or
+  choose Full.
 - **Local servers on Windows.** A confined command can connect to a server on
   your machine, but your machine cannot connect to a server running inside the
   confinement. Start development servers in Full; you can return to Workspace

@@ -70,9 +70,8 @@ fn local_media_tool_receipts_feed_provider_and_survive_resume_without_sources() 
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    let shown = crate::test_support::durable_messages(messages)
-        .last()
-        .unwrap();
+    let durable = crate::test_support::durable_messages(messages);
+    let shown = durable.last().unwrap();
     assert_eq!(shown.get("role").and_then(Value::as_str), Some("user"));
     assert_eq!(parts(shown), ["text", "image_url", "file"]);
     assert_eq!(

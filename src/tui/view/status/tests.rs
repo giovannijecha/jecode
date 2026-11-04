@@ -333,6 +333,30 @@ fn tool_labels_prefer_the_description_then_a_verb_and_a_short_target() {
         text::cells(&tool_label("bash", &arguments(&[("command", &long)]))),
         8 + TARGET
     );
+    // A multi-file edit counts its files; one entry names its file.
+    let files = |paths: &[&str]| {
+        let files = paths
+            .iter()
+            .map(|path| Value::object([("path", Value::string(*path))]))
+            .collect();
+        Value::object([("files", Value::Array(files))])
+    };
+    assert_eq!(
+        tool_label("edit", &files(&["src/a.rs", "src/b.rs", "c.rs"])),
+        "Editing 3 files"
+    );
+    assert_eq!(tool_label("edit", &files(&["src/a.rs"])), "Editing a.rs");
+    let paths = |paths: &[&str]| {
+        Value::object([(
+            "paths",
+            Value::Array(paths.iter().map(|path| Value::string(*path)).collect()),
+        )])
+    };
+    assert_eq!(
+        tool_label("read", &paths(&["src/a.rs", "src/b.rs", "c.rs"])),
+        "Reading 3 files"
+    );
+    assert_eq!(tool_label("read", &paths(&["src/a.rs"])), "Reading a.rs");
 }
 
 #[test]

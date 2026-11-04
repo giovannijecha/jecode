@@ -188,6 +188,18 @@ pub fn target(name: &str, arguments: &Value) -> String {
             _ => executable.into(),
         };
     }
+    if name == "read"
+        && let Some(paths) = arguments.get("paths").and_then(Value::as_array)
+    {
+        let paths: Vec<_> = paths.iter().filter_map(Value::as_str).collect();
+        return paths.join(", ");
+    }
+    if name == "edit" {
+        let paths = edited(arguments);
+        if !paths.is_empty() {
+            return paths.join(", ");
+        }
+    }
     let path = arguments
         .get("path")
         .and_then(Value::as_str)
@@ -204,4 +216,18 @@ pub fn target(name: &str, arguments: &Value) -> String {
         return format!("{path} (from line {offset}, up to {limit} lines)");
     }
     path.into()
+}
+
+/// The paths of a multi-file edit in call order; empty for one `path`.
+pub fn edited(arguments: &Value) -> Vec<&str> {
+    if !crate::tools::edit::several(arguments) {
+        return Vec::new();
+    }
+    arguments
+        .get("files")
+        .and_then(Value::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|file| file.get("path")?.as_str())
+        .collect()
 }

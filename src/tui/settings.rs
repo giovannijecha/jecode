@@ -7,6 +7,7 @@ use super::{
 use crate::{backend, effort::Effort};
 
 mod auto_compact;
+mod prompt_cache;
 
 impl App {
     pub(super) fn choose(&mut self, choice: Choice) -> Result<(), String> {
@@ -100,7 +101,7 @@ impl App {
                 self.apply_selection(model.id.clone(), effort, *defaults)
             }
             (Choice::Routing(index), Purpose::Routing { .. }) => self.choose_routing(menu, index),
-            (Choice::Setting(setting), Purpose::Settings) => {
+            (Choice::Setting(setting), Purpose::Settings | Purpose::Context) => {
                 self.settings_parent = Some(setting);
                 match setting {
                     Setting::Model => self.open_model_providers(true),
@@ -115,9 +116,14 @@ impl App {
                             self.config.settings.default_permissions,
                         ))
                     }
+                    Setting::Context => self.state.selector = Some(self.context_menu()),
                     Setting::AutoCompact => {
                         self.state.selector =
                             Some(Selector::auto_compact(self.config.settings.auto_compact))
+                    }
+                    Setting::PromptCache => {
+                        self.state.selector =
+                            Some(Selector::prompt_cache(self.config.settings.cache_retention))
                     }
                     Setting::Providers => {
                         self.state.selector = Some(Selector::providers_settings())
@@ -125,6 +131,9 @@ impl App {
                     Setting::Mcp => self.open_mcp(true),
                     Setting::Lsp => self.open_lsp(true),
                 }
+            }
+            (Choice::Retention(retention), Purpose::PromptCache) => {
+                self.save_prompt_cache(retention)
             }
             (Choice::Mcp(index, _), Purpose::Mcp(panel)) => self.choose_mcp(*panel, index),
             (Choice::Lsp(index), Purpose::Lsp(panel)) => self.choose_lsp(*panel, index),
@@ -180,9 +189,15 @@ impl App {
         self.return_to_settings();
     }
 
+    /// Context's own rows return to Context, which then returns to Settings.
     pub(super) fn return_to_settings(&mut self) {
         if let Some(parent) = self.settings_parent.take() {
-            let mut menu = self.settings_menu();
+            let mut menu = if matches!(parent, Setting::AutoCompact | Setting::PromptCache) {
+                self.settings_parent = Some(Setting::Context);
+                self.context_menu()
+            } else {
+                self.settings_menu()
+            };
             menu.selected = menu.setting_index(parent);
             self.state.selector = Some(menu);
         }

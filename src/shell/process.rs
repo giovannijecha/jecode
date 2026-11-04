@@ -1,6 +1,20 @@
 use super::*;
+use std::sync::{Mutex, PoisonError};
+use std::thread::JoinHandle;
 
 type Assignments = Vec<(String, String)>;
+
+/// Threads feeding here-documents. A background command can still be reading
+/// when the shell's own work ends, and these threads die with the process.
+static WRITERS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// Waits until every here-document has been read, or its reader has gone.
+pub(super) fn join_writers() {
+    let writers = std::mem::take(&mut *WRITERS.lock().unwrap_or_else(PoisonError::into_inner));
+    for writer in writers {
+        let _ = writer.join();
+    }
+}
 
 impl Shell {
     pub(super) fn simple(&mut self, simple: &Simple, io: &Io) -> i32 {
@@ -101,6 +115,16 @@ impl Shell {
         Ok((args, local_env))
     }
 
+    /// A redirection's path. As in Bash, a pattern may match one path; a
+    /// redirection cannot open several.
+    fn redirection_path(&self, word: &Word, io: &Io) -> Result<String, String> {
+        let mut fields = self.fields(word, io)?;
+        if fields.len() == 1 {
+            return Ok(fields.remove(0));
+        }
+        Err(format!("{}: ambiguous redirect", fields.join(" ")))
+    }
+
     /// Applies redirections in order to a copy of `io`.
     pub(super) fn redirected(&self, io: &Io, redirects: &[Redirect]) -> Result<Io, String> {
         let mut io = io.try_clone()?;
@@ -109,7 +133,29 @@ impl Shell {
                 io.stdout = io.stderr.try_clone().map_err(|error| error.to_string())?;
                 continue;
             }
-            let target = self.expand(&redirect.target, &io)?;
+            if redirect.mode == "2>&1" {
+                io.stderr = io.stdout.try_clone().map_err(|error| error.to_string())?;
+                continue;
+            }
+            if let Some(newline) = match redirect.mode {
+                "<<" => Some(""),
+                "<<<" => Some("\n"),
+                _ => None,
+            } {
+                // A writer thread keeps a long body from filling the pipe
+                // before the command starts reading.
+                let (reader, mut writer) = io::pipe().map_err(|error| error.to_string())?;
+                let text = format!("{}{newline}", self.text(&redirect.target, &io)?);
+                let feeding = std::thread::spawn(move || {
+                    let _ = io::Write::write_all(&mut writer, text.as_bytes());
+                });
+                let mut writers = WRITERS.lock().unwrap_or_else(PoisonError::into_inner);
+                writers.retain(|writer| !writer.is_finished());
+                writers.push(feeding);
+                io.stdin = Source::Pipe(reader);
+                continue;
+            }
+            let target = self.redirection_path(&redirect.target, &io)?;
             if redirect.mode == "<" {
                 io.stdin = if target == "/dev/null" {
                     Source::Null
@@ -134,10 +180,13 @@ impl Shell {
                     .map(Sink::File)
                     .map_err(|error| format!("{}: {error}", path.display()))?
             };
-            if redirect.stream == 2 {
-                io.stderr = sink;
-            } else {
-                io.stdout = sink;
+            match redirect.stream {
+                2 => io.stderr = sink,
+                3 => {
+                    io.stderr = sink.try_clone().map_err(|error| error.to_string())?;
+                    io.stdout = sink;
+                }
+                _ => io.stdout = sink,
             }
         }
         Ok(io)
@@ -162,7 +211,7 @@ impl Shell {
         };
         let mut child = command
             .spawn()
-            .map_err(|error| format!("{}: {error}", args[0]))?;
+            .map_err(|error| self.launch_error(&args[0], &error))?;
         drop(command);
         let relay = relay_sink.map(|sink| {
             let mut stdout = child.stdout.take().expect("piped external stdout");
@@ -211,6 +260,28 @@ impl Shell {
             command.env(name, value);
         }
         Ok(())
+    }
+
+    /// A missing program names what does exist, so the next call can use it
+    /// instead of trying further unavailable programs.
+    pub(super) fn launch_error(&self, name: &str, error: &io::Error) -> String {
+        if error.kind() != io::ErrorKind::NotFound {
+            return format!("{name}: {error}");
+        }
+        if cfg!(windows) && Path::new(name).extension().is_none() {
+            let directories = self.variables.get("PATH").unwrap_or_default();
+            for directory in std::env::split_paths(directories) {
+                for script in [format!("{name}.cmd"), format!("{name}.bat")] {
+                    if directory.join(&script).is_file() {
+                        return format!("{name}: {error}; run the script as {script}");
+                    }
+                }
+            }
+        }
+        format!(
+            "{name}: {error}. Shell built-ins: {}; use the read, search and edit tools to view, find and change files",
+            builtins::SUMMARY
+        )
     }
 
     pub(super) fn program(&self, args: &[String]) -> Command {

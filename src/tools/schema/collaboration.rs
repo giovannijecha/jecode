@@ -53,7 +53,7 @@ pub(super) fn definition() -> Value {
     ]);
     super::tool(
         "agent",
-        "Coordinate collaborators with the same working tools and separate contexts. Only the main agent can delegate and review. After checking a returned or failed report, record the main agent's assessment with review (id, report_version, note); inspection or a text summary does not mark it reviewed. After any follow-up or integration, close the collaborator to release its resources and remove it from the active list. Returns arrive asynchronously; sent and received instructions are distinct. Calls are serialized with other tools.",
+        "Coordinate collaborators with the same working tools and separate contexts. Each create, inspect, update, wait, stop and close is a full request of your own, so delegate work that is large and independent enough to repay that coordination, and do work you can finish in a few calls yourself; prefer one wait over repeated inspect. Only the main agent can delegate and review. After checking a returned or failed report, record the main agent's assessment with review (id, report_version, note); inspection or a text summary does not mark it reviewed. After any follow-up or integration, close the collaborator to release its resources and remove it from the active list. Returns arrive asynchronously; sent and received instructions are distinct. Calls are serialized with other tools.",
         Value::object([
             (
                 "action",

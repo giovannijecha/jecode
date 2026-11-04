@@ -2,7 +2,7 @@
 //! resolve as the tools resolve them; a path the tool will reject anyway is
 //! treated as inside, so the tool reports its own error.
 
-use super::{Tools, attachment, exec, show};
+use super::{Tools, attachment, edit, exec, show};
 use crate::json::{self, Value};
 use crate::permissions::{Access, Kind, plain};
 use std::fs;
@@ -16,8 +16,14 @@ impl Tools {
         let arguments = json::parse(arguments).ok()?;
         let text = |key| arguments.get(key).and_then(Value::as_str);
         match name {
+            // Each entry of a multi-path read is checked again when it runs;
+            // outside paths are refused there and need a single read.
+            "read" if arguments.get("paths").is_some() => {
+                Some(self.inside(Kind::Reads, "several files".into()))
+            }
             "read" => self.file_access(Kind::Reads, text("path")?, false),
             "list" | "search" => self.file_access(Kind::Reads, text("path").unwrap_or("."), true),
+            "edit" if edit::several(&arguments) => self.edits_access(&arguments),
             "write" | "edit" => self.file_access(Kind::Edits, text("path")?, false),
             "checkpoint" if text("action") == Some("restore") => Some(self.inside(
                 Kind::Edits,
@@ -71,6 +77,7 @@ impl Tools {
                     outside,
                     base: None,
                     identity,
+                    members: Vec::new(),
                 })
             }
             _ => None,
@@ -123,10 +130,36 @@ impl Tools {
             outside: false,
             base: None,
             identity: None,
+            members: Vec::new(),
         }
     }
 
-    fn file_access(&self, kind: Kind, path: &str, directory: bool) -> Option<Access> {
+    /// One access for a multi-file edit that names every file, so one
+    /// request or refusal covers the whole call; it is outside when any file
+    /// is. Session temporary files are not governed, and a malformed call
+    /// edits nothing, so it runs to report its own error.
+    fn edits_access(&self, arguments: &Value) -> Option<Access> {
+        let files = edit::files(arguments).ok()??;
+        let members: Vec<_> = files
+            .iter()
+            .filter_map(|(path, _)| self.file_access(Kind::Edits, path, false))
+            .collect();
+        (!members.is_empty()).then(|| Access {
+            kind: Kind::Edits,
+            target: members
+                .iter()
+                .map(|access| access.target.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            place: None,
+            outside: members.iter().any(|access| access.outside),
+            base: None,
+            identity: None,
+            members,
+        })
+    }
+
+    pub(super) fn file_access(&self, kind: Kind, path: &str, directory: bool) -> Option<Access> {
         // Jecode's own areas: references, session history and temporary
         // storage. Their tools check them; edits there change no project.
         let temporary = path.starts_with("tmp:")
@@ -162,6 +195,7 @@ impl Tools {
             outside,
             base,
             identity: None,
+            members: Vec::new(),
         })
     }
 }

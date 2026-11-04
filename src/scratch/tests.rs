@@ -35,6 +35,33 @@ fn simultaneous_first_uses_publish_one_complete_ownership_record() {
     assert_eq!(temporary.info().unwrap().files, 8);
 }
 
+#[test]
+fn shared_areas_coordinate_concurrent_first_uses() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let temporary = area(&home, &project, "123-1-1");
+    let shared: Vec<_> = (0..8).map(|_| temporary.share()).collect();
+    let barrier = std::sync::Barrier::new(shared.len());
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = shared
+            .into_iter()
+            .enumerate()
+            .map(|(index, copy)| {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    let (_, file) = copy.file(&format!("shared/{index}.txt"), true).unwrap();
+                    fs::write(file, "complete").unwrap();
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    assert_eq!(temporary.info().unwrap().files, 8);
+}
+
 fn call(tools: &Tools, name: &str, entries: &[(&str, &str)]) -> Value {
     let arguments = Value::Object(
         entries
@@ -298,4 +325,50 @@ fn links_or_junctions_are_rejected_before_any_cleanup() {
     #[cfg(unix)]
     fs::remove_file(link).unwrap();
     temporary.clean().unwrap();
+}
+
+#[test]
+fn commands_get_temp_and_tmp_only_for_a_path_windows_accepts() {
+    let exported = |root: &Path| {
+        let mut command = std::process::Command::new("fixture");
+        export(&mut command, root);
+        let mut names = command
+            .get_envs()
+            .map(|(name, value)| {
+                assert_eq!(value, Some(environment_path(root).as_os_str()));
+                name.to_string_lossy().into_owned()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    // A 260-unit path needs a separator and NUL, overflowing a 261-unit buffer.
+    let path = |length: usize| {
+        let drive = if cfg!(windows) { "C:/" } else { "/" };
+        PathBuf::from(format!("{drive}{}", "a".repeat(length - drive.len())))
+    };
+    let non_bmp = |length: usize| {
+        let drive = if cfg!(windows) { "C:/" } else { "/" };
+        PathBuf::from(format!("{drive}{}🦀", "a".repeat(length - drive.len() - 2)))
+    };
+    let all = ["JECODE_TMP", "TEMP", "TMP", "TMPDIR"];
+    assert_eq!(exported(&path(259)), all);
+    let long = path(260);
+    let kept: &[&str] = if cfg!(windows) {
+        &["JECODE_TMP", "TMPDIR"]
+    } else {
+        &all
+    };
+    assert_eq!(exported(&long), kept);
+    assert_eq!(exported(&path(261)), kept);
+    assert_eq!(exported(&non_bmp(259)), all);
+    assert_eq!(exported(&non_bmp(260)), kept);
+    let instructions = Area::new(long, PathBuf::from("/project"), "123-7-0")
+        .unwrap()
+        .instructions();
+    assert_eq!(
+        instructions.contains("\"TEMP\""),
+        !cfg!(windows),
+        "{instructions}"
+    );
 }

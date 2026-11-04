@@ -128,8 +128,10 @@ impl Parser<'_> {
                 _ => {}
             }
             let start = self.tokens[self.index].start;
+            let first_token = self.index;
             let and_or = self.and_or()?;
             let end = self.tokens[self.index - 1].end;
+            let last_token = self.index;
             let background = self.eat_op("&");
             if !background && !self.eat_op(";") {
                 match self.peek() {
@@ -139,10 +141,42 @@ impl Parser<'_> {
             }
             items.push(Item {
                 and_or,
-                background: background.then(|| self.script[start..end].to_owned()),
+                background: background
+                    .then(|| self.background_source(start, end, first_token, last_token)),
             });
         }
         Ok(items)
+    }
+
+    /// The source of a background item spanning `start..end` and owning the
+    /// tokens `first..last`. An earlier command's here-document body can lie
+    /// inside that span and is left out; the item's own bodies that come after
+    /// the span follow it.
+    fn background_source(&self, start: usize, end: usize, first: usize, last: usize) -> String {
+        let mut source = String::new();
+        let mut copied = start;
+        for (body_start, body_end) in self.tokens[..first]
+            .iter()
+            .filter_map(|token| token.body)
+            .filter(|(body_start, body_end)| *body_start >= start && *body_end <= end)
+        {
+            source.push_str(&self.script[copied..body_start]);
+            copied = body_end;
+        }
+        source.push_str(&self.script[copied..end]);
+        let mut appended = false;
+        for (body_start, body_end) in self.tokens[first..last]
+            .iter()
+            .filter_map(|token| token.body)
+            .filter(|(body_start, _)| *body_start >= end)
+        {
+            if !appended {
+                source.push('\n');
+                appended = true;
+            }
+            source.push_str(&self.script[body_start..body_end]);
+        }
+        source
     }
 
     fn and_or(&mut self) -> Result<AndOr, String> {
@@ -246,15 +280,19 @@ impl Parser<'_> {
         let op = *op;
         self.index += 1;
         let (stream, mode) = match op {
-            ">&2" => {
+            ">&2" | "2>&1" => {
                 return Ok(Redirect {
-                    stream: 1,
-                    mode: ">&2",
+                    stream: if op == ">&2" { 1 } else { 2 },
+                    mode: op,
                     target: Word(Vec::new()),
                 });
             }
             "2>" => (2, ">"),
             "2>>" => (2, ">>"),
+            // Stream 3 stands for stdout and stderr together.
+            "&>" => (3, ">"),
+            "&>>" => (3, ">>"),
+            "<<" | "<<<" => (0, op),
             mode => (if mode == "<" { 0 } else { 1 }, mode),
         };
         let target = self.take_word().ok_or("redirection needs a path")?;
@@ -348,7 +386,10 @@ impl Parser<'_> {
 }
 
 fn redirect_op(op: &str) -> bool {
-    matches!(op, ">" | ">>" | "<" | "2>" | "2>>" | ">&2")
+    matches!(
+        op,
+        ">" | ">>" | "<" | "2>" | "2>>" | ">&2" | "2>&1" | "&>" | "&>>" | "<<" | "<<<"
+    )
 }
 
 fn unexpected(token: &Token) -> String {

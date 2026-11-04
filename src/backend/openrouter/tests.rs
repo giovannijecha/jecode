@@ -100,19 +100,28 @@ fn automatic_cache_control_is_scoped_to_claude_agent_requests() {
     client
         .set_model("anthropic/claude-sonnet-4.5".into())
         .unwrap();
-    client.complete(&[]).unwrap();
-    client.sample(&[], false, None, &mut |_| Ok(())).unwrap();
+    let hello = [hello()];
+    client.complete(&hello).unwrap();
+    client.sample(&hello, false, None, &mut |_| Ok(())).unwrap();
     client.set_model("openai/gpt-5".into()).unwrap();
-    client.complete(&[]).unwrap();
+    client.complete(&hello).unwrap();
     let requests = fixture.finish();
-    assert_eq!(
-        requests[0].body.get("cache_control"),
-        Some(&Value::object([("type", Value::string("ephemeral"))]))
-    );
+    assert!(requests[0].body.encode().contains("cache_control"));
     assert!(requests[0].body.get("tools").is_some());
-    assert!(requests[1].body.get("cache_control").is_none());
+    assert!(!requests[1].body.encode().contains("cache_control"));
     assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("cache_control").is_none());
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.body.get("cache_control").is_none())
+    );
+}
+
+fn hello() -> Value {
+    Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Hello")),
+    ])
 }
 
 #[test]
@@ -126,22 +135,24 @@ fn automatic_cache_control_accepts_claude_alias_only_for_agent_requests() {
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     let alias = "~anthropic/claude-sonnet-latest";
     client.set_model(alias.into()).unwrap();
-    client.complete(&[]).unwrap();
-    client.sample(&[], false, None, &mut |_| Ok(())).unwrap();
+    let hello = [hello()];
+    client.complete(&hello).unwrap();
+    client.sample(&hello, false, None, &mut |_| Ok(())).unwrap();
     client.set_model("~openai/gpt-latest".into()).unwrap();
-    client.complete(&[]).unwrap();
+    client.complete(&hello).unwrap();
 
     let requests = fixture.finish();
     assert_eq!(requests[0].body.get("model"), Some(&Value::string(alias)));
-    assert_eq!(
-        requests[0].body.get("cache_control"),
-        Some(&Value::object([("type", Value::string("ephemeral"))]))
-    );
+    assert!(requests[0].body.encode().contains("cache_control"));
     assert!(requests[0].body.get("tools").is_some());
-    assert!(requests[1].body.get("cache_control").is_none());
+    assert!(!requests[1].body.encode().contains("cache_control"));
     assert!(requests[1].body.get("tools").is_none());
-    assert!(requests[2].body.get("cache_control").is_none());
     assert!(requests[2].body.get("tools").is_some());
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.body.get("cache_control").is_none())
+    );
 }
 
 #[test]
@@ -178,7 +189,7 @@ fn request_effort_is_transient_and_internal_state_marker_is_not_sent() {
 }
 
 #[test]
-fn claude_cache_stops_before_request_only_state() {
+fn claude_cache_covers_anchored_request_state() {
     let fixture = HttpFixture::new(vec![(200, crate::test_support::completion("ok", vec![]))]);
     let mut client = OpenRouter::fixture(fixture.endpoint.clone());
     client
@@ -203,15 +214,14 @@ fn claude_cache_stops_before_request_only_state() {
         .get("messages")
         .and_then(Value::as_array)
         .unwrap();
-    assert!(
-        history[0].get("content").and_then(Value::as_array).unwrap()[0]
-            .get("cache_control")
-            .is_some()
-    );
-    assert_eq!(
-        history[1].get("content"),
-        Some(&Value::string("Changing state"))
-    );
+    // State stays where it was first sent, so it belongs to the cached prefix.
+    for message in &history[..2] {
+        assert!(
+            message.get("content").and_then(Value::as_array).unwrap()[0]
+                .get("cache_control")
+                .is_some()
+        );
+    }
 }
 
 #[test]
@@ -242,19 +252,31 @@ fn growing_tool_batches_keep_the_prior_explicit_boundary() {
             ("content", Value::string("Stable task")),
         ])];
         batch(&mut messages, 0);
-        let state = Value::object([
+        // Runtime state is anchored where it was first sent.
+        messages.push(Value::object([
             ("role", Value::string("user")),
-            ("content", Value::string("Changing request state")),
-        ]);
-        let mut first = messages.clone();
-        first.push(state.clone());
+            ("content", Value::string("Anchored request state")),
+        ]));
         client
-            .sample_owned(first, Effort::Default, true, true, None, &mut |_| Ok(()))
+            .sample_owned(
+                messages.clone(),
+                Effort::Default,
+                true,
+                None,
+                Default::default(),
+                &mut |_| Ok(()),
+            )
             .unwrap();
         batch(&mut messages, 1);
-        messages.push(state);
         client
-            .sample_owned(messages, Effort::Default, true, true, None, &mut |_| Ok(()))
+            .sample_owned(
+                messages,
+                Effort::Default,
+                true,
+                None,
+                Default::default(),
+                &mut |_| Ok(()),
+            )
             .unwrap();
         let requests = fixture.finish();
         let first = requests[0]
@@ -268,11 +290,11 @@ fn growing_tool_batches_keep_the_prior_explicit_boundary() {
             .and_then(Value::as_array)
             .unwrap();
         assert_eq!(
-            &first[..26],
-            &second[..26],
+            &first[..27],
+            &second[..27],
             "{model} changed the cached prefix"
         );
-        for index in [25, 50] {
+        for index in [25, 26, 51] {
             assert!(
                 second[index]
                     .get("content")
@@ -338,4 +360,46 @@ fn incomplete_and_malformed_tool_calls_are_rejected_before_execution() {
         assert!(parse_completion(json::parse(response).unwrap()).is_err());
     }
     assert!(OpenRouter::new("bad\nheader".into(), "fixture/model".into()).is_err());
+}
+
+#[test]
+fn one_hour_retention_reaches_only_claude_breakpoints() {
+    let response = crate::test_support::completion("ok", vec![]);
+    let fixture = HttpFixture::new(vec![(200, response.clone()), (200, response)]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    let messages = [
+        Value::object([
+            ("role", Value::string("system")),
+            ("content", Value::string("Instructions")),
+            ("jecode_cache_retention", Value::string("1h")),
+        ]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Question")),
+        ]),
+    ];
+    for model in ["anthropic/claude-sonnet-4.5", "openai/gpt-6"] {
+        client.set_model(model.into()).unwrap();
+        crate::backend::Backend::sample(&client, &messages, true, None, None, &mut |_| Ok(()))
+            .unwrap();
+    }
+    let requests = fixture.finish();
+    let markers = |index: usize| {
+        let body = &requests[index].body;
+        assert!(!body.encode().contains("jecode_cache_retention"));
+        body.get("messages")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(|message| message.get("content")?.as_array()?[0].get("cache_control"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let long = Value::object([
+        ("type", Value::string("ephemeral")),
+        ("ttl", Value::string("1h")),
+    ]);
+    let short = Value::object([("type", Value::string("ephemeral"))]);
+    assert_eq!(markers(0), [long.clone(), long]);
+    assert_eq!(markers(1), [short.clone(), short]);
 }

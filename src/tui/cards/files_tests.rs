@@ -311,3 +311,144 @@ fn write_badge_keeps_the_operation_without_a_confirmed_file_change() {
             .starts_with(" WRITE ")
     );
 }
+
+#[test]
+fn multi_path_reads_name_their_files_and_expand_under_each_path() {
+    let args = Value::object([(
+        "paths",
+        Value::Array(vec![
+            Value::string("src/a.rs"),
+            Value::string("src/b.rs"),
+            Value::string("gone.rs"),
+        ]),
+    )]);
+    let file = |path: &str, content: &str| {
+        Value::object([
+            ("path", Value::string(path)),
+            ("content", Value::string(content)),
+            ("offset", Value::number(1)),
+        ])
+    };
+    let result = Value::object([(
+        "files",
+        Value::Array(vec![
+            file("src/a.rs", "1: fn a() {}\n"),
+            file("src/b.rs", "1: fn b() {}\n2: // end\n"),
+            Value::object([
+                ("path", Value::string("gone.rs")),
+                ("error", Value::string("Could not resolve path")),
+            ]),
+        ]),
+    )]);
+    let collapsed = Presentation::default();
+    let rows = plain(&card(tool("read", &args, &result, &collapsed), 80, false).rows);
+    assert!(rows[0].contains("src/a.rs, src/b.rs, gone.rs"));
+    assert!(rows.join("\n").contains("2 files · 3 lines · 1 not read"));
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = plain(&card(tool("read", &args, &result, &expanded), 80, false).rows).join("\n");
+    for expected in [
+        "src/a.rs",
+        "fn a() {}",
+        "src/b.rs",
+        "// end",
+        "gone.rs · Could not resolve path",
+    ] {
+        assert!(rows.contains(expected), "{expected} in {rows}");
+    }
+}
+
+#[test]
+fn a_binary_attachment_in_a_multi_path_read_keeps_its_note_on_expansion() {
+    let reference = "attachment:blob";
+    let args = Value::object([("paths", Value::Array(vec![Value::string(reference)]))]);
+    let note = "Jecode has not interpreted this file.";
+    let result = Value::object([(
+        "files",
+        Value::Array(vec![Value::object([
+            ("path", Value::string(reference)),
+            ("attachment", Value::object([])),
+            ("note", Value::string(note)),
+        ])]),
+    )]);
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = plain(&card(tool("read", &args, &result, &expanded), 80, false).rows);
+    assert_eq!(
+        rows[1..],
+        [format!("  │ {reference}"), format!("  └ {note}"),],
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn expanded_multi_path_reads_keep_every_row_clean_and_on_the_tree() {
+    let hostile = "src/\x1b]0;x\x07evil.rs";
+    let args = Value::object([(
+        "paths",
+        Value::Array(vec![
+            Value::string(hostile),
+            Value::string("src/b.rs"),
+            Value::string("gone.rs"),
+        ]),
+    )]);
+    let file = |path: &str, content: &str| {
+        Value::object([
+            ("path", Value::string(path)),
+            ("content", Value::string(content)),
+            ("offset", Value::number(1)),
+        ])
+    };
+    let error = "Could not resolve path: the folder it names is not there\n\x1b[2Jand this second line of the cause is long enough to wrap on a narrow row";
+    let result = Value::object([(
+        "files",
+        Value::Array(vec![
+            file(hostile, "1: fn a() {}\n"),
+            file("src/b.rs", "1: fn b() {}\n"),
+            Value::object([
+                ("path", Value::string("gone.rs")),
+                ("error", Value::string(error)),
+            ]),
+        ]),
+    )]);
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    for columns in [44, 80] {
+        let rows = card(tool("read", &args, &result, &expanded), columns, false).rows;
+        let text = plain(&rows);
+        for row in &text {
+            assert!(!row.contains(['\x1b', '\x07', '\n']), "{row:?}");
+            assert!(text::cells(row) <= columns, "{row:?}");
+        }
+        let first = text
+            .iter()
+            .position(|row| row.starts_with("  │ src/[ESC]]0;x"))
+            .unwrap_or_else(|| panic!("{text:#?}"));
+        let (last, body) = text[first..].split_last().unwrap();
+        assert!(body.iter().all(|row| row.starts_with("  │ ")), "{text:#?}");
+        assert!(last.starts_with("  └ "), "{text:#?}");
+        assert!(last.ends_with(" row"), "{text:#?}");
+        let span = |needle: &str| {
+            rows[first..]
+                .iter()
+                .flat_map(|row| &row.spans)
+                .find(|span| span.text.contains(needle))
+                .map(|span| span.style)
+        };
+        assert_eq!(span("evil.rs"), Some(MUTED));
+        assert_eq!(span("gone.rs · "), Some(crate::tui::theme::WARNING));
+        // The files' source lines follow each other, as one card's rows do.
+        let lines: Vec<_> = rows[first..]
+            .iter()
+            .filter_map(|row| row.origin.map(|origin| origin.line))
+            .collect();
+        assert!(lines.windows(2).all(|pair| pair[0] <= pair[1]), "{lines:?}");
+        assert!(lines.last() > lines.first(), "{lines:?}");
+    }
+}

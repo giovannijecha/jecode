@@ -21,6 +21,8 @@ pub(super) struct Facts {
     pub effort: Effort,
     /// A live preference shared with the execution worker and its collaborators.
     pub auto_compact: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Whether Claude prompt caches last an hour, shared the same way.
+    pub cache_retention: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub routing: Routing,
     routing_preferences: Option<BTreeMap<(String, String), Routing>>,
     /// The listing cached for `model`.
@@ -43,6 +45,7 @@ impl Facts {
             model: agent.model().into(),
             effort: agent.effort(),
             auto_compact: agent.auto_compact_preference(),
+            cache_retention: agent.cache_retention_preference(),
             routing: agent.routing(),
             routing_preferences: agent.routing_preferences_snapshot(),
             endpoints: agent.cached_endpoints(agent.model()),

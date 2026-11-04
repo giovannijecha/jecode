@@ -120,18 +120,17 @@ fn model_and_effort_commit_together_preserve_context_and_leave_defaults_unchange
         .unwrap()
         .as_array()
         .unwrap();
+    // Unchanged state is sent once, where the first request placed it.
     assert_eq!(messages.len(), 5);
+    assert!(crate::test_support::is_request_state(&messages[2]));
     assert_eq!(
-        messages[2].get("content").and_then(Value::as_str),
+        messages[3].get("content").and_then(Value::as_str),
         Some("Before.")
     );
-    assert!(messages[2].get("reasoning_details").is_none());
-    assert!(
-        messages
-            .last()
-            .unwrap()
-            .encode()
-            .contains("Jecode session state")
+    assert!(messages[3].get("reasoning_details").is_none());
+    assert_eq!(
+        messages[4].get("content").and_then(Value::as_str),
+        Some("Second request")
     );
     assert_eq!(
         requests[2]
@@ -309,8 +308,10 @@ fn an_ordinary_message_joins_the_turn_and_a_local_command_waits_for_it() {
         .filter_map(|message| message.get("content").and_then(Value::as_str))
         .collect();
     assert_eq!(users.len(), 3);
-    assert_eq!(&users[..2], ["first", "second\nline"]);
-    assert!(users[2].starts_with("Jecode session state for the next request."));
+    // Unchanged state stays where the first request sent it.
+    assert_eq!(users[0], "first");
+    assert!(users[1].starts_with("Jecode session state"));
+    assert_eq!(users[2], "second\nline");
     assert!(
         requests
             .iter()

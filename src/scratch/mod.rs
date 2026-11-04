@@ -16,7 +16,7 @@ pub struct Area {
     path: PathBuf,
     project: PathBuf,
     session: String,
-    establishment: std::sync::Mutex<()>,
+    establishment: std::sync::Arc<std::sync::Mutex<()>>,
 }
 
 #[derive(Debug)]
@@ -28,7 +28,11 @@ pub struct Info {
     pub skipped: usize,
 }
 
+mod delegated;
+#[cfg(test)]
+mod delegated_tests;
 mod removal;
+pub use delegated::find;
 pub(crate) use removal::Removal;
 
 impl Area {
@@ -40,13 +44,31 @@ impl Area {
             path,
             project,
             session: session.into(),
-            establishment: std::sync::Mutex::new(()),
+            establishment: std::sync::Arc::new(std::sync::Mutex::new(())),
         })
+    }
+
+    /// This area, for an agent the owning agent delegates to.
+    pub fn share(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            project: self.project.clone(),
+            session: self.session.clone(),
+            establishment: std::sync::Arc::clone(&self.establishment),
+        }
     }
 
     #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// An existing entry, found without creating the area.
+    pub fn existing(&self, alias: &str) -> Option<(PathBuf, PathBuf)> {
+        crate::disk::metadata_if_present(&self.path)
+            .ok()
+            .flatten()?;
+        self.file(alias, false).ok()
     }
 
     pub fn relative_path(&self, value: &str) -> Option<String> {
@@ -90,9 +112,10 @@ impl Area {
             (
                 "bash_environment",
                 Value::Array(
-                    ["JECODE_TMP", "TMPDIR", "TEMP", "TMP"]
-                        .map(Value::string)
-                        .into(),
+                    variables(&environment_path(&self.path))
+                        .iter()
+                        .map(|name| Value::string(*name))
+                        .collect(),
                 ),
             ),
             ("lifetime", Value::string("session_including_resume")),
@@ -133,21 +156,7 @@ impl Area {
     }
 
     pub fn file(&self, alias: &str, create_parents: bool) -> Result<(PathBuf, PathBuf), String> {
-        let relative = PathBuf::from(alias.replace('\\', "/"));
-        if relative.as_os_str().is_empty()
-            || relative.components().any(|part| match part {
-                Component::Normal(name) => {
-                    name.to_string_lossy().contains(':')
-                        || name.to_string_lossy().eq_ignore_ascii_case(MARKER)
-                }
-                _ => true,
-            })
-        {
-            return Err(
-                "tmp: must name a relative file without traversal or reserved metadata paths"
-                    .into(),
-            );
-        }
+        let relative = relative(alias)?;
         let root = self.ensure()?;
         let parts: Vec<_> = relative.components().collect();
         let mut path = root.clone();
@@ -247,6 +256,25 @@ fn private_directory(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Could not prepare temporary area: {error}"))
 }
 
+/// A `tmp:` alias as a relative path inside an area.
+fn relative(alias: &str) -> Result<PathBuf, String> {
+    let relative = PathBuf::from(alias.replace('\\', "/"));
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|part| match part {
+            Component::Normal(name) => {
+                name.to_string_lossy().contains(':')
+                    || name.to_string_lossy().eq_ignore_ascii_case(MARKER)
+            }
+            _ => true,
+        })
+    {
+        return Err(
+            "tmp: must name a relative file without traversal or reserved metadata paths".into(),
+        );
+    }
+    Ok(relative)
+}
+
 fn inspect(path: &Path) -> Result<Metadata, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("Could not inspect temporary path: {error}"))?;
@@ -254,6 +282,33 @@ fn inspect(path: &Path) -> Result<Metadata, String> {
         return Err("Temporary area contains a link or junction; it was left unchanged".into());
     }
     Ok(metadata)
+}
+
+/// Points a command's temporary-file variables at the area at `root`.
+pub fn export(command: &mut std::process::Command, root: &Path) {
+    let value = environment_path(root);
+    for name in variables(&value) {
+        command.env(name, &value);
+    }
+}
+
+/// The variables that name an area, given its environment path. Windows
+/// programs read TEMP and TMP through GetTempPathW, which appends a separator;
+/// a 260-unit path exceeds its MAX_PATH + 1 buffer once the NUL is included.
+/// With such a TMP, a program cmd.exe starts stays suspended, as Volta's node
+/// shim does. An area that deep, such as a collaborator's under a long home,
+/// keeps the inherited TEMP and TMP.
+fn variables(_value: &Path) -> &'static [&'static str] {
+    const ALL: &[&str] = &["JECODE_TMP", "TMPDIR", "TEMP", "TMP"];
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        const MAX_PATH: usize = 260;
+        if _value.as_os_str().encode_wide().count() >= MAX_PATH {
+            return &ALL[..2];
+        }
+    }
+    ALL
 }
 
 /// Win32 extended paths are unsuitable for Git Bash and many child programs.

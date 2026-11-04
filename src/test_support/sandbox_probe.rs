@@ -61,6 +61,21 @@ fn main() {
             std::fs::remove_file(file).unwrap();
             std::fs::remove_dir(nested).unwrap();
         }
+        "listing" => {
+            let allowed = PathBuf::from(env::var_os(ALLOWED).unwrap());
+            let private = PathBuf::from(env::var_os(PRIVATE).unwrap());
+            let escaped = PathBuf::from(env::var_os(ESCAPED).unwrap());
+            let outcome = |result: std::io::Result<()>| match result {
+                Ok(()) => "ok".to_owned(),
+                Err(error) => format!("{:?}", error.kind()),
+            };
+            let root = allowed.ancestors().last().unwrap();
+            let outside = private.parent().unwrap();
+            println!("ROOT:{}", outcome(std::fs::metadata(root).map(drop)));
+            println!("LIST:{}", outcome(std::fs::read_dir(outside).map(drop)));
+            println!("READ:{}", outcome(std::fs::read(&private).map(drop)));
+            println!("WRITE:{}", outcome(std::fs::write(&escaped, "escaped")));
+        }
         other => panic!("Unknown sandbox probe role: {other}"),
     }
 }

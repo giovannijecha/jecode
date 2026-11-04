@@ -2,7 +2,7 @@ mod storage;
 
 pub use storage::Store;
 
-use crate::backend::Routing;
+use crate::backend::{CacheRetention, Routing};
 pub use crate::backend::{validate_id as validate_backend_id, validate_model};
 use crate::effort::Effort;
 use crate::json::Value;
@@ -20,6 +20,8 @@ pub struct Settings {
     pub effort: Effort,
     /// `context.auto_compact_percent`: applies to every conversation, not only new ones.
     pub auto_compact: u8,
+    /// `context.prompt_cache`: how long Claude prompt caches last, for every conversation.
+    pub cache_retention: CacheRetention,
     /// Optional routing for the selected backend, scoped by backend in the file.
     pub routing: BTreeMap<String, Routing>,
     /// `permissions.default`: the level new conversations start at.
@@ -59,6 +61,7 @@ impl Settings {
             model: String::new(),
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            cache_retention: CacheRetention::default(),
             routing: BTreeMap::new(),
             default_permissions: crate::permissions::Level::default(),
         }
@@ -137,6 +140,7 @@ impl Settings {
             model,
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            cache_retention: CacheRetention::default(),
             routing: BTreeMap::new(),
             default_permissions: crate::permissions::Level::default(),
         })
@@ -271,6 +275,7 @@ impl Settings {
             model: model.into(),
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
+            cache_retention: CacheRetention::default(),
             routing: BTreeMap::new(),
             default_permissions: crate::permissions::Level::default(),
         };
@@ -330,6 +335,13 @@ impl Settings {
                     .ok_or_else(|| "Auto-compact must be a whole percentage from 1 to 99".into())
                     .and_then(crate::context::auto_compact_percent)
                     .map_err(|error| format!("Invalid context.auto_compact_percent: {error}"))?;
+            }
+            if let Some(value) = context.get("prompt_cache") {
+                settings.cache_retention = value
+                    .as_str()
+                    .ok_or_else(|| "Prompt cache must be \"5m\" or \"1h\"".into())
+                    .and_then(CacheRetention::parse)
+                    .map_err(|error| format!("Invalid context.prompt_cache: {error}"))?;
             }
         }
         // Configurations written before permissions start new conversations

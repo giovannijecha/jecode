@@ -25,6 +25,8 @@ pub struct Agent {
     context: crate::context::Context,
     /// User preference, not session state: resumed conversations use the current value.
     auto_compact: Arc<AtomicU8>,
+    /// User preference: whether Claude prompt caches last an hour.
+    cache_retention: Arc<std::sync::atomic::AtomicBool>,
     project_instructions: String,
     skills: crate::skills::Library,
     used_skills: std::collections::BTreeSet<String>,
@@ -68,6 +70,8 @@ impl Agent {
         let redactor = client.redactor();
         let mut tools = tools;
         tools.include_credentials(redactor.clone());
+        let collaboration = crate::collaboration::Observer::default();
+        tools.configure_collaborators(collaboration.clone());
         let mut agent = Self {
             client,
             accounts: std::collections::BTreeMap::new(),
@@ -82,13 +86,16 @@ impl Agent {
             prepared: None,
             context: crate::context::Context::default(),
             auto_compact: Arc::new(AtomicU8::new(crate::context::AUTO_COMPACT_DEFAULT)),
+            cache_retention: Arc::new(std::sync::atomic::AtomicBool::new(
+                crate::backend::CacheRetention::default() == crate::backend::CacheRetention::Long,
+            )),
             project_instructions: String::new(),
             skills: crate::skills::Library::default(),
             used_skills: std::collections::BTreeSet::new(),
             inbox: crate::inbox::Inbox::default(),
             routing_preferences: None,
             charges: Mutex::default(),
-            collaboration: crate::collaboration::Observer::default(),
+            collaboration,
             questions: crate::ask::Observer::default(),
             permissions: crate::permissions::Permissions::default(),
             child: false,
@@ -319,11 +326,8 @@ impl Agent {
                 Value::string(self.redactor.value(result).encode()),
             ),
         ]));
-        if let Some(reference) = result.get("skill_reference").and_then(Value::as_str)
-            && let Ok((name, _)) = crate::skills::parse_reference(reference)
-        {
-            self.used_skills.insert(name.to_owned());
-        }
+        self.used_skills
+            .extend(skills::delivered(result).map(str::to_owned));
     }
 
     fn cancel_calls(&mut self, calls: &[ToolCall]) {
@@ -417,6 +421,7 @@ mod permission_tests;
 mod persistence;
 mod project_instructions;
 mod projection;
+pub(crate) mod read_paths;
 mod recovery;
 mod retraction;
 mod routing;
@@ -467,6 +472,8 @@ mod lsp_tests;
 mod map_tests;
 #[cfg(test)]
 mod mcp_tests;
+#[cfg(test)]
+mod multi_edit_tests;
 #[cfg(test)]
 mod naming_tests;
 #[cfg(test)]

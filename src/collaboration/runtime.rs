@@ -440,47 +440,63 @@ impl Observer {
         }
     }
 
-    /// Records the changed path and its line counts, for receipts that list
-    /// changed files with `+` / `−` counts.
+    /// Records the changed paths and their line counts, for receipts that
+    /// list changed files with `+` / `−` counts. A multi-file edit keeps each
+    /// file's counts under its path.
     pub(super) fn tool_changed(
         &self,
         id: &str,
         call_id: &str,
         change: &crate::file_change::Change,
     ) {
+        let counts = |change: &crate::file_change::Change| {
+            Value::object([
+                ("added", Value::number(change.added)),
+                ("removed", Value::number(change.removed)),
+                ("created", Value::Bool(change.created)),
+            ])
+        };
         let mut state = self.0.state.lock().unwrap();
         let Some(record) = state.record(id) else {
             return;
         };
-        if let Some(Value::Object(tool)) = record
+        let Some(Value::Object(tool)) = record
             .tools
             .iter_mut()
             .rev()
             .find(|tool| tool.get("id").and_then(Value::as_str) == Some(call_id))
-        {
-            tool.insert(
-                "change".into(),
-                Value::object([
-                    ("added", Value::number(change.added)),
-                    ("removed", Value::number(change.removed)),
-                    ("created", Value::Bool(change.created)),
-                ]),
-            );
-            self.0.changed.notify_all();
-        }
-        if let Some(tool) = record
-            .tools
-            .iter()
-            .rev()
-            .find(|tool| tool.get("id").and_then(Value::as_str) == Some(call_id))
-            && let Some(path) = tool
-                .get("arguments")
+        else {
+            return;
+        };
+        let mut recorded = counts(change);
+        let paths: Vec<String> = if change.files.is_empty() {
+            tool.get("arguments")
                 .and_then(|arguments| arguments.get("path"))
                 .and_then(Value::as_str)
-            && !record.files.iter().any(|file| file == path)
+                .map(str::to_owned)
+                .into_iter()
+                .collect()
+        } else {
+            change.files.iter().map(|(path, _)| path.clone()).collect()
+        };
+        if let Value::Object(fields) = &mut recorded
+            && !change.files.is_empty()
         {
-            record.files.push(path.to_owned());
-            self.0.changed.notify_all();
+            let files = change.files.iter().map(|(path, file)| {
+                let mut file = counts(file);
+                if let Value::Object(fields) = &mut file {
+                    fields.insert("path".into(), Value::string(path));
+                }
+                file
+            });
+            fields.insert("files".into(), Value::Array(files.collect()));
         }
+        tool.insert("change".into(), recorded);
+        for path in paths {
+            if !record.files.contains(&path) {
+                record.files.push(path);
+            }
+        }
+        self.0.changed.notify_all();
     }
 }

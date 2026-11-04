@@ -21,19 +21,6 @@ fn run(runtime: &Runtime, fixture: &Fixture, path: PathBuf) -> Outcome {
     )
 }
 
-fn wait_for(fixture: &Fixture, text: &str, failure: &str) {
-    // Shutdown includes the fixture's slow reply and the handshake timeouts;
-    // a loaded parallel run needs headroom beyond their nominal 1.2 s.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !fs::read_to_string(fixture.marker())
-        .unwrap_or_default()
-        .contains(text)
-    {
-        assert!(Instant::now() < deadline, "{failure}");
-        thread::sleep(Duration::from_millis(25));
-    }
-}
-
 fn registered(runtime: &Runtime) -> Arc<Entry> {
     let entries = runtime.0.entries.lock().unwrap();
     assert_eq!(entries.len(), 1);
@@ -55,18 +42,19 @@ fn off_then_on_without_a_request_starts_a_fresh_instance() {
     let runtime = Runtime::with_home(home);
     let first = run(&runtime, &fixture, fixture.sample());
     assert_eq!(first.status, "ready", "{}", first.detail);
+    let pid = runtime.statuses()[0].pid.expect("server pid");
     store.set_enabled(&profile.id, false).unwrap();
-    wait_for(&fixture, "exit", "Off did not stop the idle instance");
+    // A server slow to read exit is killed; either way it must stop.
+    fixture.wait_stopped(pid, "Off did not stop the idle instance");
     assert!(runtime.statuses().is_empty());
     store.set_enabled(&profile.id, true).unwrap();
     let again = run(&runtime, &fixture, fixture.sample());
     assert_eq!(again.status, "ready", "{}", again.detail);
+    let pid = runtime.statuses()[0].pid.expect("server pid");
     runtime.shutdown();
     drop(runtime);
     assert!(
-        fs::read_to_string(fixture.marker())
-            .unwrap()
-            .contains("exit"),
+        !fixture.running(pid),
         "The last runtime owner did not wait for its instances to stop"
     );
 }
@@ -101,14 +89,17 @@ fn turn_off_returns_while_a_request_is_in_flight() {
     Store::new(home.clone()).save(profile.clone()).unwrap();
     let runtime = Runtime::with_home(home);
     assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
-    let slow_runtime = runtime.clone();
-    let slow_root = fixture.workspace().to_path_buf();
-    let slow_path = fixture.sample();
-    let slow = thread::spawn(move || {
-        slow_runtime.execute(
-            &slow_root,
+    let pid = runtime.statuses()[0].pid.expect("server pid");
+    assert!(fixture.running(pid));
+    let stuck_runtime = runtime.clone();
+    let stuck_root = fixture.workspace().to_path_buf();
+    let stuck_path = fixture.sample();
+    // The fixture never answers this request, so it stays in flight throughout.
+    let stuck = thread::spawn(move || {
+        stuck_runtime.execute(
+            &stuck_root,
             &[],
-            definition(slow_path, 6),
+            definition(stuck_path, 9),
             &Cancellation::default(),
         )
     });
@@ -119,7 +110,7 @@ fn turn_off_returns_while_a_request_is_in_flight() {
         .count()
         < 2
     {
-        assert!(Instant::now() < deadline, "Slow call was not dispatched");
+        assert!(Instant::now() < deadline, "Stuck call was not dispatched");
         thread::sleep(Duration::from_millis(10));
     }
     let started = Instant::now();
@@ -130,8 +121,9 @@ fn turn_off_returns_while_a_request_is_in_flight() {
         started.elapsed()
     );
     assert!(runtime.statuses().is_empty());
-    assert_eq!(slow.join().unwrap().status, "settings_changed");
-    wait_for(&fixture, "exit", "Turn off did not stop the instance");
+    assert_eq!(stuck.join().unwrap().status, "settings_changed");
+    // Unanswered, the shutdown handshake times out and the server is killed.
+    fixture.wait_stopped(pid, "Turn off did not stop the instance");
 }
 
 #[test]
@@ -164,6 +156,43 @@ fn local_document_failures_keep_the_server_and_success_clears_failures() {
     assert_eq!(observed(&entry), ("ready".into(), pid));
     assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
     assert_eq!(observed(&entry), ("ready".into(), pid));
+    runtime.shutdown();
+}
+
+#[test]
+fn only_requests_report_an_instance_busy() {
+    let fixture = Fixture::new();
+    let home = fixture.workspace().join("home");
+    Store::new(home.clone()).save(fixture.profile()).unwrap();
+    let runtime = Runtime::with_home(home);
+    assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
+    let entry = registered(&runtime);
+    let (_, pid) = observed(&entry);
+    // Holding the state stands in for an idle pump tick.
+    let held = entry.state.lock().unwrap();
+    let status = runtime.statuses().remove(0);
+    assert_eq!((status.state.as_str(), status.pid), ("ready", pid));
+    let queued_runtime = runtime.clone();
+    let workspace = fixture.workspace().to_path_buf();
+    let path = fixture.sample();
+    let queued = thread::spawn(move || {
+        queued_runtime.execute(
+            &workspace,
+            &[],
+            definition(path, 1),
+            &Cancellation::default(),
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while entry.requests.load(Ordering::Acquire) == 0 {
+        assert!(Instant::now() < deadline, "Request was not queued");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(runtime.statuses()[0].state, "busy");
+    drop(held);
+    assert_eq!(queued.join().unwrap().status, "ready");
+    let status = runtime.statuses().remove(0);
+    assert_eq!((status.state.as_str(), status.pid), ("ready", pid));
     runtime.shutdown();
 }
 

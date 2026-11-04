@@ -1,6 +1,7 @@
 //! Canonical transcript and attachment mapping for Messages.
 
 use crate::attachments::{self, Attachment, Kind, Pool, base64};
+use crate::backend::CacheRetention;
 use crate::conversation::ToolCall;
 use crate::effort::Effort;
 use crate::json::Value;
@@ -82,7 +83,15 @@ fn build_request(
     let mut results = Vec::new();
     let active_start = attachments::active_view_start(messages);
     let mut views = Vec::new();
-    let mut volatile_start = None;
+    let mut latest_state = None;
+    // The system block every conversation shares, cached on its own.
+    let mut shared = None;
+    // With one-hour retention every breakpoint lasts an hour, so a break
+    // longer than five minutes still resumes from the last request's end.
+    let control = match CacheRetention::requested(messages) {
+        CacheRetention::Short => ephemeral(),
+        CacheRetention::Long => long_lived(),
+    };
     for (index, message) in messages.iter().enumerate() {
         let role = message.get("role").and_then(Value::as_str);
         if role != Some("tool") && !results.is_empty() {
@@ -96,17 +105,26 @@ fn build_request(
         }
         match role {
             Some("system" | "developer") => {
-                if let Some(content) = message.get("content").and_then(Value::as_str)
-                    && !content.is_empty()
-                {
+                let Some(content) = message.get("content").and_then(Value::as_str) else {
+                    continue;
+                };
+                let prefix = message.get("jecode_cache_prefix").and_then(Value::as_usize);
+                if let Some(end) = prefix.filter(|end| {
+                    shared.is_none()
+                        && *end > 0
+                        && *end < content.len()
+                        && content.is_char_boundary(*end)
+                }) {
+                    shared = Some(instructions.len());
+                    instructions.push(content[..end].to_owned());
+                    instructions.push(content[end..].trim_start().to_owned());
+                } else if !content.is_empty() {
                     instructions.push(content.to_owned());
                 }
             }
             Some("user") => {
+                // Runtime state keeps its first position, so it is cacheable history.
                 let request_state = message.get("jecode_request_state") == Some(&Value::Bool(true));
-                if request_state {
-                    volatile_start = Some(wire.len());
-                }
                 let mut mapped = user(message, pool)?;
                 if request_state
                     && subscription
@@ -114,6 +132,9 @@ fn build_request(
                     && let Value::Object(fields) = &mut mapped
                 {
                     fields.insert("role".into(), Value::string("system"));
+                }
+                if request_state {
+                    latest_state = Some(wire.len());
                 }
                 wire.push(mapped);
             }
@@ -147,11 +168,18 @@ fn build_request(
     }
     // A tool-result batch can exceed the 20-block lookback window. Preserve
     // recent user-message ends, including earlier batched tool results.
-    let durable_end = volatile_start.unwrap_or(wire.len());
-    let slots = if volatile_start.is_some() { 3 } else { 2 };
+    // The automatic top-level breakpoint covers the request end, including
+    // newly sent state, so explicit slots keep the earlier boundaries.
+    let marked_end = if latest_state.is_some_and(|index| index + 1 == wire.len()) {
+        wire.len() - 1
+    } else {
+        wire.len()
+    };
+    let slots = 2;
     let mut marked = 0;
-    for message in wire[..durable_end].iter_mut().rev() {
-        if message.get("role").and_then(Value::as_str) == Some("user") && cache_breakpoint(message)
+    for message in wire[..marked_end].iter_mut().rev() {
+        if message.get("role").and_then(Value::as_str) == Some("user")
+            && cache_breakpoint(message, &control)
         {
             marked += 1;
             if marked == slots {
@@ -169,8 +197,15 @@ fn build_request(
         })
         .collect();
     let mut system = system;
-    if let Some(Value::Object(last)) = system.last_mut() {
-        last.insert("cache_control".into(), ephemeral());
+    // Tools and the shared block are the same for every conversation, so
+    // they stay cached for an hour across folders, sessions and agents. The
+    // folder-specific remainder is covered by the history breakpoints.
+    let marked = match shared {
+        Some(index) => system.get_mut(index).map(|block| (block, long_lived())),
+        None => system.last_mut().map(|block| (block, control.clone())),
+    };
+    if let Some((Value::Object(block), control)) = marked {
+        block.insert("cache_control".into(), control);
     }
     let empty_system = system.is_empty();
     let mut request = Value::object([
@@ -189,9 +224,7 @@ fn build_request(
     if !subscription && empty_system {
         fields.remove("system");
     }
-    if volatile_start.is_none() {
-        fields.insert("cache_control".into(), ephemeral());
-    }
+    fields.insert("cache_control".into(), control);
     match effort {
         Effort::Default => {}
         Effort::None => {
@@ -244,6 +277,13 @@ fn ephemeral() -> Value {
     Value::object([("type", Value::string("ephemeral"))])
 }
 
+fn long_lived() -> Value {
+    Value::object([
+        ("type", Value::string("ephemeral")),
+        ("ttl", Value::string("1h")),
+    ])
+}
+
 fn supports_mid_system(model: &str) -> bool {
     const MODELS: &[&str] = &[
         "claude-opus-5-5",
@@ -266,7 +306,7 @@ fn supports_mid_system(model: &str) -> bool {
     })
 }
 
-fn cache_breakpoint(message: &mut Value) -> bool {
+fn cache_breakpoint(message: &mut Value, control: &Value) -> bool {
     let Value::Object(fields) = message else {
         return false;
     };
@@ -279,7 +319,7 @@ fn cache_breakpoint(message: &mut Value) -> bool {
             *content = Value::Array(vec![Value::object([
                 ("type", Value::string("text")),
                 ("text", Value::string(text)),
-                ("cache_control", ephemeral()),
+                ("cache_control", control.clone()),
             ])]);
             true
         }
@@ -296,7 +336,7 @@ fn cache_breakpoint(message: &mut Value) -> bool {
             }) else {
                 return false;
             };
-            block.insert("cache_control".into(), ephemeral());
+            block.insert("cache_control".into(), control.clone());
             true
         }
         _ => false,
@@ -305,9 +345,26 @@ fn cache_breakpoint(message: &mut Value) -> bool {
 
 fn assistant(message: &Value) -> Result<Value, String> {
     if let Some(blocks) = message.get("anthropic_blocks").and_then(Value::as_array) {
+        let mut blocks = blocks.to_vec();
+        let calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .unwrap_or(&[]);
+        // The canonical call records the arguments actually executed, including
+        // decoded JSON-text containers. Keep the rest of the native reply intact.
+        for block in &mut blocks {
+            if block.get("type").and_then(Value::as_str) == Some("tool_use")
+                && let Some(call) = calls.iter().find(|call| call.get("id") == block.get("id"))
+            {
+                let call = ToolCall::parse(call)?;
+                if let Value::Object(fields) = block {
+                    fields.insert("input".into(), crate::json::parse(&call.arguments)?);
+                }
+            }
+        }
         return Ok(Value::object([
             ("role", Value::string("assistant")),
-            ("content", Value::Array(blocks.to_vec())),
+            ("content", Value::Array(blocks)),
         ]));
     }
     let mut blocks = Vec::new();
@@ -439,3 +496,6 @@ fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| format!("Conversation {key} must be a string"))
 }
+
+#[cfg(test)]
+mod replay_tests;

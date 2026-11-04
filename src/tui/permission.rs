@@ -28,6 +28,8 @@ pub struct Pending {
     /// Arrived while the draft was typed in: until the keys pause or an
     /// arrow moves, typing continues the draft and no digit decides.
     pub guard: Option<Guard>,
+    /// The first row of a call too long for the dock.
+    pub scroll: usize,
 }
 
 const DECISIONS: [Decision; 3] = [Decision::Once, Decision::Remember, Decision::Deny];
@@ -43,6 +45,9 @@ impl App {
             .pending()
             .map(|(mut request, count)| {
                 request.access.target = self.archive.redactor.text(&request.access.target);
+                for file in &mut request.access.members {
+                    file.target = self.archive.redactor.text(&file.target);
+                }
                 request.access.place = request
                     .access
                     .place
@@ -66,6 +71,7 @@ impl App {
                     .as_ref()
                     .filter(|shown| shown.request == request);
                 let focus = shown.and_then(|shown| shown.focus);
+                let scroll = shown.map_or(0, |shown| shown.scroll);
                 let guard = match shown {
                     Some(shown) => shown.guard,
                     None => Guard::arrive(self.typed, now),
@@ -77,6 +83,7 @@ impl App {
                     agent,
                     focus,
                     guard,
+                    scroll,
                 }
             });
             // A request closes any menu over it, as a question does.
@@ -150,6 +157,10 @@ impl App {
             }
             return;
         }
+        if matches!(key.code, 33 | 34) && !key.ctrl() && !key.alt() {
+            self.page_permission(key.code == 33);
+            return;
+        }
         let Some(shown) = self.state.permission.as_mut() else {
             return;
         };
@@ -167,11 +178,21 @@ impl App {
                     self.decide_permission(focus);
                 }
             }
-            33 | 34 if !key.ctrl() && !key.alt() => {
-                self.renderer.scroll(Scroll::Page(key.code == 33));
-            }
             _ => {}
         }
+    }
+
+    /// A call too long for the dock pages first, since it is what the choice
+    /// agrees to; otherwise the conversation scrolls behind the request.
+    fn page_permission(&mut self, back: bool) {
+        let Some(scroll) = super::view::permission_page(&self.state, back) else {
+            self.renderer.scroll(Scroll::Page(back));
+            return;
+        };
+        if let Some(shown) = self.state.permission.as_mut() {
+            shown.scroll = scroll;
+        }
+        self.state.changed();
     }
 
     fn decide_permission(&mut self, choice: usize) {

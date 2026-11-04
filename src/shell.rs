@@ -4,6 +4,8 @@
 mod builtins;
 #[path = "shell/flow.rs"]
 mod flow;
+#[path = "shell/glob.rs"]
+mod glob;
 #[path = "shell/lexer.rs"]
 mod lexer;
 #[path = "shell/parser.rs"]
@@ -91,7 +93,9 @@ pub fn run_entry(args: impl Iterator<Item = OsString>) -> i32 {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
     shell.arg_zero = arg_zero;
-    shell.run(&script)
+    let status = shell.run(&script);
+    process::join_writers();
+    status
 }
 
 struct Shell {
@@ -168,6 +172,15 @@ impl Shell {
         Ok(self.fields(word, io)?.join(" "))
     }
 
+    /// A word's expansions as one string, without pathname expansion.
+    fn text(&self, word: &Word, io: &Io) -> Result<String, String> {
+        let mut text = String::new();
+        for part in &word.0 {
+            self.expand_part(part, &mut text, io)?;
+        }
+        Ok(text)
+    }
+
     /// Expands words into arguments; `"$@"` yields one per positional argument.
     fn words(&self, words: &[Word], io: &Io) -> Result<Vec<String>, String> {
         let mut result = Vec::with_capacity(words.len());
@@ -180,6 +193,9 @@ impl Shell {
     fn fields(&self, word: &Word, io: &Io) -> Result<Vec<String>, String> {
         let mut fields = Vec::new();
         let mut current = String::new();
+        let globbing = word.0.iter().any(|part| matches!(part, Part::Glob(_)))
+            && !word.0.contains(&Part::AllArguments);
+        let mut pattern = Vec::new();
         for part in &word.0 {
             if *part == Part::AllArguments {
                 let mut arguments = self.positional.iter();
@@ -191,8 +207,22 @@ impl Shell {
                     }
                 }
             } else {
+                let start = current.len();
                 self.expand_part(part, &mut current, io)?;
+                if globbing {
+                    match part {
+                        Part::Glob(ch) => pattern.push(glob::Item::Meta(*ch)),
+                        _ => pattern.extend(current[start..].chars().map(glob::Item::Literal)),
+                    }
+                }
             }
+        }
+        // Assignment values are not expanded, as in POSIX shells.
+        if globbing
+            && !assignment(&current)
+            && let Some(paths) = glob::expand(&pattern, &self.cwd)
+        {
+            return Ok(paths);
         }
         if word.0 != [Part::AllArguments] || !self.positional.is_empty() {
             fields.push(current);
@@ -216,6 +246,7 @@ impl Shell {
                 }
             }
             Part::Command(script) => result.push_str(&self.substitute(script, io)?),
+            Part::Glob(ch) => result.push(*ch),
             Part::Variable(name) => {
                 let value = if let Some((name, fallback)) = name.split_once(":-") {
                     self.variables
@@ -300,6 +331,12 @@ fn assignment(value: &str) -> bool {
 #[cfg(test)]
 #[path = "shell/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "shell/tests_grep.rs"]
+mod tests_grep;
+#[cfg(test)]
+#[path = "shell/tests_grep_syntax.rs"]
+mod tests_grep_syntax;
 #[cfg(test)]
 #[path = "shell/tests_runtime.rs"]
 mod tests_runtime;

@@ -24,35 +24,19 @@ use std::{
 #[ignore = "requires Windows ConPTY and PowerShell for native LSP panels"]
 fn native_windows_lsp_panels() {
     let directory = Directory::new();
-    let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', 'lsp-panels')\n",
+    let executable = std::env::current_exe().unwrap();
+    let result = super::native_script::pty(
         super::native_pty_source(),
-        std::env::current_exe()
-            .unwrap()
-            .to_string_lossy()
-            .replace('\'', "''"),
-        directory.path().to_string_lossy().replace('\'', "''"),
-    );
-    let result = crate::process::run_observed(
-        std::process::Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ])
-            .env("TEMP", directory.path())
-            .env("TMP", directory.path())
-            .env_remove("OPENROUTER_API_KEY"),
-        None,
+        "Run",
+        &[
+            &executable.to_string_lossy(),
+            &directory.path().to_string_lossy(),
+            "lsp-panels",
+        ],
+        &directory,
         Duration::from_secs(90),
-        64 * 1024,
-        &crate::cancel::Cancellation::default(),
-        None,
-        &mut |_| Ok(()),
-    )
-    .unwrap();
+        false,
+    );
     assert_eq!(
         result.exit_code,
         Some(0),

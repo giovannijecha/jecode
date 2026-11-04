@@ -35,6 +35,7 @@ fn batch_edits_use_unique_matches_in_staged_order_and_report_one_change() {
     )
     .unwrap();
     assert_eq!(result.get("bytes_written"), Some(&Value::number(6)));
+    assert_eq!(result.get("changed"), Some(&Value::Bool(true)));
     assert_eq!(
         fs::read_to_string(root.join("source.txt")).unwrap(),
         "delta\n"
@@ -271,6 +272,7 @@ fn streaming_batch_composes_each_step_and_installs_only_after_validation() {
         result.get("bytes_written"),
         Some(&Value::number(original.len() + 1))
     );
+    assert_eq!(result.get("changed"), Some(&Value::Bool(true)));
     assert!(change.is_none());
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
@@ -285,6 +287,7 @@ fn streaming_batch_composes_each_step_and_installs_only_after_validation() {
     )
     .unwrap();
     assert_eq!(noop.get("bytes_written"), Some(&Value::number(0)));
+    assert_eq!(noop.get("changed"), Some(&Value::Bool(false)));
     assert!(change.is_none());
     assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
 }

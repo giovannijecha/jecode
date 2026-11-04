@@ -32,10 +32,12 @@ retrying.
 
 Every model has a context window. The TUI footer shows how much of it the latest
 request used, as a share of the window, filling toward the **Auto-compact at**
-threshold (default 80%). `?` means no usage has been reported yet or the window
-is unknown. The figure includes cached input. It is not your plan's usage or
-remaining quota. The `↓` count in the status row is the turn's generated output,
-not context.
+threshold (default 80%). A leading `~` means the figure is Jecode's estimate of
+the next request, shown when it differs from the last provider reading by at
+least one point of the window. `?` means no usage has been reported yet or the
+window is unknown. The figure includes cached input. It is not your plan's
+usage or remaining quota. The `↑` and `↓` counts in the status row are the
+turn's input tokens sent and generated output, not context.
 
 Before each model request, Jecode estimates whether the request would exceed the
 threshold. If it would:
@@ -43,8 +45,11 @@ threshold. If it would:
 1. Large tool results, such as long file reads, are replaced by previews that
    point to the original.
 2. If that is not enough, the same model summarizes the work since the last
-   compaction into a plain-text handoff of at most about 16 KiB, at medium effort
-   when the model supports it and with tools disabled. The summary keeps goals,
+   compaction into a plain-text handoff of at most about 16 KiB. It first asks
+   over the conversation's own request, with its tools and your selected effort,
+   so the provider's cache is reused. If that does not fit or fails, it
+   summarizes the work in portions at medium effort when the model supports it,
+   with tools disabled. The summary keeps goals,
    constraints, decisions, completed work, errors and next steps. Your model and
    effort for the task do not change.
 

@@ -1,16 +1,21 @@
 //! Session-scoped stores, areas and homes that configure the tools.
 
 use super::{Tools, processes};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 impl Tools {
     #[cfg(test)]
-    pub fn configure_output(&mut self, directory: PathBuf, redactor: crate::redact::Redactor) {
+    pub fn configure_output(
+        &mut self,
+        directory: std::path::PathBuf,
+        redactor: crate::redact::Redactor,
+    ) {
         self.outputs = crate::output::Store::new(directory, redactor);
     }
+    #[cfg(test)]
     pub fn configure_session_output(
         &mut self,
-        directory: PathBuf,
+        directory: std::path::PathBuf,
         session: &str,
         redactor: crate::redact::Redactor,
     ) -> Result<(), String> {
@@ -20,6 +25,24 @@ impl Tools {
     }
     pub(crate) fn configure_output_store(&mut self, outputs: crate::output::Store) {
         self.outputs = outputs;
+    }
+    /// Lets a collaborator read the saved outputs and temporary files of the
+    /// agents above it, which its main agent hands it by reference.
+    pub(crate) fn inherit_references(&mut self, parent: &Tools) {
+        self.outputs.inherit(&parent.outputs);
+        self.inherited_temporary = parent
+            .temporary
+            .iter()
+            .chain(&parent.inherited_temporary)
+            .map(crate::scratch::Area::share)
+            .collect();
+    }
+    /// The agent's collaborators, whose temporary files it reads.
+    pub(crate) fn configure_collaborators(
+        &mut self,
+        collaborators: crate::collaboration::Observer,
+    ) {
+        self.collaborators = collaborators;
     }
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
         self.project_map.include_credentials(redactor.clone());

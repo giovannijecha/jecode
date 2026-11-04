@@ -24,6 +24,7 @@ impl Agent {
             tokens: self.context.reported.tokens_for(&self.identity()),
             capacity: self.client.known_limits().map(|limits| limits.context),
             auto_compact: self.auto_compact_percent(),
+            pending: None,
         }
     }
 
@@ -48,6 +49,10 @@ impl Agent {
             events.emit(Event::Preparing)?;
             self.reload_restored_instructions();
             self.accept_input(events)?;
+            // Show the window automatic compaction is about to judge.
+            events.emit(Event::Context(
+                self.context_status().with_estimate(self.locked_estimate()),
+            ))?;
             self.compact_if_needed(limits, false, events)?;
             if self.accept_input(events)? {
                 // Input arriving during summaries or tool previews can change the budget.
@@ -59,7 +64,10 @@ impl Agent {
             self.reload_restored_instructions();
             let seen = self.collaboration.latest_return_sequence();
             let request = self.transport_request();
-            self.emit_context(events)?;
+            events.emit(Event::Context(
+                self.context_status()
+                    .with_estimate(request.estimated_tokens),
+            ))?;
             let messages = &request.messages;
             self.collaboration_seen = seen;
             let output_tokens = limits.and_then(|limits| {
@@ -99,7 +107,7 @@ impl Agent {
             // submitted messages reach the next provider request as well.
             let result = self.complete_attempt(
                 messages,
-                true,
+                super::recovery::Purpose::Conversation,
                 output_tokens,
                 &mut retries,
                 timing,
@@ -110,12 +118,11 @@ impl Agent {
                 Ok(Some(completion)) => {
                     self.context
                         .record_request(completion.usage.as_ref(), request.measurement);
-                    if let Some(tokens) = completion
-                        .usage
-                        .as_ref()
-                        .and_then(|usage| usage.output_tokens)
-                    {
-                        emit(Event::Generated { tokens })?;
+                    if let Some((before, state)) = request.state {
+                        self.context.anchor_state(before, state);
+                    }
+                    if let Some(event) = completion.usage.as_ref().and_then(generated) {
+                        emit(event)?;
                     }
                     return Ok(completion);
                 }
@@ -232,6 +239,8 @@ impl Agent {
         let mut next = self.context.clone();
         next.clear_measurement();
         next.from = end;
+        // State before the boundary is summarized away; current state is sent again.
+        next.states.retain(|state| state.before >= end);
         next.skill_references = self.redact(&self.skill_checkpoint_instructions());
         next.preview_until = end;
         next.preview_limit = (input_budget / 12).clamp(512, 2048);
@@ -275,8 +284,18 @@ impl Agent {
                 self.model()
             ),
         })?;
-        let (summary, output_floor) =
-            self.summarize(&transcript, &requests, limits, limit, events)?;
+        // Proactive compaction first asks over the cached conversation itself;
+        // a rejected or oversized request summarizes portions instead.
+        let in_place = if forced {
+            None
+        } else {
+            let request = self.transport_request();
+            self.summarize_in_place(&request, end, limits, limit, events)?
+        };
+        let (summary, output_floor) = match in_place {
+            Some(summary) => summary,
+            None => self.summarize(&transcript, &requests, limits, limit, events)?,
+        };
         next.summary = self.redact(&summary);
         next.summary_output_tokens = output_floor;
         let environment = self.environment();
@@ -367,6 +386,16 @@ impl Agent {
     }
 }
 
+/// The turn's reported input and output for one completed request.
+pub(super) fn generated(usage: &crate::backend::Usage) -> Option<Event> {
+    (usage.input_tokens.is_some() || usage.output_tokens.is_some()).then(|| Event::Generated {
+        input: usage.input_tokens.unwrap_or(0),
+        tokens: usage.output_tokens.unwrap_or(0),
+    })
+}
+
+#[cfg(test)]
+mod in_place_tests;
 #[cfg(test)]
 mod input_tests;
 #[cfg(test)]

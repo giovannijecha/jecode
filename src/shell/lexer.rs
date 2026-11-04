@@ -1,3 +1,6 @@
+#[path = "heredoc.rs"]
+mod heredoc;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     Word(Word),
@@ -11,6 +14,8 @@ pub struct Spanned {
     pub token: Token,
     pub start: usize,
     pub end: usize,
+    /// Original here-document body and closing line, if this is its target.
+    pub body: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,9 +31,12 @@ pub enum Part {
     Pid,
     LastBackground,
     Command(String),
+    /// An unquoted `*`, `?`, `[` or `]`, for pathname expansion.
+    Glob(char),
 }
 
 struct Cursor<'a> {
+    source: &'a str,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     position: usize,
 }
@@ -43,9 +51,27 @@ impl Iterator for Cursor<'_> {
     }
 }
 
-impl Cursor<'_> {
+impl<'a> Cursor<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            chars: source.chars().peekable(),
+            position: 0,
+        }
+    }
+
     fn peek(&mut self) -> Option<char> {
         self.chars.peek().copied()
+    }
+
+    fn rest(&self) -> &'a str {
+        &self.source[self.position..]
+    }
+
+    /// Moves forward by `length` bytes, which must end on a character boundary.
+    fn advance(&mut self, length: usize) {
+        let target = self.position + length;
+        while self.position < target && self.next().is_some() {}
     }
 }
 
@@ -90,6 +116,7 @@ impl Pending {
             token: Token::Word(Word(std::mem::take(&mut self.word))),
             start: self.start,
             end,
+            body: None,
         });
         self.unquoted.clear();
         self.started = false;
@@ -114,13 +141,11 @@ impl Pending {
 }
 
 pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
-    let mut chars = Cursor {
-        chars: script.chars().peekable(),
-        position: 0,
-    };
+    let mut chars = Cursor::new(script);
     let mut tokens = Vec::new();
     let mut pending = Pending::default();
     let mut quote = None;
+    let mut documents = Vec::new();
     loop {
         let at = chars.position;
         let Some(ch) = chars.next() else { break };
@@ -184,13 +209,21 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
                     }
                 }
                 separator(&mut tokens, chars.position);
+                heredoc::bodies(&mut chars, &mut tokens, &mut documents)?;
                 continue;
             }
             if ch.is_whitespace() {
                 pending.flush(&mut tokens, at)?;
                 if ch == '\n' {
                     separator(&mut tokens, at);
+                    heredoc::bodies(&mut chars, &mut tokens, &mut documents)?;
                 }
+                continue;
+            }
+            if ch == '<' && chars.peek() == Some('<') {
+                pending.flush(&mut tokens, at)?;
+                chars.next();
+                heredoc::start(&mut chars, &mut tokens, at, &mut documents)?;
                 continue;
             }
             if ";&|<>()".contains(ch) {
@@ -205,10 +238,21 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
                     token: Token::Op(op),
                     start: at,
                     end: chars.position,
+                    body: None,
                 });
                 continue;
             }
             pending.unquoted.push(ch);
+            if matches!(ch, '*' | '?' | '[' | ']') {
+                pending.begin(at);
+                if !pending.literal.is_empty() {
+                    pending
+                        .word
+                        .push(Part::Literal(std::mem::take(&mut pending.literal)));
+                }
+                pending.word.push(Part::Glob(ch));
+                continue;
+            }
         } else {
             pending.unquoted.push('\0');
         }
@@ -217,6 +261,12 @@ pub fn tokenize(script: &str) -> Result<Vec<Spanned>, String> {
     }
     if quote.is_some() {
         return Err("unterminated quote".into());
+    }
+    if let Some(document) = documents.first() {
+        return Err(format!(
+            "here-document needs its body on the following lines, ending with a {} line",
+            document.delimiter()
+        ));
     }
     pending.flush(&mut tokens, chars.position)?;
     Ok(tokens)
@@ -236,6 +286,7 @@ fn separator(tokens: &mut Vec<Spanned>, at: usize) {
             token: Token::Op(";"),
             start: at,
             end: at,
+            body: None,
         });
     }
 }
@@ -245,14 +296,26 @@ fn operator(ch: char, fd: Option<u8>, chars: &mut Cursor<'_>) -> Result<&'static
     Ok(match (ch, chars.peek()) {
         ('>', Some('&')) => {
             chars.next();
-            if chars.next() != Some('2') || errors {
-                return Err("only >&2 descriptor redirection is supported".into());
+            match chars.next() {
+                Some('2') if !errors => ">&2",
+                Some('1') if errors => "2>&1",
+                _ => {
+                    return Err("only 1>&2 and 2>&1 descriptor redirections are supported".into());
+                }
             }
-            ">&2"
         }
         ('&', Some('&')) => {
             chars.next();
             "&&"
+        }
+        ('&', Some('>')) => {
+            chars.next();
+            if chars.peek() == Some('>') {
+                chars.next();
+                "&>>"
+            } else {
+                "&>"
+            }
         }
         ('|', Some('|')) => {
             chars.next();
@@ -333,20 +396,24 @@ fn variable(next: char, chars: &mut Cursor<'_>) -> Result<Option<Part>, String> 
     }))
 }
 
+/// The source text up to the `)` closing a `$(`. Quotes, comments and
+/// here-document bodies may hold an unbalanced `)` or quote, so they are skipped
+/// as the substitution's own interpreter will read them.
 fn substitution(chars: &mut Cursor<'_>) -> Result<String, String> {
-    let mut script = String::new();
+    let start = chars.position;
     let mut depth = 1;
     let mut inner_quote = None;
-    let mut escaped = false;
-    for c in chars.by_ref() {
-        if escaped {
-            script.push(c);
-            escaped = false;
-            continue;
-        }
+    let mut word_start = true;
+    let mut documents = Vec::new();
+    loop {
+        let at = chars.position;
+        let Some(c) = chars.next() else {
+            return Err("unterminated command substitution".into());
+        };
+        let starts_word =
+            std::mem::replace(&mut word_start, c.is_whitespace() || ";&|(".contains(c));
         if c == '\\' && inner_quote != Some('\'') {
-            script.push(c);
-            escaped = true;
+            chars.next();
             continue;
         }
         if c == '\'' || c == '"' {
@@ -355,21 +422,37 @@ fn substitution(chars: &mut Cursor<'_>) -> Result<String, String> {
             } else if inner_quote.is_none() {
                 inner_quote = Some(c);
             }
+            continue;
         }
-        if inner_quote.is_none() {
-            if c == '(' {
-                depth += 1;
-            }
-            if c == ')' {
+        if inner_quote.is_some() {
+            continue;
+        }
+        match c {
+            '(' => depth += 1,
+            ')' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Ok(script);
+                    return Ok(chars.source[start..at].to_owned());
                 }
             }
+            '#' if starts_word => {
+                while chars.peek().is_some_and(|c| c != '\n') {
+                    chars.next();
+                }
+            }
+            '<' if chars.peek() == Some('<') => {
+                chars.next();
+                if chars.peek() == Some('<') {
+                    chars.next();
+                } else {
+                    let (delimiter, _, strip_tabs) = heredoc::header(chars)?;
+                    documents.push((delimiter, strip_tabs));
+                }
+            }
+            '\n' => heredoc::skip_bodies(chars, &mut documents)?,
+            _ => {}
         }
-        script.push(c);
     }
-    Err("unterminated command substitution".into())
 }
 
 /// Detects unquoted `{a,b}` or `{1..3}`, which Bash would expand. Literal

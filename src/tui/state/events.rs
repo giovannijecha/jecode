@@ -88,8 +88,9 @@ impl State {
                 self.question = Some(request);
             }
             Event::Context(status) => self.context = Some(status),
-            Event::Generated { tokens } => {
+            Event::Generated { input, tokens } => {
                 if let Some(activity) = &mut self.activity {
+                    activity.sent += input;
                     activity.generated += tokens;
                 }
             }

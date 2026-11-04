@@ -95,16 +95,21 @@ counted; access errors and a corrupt selected account remain explicit errors.
 - **Usage.** Input is normalized as uncached input plus cache reads plus cache
   writes. Reported cache counters are kept, and no subscription charge is
   invented.
-- **Caching.** Requests opt in to prompt caching at the stable system boundary
-  and recent durable user-message ends, with at most four breakpoints. The final
-  request-only session state stays outside them. On models documented to accept
-  mid-conversation system messages, that state is a final `role: "system"`
-  message; other models receive it as a user message.
+- **Caching.** Requests opt in to prompt caching at the stable system boundary,
+  up to two recent durable user-message ends and the automatic top-level
+  breakpoint, which covers the end of the request. Runtime session state is
+  anchored where it was first sent and added again only when it changes, so it
+  stays in the cacheable history; only state sent for the first time at the end
+  is covered by the automatic breakpoint alone. On the Claude plan, for models
+  documented to accept mid-conversation system messages, state is sent as a
+  `role: "system"` message; otherwise it is a user message.
 
 Effort and adaptive thinking are separate catalog capabilities. Adaptive
-thinking is sent only when the model reports support for it. Compaction prefers
-medium effort and conversation titles low effort, each falling back to the
-default when the catalog does not list that level. See Anthropic's
+thinking is sent only when the model reports support for it. Compaction first
+asks over the conversation's own request, with its tools and selected effort;
+when it falls back to portion summaries, it prefers medium effort without tools.
+Conversation titles use low effort. Each falls back to the default when the
+catalog does not list that level. See Anthropic's
 [thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) and
 [effort](https://platform.claude.com/docs/en/build-with-claude/effort)
 documentation.

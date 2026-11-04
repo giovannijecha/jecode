@@ -2,9 +2,7 @@ use super::*;
 use crate::{
     agent::Agent,
     backend::openrouter::OpenRouter,
-    cancel::Cancellation,
     config::{Settings, Store},
-    process,
     session::SessionConfig,
     test_support::{Directory, HttpFixture, completion, tool_call},
     tools::Tools,
@@ -19,6 +17,9 @@ mod work_tests;
 
 #[path = "card_tests.rs"]
 mod card_tests;
+
+#[path = "multi_edit_cards.rs"]
+mod multi_edit_cards;
 
 #[path = "console_probe.rs"]
 mod console_probe;
@@ -47,6 +48,9 @@ mod native_lsp;
 
 #[path = "startup_tests.rs"]
 mod startup_tests;
+
+#[path = "native_script.rs"]
+mod native_script;
 
 fn native_pty_source() -> String {
     format!(
@@ -77,35 +81,19 @@ fn native_pty_source() -> String {
 #[ignore = "requires Windows ConPTY for the real startup screen"]
 fn native_windows_startup_splash() {
     let directory = Directory::new();
-    let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', 'startup-splash')\n",
+    let executable = std::env::current_exe().unwrap();
+    let result = native_script::pty(
         native_pty_source(),
-        std::env::current_exe()
-            .unwrap()
-            .to_string_lossy()
-            .replace('\'', "''"),
-        directory.path().to_string_lossy().replace('\'', "''"),
-    );
-    let result = process::run_observed(
-        Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ])
-            .env("TEMP", directory.path())
-            .env("TMP", directory.path())
-            .env_remove("OPENROUTER_API_KEY"),
-        None,
+        "Run",
+        &[
+            &executable.to_string_lossy(),
+            &directory.path().to_string_lossy(),
+            "startup-splash",
+        ],
+        &directory,
         Duration::from_secs(60),
-        64 * 1024,
-        &Cancellation::default(),
-        None,
-        &mut |_| Ok(()),
-    )
-    .unwrap();
+        false,
+    );
     assert_eq!(
         result.exit_code,
         Some(0),
@@ -140,36 +128,19 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "auth-panels",
     ] {
         let directory = Directory::new();
-        let script = format!(
-            "Add-Type -TypeDefinition @'\n{}\n'@\n[JecodeTestPty]::Run('{}', '{}', '{}')\n",
+        let executable = std::env::current_exe().unwrap();
+        let result = native_script::pty(
             native_pty_source(),
-            std::env::current_exe()
-                .unwrap()
-                .to_string_lossy()
-                .replace('\'', "''"),
-            directory.path().to_string_lossy().replace('\'', "''"),
-            scenario
-        );
-        let result = process::run_observed(
-            Command::new("powershell.exe")
-                .args([
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    &script,
-                ])
-                .env("TEMP", directory.path())
-                .env("TMP", directory.path())
-                .env_remove("OPENROUTER_API_KEY"),
-            None,
+            "Run",
+            &[
+                &executable.to_string_lossy(),
+                &directory.path().to_string_lossy(),
+                scenario,
+            ],
+            &directory,
             Duration::from_secs(60),
-            64 * 1024,
-            &Cancellation::default(),
-            None,
-            &mut |_| Ok(()),
-        )
-        .unwrap();
+            false,
+        );
         assert_eq!(
             result.exit_code,
             Some(0),
@@ -201,39 +172,19 @@ fn native_windows_scroll_latency() {
 /// Runs one ConPTY measurement scenario and prints the host's samples.
 fn measure(scenario: &str, source: String, entry: &str) {
     let directory = Directory::new();
-    // The combined source exceeds the Windows command-line limit.
-    let path = directory.path().join("harness.cs");
-    std::fs::write(&path, source).unwrap();
-    let script = format!(
-        "Add-Type -TypeDefinition ([IO.File]::ReadAllText('{}'))\n[JecodeTestPty]::{entry}('{}', '{}', '{}')\n",
-        path.to_string_lossy().replace('\'', "''"),
-        std::env::current_exe()
-            .unwrap()
-            .to_string_lossy()
-            .replace('\'', "''"),
-        directory.path().to_string_lossy().replace('\'', "''"),
-        scenario,
-    );
-    let result = process::run_observed(
-        Command::new("powershell.exe")
-            .args([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &script,
-            ])
-            .env("TEMP", directory.path())
-            .env("TMP", directory.path())
-            .env_remove("OPENROUTER_API_KEY"),
-        None,
+    let executable = std::env::current_exe().unwrap();
+    let result = native_script::pty(
+        source,
+        entry,
+        &[
+            &executable.to_string_lossy(),
+            &directory.path().to_string_lossy(),
+            scenario,
+        ],
+        &directory,
         Duration::from_secs(180),
-        64 * 1024,
-        &Cancellation::default(),
-        None,
-        &mut |_| Ok(()),
-    )
-    .unwrap();
+        false,
+    );
     assert_eq!(
         result.exit_code,
         Some(0),

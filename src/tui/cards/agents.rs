@@ -78,7 +78,8 @@ fn workspace(record: &Value) -> String {
 }
 
 /// Changed files with their `+` / `−` line counts, summed over the calls that
-/// changed them. Sessions saved before counts existed list the path alone.
+/// changed them; a multi-file edit counts each file under its path. Sessions
+/// saved before counts existed list the path alone.
 fn files(record: &Value) -> Vec<(String, Option<(usize, usize)>)> {
     strings(record, "files")
         .into_iter()
@@ -88,11 +89,20 @@ fn files(record: &Value) -> Vec<(String, Option<(usize, usize)>)> {
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter(|tool| {
-                    tool.get("arguments")
+                .filter_map(|tool| {
+                    let change = tool.get("change")?;
+                    if tool
+                        .get("arguments")
                         .is_some_and(|arguments| field(arguments, "path") == path)
+                    {
+                        return Some(change);
+                    }
+                    change
+                        .get("files")?
+                        .as_array()?
+                        .iter()
+                        .find(|file| field(file, "path") == path)
                 })
-                .filter_map(|tool| tool.get("change"))
                 .map(|change| (number(change, "added"), number(change, "removed")))
                 .reduce(|left, right| (left.0 + right.0, left.1 + right.1));
             (path.to_owned(), counts)

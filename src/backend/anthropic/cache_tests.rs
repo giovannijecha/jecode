@@ -120,7 +120,8 @@ fn prior_tool_batch_boundary_survives_a_new_large_batch() {
         None,
     )
     .unwrap();
-    assert!(request.get("cache_control").is_none());
+    // The automatic breakpoint covers the newly sent state at the end.
+    assert!(request.get("cache_control").is_some());
     let history = request.get("messages").and_then(Value::as_array).unwrap();
     for index in [2, 4] {
         let blocks = history[index]
@@ -134,7 +135,7 @@ fn prior_tool_batch_boundary_survives_a_new_large_batch() {
 }
 
 #[test]
-fn request_state_suffix_is_outside_the_cached_prefix() {
+fn newly_sent_state_is_covered_by_the_automatic_breakpoint() {
     let messages = [
         Value::object([
             ("role", Value::string("user")),
@@ -156,7 +157,7 @@ fn request_state_suffix_is_outside_the_cached_prefix() {
         None,
     )
     .unwrap();
-    assert!(request.get("cache_control").is_none());
+    assert!(request.get("cache_control").is_some());
     let history = request.get("messages").and_then(Value::as_array).unwrap();
     assert!(
         history[0].get("content").and_then(Value::as_array).unwrap()[0]
@@ -232,7 +233,7 @@ fn mid_system_state_preserves_the_cached_prefix_as_history_grows() {
         next.last().unwrap().get("role").and_then(Value::as_str),
         Some("system")
     );
-    assert!(cold.get("cache_control").is_none());
+    assert!(cold.get("cache_control").is_some());
 }
 
 #[test]
@@ -259,5 +260,126 @@ fn mid_system_is_limited_to_documented_model_ids() {
         .unwrap();
         let message = &request.get("messages").and_then(Value::as_array).unwrap()[0];
         assert_eq!(message.get("role").and_then(Value::as_str), Some(role));
+    }
+}
+
+#[test]
+fn shared_instructions_are_cached_apart_from_the_folder_part() {
+    let shared = "Shared agent prompt.";
+    let content = format!("{shared}\n\nEnvironment:\n{{\"working_directory\":\"/a\"}}");
+    let mut messages = vec![Value::object([
+        ("role", Value::string("system")),
+        ("content", Value::string(&content)),
+        ("jecode_cache_prefix", Value::number(shared.len())),
+    ])];
+    for index in 0..6 {
+        messages.push(Value::object([
+            (
+                "role",
+                Value::string(if index % 2 == 0 { "user" } else { "assistant" }),
+            ),
+            ("content", Value::string(format!("Turn {index}"))),
+        ]));
+    }
+    let request = wire::request(
+        "model-a",
+        Effort::Default,
+        &messages,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let system = request.get("system").and_then(Value::as_array).unwrap();
+    let texts: Vec<_> = system
+        .iter()
+        .map(|block| block.get("text").and_then(Value::as_str).unwrap())
+        .collect();
+    assert_eq!(
+        texts[texts.len() - 2..],
+        [shared, "Environment:\n{\"working_directory\":\"/a\"}"]
+    );
+    let shared_block = &system[system.len() - 2];
+    assert_eq!(
+        shared_block.get("cache_control"),
+        Some(&Value::object([
+            ("type", Value::string("ephemeral")),
+            ("ttl", Value::string("1h")),
+        ]))
+    );
+    assert!(system.last().unwrap().get("cache_control").is_none());
+    let encoded = request.encode();
+    assert!(
+        encoded.matches("\"cache_control\"").count() <= 4,
+        "{encoded}"
+    );
+    assert!(!encoded.contains("jecode_cache_prefix"));
+}
+
+#[test]
+fn one_hour_retention_extends_every_breakpoint() {
+    let shared = "Shared agent prompt.";
+    let content = format!("{shared}\n\nEnvironment:\n{{}}");
+    let short = Value::object([("type", Value::string("ephemeral"))]);
+    let long = Value::object([
+        ("type", Value::string("ephemeral")),
+        ("ttl", Value::string("1h")),
+    ]);
+    for (retention, expected) in [(None, short), (Some("1h"), long.clone())] {
+        let mut system = Value::object([
+            ("role", Value::string("system")),
+            ("content", Value::string(&content)),
+            ("jecode_cache_prefix", Value::number(shared.len())),
+        ]);
+        if let (Some(retention), Value::Object(fields)) = (retention, &mut system) {
+            fields.insert("jecode_cache_retention".into(), Value::string(retention));
+        }
+        let mut messages = vec![system];
+        for index in 0..6 {
+            let role = if index % 2 == 0 { "user" } else { "assistant" };
+            messages.push(Value::object([
+                ("role", Value::string(role)),
+                ("content", Value::string(format!("Turn {index}"))),
+            ]));
+        }
+        let request = wire::request(
+            "model-a",
+            Effort::Default,
+            &messages,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        // The shared block is always long-lived; it precedes every other
+        // breakpoint in the prompt, as mixed lifetimes require.
+        let mut system = Vec::new();
+        collect_controls(request.get("system").unwrap(), &mut system);
+        assert_eq!(system, std::slice::from_ref(&long));
+        let mut rest = vec![request.get("cache_control").unwrap().clone()];
+        collect_controls(request.get("messages").unwrap(), &mut rest);
+        assert_eq!(rest.len(), 3, "{rest:?}");
+        assert!(rest.iter().all(|control| *control == expected), "{rest:?}");
+        assert!(!request.encode().contains("jecode_cache_retention"));
+    }
+}
+
+fn collect_controls(value: &Value, found: &mut Vec<Value>) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if key == "cache_control" {
+                    found.push(value.clone());
+                } else {
+                    collect_controls(value, found);
+                }
+            }
+        }
+        Value::Array(values) => values
+            .iter()
+            .for_each(|value| collect_controls(value, found)),
+        _ => {}
     }
 }

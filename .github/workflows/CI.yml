@@ -31,7 +31,7 @@ jobs:
             toolchain: 1.95.0
             npm_target: linux-x64
           - name: macOS
-            os: macos-15
+            os: macos-26
             toolchain: 1.95.0
             npm_target: darwin-arm64
     env:

@@ -22,6 +22,7 @@ const STATUS: Status = Status {
     tokens: Some(122_400),
     capacity: Some(200_000),
     auto_compact: 80,
+    pending: None,
 };
 
 fn state(columns: usize) -> State {
@@ -35,15 +36,17 @@ fn state(columns: usize) -> State {
 
 fn working(state: &mut State, seconds: f64) {
     state.status = "Working…".into();
-    let activity = Activity::with_elapsed(Duration::from_secs_f64(seconds));
+    let mut activity = Activity::with_elapsed(Duration::from_secs_f64(seconds));
+    activity.sent = 48_200;
+    activity.generated = 1_200;
     state.activity = Some(activity);
 }
 
 fn queued(state: &mut State) {
-    state.queue.push("also update the README").unwrap();
+    // One pending draft at a time (B4.3).
     state
         .queue
-        .push("and bump the version\nin Cargo.toml")
+        .push("also update the README\nand bump the version in Cargo.toml")
         .unwrap();
 }
 
@@ -116,6 +119,9 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         capacity: None,
         ..STATUS
     });
+    let mut estimate = state(columns);
+    working(&mut estimate, 12.4);
+    estimate.context = Some(STATUS.with_estimate(162_000));
     let mut unmeasured = state(columns);
     unmeasured.context = Some(Status {
         tokens: None,
@@ -126,6 +132,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ("Idle", idle),
         ("Provider usage unknown", unmeasured),
         ("Context capacity unknown", unknown),
+        ("Next request estimate as compaction starts", estimate),
         ("Typing a long draft", typing),
         ("Working", work),
         ("Working with a queued draft", queue),

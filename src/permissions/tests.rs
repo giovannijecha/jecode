@@ -9,7 +9,27 @@ fn access(kind: Kind, outside: bool) -> Access {
         outside,
         base: None,
         identity: None,
+        members: Vec::new(),
     }
+}
+
+#[test]
+fn a_grant_states_which_files_of_a_multi_file_edit_it_covers() {
+    let several = |outside: &[bool]| Access {
+        members: outside
+            .iter()
+            .map(|outside| access(Kind::Edits, *outside))
+            .collect(),
+        ..access(Kind::Edits, true)
+    };
+    let covers = |outside: &[bool]| wording::covers(&several(outside), "edit");
+    assert_eq!(covers(&[true, true]), "Edits to these files");
+    assert_eq!(covers(&[false, true]), "Edits to the outside file above");
+    assert_eq!(
+        covers(&[false, true, true]),
+        "Edits to the outside files above"
+    );
+    assert_eq!(covers(&[true]), "Edits to this file");
 }
 
 fn allowed(permissions: &Permissions, access: &Access) -> &'static str {
@@ -171,6 +191,7 @@ fn a_remembered_decision_replays_as_one_event_and_revoke_removes_it() {
             outside: true,
             base: None,
             identity: Some("digest".into()),
+            members: Vec::new(),
         },
     };
     let asked = journal::request(&request);

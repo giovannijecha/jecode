@@ -325,6 +325,7 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
         "provider/model",
         Effort::High,
         80,
+        Default::default(),
         &crate::backend::openrouter::Routing::Auto,
         Default::default(),
         std::path::Path::new("fixture/config.json"),

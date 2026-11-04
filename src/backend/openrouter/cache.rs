@@ -1,5 +1,6 @@
 //! Explicit cache boundaries for providers that accept chat content markers.
 
+use crate::backend::CacheRetention;
 use crate::json::Value;
 
 pub(super) fn supports_openai(model: &str) -> bool {
@@ -12,7 +13,18 @@ pub(super) fn supports_openai(model: &str) -> bool {
     })
 }
 
-pub(super) fn mark_recent(messages: &mut [Value]) {
+/// A breakpoint marker; one-hour retention adds the TTL Claude accepts.
+pub(super) fn marker(retention: CacheRetention) -> Value {
+    match retention {
+        CacheRetention::Short => Value::object([("type", Value::string("ephemeral"))]),
+        CacheRetention::Long => Value::object([
+            ("type", Value::string("ephemeral")),
+            ("ttl", Value::string("1h")),
+        ]),
+    }
+}
+
+pub(super) fn mark_recent(messages: &mut [Value], marker: &Value) {
     let mut marked = 0;
     let mut inside_tool_batch = false;
     for message in messages.iter_mut().rev() {
@@ -21,7 +33,7 @@ pub(super) fn mark_recent(messages: &mut [Value]) {
             continue;
         }
         inside_tool_batch = tool;
-        if mark(message) {
+        if mark(message, marker) {
             marked += 1;
             if marked == 4 {
                 break;
@@ -30,7 +42,7 @@ pub(super) fn mark_recent(messages: &mut [Value]) {
     }
 }
 
-fn mark(message: &mut Value) -> bool {
+fn mark(message: &mut Value, marker: &Value) -> bool {
     let Value::Object(fields) = message else {
         return false;
     };
@@ -43,14 +55,13 @@ fn mark(message: &mut Value) -> bool {
     let Some(content) = fields.get_mut("content") else {
         return false;
     };
-    let marker = Value::object([("type", Value::string("ephemeral"))]);
     match content {
         Value::String(text) if !text.is_empty() => {
             let text = text.clone();
             *content = Value::Array(vec![Value::object([
                 ("type", Value::string("text")),
                 ("text", Value::string(text)),
-                ("cache_control", marker),
+                ("cache_control", marker.clone()),
             ])]);
             true
         }
@@ -64,7 +75,7 @@ fn mark(message: &mut Value) -> bool {
             }) else {
                 return false;
             };
-            block.insert("cache_control".into(), marker);
+            block.insert("cache_control".into(), marker.clone());
             true
         }
         _ => false,

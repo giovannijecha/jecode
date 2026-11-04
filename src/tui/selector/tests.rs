@@ -8,6 +8,7 @@ fn settings_restore_focus_from_their_actual_rows() {
         "fixture/model",
         Effort::Default,
         80,
+        Default::default(),
         &Routing::Auto,
         Default::default(),
         path,

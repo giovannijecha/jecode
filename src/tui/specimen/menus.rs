@@ -31,6 +31,7 @@ fn state(columns: usize) -> State {
             tokens: Some(122_400),
             capacity: Some(200_000),
             auto_compact: 80,
+            pending: None,
         }),
         ..State::default()
     }
@@ -223,6 +224,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
                     MODEL,
                     Effort::High,
                     80,
+                    Default::default(),
                     &crate::backend::openrouter::Routing::Auto,
                     Default::default(),
                     std::path::Path::new("fixture/config.json"),
@@ -350,8 +352,22 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             routing(columns, Routing::Auto, true, Some(&listing), vec![]),
         ),
         (
+            "Context",
+            selecting(
+                columns,
+                Selector::context_settings(80, crate::backend::CacheRetention::Long),
+            ),
+        ),
+        (
             "Auto-compact at",
             selecting(columns, Selector::auto_compact(80)),
+        ),
+        (
+            "Prompt cache",
+            selecting(
+                columns,
+                Selector::prompt_cache(crate::backend::CacheRetention::Long),
+            ),
         ),
         ("OpenRouter key", selecting(columns, key)),
         (

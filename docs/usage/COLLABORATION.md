@@ -19,7 +19,10 @@ Collaborators have the same file, command, process, checkpoint, web, browser,
 map and plan tools as the main agent, and follow the same permission level and
 approvals. They cannot delegate further and cannot ask you questions; they
 report questions to the main agent. Each collaborator has its own processes,
-browsers, temporary files and history.
+browsers, temporary files and history. Within one conversation `tmp:` and
+`output:` references still resolve between a main agent and its collaborators
+(see [Tool reference](TOOL_REFERENCE.md#read)), and `tmp:<agent>:path` lets the
+main agent name one collaborator's temporary file. Those reads never write.
 
 Attachments are shared: the main agent can pass an `attachment:ID` in an
 assignment, and files a collaborator imports are readable by the main agent.

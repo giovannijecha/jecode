@@ -270,7 +270,7 @@ impl Shell {
                 0
             }
             Err(error) => {
-                io.report(&format!("{}: {error}", command.get_program().display()));
+                io.report(&self.launch_error(&command.get_program().to_string_lossy(), &error));
                 127
             }
         }

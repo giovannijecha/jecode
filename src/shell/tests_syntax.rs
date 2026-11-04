@@ -1,4 +1,5 @@
 use super::tests::shell;
+use super::tests_runtime::bounded_script;
 use super::*;
 use lexer::{Token, tokenize};
 
@@ -32,6 +33,140 @@ fn descriptor_numbers_must_touch_the_redirection() {
     assert_eq!(read(&directory, "one"), "1\n");
     assert_eq!(read(&directory, "quoted"), "2\n");
     assert_eq!(read(&directory, "err"), "hi\n");
+}
+
+#[test]
+fn stderr_joins_stdout_in_order_of_redirection() {
+    assert_eq!(ops("echo hi 2>&1"), ["2>&1"]);
+    assert_eq!(ops("echo hi &> log; echo hi &>> log"), ["&>", ";", "&>>"]);
+    assert!(tokenize("echo hi 2>&3").is_err());
+    let (directory, mut shell) = shell();
+    let script = "(echo b >&2) > both 2>&1; \
+        (echo c >&2) 2>&1 | cat > piped; \
+        ((echo f >&2) 2>&1 > not_here) > outer; \
+        cat missing-entry &> all; echo d &>> all";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "both"), "b\n");
+    assert_eq!(read(&directory, "piped"), "c\n");
+    assert_eq!(read(&directory, "not_here"), "");
+    assert_eq!(read(&directory, "outer"), "f\n");
+    let all = read(&directory, "all");
+    assert!(
+        all.contains("missing-entry") && all.ends_with("d\n"),
+        "{all}"
+    );
+}
+
+#[test]
+fn head_and_tail_select_lines_from_files_and_pipes() {
+    let (directory, mut shell) = shell();
+    let script = "seq 1 20 > numbers; \
+        head -n 3 numbers > h3; head -2 numbers > h2; head numbers > h10; \
+        tail -n 2 numbers > t2; tail -3 numbers > t3; tail -n +19 numbers > from19; \
+        seq 1 5 | head -n2 > piped_head; seq 1 5 | tail -n 1 > piped_tail; \
+        printf 'x\\ny' | tail -n 1 > unterminated; \
+        head -n 1 numbers numbers > headers; head -n 0 numbers > none";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "h3"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "h2"), "1\n2\n");
+    assert_eq!(read(&directory, "h10").lines().count(), 10);
+    assert_eq!(read(&directory, "t2"), "19\n20\n");
+    assert_eq!(read(&directory, "t3"), "18\n19\n20\n");
+    assert_eq!(read(&directory, "from19"), "19\n20\n");
+    assert_eq!(read(&directory, "piped_head"), "1\n2\n");
+    assert_eq!(read(&directory, "piped_tail"), "5\n");
+    assert_eq!(read(&directory, "unterminated"), "y");
+    assert_eq!(
+        read(&directory, "headers"),
+        "==> numbers <==\n1\n\n==> numbers <==\n1\n"
+    );
+    assert_eq!(read(&directory, "none"), "");
+    assert_eq!(shell.run("head -c 3 numbers"), 1);
+    assert_eq!(shell.run("tail -f numbers"), 1);
+}
+
+#[test]
+fn head_and_tail_report_a_missing_file_and_go_on() {
+    let (directory, mut shell) = shell();
+    let script = "seq 1 2 > f; \
+        head -n1 f missing f > head_out 2> head_err; echo \"$?\" > head_status; \
+        tail -n1 missing f > tail_out 2> tail_err; echo \"$?\" > tail_status; \
+        head -n1 missing > alone 2> alone_err; echo \"$?\" > alone_status";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(
+        read(&directory, "head_out"),
+        "==> f <==\n1\n\n==> f <==\n1\n"
+    );
+    assert!(read(&directory, "head_err").contains("head: missing:"));
+    assert_eq!(read(&directory, "head_status"), "1\n");
+    assert_eq!(read(&directory, "tail_out"), "==> f <==\n2\n");
+    assert!(read(&directory, "tail_err").contains("tail: missing:"));
+    assert_eq!(read(&directory, "tail_status"), "1\n");
+    assert_eq!(read(&directory, "alone"), "");
+    assert!(read(&directory, "alone_err").contains("missing"));
+    assert_eq!(read(&directory, "alone_status"), "1\n");
+}
+
+#[test]
+fn head_leaves_a_redirected_file_after_its_lines() {
+    let (directory, mut shell) = shell();
+    let script = "seq 1 3 > f; (head -n1; cat) < f > rest; \
+        (head -n1; head -n1; cat) < f > steps; (head -n0; cat) < f > none; \
+        (tail -n1; cat) < f > all_read";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "rest"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "steps"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "none"), "1\n2\n3\n");
+    assert_eq!(read(&directory, "all_read"), "3\n");
+}
+
+#[test]
+fn missing_programs_name_the_built_ins() {
+    let (directory, mut shell) = shell();
+    assert_eq!(
+        shell.run("jecode-missing-program-fixture 2> err; echo \"$?\" > status"),
+        0
+    );
+    assert_eq!(read(&directory, "status"), "127\n");
+    let error = read(&directory, "err");
+    assert!(error.contains(builtins::SUMMARY), "{error}");
+    for name in builtins::SUMMARY.split(", ") {
+        let name = name.split(' ').next().unwrap();
+        assert!(builtins::is_builtin(name), "{name}");
+    }
+    let bash = crate::tools::definitions()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool.get("name").and_then(crate::json::Value::as_str) == Some("bash"))
+        .and_then(|tool| tool.get("description"))
+        .and_then(crate::json::Value::as_str)
+        .unwrap();
+    assert!(bash.contains(builtins::SUMMARY), "{bash}");
+}
+
+#[cfg(windows)]
+#[test]
+fn missing_programs_point_to_a_windows_script_of_the_same_name() {
+    let (directory, mut shell) = shell();
+    let bin = directory.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::write(bin.join("jecode-script-fixture.cmd"), "@echo %1> ran\r\n").unwrap();
+    let path = format!("export PATH='{}'", bin.display());
+    assert_eq!(
+        shell.run(&format!("{path}; jecode-script-fixture 2> err")),
+        127
+    );
+    let error = read(&directory, "err");
+    assert!(
+        error.contains("run the script as jecode-script-fixture.cmd"),
+        "{error}"
+    );
+    assert_eq!(
+        shell.run(&format!("{path}; jecode-script-fixture.cmd argument")),
+        0
+    );
+    assert_eq!(read(&directory, "ran").trim(), "argument");
 }
 
 #[test]
@@ -124,6 +259,33 @@ fn escaped_closing_parenthesis_stays_inside_command_substitution() {
 }
 
 #[test]
+fn command_substitution_reads_here_document_bodies_as_text() {
+    let (directory, mut shell) = shell();
+    let script = "echo \"$(cat <<'EOF'\nSubject\n\nit's a fix (for \"quotes)\nEOF\n)\" > message\n\
+        echo \"$(cat <<EOF\nvalue ) $(echo 'inner)')\nEOF\n)\" > expanded\n\
+        echo \"$(cat <<EOF\nbody\nEOF)\" > closed_on_delimiter\n\
+        echo \"$(cat <<-EOF\n\t' tabbed )\n\tEOF\n)\" > tabs\n\
+        echo \"$(cat <<A; cat <<B\n'a\nA\n)b\nB\n)\" > two\n\
+        echo $(tr -d o <<< \"foo)\") > here_string\n\
+        echo \"$(echo keep # don't close )\n)\" > comment\n\
+        echo \"$(echo not#comment)\" > hash\n";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(
+        read(&directory, "message"),
+        "Subject\n\nit's a fix (for \"quotes)\n"
+    );
+    assert_eq!(read(&directory, "expanded"), "value ) inner)\n");
+    assert_eq!(read(&directory, "closed_on_delimiter"), "body\n");
+    assert_eq!(read(&directory, "tabs"), "' tabbed )\n");
+    assert_eq!(read(&directory, "two"), "'a\n)b\n");
+    assert_eq!(read(&directory, "here_string"), "f)\n");
+    assert_eq!(read(&directory, "comment"), "keep\n");
+    assert_eq!(read(&directory, "hash"), "not#comment\n");
+    assert!(tokenize("echo \"$(cat <<EOF\nnever closed)\"").is_err());
+    assert!(tokenize("echo $(cat <<)").is_err());
+}
+
+#[test]
 fn set_e_stops_only_on_unhandled_failures() {
     let (directory, mut shell) = shell();
     let script = "set -e; false || true; false && true; if false; then :; fi; echo ok > ok; false; echo no > no";
@@ -141,4 +303,155 @@ fn long_scripts_run_without_deep_recursion() {
     script.push_str("fi > lines\n");
     assert_eq!(shell.run(&script), 0);
     assert_eq!(read(&directory, "lines").len(), 5000 * "line\n".len());
+}
+
+#[test]
+fn here_documents_feed_standard_input() {
+    let (directory, mut shell) = shell();
+    let script = "NAME=world\n\
+        cat > literal <<'EOF'\nconst q = 'it\'s' + `${x}`; $NAME\nEOF\n\
+        cat > expanded <<EOF\nhello $NAME \\$HOME \"quoted\"\nEOF\n\
+        cat <<-END > tabs\n\tindented\n\tEND\n\
+        cat >> literal << \"STOP\"\n2 > 1 && echo no\nSTOP\n\
+        tr -d o <<< \"foo\" > here_string\n\
+        echo after > after";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(
+        read(&directory, "literal"),
+        "const q = 'it\'s' + `${x}`; $NAME\n2 > 1 && echo no\n"
+    );
+    assert_eq!(
+        read(&directory, "expanded"),
+        "hello world $HOME \"quoted\"\n"
+    );
+    assert_eq!(read(&directory, "tabs"), "indented\n");
+    assert_eq!(read(&directory, "here_string"), "f\n");
+    assert_eq!(read(&directory, "after"), "after\n");
+    assert!(!directory.path().join("no").exists());
+    for broken in [
+        "cat <<EOF",
+        "cat <<EOF\nbody",
+        "cat <<\nx",
+        "cat <<EOF\n`date`\nEOF",
+    ] {
+        assert!(tokenize(broken).is_err(), "{broken}");
+    }
+}
+
+#[test]
+fn background_lists_keep_here_document_bodies() {
+    let (directory, mut shell) = shell();
+    let script = "cat <<FIRST | cat > piped &\nfrom pipeline\nFIRST\n\
+        (cat <<SECOND) > grouped &\nfrom subshell\nSECOND\n\
+        (cat <<INSIDE\ninside subshell\nINSIDE\n) > inside &\n\
+        cat <<LEFT | cat <<RIGHT > multiple &\nignored\nLEFT\nsecond body\nRIGHT\n\
+        wait";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "piped"), "from pipeline\n");
+    assert_eq!(read(&directory, "grouped"), "from subshell\n");
+    assert_eq!(read(&directory, "inside"), "inside subshell\n");
+    assert_eq!(read(&directory, "multiple"), "second body\n");
+}
+
+#[test]
+fn background_lists_leave_out_bodies_of_earlier_commands() {
+    let (directory, mut shell) = shell();
+    let script = "cat <<A > first; (echo x > second\ntouch injected\nA\necho y > third) &\n\
+        wait\n\
+        cat <<C > one; (cat <<D > two\nfor one\nC\nfor two\nD\n) &\n\
+        wait";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "first"), "touch injected\n");
+    assert_eq!(read(&directory, "second"), "x\n");
+    assert_eq!(read(&directory, "third"), "y\n");
+    assert!(!directory.path().join("injected").exists());
+    assert_eq!(read(&directory, "one"), "for one\n");
+    assert_eq!(read(&directory, "two"), "for two\n");
+}
+
+#[test]
+fn patterns_list_only_paths_that_exist_and_keep_dangling_links() {
+    let (directory, mut shell) = shell();
+    let root = directory.path();
+    fs::create_dir_all(root.join("tree/with")).unwrap();
+    fs::create_dir_all(root.join("tree/without")).unwrap();
+    fs::write(root.join("tree/with/wanted"), "").unwrap();
+    let absolute = root.display().to_string().replace('\\', "/");
+    assert_eq!(
+        shell.run(&format!(
+            "echo '{absolute}'/tree/*/wanted > absolute; echo tree/*/wanted > relative"
+        )),
+        0
+    );
+    assert_eq!(
+        read(&directory, "absolute"),
+        format!("{absolute}/tree/with/wanted\n")
+    );
+    assert_eq!(read(&directory, "relative"), "tree/with/wanted\n");
+
+    fs::create_dir(root.join("links")).unwrap();
+    fs::create_dir(root.join("gone")).unwrap();
+    fs::write(root.join("links/real"), "").unwrap();
+    super::tests_grep::directory_link(&root.join("gone"), &root.join("links/dangling"));
+    fs::remove_dir(root.join("gone")).unwrap();
+    let script = "cd links; echo * > ../all; ls * > ../listed; echo \"$?\" > ../status; \
+        ls dangling > ../named";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "all"), "dangling real\n");
+    assert_eq!(read(&directory, "listed"), "dangling\nreal\n");
+    assert_eq!(read(&directory, "status"), "0\n");
+    assert_eq!(read(&directory, "named"), "dangling\n");
+}
+
+#[test]
+fn many_stars_on_a_long_name_stay_fast() {
+    let directory = crate::test_support::Directory::new();
+    let name = "a".repeat(120);
+    fs::write(directory.path().join(&name), "").unwrap();
+    let script = "echo *a*a*a*a*a*a*a*a*b > unmatched; echo *a*a*a*a*a*a*a*a* > matched";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(read(&directory, "unmatched"), "*a*a*a*a*a*a*a*a*b\n");
+    assert_eq!(read(&directory, "matched"), format!("{name}\n"));
+}
+
+#[test]
+fn patterns_accept_named_classes() {
+    let (directory, mut shell) = shell();
+    let script = "mkdir h; cd h; echo x > a; echo x > 1; echo x > B; \
+        echo [[:alpha:]] > ../alpha; echo [[:digit:]] > ../digit; \
+        echo [![:alpha:]] > ../negated; echo [[:alpha:][:digit:]] > ../both; \
+        echo [[:digit:]x] > ../mixed; echo [[:foo:]] > ../unknown; \
+        cd ..; grep -rl --include='[[:alpha:]]' x h > listed";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "alpha"), "B a\n");
+    assert_eq!(read(&directory, "digit"), "1\n");
+    assert_eq!(read(&directory, "negated"), "1\n");
+    assert_eq!(read(&directory, "both"), "1 B a\n");
+    assert_eq!(read(&directory, "mixed"), "1\n");
+    assert_eq!(read(&directory, "unknown"), "[[:foo:]]\n");
+    assert_eq!(read(&directory, "listed"), "h/B\nh/a\n");
+}
+
+#[test]
+fn unquoted_patterns_expand_to_sorted_paths() {
+    let (directory, mut shell) = shell();
+    let script = "mkdir -p src/nested test; touch src/b.js src/a.js src/c.rs src/.hidden.js src/nested/d.js test/x.test.js; \
+        echo src/*.js > star; echo src/?.rs > question; echo src/[ab].js > class; \
+        echo src/[!a].js > negated; echo src/*/*.js > nested; echo 'src/*.js' \"src/*.js\" > quoted; \
+        echo src/*.none > unmatched; echo src/.*.js > dotted; X=src/*.js; echo \"$X\" > assigned; \
+        for f in test/*.js; do echo \"$f\" > looped; done; \
+        if [ -d src ]; then echo yes > bracket; fi; cat src/*.js > joined";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "star"), "src/a.js src/b.js\n");
+    assert_eq!(read(&directory, "question"), "src/c.rs\n");
+    assert_eq!(read(&directory, "class"), "src/a.js src/b.js\n");
+    assert_eq!(read(&directory, "negated"), "src/b.js\n");
+    assert_eq!(read(&directory, "nested"), "src/nested/d.js\n");
+    assert_eq!(read(&directory, "quoted"), "src/*.js src/*.js\n");
+    assert_eq!(read(&directory, "unmatched"), "src/*.none\n");
+    assert_eq!(read(&directory, "dotted"), "src/.hidden.js\n");
+    assert_eq!(read(&directory, "assigned"), "src/*.js\n");
+    assert_eq!(read(&directory, "looped"), "test/x.test.js\n");
+    assert_eq!(read(&directory, "bracket"), "yes\n");
+    assert_eq!(read(&directory, "joined"), "");
 }

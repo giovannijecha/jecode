@@ -15,7 +15,18 @@ impl Agent {
         Arc::clone(&self.auto_compact)
     }
 
+    /// Runs an agent action and returns the model view of its result.
     pub(super) fn agent_tool(&self, arguments: &Value) -> Result<Value, String> {
+        let action = arguments
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let id = arguments.get("id").and_then(Value::as_str);
+        self.agent_action(arguments)
+            .map(|value| view::result(action, id, value))
+    }
+
+    fn agent_action(&self, arguments: &Value) -> Result<Value, String> {
         if self.child {
             return Err("Collaborators cannot delegate or manage agents".into());
         }
@@ -230,6 +241,7 @@ impl Agent {
         child.permissions = self.permissions.for_agent(id);
         child.accounts = self.accounts.clone();
         child.auto_compact = self.auto_compact_preference();
+        child.cache_retention = self.cache_retention_preference();
         child.routing_preferences = self.routing_preferences.clone();
         child.redactor.include(self.redactor.clone());
         if mode == Mode::Isolated {
@@ -246,15 +258,12 @@ impl Agent {
             .and_then(Path::parent)
             .ok_or("Invalid session storage location")?
             .to_path_buf();
-        let child_home = handle
-            .store()
-            .bucket()
-            .join("collaboration")
-            .join(handle.id())
-            .join("child-home");
+        let child_home = handle.store().collaborator_home(&handle.id());
         crate::disk::ensure_private_directory(&child_home)
             .map_err(|error| format!("Could not prepare collaborator storage: {error}"))?;
         child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
+        // References the main agent hands over resolve in its own storage.
+        child.tools.inherit_references(&self.tools);
         child.enable_checkpoints(&child_home);
         child.skills.configure(&home);
         let _ = child.configure_mcp(&home);
@@ -293,6 +302,8 @@ fn optional_number(value: &Value, name: &str) -> Result<Option<usize>, String> {
         .transpose()
 }
 
+mod view;
+
 #[cfg(test)]
 mod attachment_tests;
 #[cfg(test)]
@@ -310,8 +321,14 @@ mod reclaim_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
+mod reference_tests;
+#[cfg(test)]
 mod resume_tests;
+#[cfg(test)]
+mod temporary_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod update_tests;
+#[cfg(all(test, windows))]
+mod windows_temp_tests;

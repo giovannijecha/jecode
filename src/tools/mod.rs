@@ -1,5 +1,6 @@
 mod access;
 mod attachment;
+pub(crate) mod coerce;
 mod configuration;
 pub(crate) mod discovery;
 pub(crate) mod edit;
@@ -12,6 +13,8 @@ mod network;
 pub mod processes;
 pub(crate) mod schema;
 mod shell;
+mod temporary;
+mod writes;
 
 pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
@@ -73,6 +76,10 @@ pub struct Tools {
     root: PathBuf,
     outputs: crate::output::Store,
     temporary: Option<crate::scratch::Area>,
+    /// Temporary areas of the agents above this one, nearest first.
+    inherited_temporary: Vec<crate::scratch::Area>,
+    /// This agent's collaborators, whose temporary files it can read.
+    collaborators: crate::collaboration::Observer,
     attachments: Option<crate::attachments::Pool>,
     processes: processes::Registry,
     checkpoints: Option<Arc<Session>>,
@@ -103,6 +110,8 @@ impl Tools {
             ),
             root,
             temporary: None,
+            inherited_temporary: Vec::new(),
+            collaborators: crate::collaboration::Observer::default(),
             attachments: None,
             processes: processes::Registry::default(),
             checkpoints: None,
@@ -142,6 +151,7 @@ impl Tools {
         let Some(alias) = path.strip_prefix("tmp:").or(absolute.as_deref()) else {
             return Ok((self.root.clone(), arguments.clone()));
         };
+        temporary::own(path)?;
         let (root, path) = self.temporary()?.file(alias, create)?;
         let mut arguments = arguments.clone();
         if let Value::Object(fields) = &mut arguments {
@@ -254,7 +264,7 @@ impl Tools {
                             self.read_checkpoint(path, &arguments, cancellation)
                                 .map(|value| (value, None))
                         } else {
-                            let (root, arguments) = self.file_arguments(&arguments, false)?;
+                            let (root, arguments) = self.read_arguments(&arguments)?;
                             let (root, arguments) = match base {
                                 Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
                                 None => (root, arguments),
@@ -268,44 +278,13 @@ impl Tools {
                             .map(|value| (value, None))
                         }
                     }
-                    "write" | "edit" => {
-                        let (root, arguments) = self.file_arguments(&arguments, name == "write")?;
-                        let (root, arguments) = match base {
-                            Some(base) => (base.to_path_buf(), self.rebase(base, &arguments)),
-                            None => (root, arguments),
-                        };
-                        // Session temporary files are outside the workspace scope.
-                        let checkpoints = self.checkpoints.as_deref().filter(|_| root == self.root);
-                        let result = if name == "write" {
-                            files::write_with_change(&root, &arguments, checkpoints, cancellation)
-                        } else {
-                            files::edit_with_change(&root, &arguments, checkpoints, cancellation)
-                        };
-                        result.map(|(mut value, change)| {
-                            if self.checkpoints.is_some()
-                                && root != self.root
-                                && value.get("bytes_written").is_some()
-                                && let Value::Object(fields) = &mut value
-                            {
-                                fields.insert(
-                                    "checkpoint".into(),
-                                    Value::object([
-                                        ("status", Value::string("none")),
-                                        ("saved_paths", Value::number(0)),
-                                        (
-                                            "reason",
-                                            Value::string(if base.is_some() {
-                                                "the file is outside the working folder"
-                                            } else {
-                                                "session temporary storage is outside the workspace"
-                                            }),
-                                        ),
-                                    ]),
-                                );
-                            }
-                            (value, change)
-                        })
+                    "edit" if edit::several(&arguments) => {
+                        let outside = permission
+                            .and_then(|(_, access)| access.as_ref())
+                            .is_some_and(|access| access.outside);
+                        self.edit_files(&arguments, outside, cancellation)
                     }
+                    "write" | "edit" => self.change_file(name, &arguments, base, cancellation),
                     "bash" | "exec" | "process" => {
                         let temporary = self
                             .temporary
@@ -328,6 +307,7 @@ impl Tools {
                         if let Some(policy) = &mut sandbox {
                             policy.protect_session_home(self.session_home.as_deref())?;
                             policy.allow_installed_rust_tools(self.session_home.as_deref())?;
+                            policy.allow_installed_node_tools(self.session_home.as_deref())?;
                             if name == "bash" {
                                 policy.allow_owned_shell()?;
                             }
@@ -488,5 +468,7 @@ pub(crate) fn optional_number(
 mod checkpoint_tests;
 #[cfg(test)]
 mod local_read_tests;
+#[cfg(test)]
+mod multi_edit_tests;
 #[cfg(test)]
 mod tests;

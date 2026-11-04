@@ -17,6 +17,7 @@ fn with_status(tokens: usize, capacity: Option<usize>) -> State {
             tokens: Some(tokens),
             capacity,
             auto_compact: 80,
+            pending: None,
         }),
         ..State::default()
     }
@@ -177,6 +178,7 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
                 "provider/model",
                 Effort::Default,
                 80,
+                Default::default(),
                 &crate::backend::openrouter::Routing::Auto,
                 Default::default(),
                 std::path::Path::new("fixture/config.json"),
@@ -205,7 +207,8 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
             let shown = if height == 12 {
                 short
             } else {
-                "Auto-compact at"
+                // The Settings row, and the breadcrumb above Auto-compact.
+                "Context"
             };
             assert!(rows.iter().any(|row| row.contains(shown)), "{rows:#?}");
         }
@@ -224,9 +227,25 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
     assert_eq!(rows[row], "› 80% of the context window");
     assert_eq!(column, 4);
     assert!(rows[row - 1].starts_with("─ Threshold ─"));
-    assert!(rows[row + 1].starts_with("─ Settings › Auto-compact at "));
+    assert!(rows[row + 1].starts_with("─ Context › Auto-compact at "));
     assert!(rows[row + 1].ends_with(" this and new conversations ─"));
     assert_eq!(rows[row + 2], "   Enter  save    Esc  back");
     assert_eq!(rows.len(), row + 3);
     assert!(rows.iter().all(|row| text::cells(row) <= state.width));
+}
+
+#[test]
+fn the_meter_marks_the_next_request_estimate_until_usage_arrives() {
+    let mut state = with_status(90_000, Some(1_000_000));
+    if let Some(status) = &mut state.context {
+        *status = status.with_estimate(790_000);
+    }
+    assert!(footer(&state).contains("~79%"));
+    // A reading within a point of the estimate stays the provider's.
+    let mut close = with_status(90_000, Some(1_000_000));
+    if let Some(status) = &mut close.context {
+        *status = status.with_estimate(95_000);
+    }
+    assert!(footer(&close).contains(" 9%"));
+    assert!(!footer(&close).contains('~'));
 }

@@ -47,8 +47,9 @@ shortcuts; [Commands and keys](COMMANDS.md) has the full reference.
 ## While the agent works
 
 The status row shows a blinking `>_`, the current activity (the running tool's
-description, or a phase such as `Thinking`), the elapsed time and the number of
-tokens generated. The composer stays editable.
+description, or a phase such as `Thinking`), the elapsed time and the turn's
+token counts: `↑` input tokens sent, cached input included, and `↓` tokens
+generated. The counts appear while no tool progress is shown. The composer stays editable.
 
 - **Add a message.** Press Enter to queue it. It appears above the status row
   marked `queued`, and the agent receives it before its next model request. Only
@@ -93,8 +94,11 @@ conversation:
 
 The right side shows the model and effort, then an eight-cell context gauge. The
 gauge fills toward the **Auto-compact at** threshold, so a full gauge means
-compaction is due, and turns amber within three points of it. `<1%` means a
-little context is used; `?` means there is no reliable figure yet. See
+compaction is due, and turns amber within three points of it. It shows the last
+provider reading; a leading `~`, as in `~52%`, marks an estimate of the next
+request instead, shown while it differs from that reading by at least one point
+of the window. `<1%` means a little context is used; `?` means there is no
+reliable figure yet. See
 [Long-running work](../usage/LONG_WORK.md#context-and-compaction).
 
 While collaborators are working or waiting for review, an `AGENTS` badge with

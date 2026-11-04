@@ -128,9 +128,14 @@ available.
 
 Before summarizing, `agent/compaction.rs` turns large tool payloads into
 previews while keeping the original results. If that is not enough,
-`agent/summary.rs` asks the same model, at medium effort when supported, for a
-plain-text handoff targeting at most 16 KiB. The transcript is folded into the
-previous summary in chronological portions. A verbatim tail of recent messages
+`agent/summary.rs` asks the same model for a plain-text handoff targeting at
+most 16 KiB. Proactive compaction first appends the request to the
+conversation's own request, with its tool definitions and selected effort, so
+the provider's cached prefix is reused (`Purpose::CachedSummary`). If that
+request leaves no room, fails on context or length, or returns tool calls or
+no text, and for forced compaction, the transcript is folded into the previous
+summary in chronological portions, without tools and at medium effort when
+supported. A verbatim tail of recent messages
 is kept within a quarter of the input budget; a tool call and all its results
 stay on the same side of that boundary. Failed compaction leaves the previous
 context in place.
@@ -142,14 +147,17 @@ keeping the first and the latest user requests within its byte budget.
 
 The built-in instructions live in `agent/PROMPT.md` and are compiled into the
 executable. Project instructions and the skill catalog form the stable system
-prefix. Permissions, temporary paths, plans and collaboration state form a
-separate final request-only message, so changes to them do not invalidate the
-cached prefix. Neither projection rewrites the saved system message.
+prefix. Permissions, temporary paths, plans and collaboration state form
+request-only session-state messages (`context/state.rs`). A state stays where it
+was first sent and is added again only when its text changes, so earlier
+requests remain an identical prefix for the provider's cache. Neither
+projection rewrites the saved system message.
 
 Each request attempt records its operation, resolved effort, timing and the
 usage counters the provider reported. Background title requests run at low
-effort and compaction at medium; both fall back to the provider default when
-the model does not advertise that level.
+effort and portion summaries at medium; both fall back to the provider default
+when the model does not advertise that level. A cached summary uses the
+selected effort.
 
 ### Input and processes
 
@@ -333,10 +341,15 @@ credential environment variables of every available backend before launch.
 | `backend/openai/` | Stateless Responses requests with an API key (`openai-api`) or ChatGPT account (`openai`) | [OpenAI backend](OPENAI.md) |
 | `backend/anthropic/` | Streamed Messages requests with an API key (`anthropic-api`) or Claude compatibility account (`anthropic`) | [Anthropic backend](ANTHROPIC.md) |
 
-Caching follows each provider's model. Anthropic requests mark the stable system
-block and recent durable user-message boundaries. Through OpenRouter, requests
+Caching follows each provider's model. Anthropic requests cache the built-in
+prompt, shared by every conversation, for one hour on its own breakpoint, and
+mark recent durable user-message boundaries. Through OpenRouter, requests
 to models that accept explicit cache markers (`backend/openrouter/cache.rs`)
-mark up to four recent durable user or tool-batch boundaries. The ChatGPT route
+mark up to four recent durable user or tool-batch boundaries. The saved
+**Prompt cache** lifetime (`backend/retention.rs`) reaches adapters as a
+request-only field of the system message, read at every request, so Claude
+breakpoints on Anthropic and OpenRouter take a one-hour TTL by default, or the
+provider's five minutes when that is chosen. The ChatGPT route
 relies on implicit caching with a stable per-conversation key. Reported cache
 reads and writes stay separate from charged cost.
 

@@ -190,7 +190,7 @@ fn returned_messages_do_not_enter_the_unmeasured_agent_estimate() {
     assert_eq!(
         projected,
         vec![
-            messages[0].clone(),
+            agent.current_system_message(),
             messages[1].clone(),
             messages[4].clone()
         ]

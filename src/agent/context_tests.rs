@@ -66,7 +66,7 @@ fn current_request_boundary_survives_compaction_resume_and_a_new_goal() {
         .prepare_turn("Audit without more code changes")
         .unwrap();
     let request = resumed.transport_messages();
-    let payload = text(crate::test_support::durable_messages(&request));
+    let payload = text(&crate::test_support::durable_messages(&request));
     assert!(payload.contains("history:3 — archived user request"));
     assert!(payload.ends_with("Audit without more code changes"));
     assert!(fixture.finish().is_empty());
@@ -167,12 +167,7 @@ fn live_curl_delivers_reasoning_and_text_before_completion_and_tools_wait_for_va
     );
     let requests = fixture.finish();
     assert_eq!(requests[0].body.get("stream"), Some(&Value::Bool(true)));
-    let messages = requests[1]
-        .body
-        .get("messages")
-        .unwrap()
-        .as_array()
-        .unwrap();
+    let messages = crate::test_support::request_messages(&requests[1].body);
     assert_eq!(
         messages[2]
             .get("reasoning_details")
@@ -315,4 +310,59 @@ fn registering_an_account_masks_its_credentials_before_selection() {
         "[redacted] [redacted]"
     );
     assert_eq!(agent.model(), "fixture/model");
+}
+
+/// Every request in a tool loop extends the previous one exactly, so provider
+/// prompt caches can reuse it. Runtime state stays where it was first sent.
+#[test]
+fn tool_loop_requests_extend_the_previous_request_exactly() {
+    let directory = Directory::new();
+    std::fs::write(directory.path().join("a.txt"), "alpha\n").unwrap();
+    let read = || Value::object([("path", Value::string("a.txt"))]);
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion("Reading.", vec![tool_call("r1", "read", read())]),
+        ),
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "l1",
+                    "list",
+                    Value::object([("path", Value::string("."))]),
+                )],
+            ),
+        ),
+        (200, completion("", vec![tool_call("r2", "read", read())])),
+        (200, completion("Done.", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.run_turn("Inspect the file", &mut |_| Ok(())).unwrap();
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 4);
+    let messages = |index: usize| {
+        requests[index]
+            .body
+            .get("messages")
+            .and_then(Value::as_array)
+            .unwrap()
+            .to_vec()
+    };
+    for index in 1..requests.len() {
+        let (earlier, later) = (messages(index - 1), messages(index));
+        assert!(later.len() > earlier.len());
+        assert_eq!(later[..earlier.len()], earlier[..], "request {index}");
+    }
+    let last = messages(3);
+    let states = last
+        .iter()
+        .filter(|message| crate::test_support::is_request_state(message))
+        .count();
+    assert_eq!(states, 1, "unchanged state is sent once");
+    assert!(crate::test_support::is_request_state(&last[2]));
 }

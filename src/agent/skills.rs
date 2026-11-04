@@ -42,22 +42,26 @@ impl Agent {
             if message.get("role").and_then(Value::as_str) != Some("tool") {
                 continue;
             }
-            let Some(reference) = message
+            let Some(receipt) = message
                 .get("content")
                 .and_then(Value::as_str)
                 .and_then(|content| json::parse(content).ok())
-                .and_then(|receipt| {
-                    receipt
-                        .get("skill_reference")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                })
             else {
                 continue;
             };
-            if let Ok((name, _)) = crate::skills::parse_reference(&reference) {
-                self.used_skills.insert(name.to_owned());
-            }
+            self.used_skills
+                .extend(delivered(&receipt).map(str::to_owned));
         }
     }
+}
+
+/// The skills a read result delivered: its own, or each file's of a
+/// multi-path read.
+pub(super) fn delivered(result: &Value) -> impl Iterator<Item = &str> {
+    let files = result.get("files").and_then(Value::as_array);
+    std::iter::once(result)
+        .chain(files.into_iter().flatten())
+        .filter_map(|item| item.get("skill_reference")?.as_str())
+        .filter_map(|reference| crate::skills::parse_reference(reference).ok())
+        .map(|(name, _)| name)
 }

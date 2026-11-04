@@ -137,8 +137,9 @@ The local transcript is the recoverable copy and is independent of provider
 caching. Each request sends the conversation ID as `prompt_cache_key` and as the
 `session-id` header for cache affinity; a stable key does not guarantee a cache
 hit. The subscription route rejected explicit `prompt_cache_options`, so Jecode
-relies on implicit caching and places request-only session state in a final
-developer message, after the stable prefix. Reported `cached_tokens` appear with
+relies on implicit caching and sends runtime session state as developer
+messages anchored where each was first sent, added again only when it changes,
+so earlier requests stay an identical prefix. Reported `cached_tokens` appear with
 the completion.
 
 The stream reports progress as soon as a reasoning or tool-call item opens, so

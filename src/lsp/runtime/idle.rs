@@ -38,7 +38,7 @@ impl Runtime {
                         }
                     }
                 }
-                let Ok(mut state) = entry.state.try_lock() else {
+                let Ok(mut state) = entry.try_session() else {
                     continue;
                 };
                 if state.generation != generation {

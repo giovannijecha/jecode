@@ -92,6 +92,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         MODEL,
         crate::effort::Effort::High,
         80,
+        Default::default(),
         &crate::backend::openrouter::Routing::Auto,
         Default::default(),
         std::path::Path::new("fixture/config.json"),

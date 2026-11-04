@@ -92,7 +92,13 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
         };
         if progress.is_none() && !activity.stopping {
             facts.extend(
-                activity::generated(activity.generated).map(|tokens| Line::new(&tokens, DIM)),
+                [
+                    activity::sent(activity.sent),
+                    activity::generated(activity.generated),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|tokens| Line::new(&tokens, DIM)),
             );
         }
         return fitted(
@@ -395,6 +401,23 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
                 },
             ),
         },
+        "read" if arguments.get("paths").is_some() => {
+            match arguments
+                .get("paths")
+                .and_then(Value::as_array)
+                .unwrap_or(&[])
+            {
+                [path] => labelled(
+                    "Reading",
+                    short(
+                        path.as_str()
+                            .and_then(|path| path.rsplit(['/', '\\']).next())
+                            .unwrap_or(""),
+                    ),
+                ),
+                paths => format!("Reading {} files", paths.len()),
+            }
+        }
         "read" => match field("path").strip_prefix("skill:") {
             Some(skill) => labelled(
                 "Loading skill",
@@ -402,7 +425,14 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
             ),
             None => labelled("Reading", file("path")),
         },
-        "edit" => labelled("Editing", file("path")),
+        "edit" => match crate::events::edited(arguments).as_slice() {
+            [] => labelled("Editing", file("path")),
+            [path] => labelled(
+                "Editing",
+                short(path.rsplit(['/', '\\']).next().unwrap_or(path)),
+            ),
+            paths => format!("Editing {} files", paths.len()),
+        },
         "write" => labelled("Writing", file("path")),
         "bash" => labelled("Running", short(field("command"))),
         "exec" => labelled("Starting", short(&crate::events::target(name, arguments))),

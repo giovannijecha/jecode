@@ -238,7 +238,16 @@ fn collapsed_card(
 /// Expanded output is a plain retained stream followed by its closing facts.
 fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<Line>) -> Card {
     if let Some(result) = tool.result {
-        if let Some(error) = result.get("error").and_then(crate::json::Value::as_str) {
+        if let Some(reason) = crate::events::not_run(result) {
+            rows.extend(line_rows(
+                &Line::new(&text::clean(reason), MUTED),
+                columns,
+                3,
+                "    ",
+                "    ",
+                DIM,
+            ));
+        } else if let Some(error) = result.get("error").and_then(crate::json::Value::as_str) {
             rows.extend(line_rows(
                 &Line::new(&text::clean(error), BAD),
                 columns,

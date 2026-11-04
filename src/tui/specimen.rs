@@ -286,6 +286,7 @@ mod discovery;
 mod map;
 mod menus;
 mod messages;
+mod multi_edit;
 mod notices;
 mod panels;
 mod permissions;

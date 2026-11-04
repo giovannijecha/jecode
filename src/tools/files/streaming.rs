@@ -182,7 +182,7 @@ pub(super) fn edit(
         changed = true;
     }
     if !changed {
-        return Ok((written(0, None), None));
+        return Ok((edited(0, None, false), None));
     }
     // All matching and sequential composition is complete before any staging
     // write. Materialize the final view once, independent of the edit count.
@@ -214,7 +214,7 @@ pub(super) fn edit(
     })();
     let checkpoint = guard.map(|guard| guard.finish());
     match result {
-        Ok(()) => Ok((written(view.len(), checkpoint), None)),
+        Ok(()) => Ok((edited(view.len(), checkpoint, true), None)),
         Err(error) => Ok((failed(error, checkpoint), None)),
     }
 }

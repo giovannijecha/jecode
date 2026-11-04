@@ -137,7 +137,10 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
         .unwrap()
         .as_array()
         .unwrap()[0];
-    assert_eq!(sent, &projection[0]);
+    // The cache-prefix marker is request-only and never reaches a provider.
+    assert_eq!(sent.get("content"), projection[0].get("content"));
+    assert!(projection[0].get("jecode_cache_prefix").is_some());
+    assert!(sent.get("jecode_cache_prefix").is_none());
     assert!(sent.encode().contains("Environment:"));
     assert!(!sent.encode().contains("Legacy harness instructions"));
     let temporary = resumed.tools.temporary_instructions();
@@ -149,20 +152,7 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
         assert_eq!(system.matches("Working files and verification:").count(), 1);
         assert!(system.contains("useful durable tests"));
         assert!(system.contains("one-off verification"));
-        assert!(
-            request
-                .body
-                .get("messages")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .last()
-                .unwrap()
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap()
-                .contains(&temporary)
-        );
+        assert!(crate::test_support::latest_state(&request.body).contains(&temporary));
         for tool in request.body.get("tools").unwrap().as_array().unwrap() {
             let function = tool.get("function").unwrap();
             let description = function.get("description").and_then(Value::as_str).unwrap();
@@ -176,4 +166,41 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
             }
         }
     }
+}
+
+#[test]
+fn one_hour_prompt_cache_reaches_claude_breakpoints_from_the_next_request() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, completion("First", vec![])),
+        (200, completion("Second", vec![])),
+    ]);
+    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
+    client
+        .set_model("anthropic/claude-sonnet-4.5".into())
+        .unwrap();
+    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
+    assert_eq!(
+        agent.cache_retention(),
+        crate::backend::CacheRetention::Long
+    );
+    agent.set_cache_retention(crate::backend::CacheRetention::Short);
+    agent.run_turn("First request", &mut |_| Ok(())).unwrap();
+    // A running conversation's shared preference changes like auto-compact.
+    agent
+        .cache_retention_preference()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        agent.cache_retention(),
+        crate::backend::CacheRetention::Long
+    );
+    agent.run_turn("Second request", &mut |_| Ok(())).unwrap();
+    let requests = fixture.finish();
+    let lifetimes = |index: usize| {
+        let encoded = requests[index].body.encode();
+        assert!(!encoded.contains("jecode_cache_retention"));
+        encoded.matches("\"ttl\":\"1h\"").count()
+    };
+    assert_eq!(lifetimes(0), 0);
+    assert!(lifetimes(1) >= 2, "{}", requests[1].body.encode());
 }

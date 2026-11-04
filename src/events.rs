@@ -50,8 +50,10 @@ pub enum Event {
     },
     /// The provider's reported context count, capacity or configured threshold changed.
     Context(crate::context::Status),
-    /// A response reported how many tokens it generated, reasoning included.
+    /// A response reported the input it was sent, cached input included, and
+    /// the tokens it generated, reasoning included.
     Generated {
+        input: usize,
         tokens: usize,
     },
     ToolStarted {
@@ -87,11 +89,12 @@ impl<F: FnMut(Event) -> Result<(), String>> EventSink for F {
 }
 
 pub fn tool_summary(name: &str, result: &Value) -> String {
-    let summary = outcome_summary(name, result);
-    match checkpoint_warning(result) {
-        Some(warning) => format!("{summary}; {warning}"),
-        None => summary,
-    }
+    checkpoint_warning(result)
+        .into_iter()
+        .chain(batch::warnings(result))
+        .fold(outcome_summary(name, result), |summary, warning| {
+            format!("{summary}; {warning}")
+        })
 }
 
 /// A checkpoint problem that people should see next to a tool result.
@@ -174,6 +177,9 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             _ => "Question finished",
         }
         .into();
+    }
+    if let Some(reason) = not_run(result) {
+        return reason.into();
     }
     if name == "todo_list" {
         let revision = result
@@ -423,6 +429,11 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         }
         return summary;
     }
+    if let Some(files) = result.get("files").and_then(Value::as_array)
+        && let Some(summary) = batch::summary(name, files)
+    {
+        return summary;
+    }
     if let Some(bytes) = result.get("bytes_written").and_then(Value::as_usize) {
         return format!("wrote {bytes} bytes");
     }
@@ -430,6 +441,20 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         return "read; more lines available".into();
     }
     "complete".into()
+}
+
+/// Why a call never ran: denied, refused at this level, or stopped first. A
+/// denial was the reader's own decision, and its `reason` tells the model how
+/// to continue, so it reads as the decision.
+pub fn not_run(result: &Value) -> Option<&str> {
+    match result.get("outcome")?.as_str()? {
+        "denied" => Some("Denied · nothing ran; the agent was told"),
+        "unavailable" | "not_executed" => result
+            .get("reason")
+            .or_else(|| result.get("error"))?
+            .as_str(),
+        _ => None,
+    }
 }
 
 /// The status of a persistent process result, if it is one.
@@ -440,9 +465,11 @@ pub fn process_status(result: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+mod batch;
 mod description;
 mod lsp;
-pub use description::{description, target};
+pub use batch::file_changed;
+pub use description::{description, edited, target};
 pub(crate) use lsp::diagnostic_counts;
 
 #[cfg(test)]

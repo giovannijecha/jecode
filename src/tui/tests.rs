@@ -84,7 +84,7 @@ pub(super) fn rows(app: &App) -> Vec<String> {
         })
         .collect()
 }
-/// The last durable user task, followed by separate request-local runtime state.
+/// The last durable user task; runtime state messages are excluded.
 pub(super) fn task_content(request: &crate::test_support::Request) -> String {
     let messages = request.body.get("messages").unwrap().as_array().unwrap();
     messages
@@ -95,9 +95,7 @@ pub(super) fn task_content(request: &crate::test_support::Request) -> String {
             !message
                 .get("content")
                 .and_then(Value::as_str)
-                .is_some_and(|content| {
-                    content.starts_with("Jecode session state for the next request.")
-                })
+                .is_some_and(|content| content.starts_with("Jecode session state"))
         })
         .unwrap()
         .get("content")
@@ -106,14 +104,14 @@ pub(super) fn task_content(request: &crate::test_support::Request) -> String {
         .into()
 }
 
+/// The latest runtime state in the request, wherever it was first sent.
 pub(super) fn runtime_state(request: &crate::test_support::Request) -> String {
     let messages = request.body.get("messages").unwrap().as_array().unwrap();
     messages
-        .last()
-        .unwrap()
-        .get("content")
-        .and_then(Value::as_str)
-        .filter(|content| content.starts_with("Jecode session state for the next request."))
+        .iter()
+        .rev()
+        .filter_map(|message| message.get("content").and_then(Value::as_str))
+        .find(|content| content.starts_with("Jecode session state"))
         .unwrap()
         .into()
 }

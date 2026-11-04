@@ -22,7 +22,7 @@ Most settings have two scopes:
 | **Default effort** | Reasoning effort for the default model. |
 | **Default routing** | OpenRouter endpoint choice for the default model. |
 | **Default permissions** | The [permission level](PERMISSIONS.md) new conversations start at. |
-| **Auto-compact at** | When long conversations are compacted; applies immediately, including to the current conversation. |
+| **Context** | **Auto-compact at** and **Prompt cache**; both apply immediately, including to the current conversation. |
 | **Providers** | API keys and account sign-in; see [Providers](PROVIDERS.md). |
 | **MCP** | Global remote connections; see [MCP](MCP.md). |
 | **LSP** | Global, explicitly enabled local language servers; see [Language servers](LSP.md). |
@@ -58,14 +58,34 @@ shortens large tool results and then, if needed, asks the model to summarize
 earlier work. The original history stays saved and readable. See
 [Long-running work](LONG_WORK.md#context-and-compaction) for what is kept.
 
-Set the threshold in `/settings` → **Auto-compact at** as a whole number from 1
-to 99, with or without `%`. A saved change applies from the next model request,
+Set the threshold in `/settings` → **Context** → **Auto-compact at** as a whole
+number from 1 to 99, with or without `%`. A saved change applies from the next model request,
 including in the current conversation and its collaborators. A higher value
 uses more of the window before compacting but leaves less room for the reply.
 
 If even the instructions, your original requests and a minimal summary cannot
 fit, the turn stops with an error that names the budget. Raise the threshold or
 choose a model with a larger context window, then continue.
+
+## Prompt cache
+
+Claude models reuse the unchanged start of each request from the provider's
+prompt cache, which is much cheaper than sending it again. The provider's
+default cache lasts five minutes after its last use: after a longer break, the
+next request writes the whole conversation to the cache again.
+
+`/settings` → **Context** → **Prompt cache** chooses **1 hour**, the default,
+or **5 minutes**. With one hour, a request after a break reads the
+conversation from the cache instead, but every cache write costs more (twice
+the input price instead of 1.25 times, at Anthropic's list prices). In a
+measured working session with two breaks of six and a half minutes, five
+minutes rewrote 24,000 and 112,000 tokens after the breaks and one hour about
+1,700 in total; one hour came out cheaper overall. Five minutes is cheaper
+only when requests follow each other without breaks. The choice applies from the next
+request, in the current conversation and its collaborators, for Claude on
+Anthropic, the Claude plan and OpenRouter. Other models keep their provider's
+automatic caching. Jecode's own instructions and tools, shared by every
+conversation, are always cached for one hour on Anthropic and the Claude plan.
 
 ## OpenRouter endpoint routing
 
@@ -119,7 +139,7 @@ the default:
     "effort": "default",
     "routing": { "provider/model-id": { "mode": "auto" } }
   },
-  "context": { "auto_compact_percent": 80 },
+  "context": { "auto_compact_percent": 80, "prompt_cache": "1h" },
   "permissions": { "default": "workspace" }
 }
 ```
@@ -132,6 +152,7 @@ the default:
 | `backends.<id>.routing` | Saved routing per model ID. |
 | `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
+| `context.prompt_cache` | How long Claude prompt caches last: `1h` or `5m`. Default `1h`. |
 | `permissions.default` | `read`, `workspace` or `full`. Default `workspace`. |
 
 To pin an endpoint by hand, set the model's routing entry, in the `openrouter`

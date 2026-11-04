@@ -45,6 +45,15 @@ impl Agent {
         }
         if call.name == "read"
             && let Ok(arguments) = json::parse(&call.arguments)
+            && arguments.get("paths").is_some()
+        {
+            return crate::tools::Execution {
+                result: self.read_paths(call, &arguments),
+                change: None,
+            };
+        }
+        if call.name == "read"
+            && let Ok(arguments) = json::parse(&call.arguments)
             && arguments
                 .get("path")
                 .and_then(Value::as_str)

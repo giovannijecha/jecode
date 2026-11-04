@@ -59,6 +59,28 @@ fn redirection_alone_creates_or_truncates_the_file() {
 }
 
 #[test]
+fn redirection_targets_and_here_strings_are_not_argument_lists() {
+    let (directory, mut shell) = shell();
+    let script = "touch a1 a2; (echo x > a*) 2> err; echo \"$?\" > status; \
+        touch only1; echo y > only*; cat < only* > read_back; \
+        (cat < a*) 2> input_err; echo \"$?\" > input_status; \
+        cat <<< a* > here_string; cat <<EOF > here_document\na*\nEOF\n";
+    assert_eq!(shell.run(script), 0);
+    assert_eq!(read(&directory, "status"), "1\n");
+    let error = read(&directory, "err");
+    assert!(error.contains("ambiguous redirect"), "{error}");
+    assert_eq!(read(&directory, "a1"), "");
+    assert_eq!(read(&directory, "a2"), "");
+    assert!(!directory.path().join("a1 a2").exists());
+    assert_eq!(read(&directory, "only1"), "y\n");
+    assert_eq!(read(&directory, "read_back"), "y\n");
+    assert_eq!(read(&directory, "input_status"), "1\n");
+    assert!(read(&directory, "input_err").contains("ambiguous redirect"));
+    assert_eq!(read(&directory, "here_string"), "a*\n");
+    assert_eq!(read(&directory, "here_document"), "a*\n");
+}
+
+#[test]
 fn variable_names_follow_the_platform_environment() {
     let mut variables = Variables::default();
     variables.set("Path", "first".into());
@@ -102,6 +124,11 @@ fn assignments_prefix_pipeline_stages_background_jobs_and_builtins() {
     assert_eq!(read(&directory, "piped"), "piped\n");
     assert_eq!(read(&directory, "bg"), "bg\n");
     assert!(read(&directory, "env").contains("X=scoped\n"));
+    assert_eq!(
+        shell.run("export SEEN=yes; printenv SEEN > printed; printenv MISSING_JECODE_VARIABLE"),
+        1
+    );
+    assert_eq!(read(&directory, "printed"), "yes\n");
     assert_eq!(read(&directory, "after"), "[]\n");
 }
 
@@ -122,8 +149,9 @@ fn script_files_run_in_a_fresh_shell_with_arguments() {
     assert!(!directory.path().join("after_exit").exists());
 }
 
-/// A runaway producer must never hang the test runner if pipe closure regresses.
-fn bounded_script(script: &str, directory: &crate::test_support::Directory) -> i32 {
+/// A runaway script must never hang the test runner, for example if pipe
+/// closure regresses.
+pub(super) fn bounded_script(script: &str, directory: &crate::test_support::Directory) -> i32 {
     let mut child = command(script)
         .unwrap()
         .current_dir(directory.path())
@@ -139,7 +167,7 @@ fn bounded_script(script: &str, directory: &crate::test_support::Directory) -> i
         if Instant::now() >= deadline {
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!("shell pipeline did not stop after its reader closed: {script}");
+            panic!("shell script did not finish in time: {script}");
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -242,6 +270,15 @@ fn closed_pipeline_stops_a_loop_running_an_external_program() {
 }
 
 #[test]
+fn head_closes_an_endless_producer_after_its_lines() {
+    let directory = crate::test_support::Directory::new();
+    let script = "while true; do echo data; done | head -n 1 > first; echo after > marker";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(read(&directory, "first"), "data\n");
+    assert_eq!(read(&directory, "marker"), "after\n");
+}
+
+#[test]
 fn completed_reader_does_not_cancel_redirected_work() {
     let (directory, mut shell) = shell();
     assert_eq!(
@@ -257,6 +294,37 @@ fn completed_reader_does_not_cancel_redirected_work() {
     assert_eq!(bounded_script(&script, &directory), 0);
     assert!(directory.path().join("run_a").is_file());
     assert!(directory.path().join("run_b").is_file());
+}
+
+#[test]
+fn a_background_here_document_outlives_its_shell() {
+    let directory = crate::test_support::Directory::new();
+    let body = "here document line\n".repeat(200_000);
+    let script = format!("cat <<EOF > copy &\n{body}EOF\n");
+    // A script this long only fits in a file on every platform.
+    let script_file = directory.path().join("script");
+    fs::write(&script_file, script).unwrap();
+    let mut child = Command::new(executable().unwrap())
+        .arg(ENTRY)
+        .arg(&script_file)
+        .current_dir(directory.path())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let copied = fs::metadata(directory.path().join("copy")).map_or(0, |copy| copy.len());
+        if copied == body.len() as u64 {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "copied {copied} of {} bytes",
+            body.len()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

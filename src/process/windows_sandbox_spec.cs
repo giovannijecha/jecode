@@ -65,11 +65,13 @@ internal static class JecodeWindowsSandboxSpec {
         }
     }
 
-    public static byte[] Encode(string[] read, string[] write, string[] deny) {
+    public static byte[] Encode(string[] read, string[] write, string[] deny, string[] enumerate) {
         var buffer = new Buffer();
         // Root field indices: version, capabilities, win32k, UI, write,
         // read, deny, network policy, enumerate. Version is an inline struct.
-        int root = buffer.Table(28, 4, 8, 0, 0, 12, 16, 20, 24, 0);
+        // Enumerate is a 1.1 field, written only when it has paths.
+        bool listing = enumerate.Length > 0;
+        int root = buffer.Table(listing ? 32 : 28, 4, 8, 0, 0, 12, 16, 20, 24, listing ? 28 : 0);
         buffer.PatchByte(root + 4, 1); // Schema major 1.
         buffer.PatchByte(root + 6, 1); // Schema minor 1.
         buffer.PatchOffset(root + 8,
@@ -77,6 +79,7 @@ internal static class JecodeWindowsSandboxSpec {
         buffer.PatchOffset(root + 12, buffer.Strings(write));
         buffer.PatchOffset(root + 16, buffer.Strings(read));
         buffer.PatchOffset(root + 20, buffer.Strings(deny));
+        if (listing) buffer.PatchOffset(root + 28, buffer.Strings(enumerate));
 
         // The reserved peer name is part of the PSEC host-loopback contract.
         // NetworkPolicy: proxy, egress, peer, ingress.

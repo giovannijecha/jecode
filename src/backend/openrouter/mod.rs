@@ -293,8 +293,8 @@ impl OpenRouter {
             messages.to_vec(),
             self.effort,
             with_tools,
-            false,
             output_tokens,
+            crate::backend::CacheRetention::requested(messages),
             emit,
         )
     }
@@ -304,8 +304,8 @@ impl OpenRouter {
         mut messages: Vec<Value>,
         effort: Effort,
         with_tools: bool,
-        request_state: bool,
         output_tokens: Option<usize>,
+        retention: crate::backend::CacheRetention,
         emit: &mut impl FnMut(Update) -> Result<(), String>,
     ) -> Result<Completion, Failure> {
         let has_files = attachments::has_files(&messages);
@@ -315,10 +315,15 @@ impl OpenRouter {
                 .strip_prefix('~')
                 .unwrap_or(&self.model)
                 .starts_with("anthropic/claude-");
-        let explicit_cache = with_tools && (claude_cache || cache::supports_openai(&self.model));
-        if explicit_cache && request_state && messages.len() > 1 {
-            let durable = messages.len() - 1;
-            cache::mark_recent(&mut messages[..durable]);
+        // Runtime state keeps its first position, so the whole request is durable.
+        if with_tools && (claude_cache || cache::supports_openai(&self.model)) {
+            // Only Claude takes a cache lifetime; OpenAI markers stay plain.
+            let marker = cache::marker(if claude_cache {
+                retention
+            } else {
+                crate::backend::CacheRetention::Short
+            });
+            cache::mark_recent(&mut messages, &marker);
         }
         let mut body = Value::object([
             ("model", Value::string(&self.model)),
@@ -341,13 +346,6 @@ impl OpenRouter {
                     })
                     .collect();
                 fields.insert("tools".into(), Value::Array(wrapped));
-                // OpenRouter supports automatic top-level breakpoints for Claude.
-                if claude_cache && !request_state {
-                    fields.insert(
-                        "cache_control".into(),
-                        Value::object([("type", Value::string("ephemeral"))]),
-                    );
-                }
             }
             if let Some(tokens) = output_tokens {
                 fields.insert("max_completion_tokens".into(), Value::number(tokens));

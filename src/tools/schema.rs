@@ -76,6 +76,29 @@ fn strings() -> Value {
     Value::object([("type", Value::string("array")), ("items", string())])
 }
 
+/// An edit's ordered replacements.
+fn replacements() -> Value {
+    Value::object([
+        ("type", Value::string("array")),
+        ("minItems", Value::number(1)),
+        (
+            "items",
+            Value::object([
+                ("type", Value::string("object")),
+                (
+                    "properties",
+                    Value::object([("old_text", string()), ("new_text", string())]),
+                ),
+                (
+                    "required",
+                    Value::Array(["old_text", "new_text"].map(Value::string).into()),
+                ),
+                ("additionalProperties", Value::Bool(false)),
+            ]),
+        ),
+    ])
+}
+
 fn build_definitions() -> Value {
     let mut tools = base_definitions();
     tools.extend(super::discovery::definitions());
@@ -166,14 +189,26 @@ fn base_definitions() -> Vec<Value> {
     vec![
         routine(
             "read",
-            "Read a project file or tmp:relative/path. UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary). Input withdrawn to the composer is excluded from history reads. checkpoint:rc-ID:path reads a saved preimage (expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
+            "Read a project file or tmp:relative/path, or several at once with paths: when a step needs more than one file, read them in one call (each with the default window, results in order, outside paths and media need a single path). UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary). Input withdrawn to the composer is excluded from history reads. checkpoint:rc-ID:path reads a saved preimage (expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
             Value::object([
                 ("path", string()),
+                (
+                    "paths",
+                    Value::object([
+                        ("type", Value::string("array")),
+                        ("minItems", Value::number(1)),
+                        (
+                            "maxItems",
+                            Value::number(crate::agent::read_paths::MAX_PATHS),
+                        ),
+                        ("items", string()),
+                    ]),
+                ),
                 ("offset", integer(1, None)),
                 ("limit", integer(1, Some(2000))),
                 ("byte_offset", integer(0, None)),
             ]),
-            &["path"],
+            &[],
         ),
         tool(
             "write",
@@ -183,27 +218,27 @@ fn base_definitions() -> Vec<Value> {
         ),
         tool(
             "edit",
-            "Edit a UTF-8 project or tmp: file with one or more ordered replacements. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings.",
+            "Edit a UTF-8 project or tmp: file with path and one or more ordered replacements. Each nonempty old_text must match exactly once after preceding edits; any missing or ambiguous match leaves the file unchanged. Preserve exact whitespace and line endings. For several files send files ({path, edits} per file) instead of path and edits: each file applies all or nothing, the others are still written, and results follow call order; retry only entries with an error.",
             Value::object([
                 ("path", string()),
+                ("edits", replacements()),
                 (
-                    "edits",
+                    "files",
                     Value::object([
                         ("type", Value::string("array")),
                         ("minItems", Value::number(1)),
+                        ("maxItems", Value::number(super::edit::MAX_FILES)),
                         (
                             "items",
                             Value::object([
                                 ("type", Value::string("object")),
                                 (
                                     "properties",
-                                    Value::object([("old_text", string()), ("new_text", string())]),
+                                    Value::object([("path", string()), ("edits", replacements())]),
                                 ),
                                 (
                                     "required",
-                                    Value::Array(
-                                        ["old_text", "new_text"].map(Value::string).into(),
-                                    ),
+                                    Value::Array(["path", "edits"].map(Value::string).into()),
                                 ),
                                 ("additionalProperties", Value::Bool(false)),
                             ]),
@@ -211,11 +246,11 @@ fn base_definitions() -> Vec<Value> {
                     ]),
                 ),
             ]),
-            &["path", "edits"],
+            &[],
         ),
         routine(
             "bash",
-            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection, common file/text commands and literal argv for external programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success.",
+            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection including 2>&1 and &>, here-documents, * ? [...] patterns, the built-ins cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc, and literal argv for installed programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Run related commands together in one command line instead of one call each. Omit wait_ms for commands that finish, such as tests and builds; without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success.",
             Value::object([
                 ("command", string()),
                 (
@@ -386,7 +421,7 @@ fn base_definitions() -> Vec<Value> {
         web::browser(),
         routine(
             "exec",
-            "Run an executable with literal argv and no implicit shell. A bare name uses PATH, including any shim found there; Jecode does not bypass it. cwd defaults to the project directory; relative cwd uses the project root, and executable paths with a directory use cwd. env strings set variables and null removes them after inherited provider credentials are stripped. stdin sends a string then closes; omitted means EOF. tty:true rejects stdin and always returns a process_id; use process write/resize/interrupt. Terminal stdout combines child streams; stderr holds bridge diagnostics. Without tty, wait_ms returns a process_id; omitted waits for exit. timeout_seconds bounds execution. protect saves declared workspace paths before launch, independent of cwd. Previews and saved refs follow Bash.",
+            "Run one executable with literal argv and no implicit shell; for several commands, use one bash call. A bare name uses PATH, including any shim found there; Jecode does not bypass it. cwd defaults to the project directory; relative cwd uses the project root, and executable paths with a directory use cwd. env strings set variables and null removes them after inherited provider credentials are stripped. stdin sends a string then closes; omitted means EOF. tty:true rejects stdin and always returns a process_id; use process write/resize/interrupt. Terminal stdout combines child streams; stderr holds bridge diagnostics. Without tty, wait_ms returns a process_id for servers and watchers; omit it for commands that finish, such as tests and builds. timeout_seconds bounds execution. protect saves declared workspace paths before launch, independent of cwd. Previews and saved refs follow Bash.",
             Value::object([
                 ("executable", string()),
                 ("args", strings()),

@@ -125,7 +125,12 @@ fn an_empty_summary_response_recovers_before_any_tools_can_execute() {
         ("content", Value::string("Summarize")),
     ])];
     let result = agent
-        .complete_retry(&messages, false, Some(3000), &mut |_| Ok(()))
+        .complete_retry(
+            &messages,
+            super::recovery::Purpose::Maintenance,
+            Some(3000),
+            &mut |_| Ok(()),
+        )
         .unwrap();
     assert!(result.calls.is_empty());
     assert_eq!(result.text, "Keep the goal and next action.");

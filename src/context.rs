@@ -6,7 +6,10 @@ pub use crate::conversation::portable;
 pub(crate) mod measurement;
 pub(crate) mod provider;
 pub(crate) mod source;
+mod state;
 mod view;
+
+pub use state::{RequestState, state_message};
 
 /// Introduces a compaction summary, which the same model wrote in an earlier context window.
 const SUMMARY_PREFIX: &str = "Another language model started this task and wrote the summary below. The work it did with tools is still in place: files, saved outputs and the original history. Build on it and avoid repeating finished work.";
@@ -28,11 +31,16 @@ pub fn threshold(capacity: usize, percent: u8) -> usize {
     usize::try_from(tokens).unwrap_or(usize::MAX).max(1)
 }
 
-/// The last provider-reported context count, for display.
+/// The context count for display: the last provider reading, or the estimate
+/// of the next request while it differs from that reading.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Status {
     /// Provider input plus generated output, or its reported total; never a projection.
     pub tokens: Option<usize>,
+    /// Estimate of the next request when tool results, input or compaction moved
+    /// the window at least one point from the reading. Automatic compaction
+    /// decides with the same estimate; the next provider reading replaces it.
+    pub pending: Option<usize>,
     /// Context window declared by the provider; None while unknown.
     pub capacity: Option<usize>,
     /// Configured automatic reduction threshold, in percent.
@@ -43,8 +51,19 @@ impl Status {
     /// Whole percentage of the provider-declared window, rounded down.
     pub fn percent(&self) -> Option<usize> {
         let capacity = self.capacity.filter(|capacity| *capacity > 0)?;
-        let percent = self.tokens? as u128 * 100 / capacity as u128;
+        let percent = self.pending.or(self.tokens)? as u128 * 100 / capacity as u128;
         Some(usize::try_from(percent).unwrap_or(usize::MAX))
+    }
+
+    /// Marks the next request's estimate when it moved a point from the reading.
+    pub fn with_estimate(mut self, estimate: usize) -> Self {
+        if let Some(capacity) = self.capacity.filter(|capacity| *capacity > 0) {
+            let moved = self
+                .tokens
+                .is_none_or(|tokens| tokens.abs_diff(estimate).saturating_mul(100) >= capacity);
+            self.pending = moved.then_some(estimate);
+        }
+        self
     }
 }
 
@@ -78,6 +97,8 @@ pub struct Context {
     pub preview_limit: usize,
     /// Byte budget for verbatim recent user requests after compaction.
     pub request_limit: usize,
+    /// Runtime state updates in source order, each at the position first sent.
+    pub states: Vec<RequestState>,
 }
 impl Default for Context {
     fn default() -> Self {
@@ -100,6 +121,7 @@ impl Default for Context {
             preview_until: 0,
             preview_limit: 0,
             request_limit: 0,
+            states: Vec::new(),
         }
     }
 }
@@ -150,6 +172,7 @@ impl Context {
             ("preview_until", Value::number(self.preview_until)),
             ("preview_limit", Value::number(self.preview_limit)),
             ("request_limit", Value::number(self.request_limit)),
+            ("request_states", state::value(&self.states)),
         ])
     }
     pub fn parse(value: Option<&Value>) -> Result<Self, String> {
@@ -245,6 +268,7 @@ impl Context {
                     .as_usize()
                     .ok_or("Invalid saved context request limit")
             })?,
+            states: state::parse(value.get("request_states"))?,
         })
     }
     pub fn validate(&self, messages: &[Value]) -> Result<(), String> {
@@ -265,6 +289,16 @@ impl Context {
             || messages
                 .get(self.from)
                 .is_some_and(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+            || self
+                .states
+                .windows(2)
+                .any(|pair| pair[0].before > pair[1].before)
+            || self.states.iter().any(|state| {
+                state.before > messages.len()
+                    || messages.get(state.before).is_some_and(|message| {
+                        message.get("role").and_then(Value::as_str) == Some("tool")
+                    })
+            })
         {
             return Err("Invalid saved context boundary".into());
         }
@@ -307,14 +341,16 @@ impl Context {
                 ),
             ]));
         }
-        result.extend(
-            messages
-                .iter()
-                .enumerate()
-                .skip(self.from)
-                .filter(|(index, _)| !self.returned.contains(index))
-                .map(|(index, message)| self.project_message(message, index, compatible_from)),
-        );
+        let mut states = self.visible_states().peekable();
+        for (index, message) in messages.iter().enumerate().skip(self.from) {
+            while let Some(state) = states.next_if(|state| state.before <= index) {
+                result.push(state_message(&state.text));
+            }
+            if !self.returned.contains(&index) {
+                result.push(self.project_message(message, index, compatible_from));
+            }
+        }
+        result.extend(states.map(|state| state_message(&state.text)));
         result
     }
 

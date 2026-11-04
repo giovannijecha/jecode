@@ -15,12 +15,15 @@ pub(super) fn mode(call: &ToolCall) -> Mode {
     let Ok(arguments) = json::parse(&call.arguments) else {
         return Mode::Serial;
     };
-    // Agent-owned references depend on transcript state or a per-turn cache.
+    // Batches call the tools directly, but these reads belong to the agent:
+    // references depend on transcript state or a per-turn cache, and the agent
+    // routes each path of a multi-path read.
     if call.name == "read"
-        && arguments
-            .get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| path.starts_with("history:") || path.starts_with("skill:"))
+        && (arguments.get("paths").is_some()
+            || arguments
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.starts_with("history:") || path.starts_with("skill:")))
     {
         return Mode::Serial;
     }

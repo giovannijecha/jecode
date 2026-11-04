@@ -34,10 +34,15 @@ pub(super) fn render(
     expanded: bool,
 ) -> Body {
     let arguments = tool.arguments;
+    // A call that never ran has no output, and its arguments did not happen.
+    if crate::events::not_run(result).is_some() {
+        return Body::new(Vec::new());
+    }
     match tool.name {
         "list" | "search" => discovery::render(tool.name, result, columns, expanded),
         "map" => map::render(result, columns, expanded),
         "read" if !expanded => Body::new(Vec::new()),
+        "read" if result.get("files").is_some() => Body::new(files(result, columns)),
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
             Body::new(read(arguments, result, columns))
         }
@@ -119,6 +124,47 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
             )
         })
         .collect()
+}
+
+/// Each file of a multi-path read under its path; failures name their cause.
+fn files(result: &Value, columns: usize) -> Vec<Line> {
+    let mut rows = Vec::new();
+    let mut origin = 2;
+    for file in result.get("files").and_then(Value::as_array).unwrap_or(&[]) {
+        let path = field(file, "path");
+        let error = file.get("error").and_then(Value::as_str);
+        let label = match error {
+            Some(error) => Line::new(
+                &format!("{} · {}", text::clean(path), text::clean(error)),
+                WARNING,
+            ),
+            None => Line::new(&text::clean(path), MUTED),
+        };
+        rows.extend(line_rows(&label, columns, origin, "    ", "    ", DIM));
+        origin += 1;
+        if error.is_none() {
+            let arguments = Value::object([("path", Value::string(path))]);
+            let mut source = read(&arguments, file, columns);
+            origin = placed(&mut source, origin);
+            rows.extend(source);
+            rows.extend(notices("read", file, columns, true));
+        }
+    }
+    rows
+}
+
+/// Moves rows numbered from source line 2 to start at `origin`, and returns
+/// the first line after them.
+pub(super) fn placed(rows: &mut [Line], origin: usize) -> usize {
+    for row in rows.iter_mut() {
+        if let Some(source) = &mut row.origin {
+            source.line += origin - 2;
+        }
+    }
+    rows.iter()
+        .filter_map(|row| row.origin.map(|source| source.line + 1))
+        .max()
+        .unwrap_or(origin)
 }
 
 fn written(arguments: &Value, columns: usize, expanded: bool) -> Body {

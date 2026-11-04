@@ -66,6 +66,7 @@ fn plain_permissions_lists_and_revokes_remembered_access() {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     };
     permissions.set_surface(Surface::Panel);
     let request = permissions.begin("call-1", "read_file", &access).unwrap();
