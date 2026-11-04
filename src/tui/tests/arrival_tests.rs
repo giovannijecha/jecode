@@ -124,6 +124,7 @@ fn a_permission_arriving_mid_typing_decides_nothing_until_the_keys_pause() {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     };
     app.permission_observer
         .begin("main-call", "bash", &access)
@@ -168,6 +169,7 @@ fn an_arrow_lifts_the_permission_guard_and_moves_the_focus() {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     };
     app.permission_observer
         .begin("main-call", "bash", &access)

@@ -28,22 +28,28 @@ pub(super) fn block(
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let rule = |label: &[Line], aside: &Line| composer::rule(columns, ACCENT, label, aside);
+    let choices = choices(pending, columns);
+    let keys = if columns >= 7 {
+        panel::keys(&keys(pending), columns - 4, false)
+    } else {
+        Vec::new()
+    };
+    // The top rule and the access row always stay beside the choices and keys.
+    let room = height.saturating_sub(2 + choices.len() + keys.len()).max(1);
     let mut parts = vec![
         (status, Part::Chrome),
         (rule(&title(pending), &cards::level(level)), Part::Keep),
     ];
-    for row in facts(pending, panel::text_width(columns)) {
+    for row in facts(pending, panel::text_width(columns), room) {
         parts.push((panel::indent(row, columns), Part::Keep));
     }
     parts.push((Line::default(), Part::Space));
-    for (row, on) in choices(pending, columns) {
+    for (row, on) in choices {
         parts.push((row, if on { Part::Focus } else { Part::Keep }));
     }
     parts.push((rule(&[], &Line::default()), Part::Chrome));
-    if columns >= 7 {
-        for row in panel::keys(&keys(pending), columns - 4, false) {
-            parts.push((row.indent("  ", MUTED), Part::Keep));
-        }
+    for row in keys {
+        parts.push((row.indent("  ", MUTED), Part::Keep));
     }
     panel::fitted(parts, None, height)
 }
@@ -61,37 +67,52 @@ fn title(pending: &Pending) -> Vec<Line> {
 }
 
 /// The tool name in its family colour and the target in full, wrapping under
-/// itself and never cut; then the access.
-fn facts(pending: &Pending, width: usize) -> Vec<Line> {
+/// itself and never cut; then the access. A multi-file edit names every file
+/// that fits `room` rows and counts the rest, so its choices stay visible.
+fn facts(pending: &Pending, width: usize, room: usize) -> Vec<Line> {
     let access = &pending.request.access;
     let head = cards::tool_title(&pending.request.tool).append(Line::new(" ", MUTED));
     let indent = panel::cells(&head);
-    let target = match access.kind {
-        Kind::Runs => text::clean(&access.target),
-        // A multi-file edit names every file.
-        Kind::Reads | Kind::Edits => access
-            .target
-            .split(", ")
-            .map(footer::path)
-            .collect::<Vec<_>>()
-            .join(", "),
-    };
-    let mut call = Line::new(&target, STRONG);
-    if let Some(place) = &access.place {
-        call.push(&format!(" in {}", footer::path(place)), MUTED);
-    }
-    let mut rows: Vec<Line> = call
-        .wrap(width.saturating_sub(indent).max(1), true)
-        .into_iter()
-        .enumerate()
-        .map(|(index, part)| {
-            if index == 0 {
-                head.clone().append(part)
-            } else {
-                Line::new(&" ".repeat(indent), MUTED).append(part)
+    let wrapped = |call: Line| call.wrap(width.saturating_sub(indent).max(1), true);
+    let mut rows = if access.members.is_empty() {
+        let target = match access.kind {
+            Kind::Runs => text::clean(&access.target),
+            Kind::Reads | Kind::Edits => footer::path(&access.target),
+        };
+        let mut call = Line::new(&target, STRONG);
+        if let Some(place) = &access.place {
+            call.push(&format!(" in {}", footer::path(place)), MUTED);
+        }
+        wrapped(call)
+    } else {
+        let paths: Vec<_> = access
+            .members
+            .iter()
+            .map(|file| footer::path(&file.target))
+            .collect();
+        let mut named = paths.len();
+        loop {
+            let mut call = Line::new(&paths[..named].join(", "), STRONG);
+            if named < paths.len() {
+                call.push(&format!(" +{} files", paths.len() - named), MUTED);
             }
-        })
-        .collect();
+            let rows = wrapped(call);
+            if rows.len() <= room || named == 1 {
+                break rows;
+            }
+            named -= 1;
+        }
+    }
+    .into_iter()
+    .enumerate()
+    .map(|(index, part)| {
+        if index == 0 {
+            head.clone().append(part)
+        } else {
+            Line::new(&" ".repeat(indent), MUTED).append(part)
+        }
+    })
+    .collect::<Vec<Line>>();
     rows.push(Line::new(wording::access(access), MUTED).shortened(width));
     rows
 }

@@ -134,6 +134,88 @@ fn workspace_asks_once_for_a_call_with_an_outside_file() {
 }
 
 #[test]
+fn remembering_a_call_covers_its_outside_files_one_by_one() {
+    let project = Directory::new();
+    let other = Directory::new();
+    let home = Directory::new();
+    fs::write(project.path().join("a.rs"), "before\n").unwrap();
+    let outside: Vec<String> = ["b.rs", "c.rs", "d.rs"]
+        .iter()
+        .map(|name| {
+            let path = other.path().join(name);
+            fs::write(&path, "before\nbefore\n").unwrap();
+            path.to_string_lossy().into_owned()
+        })
+        .collect();
+    let single = tool_call(
+        "single",
+        "edit",
+        Value::object([
+            ("path", Value::string(&outside[0])),
+            ("old_text", Value::string("before")),
+            ("new_text", Value::string("after")),
+            ("replace_all", Value::Bool(true)),
+        ]),
+    );
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion("", vec![edit("first", &["a.rs", &outside[0], &outside[1]])]),
+        ),
+        (200, completion("", vec![single])),
+        (200, completion("", vec![edit("reordered", &[&outside[1]])])),
+        (
+            200,
+            completion("", vec![edit("wider", &[&outside[1], &outside[2]])]),
+        ),
+        (200, completion("Done", vec![])),
+    ]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.permissions().set_surface(Surface::Panel);
+    let permissions = agent.permissions();
+    let user = thread::spawn(move || {
+        let mut seen = Vec::new();
+        for _ in 0..400 {
+            if let Some((request, _)) = permissions.pending() {
+                let decision = if seen.is_empty() {
+                    Decision::Remember
+                } else {
+                    Decision::Once
+                };
+                seen.push(request.call_id.clone());
+                permissions.decide(request.id, decision).unwrap();
+            }
+            thread::sleep(std::time::Duration::from_millis(5));
+        }
+        seen
+    });
+    agent.run_turn("Change them", &mut |_| Ok(())).unwrap();
+    // The later edits of remembered files ask nothing; only a new file does.
+    assert_eq!(user.join().unwrap(), ["first", "wider"]);
+    // Each outside file is remembered and revocable on its own, not the project file.
+    let grants = agent.permissions().grants();
+    let targets: Vec<&str> = grants.iter().map(|grant| grant.target.as_str()).collect();
+    assert_eq!(targets.len(), 2);
+    assert!(targets[0].ends_with("b.rs") && targets[1].ends_with("c.rs"));
+
+    agent.save_session().unwrap();
+    let id = agent.sessions().unwrap().id();
+    drop(agent);
+    let mut resumed = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    assert_eq!(resumed.permissions().grants(), grants);
+    assert_eq!(fixture.finish().len(), 5);
+}
+
+#[test]
 fn json_text_files_from_the_model_run_and_are_stored_decoded() {
     let project = Directory::new();
     for name in ["a.rs", "b.rs"] {

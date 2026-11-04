@@ -104,6 +104,9 @@ pub struct Access {
     pub base: Option<PathBuf>,
     /// Exact, private invocation identity for a remembered command grant.
     pub identity: Option<String>,
+    /// Each file of a multi-file edit, whose `target` names them all. One
+    /// request covers the call; grants remember the outside files one by one.
+    pub members: Vec<Access>,
 }
 
 impl Access {
@@ -114,6 +117,19 @@ impl Access {
             place: self.place.clone(),
             identity: self.identity.clone(),
         }
+    }
+
+    /// What this access needs remembered: itself, or a multi-file edit's
+    /// outside files, so each stays covered and revocable on its own.
+    pub fn grants(&self) -> Vec<Grant> {
+        if self.members.is_empty() {
+            return vec![self.grant()];
+        }
+        self.members
+            .iter()
+            .filter(|member| member.outside)
+            .map(Self::grant)
+            .collect()
     }
 }
 
@@ -128,12 +144,12 @@ pub struct Grant {
 }
 
 impl Grant {
-    fn authorizes(&self, access: &Access) -> bool {
-        self.kind == access.kind
-            && self.place == access.place
-            && match (&self.identity, &access.identity) {
+    fn authorizes(&self, needed: &Grant) -> bool {
+        self.kind == needed.kind
+            && self.place == needed.place
+            && match (&self.identity, &needed.identity) {
                 (Some(expected), Some(actual)) => expected == actual,
-                (None, None) => self.target == access.target,
+                (None, None) => self.target == needed.target,
                 _ => false,
             }
     }
@@ -310,7 +326,12 @@ impl Permissions {
                 describe(access)
             )),
             Level::Workspace if !access.outside => Verdict::Allow,
-            Level::Workspace if state.grants.iter().any(|grant| grant.authorizes(access)) => {
+            Level::Workspace
+                if access
+                    .grants()
+                    .iter()
+                    .all(|needed| state.grants.iter().any(|grant| grant.authorizes(needed))) =>
+            {
                 Verdict::Allow
             }
             Level::Workspace => Verdict::Ask,
@@ -342,18 +363,22 @@ impl Permissions {
         let request = state.queue[index].clone();
         // Child call IDs may equal main call IDs. Its own session records the
         // answer; the parent records only a grant when one is remembered.
-        // A failed append leaves the queue and grant state unchanged.
-        if request.agent.is_some() {
-            if decision == Decision::Remember {
-                state.journal(journal::grant("permission_grant", &request.access.grant()))?;
-            }
-        } else {
+        // A multi-file edit's decision carries no grant, so it saves one per
+        // file. A failed append leaves the queue and grant state unchanged.
+        if request.agent.is_none() {
             state.journal(journal::decision(&request, decision))?;
         }
         if decision == Decision::Remember {
-            let grant = request.access.grant();
-            if !state.grants.contains(&grant) {
-                state.grants.push(grant);
+            let grants = request.access.grants();
+            if request.agent.is_some() || !request.access.members.is_empty() {
+                for grant in &grants {
+                    state.journal(journal::grant("permission_grant", grant))?;
+                }
+            }
+            for grant in grants {
+                if !state.grants.contains(&grant) {
+                    state.grants.push(grant);
+                }
             }
         }
         state.queue.remove(index);

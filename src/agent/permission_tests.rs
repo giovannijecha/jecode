@@ -316,6 +316,7 @@ fn collaborators_share_the_level_grants_and_ask_under_their_own_id() {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     };
     let request = child.begin("child-call", "write", &access).unwrap();
     assert_eq!(request.agent.as_deref(), Some("a1"));

@@ -57,7 +57,73 @@ fn outside(kind: Kind, target: &str) -> Access {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     }
+}
+
+#[test]
+fn a_multi_file_request_keeps_its_choices_and_counts_the_files_it_cannot_name() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut app = app(&directory, &fixture);
+    app.permission_observer
+        .set_surface(crate::permissions::Surface::Panel);
+    let request = |count: usize| {
+        let members: Vec<Access> = (0..count)
+            .map(|index| {
+                outside(
+                    Kind::Edits,
+                    &format!(r"D:\work\a-long-folder-name\another-long-folder\file-{index:02}.rs"),
+                )
+            })
+            .collect();
+        Access {
+            target: members
+                .iter()
+                .map(|member| member.target.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            members,
+            ..outside(Kind::Edits, "")
+        }
+    };
+    let mut ask = |access: &Access, width: usize, height: usize| {
+        let asked = app
+            .permission_observer
+            .begin("call", "edit", access)
+            .unwrap();
+        app.refresh_permission();
+        app.state.width = width;
+        app.state.height = height;
+        let shown = screen(&app);
+        app.permission_observer
+            .decide(asked.id, crate::permissions::Decision::Deny)
+            .unwrap();
+        app.refresh_permission();
+        shown
+    };
+    for (width, height) in [(80, 24), (100, 40), (44, 24), (80, 12)] {
+        let shown = ask(&request(12), width, height);
+        for choice in ["Approve", "Approve and remember", "Deny", "1–3"] {
+            assert!(
+                shown.contains(choice),
+                "{width}x{height} lost {choice}\n{shown}"
+            );
+        }
+        assert!(shown.contains("file-00.rs"), "{shown}");
+        assert!(shown.contains(" files"), "{shown}");
+    }
+    // With room, every file is named and nothing is counted.
+    let shown = ask(&request(2), 100, 40);
+    assert!(
+        shown.contains("file-00.rs") && shown.contains("file-01.rs"),
+        "{shown}"
+    );
+    assert!(!shown.contains(" +"), "{shown}");
+    assert!(
+        shown.contains("Edits to these files, this conversation"),
+        "{shown}"
+    );
 }
 
 #[test]

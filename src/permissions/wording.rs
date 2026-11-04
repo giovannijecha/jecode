@@ -28,8 +28,15 @@ pub fn covers(access: &Access, tool: &str) -> &'static str {
     match (access.kind, tool) {
         (Kind::Reads, "list" | "search") => "Reads of this folder",
         (Kind::Reads, _) => "Reads of this file",
-        // One request names every file of a multi-file edit.
-        (Kind::Edits, "edit") if access.target.contains(", ") => "Edits to these files",
+        // One request names every file of a multi-file edit; only the outside
+        // ones need remembering.
+        (Kind::Edits, "edit") if access.members.len() > 1 => {
+            match access.members.iter().filter(|file| file.outside).count() {
+                count if count == access.members.len() => "Edits to these files",
+                1 => "Edits to the outside file above",
+                _ => "Edits to the outside files above",
+            }
+        }
         (Kind::Edits, _) => "Edits to this file",
         (Kind::Runs, _) => "This command there",
     }

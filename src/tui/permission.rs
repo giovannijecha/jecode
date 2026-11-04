@@ -43,6 +43,9 @@ impl App {
             .pending()
             .map(|(mut request, count)| {
                 request.access.target = self.archive.redactor.text(&request.access.target);
+                for file in &mut request.access.members {
+                    file.target = self.archive.redactor.text(&file.target);
+                }
                 request.access.place = request
                     .access
                     .place

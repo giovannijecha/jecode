@@ -58,7 +58,7 @@ pub(super) fn decision(request: &Request, decision: Decision) -> Value {
         ("tool_call_id", Value::string(&request.call_id)),
         ("decision", Value::string(decision.id())),
     ]);
-    if decision != Decision::Remember {
+    if decision != Decision::Remember || !request.access.members.is_empty() {
         return event;
     }
     let mut event = with_identity(

@@ -17,6 +17,7 @@ fn workspace_policy_names_only_root_session_scratch_and_approved_cwd() {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     };
     let policy = Policy::for_command(
         Level::Workspace,

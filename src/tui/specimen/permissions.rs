@@ -35,6 +35,7 @@ fn access(kind: Kind, target: &str, place: Option<&str>) -> Access {
         outside: true,
         base: None,
         identity: None,
+        members: Vec::new(),
     }
 }
 
@@ -85,6 +86,24 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         "cargo test session",
         Some(r"C:\Projects\webterminal"),
     );
+    let members: Vec<Access> = (1..=12)
+        .map(|index| {
+            access(
+                Kind::Edits,
+                &format!(r"D:\Projects\other\src\session_{index}.rs"),
+                None,
+            )
+        })
+        .collect();
+    let several = Access {
+        target: members
+            .iter()
+            .map(|member| member.target.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        members,
+        ..access(Kind::Edits, "", None)
+    };
     let mut focused = asking(columns, "edit", edit, "MAIN AGENT", 1);
     focused.permission.as_mut().unwrap().focus = Some(1);
     let indicator = |level| {
@@ -101,6 +120,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             asking(columns, "read", read, "MAIN AGENT", 1),
         ),
         ("Request · edit, focus on remember", focused),
+        (
+            "Request · multi-file edit, every file that fits",
+            asking(columns, "edit", several, "MAIN AGENT", 1),
+        ),
         (
             "Request · collaborator command, 1 of 3",
             asking(columns, "exec", run, "AGENT 1", 3),

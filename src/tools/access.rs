@@ -77,6 +77,7 @@ impl Tools {
                     outside,
                     base: None,
                     identity,
+                    members: Vec::new(),
                 })
             }
             _ => None,
@@ -129,6 +130,7 @@ impl Tools {
             outside: false,
             base: None,
             identity: None,
+            members: Vec::new(),
         }
     }
 
@@ -138,21 +140,22 @@ impl Tools {
     /// edits nothing, so it runs to report its own error.
     fn edits_access(&self, arguments: &Value) -> Option<Access> {
         let files = edit::files(arguments).ok()??;
-        let accesses: Vec<_> = files
+        let members: Vec<_> = files
             .iter()
             .filter_map(|(path, _)| self.file_access(Kind::Edits, path, false))
             .collect();
-        (!accesses.is_empty()).then(|| Access {
+        (!members.is_empty()).then(|| Access {
             kind: Kind::Edits,
-            target: accesses
+            target: members
                 .iter()
                 .map(|access| access.target.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
             place: None,
-            outside: accesses.iter().any(|access| access.outside),
+            outside: members.iter().any(|access| access.outside),
             base: None,
             identity: None,
+            members,
         })
     }
 
@@ -192,6 +195,7 @@ impl Tools {
             outside,
             base,
             identity: None,
+            members: Vec::new(),
         })
     }
 }
