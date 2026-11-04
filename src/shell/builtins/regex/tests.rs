@@ -1,7 +1,7 @@
-use super::Regex;
+use super::{Edges, Regex, Syntax};
 
 fn found(pattern: &str, text: &str) -> Option<(usize, usize)> {
-    Regex::new(pattern, false)
+    Regex::new(&[pattern], Syntax::Extended, Edges::Any, false)
         .unwrap()
         .find(&text.chars().collect::<Vec<_>>(), 0)
 }

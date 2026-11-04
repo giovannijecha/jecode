@@ -1,7 +1,6 @@
-//! A small state-based regular-expression engine for `grep`: POSIX extended
-//! syntax (`grep -E`), basic syntax converted to it, and the common GNU and
-//! Perl shorthands (`\d`, `\w`, `\s`, `\b`, `\<`, `\>`). Matches are
-//! leftmost-longest.
+//! A small state-based regular-expression engine for `grep`: POSIX basic and
+//! extended syntax, fixed strings, and the common GNU and Perl shorthands
+//! (`\d`, `\w`, `\s`, `\b`, `\<`, `\>`). Matches are leftmost-longest.
 
 #[path = "regex/nfa.rs"]
 mod nfa;
@@ -18,7 +17,22 @@ pub(super) struct Regex {
 #[path = "regex/tests.rs"]
 mod tests;
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Syntax {
+    Basic,
+    Extended,
+    Fixed,
+}
+
+/// Where a match must begin and end: anywhere, on word edges (`-w`) or across
+/// the whole line (`-x`).
+#[derive(Clone, Copy)]
+pub(super) enum Edges {
+    Any,
+    Word,
+    Line,
+}
+
 enum Node {
     Char(char),
     Any,
@@ -51,16 +65,35 @@ enum Item {
 }
 
 impl Regex {
-    /// Compiles extended syntax; see `extended` for basic patterns.
-    pub(super) fn new(pattern: &str, insensitive: bool) -> Result<Self, String> {
-        let mut parser = parser::Parser {
-            chars: pattern.chars().collect(),
-            at: 0,
+    /// Compiles patterns of which any may match. Each is parsed on its own, so
+    /// its anchors and groups cannot reach into another.
+    pub(super) fn new(
+        patterns: &[&str],
+        syntax: Syntax,
+        edges: Edges,
+        insensitive: bool,
+    ) -> Result<Self, String> {
+        let mut options = patterns
+            .iter()
+            .map(|pattern| match syntax {
+                Syntax::Fixed => Ok(Node::Sequence(pattern.chars().map(Node::Char).collect())),
+                _ => parser::parse(pattern, syntax == Syntax::Basic),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let root = if options.len() == 1 {
+            options.remove(0)
+        } else {
+            Node::Alternatives(options)
         };
-        let root = parser.alternatives()?;
-        if parser.at < parser.chars.len() {
-            return Err(format!("unmatched ) in pattern: {pattern}"));
-        }
+        let root = match edges {
+            Edges::Any => root,
+            Edges::Line => Node::Sequence(vec![Node::Start, root, Node::End]),
+            Edges::Word => Node::Sequence(vec![
+                Node::Boundary(Boundary::Word(true)),
+                root,
+                Node::Boundary(Boundary::Word(true)),
+            ]),
+        };
         Ok(Self {
             machine: nfa::Machine::compile(&root)?,
             insensitive,
@@ -75,39 +108,4 @@ impl Regex {
 
 fn word(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
-}
-
-/// Basic syntax writes the operators `( ) { } | + ?` with a backslash and
-/// treats them as literal without one; extended syntax is the reverse.
-pub(super) fn extended(pattern: &str) -> String {
-    let mut result = String::new();
-    let mut chars = pattern.chars().peekable();
-    let mut bracket = false;
-    while let Some(ch) = chars.next() {
-        if bracket {
-            result.push(ch);
-            bracket = ch != ']' || result.ends_with("[]") || result.ends_with("[^]");
-            continue;
-        }
-        match ch {
-            '\\' => match chars.next() {
-                Some(next @ ('(' | ')' | '{' | '}' | '|' | '+' | '?')) => result.push(next),
-                Some(next) => {
-                    result.push('\\');
-                    result.push(next);
-                }
-                None => result.push('\\'),
-            },
-            '(' | ')' | '{' | '}' | '|' | '+' | '?' => {
-                result.push('\\');
-                result.push(ch);
-            }
-            '[' => {
-                bracket = true;
-                result.push(ch);
-            }
-            _ => result.push(ch),
-        }
-    }
-    result
 }

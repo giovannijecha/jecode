@@ -1,10 +1,26 @@
-//! Parses extended pattern syntax into a `Node` tree.
+//! Parses one pattern of basic or extended syntax into a `Node` tree.
 
 use super::{Boundary, Class, Item, Node, word};
 
-pub(super) struct Parser {
-    pub(super) chars: Vec<char>,
-    pub(super) at: usize,
+pub(super) fn parse(pattern: &str, basic: bool) -> Result<Node, String> {
+    let mut parser = Parser {
+        chars: pattern.chars().collect(),
+        at: 0,
+        basic,
+    };
+    let root = parser.alternatives()?;
+    if parser.at < parser.chars.len() {
+        return Err(format!("unmatched ) in pattern: {pattern}"));
+    }
+    Ok(root)
+}
+
+struct Parser {
+    chars: Vec<char>,
+    at: usize,
+    /// Basic syntax writes the operators `( ) { } | + ?` with a backslash and
+    /// treats them as literal without one; extended syntax is the reverse.
+    basic: bool,
 }
 
 impl Parser {
@@ -12,10 +28,26 @@ impl Parser {
         self.chars.get(self.at).copied()
     }
 
-    pub(super) fn alternatives(&mut self) -> Result<Node, String> {
+    /// Whether the operator `op` comes next in this syntax.
+    fn operator(&self, op: char) -> bool {
+        if self.basic && op != '*' {
+            self.peek() == Some('\\') && self.chars.get(self.at + 1) == Some(&op)
+        } else {
+            self.peek() == Some(op)
+        }
+    }
+
+    fn eat(&mut self, op: char) -> bool {
+        let found = self.operator(op);
+        if found {
+            self.at += if self.basic && op != '*' { 2 } else { 1 };
+        }
+        found
+    }
+
+    fn alternatives(&mut self) -> Result<Node, String> {
         let mut options = vec![self.sequence()?];
-        while self.peek() == Some('|') {
-            self.at += 1;
+        while self.eat('|') {
             options.push(self.sequence()?);
         }
         Ok(if options.len() == 1 {
@@ -27,36 +59,37 @@ impl Parser {
 
     fn sequence(&mut self) -> Result<Node, String> {
         let mut nodes = Vec::new();
-        while let Some(ch) = self.peek() {
-            if ch == '|' || ch == ')' {
-                break;
-            }
-            let atom = self.atom()?;
-            nodes.push(self.quantified(atom)?);
+        while self.peek().is_some() && !self.operator('|') && !self.operator(')') {
+            let atom = self.atom(nodes.is_empty())?;
+            // A basic `*` after a leading `^` is a literal, not its repetition.
+            nodes.push(if self.basic && matches!(atom, Node::Start) {
+                atom
+            } else {
+                self.quantified(atom)?
+            });
         }
         Ok(Node::Sequence(nodes))
     }
 
     fn quantified(&mut self, mut node: Node) -> Result<Node, String> {
         loop {
-            let (min, max) = match self.peek() {
-                Some('{') => match self.bounds() {
+            let (min, max) = if self.eat('*') {
+                (0, None)
+            } else if self.eat('+') {
+                (1, None)
+            } else if self.eat('?') {
+                (0, Some(1))
+            } else if self.operator('{') {
+                match self.bounds() {
                     Some(bounds) => bounds,
                     None => return Ok(node),
-                },
-                Some(ch @ ('*' | '+' | '?')) => {
-                    self.at += 1;
-                    match ch {
-                        '*' => (0, None),
-                        '+' => (1, None),
-                        _ => (0, Some(1)),
-                    }
                 }
-                _ => return Ok(node),
+            } else {
+                return Ok(node);
             };
             // A lazy marker changes which match is reported, not whether one exists.
-            if self.peek() == Some('?') {
-                self.at += 1;
+            if self.operator('?') {
+                self.eat('?');
             }
             node = Node::Repeat(Box::new(node), min, max);
         }
@@ -64,8 +97,13 @@ impl Parser {
 
     /// `{m}`, `{m,}` or `{m,n}`; anything else leaves `{` literal.
     fn bounds(&mut self) -> Option<(usize, Option<usize>)> {
-        let close = self.chars[self.at..].iter().position(|ch| *ch == '}')? + self.at;
-        let inside: String = self.chars[self.at + 1..close].iter().collect();
+        let open = self.at + if self.basic { 2 } else { 1 };
+        let close = self.chars[open..].iter().position(|ch| *ch == '}')? + open;
+        let inside_end = close - usize::from(self.basic);
+        if self.basic && self.chars[inside_end] != '\\' {
+            return None;
+        }
+        let inside: String = self.chars[open..inside_end].iter().collect();
         let (min, max) = match inside.split_once(',') {
             None => (inside.parse().ok()?, Some(inside.parse().ok()?)),
             Some((min, "")) => (min.parse().ok()?, None),
@@ -75,21 +113,28 @@ impl Parser {
         Some((min, max))
     }
 
-    fn atom(&mut self) -> Result<Node, String> {
+    /// One atom. `first` says it starts its branch, the only place a basic `^`
+    /// anchors. Basic `$` anchors only at the end of its branch.
+    fn atom(&mut self, first: bool) -> Result<Node, String> {
+        if self.eat('(') {
+            let inner = self.alternatives()?;
+            if !self.eat(')') {
+                return Err("unmatched ( in pattern".into());
+            }
+            return Ok(inner);
+        }
         let ch = self.chars[self.at];
         self.at += 1;
         Ok(match ch {
-            '(' => {
-                let inner = self.alternatives()?;
-                if self.peek() != Some(')') {
-                    return Err("unmatched ( in pattern".into());
-                }
-                self.at += 1;
-                inner
-            }
             '.' => Node::Any,
-            '^' => Node::Start,
-            '$' => Node::End,
+            '^' if !self.basic || first => Node::Start,
+            '$' if !self.basic
+                || self.peek().is_none()
+                || self.operator('|')
+                || self.operator(')') =>
+            {
+                Node::End
+            }
             '[' => Node::Class(self.class()?),
             '\\' => self.escape(),
             // A quantifier with nothing to repeat is an ordinary character.

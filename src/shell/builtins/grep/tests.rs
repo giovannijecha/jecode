@@ -9,7 +9,7 @@ fn max_count_zero_does_not_wait_for_standard_input() {
             max: Some(0),
             ..Options::default()
         };
-        let regex = Regex::new("foo", false).unwrap();
+        let regex = Regex::new(&["foo"], Syntax::Basic, Edges::Any, false).unwrap();
         let mut output = Vec::new();
         sender
             .send(search(

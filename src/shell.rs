@@ -324,6 +324,9 @@ mod tests;
 #[path = "shell/tests_grep.rs"]
 mod tests_grep;
 #[cfg(test)]
+#[path = "shell/tests_grep_syntax.rs"]
+mod tests_grep_syntax;
+#[cfg(test)]
 #[path = "shell/tests_runtime.rs"]
 mod tests_runtime;
 #[cfg(test)]

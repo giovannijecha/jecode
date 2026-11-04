@@ -9,7 +9,7 @@ mod search;
 #[path = "grep/walk.rs"]
 mod walk;
 
-use super::regex::{self, Regex};
+use super::regex::{Edges, Regex, Syntax};
 use super::*;
 use options::{Options, parse};
 use search::search;
@@ -23,9 +23,7 @@ pub(super) fn grep(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
 
 fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     let mut options = parse(args)?;
-    let pattern = combined(&options);
-    let regex =
-        Regex::new(&pattern, options.insensitive).map_err(|error| format!("grep: {error}"))?;
+    let regex = compiled(&options)?;
     let implicit = options.operands.is_empty();
     if implicit {
         options
@@ -98,37 +96,29 @@ fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
     Ok((status, Vec::new(), stderr))
 }
 
-/// One extended pattern for every `-e` pattern and line of a pattern.
-fn combined(options: &Options) -> String {
-    let alternatives: Vec<String> = options
+/// One pattern for every `-e` pattern and line of a pattern.
+fn compiled(options: &Options) -> Result<Regex, String> {
+    let patterns: Vec<&str> = options
         .patterns
         .iter()
         .flat_map(|pattern| pattern.split('\n'))
-        .map(|pattern| {
-            let pattern = if options.fixed {
-                pattern
-                    .chars()
-                    .flat_map(|ch| {
-                        let meta = "\\.[]()*+?{}|^$".contains(ch);
-                        meta.then_some('\\').into_iter().chain([ch])
-                    })
-                    .collect()
-            } else if options.extended {
-                pattern.to_owned()
-            } else {
-                regex::extended(pattern)
-            };
-            format!("({pattern})")
-        })
         .collect();
-    let joined = alternatives.join("|");
-    if options.whole {
-        format!("^({joined})$")
-    } else if options.words {
-        format!("\\b({joined})\\b")
+    let syntax = if options.fixed {
+        Syntax::Fixed
+    } else if options.extended {
+        Syntax::Extended
     } else {
-        joined
-    }
+        Syntax::Basic
+    };
+    let edges = if options.whole {
+        Edges::Line
+    } else if options.words {
+        Edges::Word
+    } else {
+        Edges::Any
+    };
+    Regex::new(&patterns, syntax, edges, options.insensitive)
+        .map_err(|error| format!("grep: {error}"))
 }
 
 #[cfg(test)]
