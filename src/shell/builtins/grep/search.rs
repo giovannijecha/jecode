@@ -101,6 +101,9 @@ pub(super) fn search(
             if options.quiet {
                 return Ok(true);
             }
+            if options.listed.is_some() {
+                break;
+            }
             if !lines_shown {
                 continue;
             }
@@ -151,7 +154,7 @@ pub(super) fn search(
             before.push_back((number, line.to_owned()));
         }
     }
-    if options.count {
+    if options.count && options.listed.is_none() {
         if names {
             write!(writer, "{name}:")?;
         }

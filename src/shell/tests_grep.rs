@@ -256,6 +256,19 @@ fn a_file_that_is_also_the_output_cannot_feed_itself() {
 }
 
 #[test]
+fn file_listings_stop_at_the_first_selected_line() {
+    let directory = crate::test_support::Directory::new();
+    let script = "while true; do echo hit; done | grep -l hit > listed; \
+        while true; do echo hit; done | grep -L hit > unlisted; echo after > marker";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(read(&directory, "listed"), "(standard input)\n");
+    assert_eq!(read(&directory, "unlisted"), "");
+    assert_eq!(read(&directory, "marker"), "after\n");
+    assert_eq!(over("hit\n", "-lc hit"), (0, "in\n".to_owned()));
+    assert_eq!(over("other\n", "-Lc hit"), (1, "in\n".to_owned()));
+}
+
+#[test]
 fn grep_extended_only_matching_uses_leftmost_longest() {
     assert_eq!(grep("grep -Eo 'ok|ok 1' log"), (0, "ok 1\nok\n".into()));
 }
