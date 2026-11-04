@@ -140,8 +140,10 @@ fn openrouter_map_note_reaches_model_changes_with_source_and_survives_resume() {
         Some("The run function starts the program.")
     );
     assert_eq!(changed.get("notes_count"), Some(&Value::number(1)));
-    let saved = receipt(&agent.messages.lock().unwrap(), "changed-map");
-    assert_eq!(note(&saved, &note_id).get("summary"), entry.get("summary"));
+    assert_eq!(
+        receipt(&agent.messages.lock().unwrap(), "changed-map"),
+        changed
+    );
     drop(agent);
 
     let resumed_fixture = HttpFixture::new(vec![
@@ -311,6 +313,8 @@ fn openai_namespace_map_note_and_overview_reach_followup_requests() {
         entry.get("title").and_then(Value::as_str),
         Some("Entry point")
     );
-    let saved = receipt(&agent.messages.lock().unwrap(), "openai-overview");
-    assert_eq!(note(&saved, note_id).get("title"), entry.get("title"));
+    assert_eq!(
+        receipt(&agent.messages.lock().unwrap(), "openai-overview"),
+        overview
+    );
 }

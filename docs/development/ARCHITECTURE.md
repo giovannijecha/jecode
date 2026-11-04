@@ -83,16 +83,6 @@ chain runs, results and file changes collect in `Agent::chain` and the session's
 pending call stays the model's own. `sessions/records.rs` rebuilds one card per
 step on resume.
 
-### What requests carry
-
-Records keep every field of a tool result for the interface, exports and
-`read history:N`. `context/compact.rs` derives the view sent to the model when a
-request is projected: it drops fields that restate a default or that no later
-call can use, and writes search matches as grep lines. The view is a pure
-function of the record, so request prefixes stay identical and caches keep
-advancing. Sessions saved earlier get the same view, at the cost of one cache
-miss when they resume.
-
 Collaborators send the main conversation's cache key (`prompt_cache_key`,
 OpenRouter `session_id`), since they share most of its request prefix.
 
