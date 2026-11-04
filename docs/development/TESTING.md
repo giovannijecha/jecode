@@ -335,4 +335,5 @@ Windows and Linux jobs run on maintainer-hosted runners with fresh checkouts and
 one-job credentials; the host rejects fork code before workflow steps run.
 These jobs queue while the maintainer's machine is offline, and a queued or
 skipped job is not a successful verification. macOS runs on GitHub's hosted
-`macos-15` runner.
+`macos-26` ARM64 runner for native terminal checks and the `darwin-arm64`
+npm artifact.
