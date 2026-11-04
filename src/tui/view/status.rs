@@ -401,6 +401,23 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
                 },
             ),
         },
+        "read" if arguments.get("paths").is_some() => {
+            match arguments
+                .get("paths")
+                .and_then(Value::as_array)
+                .unwrap_or(&[])
+            {
+                [path] => labelled(
+                    "Reading",
+                    short(
+                        path.as_str()
+                            .and_then(|path| path.rsplit(['/', '\\']).next())
+                            .unwrap_or(""),
+                    ),
+                ),
+                paths => format!("Reading {} files", paths.len()),
+            }
+        }
         "read" => match field("path").strip_prefix("skill:") {
             Some(skill) => labelled(
                 "Loading skill",
