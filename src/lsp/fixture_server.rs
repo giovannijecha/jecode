@@ -3,6 +3,9 @@ use std::io::{Read, Write};
 
 fn main() {
     let marker = std::env::args().nth(1).unwrap();
+    // Locked until the process ends, by exit or kill, so tests can tell it stopped.
+    let running = std::fs::File::create(format!("{marker}-{}.lock", std::process::id())).unwrap();
+    running.lock().unwrap();
     std::fs::write(&marker, "started\n").unwrap();
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
@@ -50,6 +53,10 @@ fn main() {
             "textDocument/definition" | "textDocument/references" => {
                 if text.contains("\"character\":5") {
                     std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                // A server stuck in a request, past any test's wait for it to stop.
+                if text.contains("\"character\":8") {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
                 }
                 if text.contains("\"character\":7") {
                     error(&mut output, id, "Fixture request failed");

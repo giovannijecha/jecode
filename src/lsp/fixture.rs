@@ -48,6 +48,18 @@ impl Fixture {
     pub fn marker(&self) -> PathBuf {
         self.directory.path().join("started")
     }
+    /// Whether server process `pid` is still running. Each one holds a lock on
+    /// its own file until it ends, whether it exits or is killed.
+    pub fn running(&self, pid: u32) -> bool {
+        let mut path = self.marker().into_os_string();
+        path.push(format!("-{pid}.lock"));
+        let file = fs::File::open(path).expect("fixture server lock file");
+        match file.try_lock() {
+            Ok(()) => false,
+            Err(fs::TryLockError::WouldBlock) => true,
+            Err(fs::TryLockError::Error(error)) => panic!("fixture server lock: {error}"),
+        }
+    }
     pub fn profile(&self) -> Profile {
         let mut profile = Profile::draft_guided_rust();
         profile.executable = self.executable.to_string_lossy().into_owned();

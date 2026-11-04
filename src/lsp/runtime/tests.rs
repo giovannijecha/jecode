@@ -22,8 +22,8 @@ fn run(runtime: &Runtime, fixture: &Fixture, path: PathBuf) -> Outcome {
 }
 
 fn wait_for(fixture: &Fixture, text: &str, failure: &str) {
-    // Shutdown includes the fixture's slow reply and the handshake timeouts;
-    // a loaded parallel run needs headroom beyond their nominal 1.2 s.
+    // Shutdown includes the handshake timeouts; a loaded parallel run needs
+    // headroom beyond their nominal 1.2 s.
     let deadline = Instant::now() + Duration::from_secs(10);
     while !fs::read_to_string(fixture.marker())
         .unwrap_or_default()
@@ -101,14 +101,17 @@ fn turn_off_returns_while_a_request_is_in_flight() {
     Store::new(home.clone()).save(profile.clone()).unwrap();
     let runtime = Runtime::with_home(home);
     assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
-    let slow_runtime = runtime.clone();
-    let slow_root = fixture.workspace().to_path_buf();
-    let slow_path = fixture.sample();
-    let slow = thread::spawn(move || {
-        slow_runtime.execute(
-            &slow_root,
+    let pid = runtime.statuses()[0].pid.expect("server pid");
+    assert!(fixture.running(pid));
+    let stuck_runtime = runtime.clone();
+    let stuck_root = fixture.workspace().to_path_buf();
+    let stuck_path = fixture.sample();
+    // The fixture never answers this request, so it stays in flight throughout.
+    let stuck = thread::spawn(move || {
+        stuck_runtime.execute(
+            &stuck_root,
             &[],
-            definition(slow_path, 6),
+            definition(stuck_path, 9),
             &Cancellation::default(),
         )
     });
@@ -119,7 +122,7 @@ fn turn_off_returns_while_a_request_is_in_flight() {
         .count()
         < 2
     {
-        assert!(Instant::now() < deadline, "Slow call was not dispatched");
+        assert!(Instant::now() < deadline, "Stuck call was not dispatched");
         thread::sleep(Duration::from_millis(10));
     }
     let started = Instant::now();
@@ -130,8 +133,16 @@ fn turn_off_returns_while_a_request_is_in_flight() {
         started.elapsed()
     );
     assert!(runtime.statuses().is_empty());
-    assert_eq!(slow.join().unwrap().status, "settings_changed");
-    wait_for(&fixture, "exit", "Turn off did not stop the instance");
+    assert_eq!(stuck.join().unwrap().status, "settings_changed");
+    // Unanswered, the shutdown handshake times out and the server is killed.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fixture.running(pid) {
+        assert!(
+            Instant::now() < deadline,
+            "Turn off did not stop the instance"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[test]
