@@ -34,6 +34,10 @@ pub(super) fn render(
     expanded: bool,
 ) -> Body {
     let arguments = tool.arguments;
+    // A call that never ran has no output, and its arguments did not happen.
+    if crate::events::not_run(result).is_some() {
+        return Body::new(Vec::new());
+    }
     match tool.name {
         "list" | "search" => discovery::render(tool.name, result, columns, expanded),
         "map" => map::render(result, columns, expanded),

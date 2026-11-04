@@ -66,6 +66,9 @@ impl Status {
         if tool.name == "collaboration" {
             return agents::status(result);
         }
+        if crate::events::not_run(result).is_some() {
+            return Self::Stopped;
+        }
         if tool.name == "mcp" {
             match result.get("outcome").and_then(Value::as_str) {
                 Some("unknown") => return Self::Unknown,

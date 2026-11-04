@@ -6,6 +6,7 @@ use crate::tui::theme::{
 mod files;
 mod mcp;
 mod reads;
+mod stopped;
 
 fn draw(
     name: &str,
