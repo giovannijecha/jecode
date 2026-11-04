@@ -1,4 +1,5 @@
 use super::tests::shell;
+use super::tests_runtime::bounded_script;
 use super::*;
 
 fn read(directory: &crate::test_support::Directory, name: &str) -> String {
@@ -94,6 +95,63 @@ fn grep_searches_trees_with_names_and_filters() {
         "{errors}"
     );
     assert_eq!(read(&directory, "status"), "2\n");
+}
+
+/// A link to a directory: a symbolic link on Unix, a junction on Windows.
+pub(super) fn directory_link(target: &std::path::Path, link: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        // `cmd` would read a forward slash as a switch.
+        let native = |path: &std::path::Path| path.display().to_string().replace('/', "\\");
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(native(link))
+            .arg(native(target))
+            .stdout(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+}
+
+#[test]
+fn recursive_search_follows_links_only_when_named() {
+    let directory = crate::test_support::Directory::new();
+    let root = directory.path().join("tree");
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("a"), "hit\n").unwrap();
+    fs::write(root.join("sub/b"), "hit\n").unwrap();
+    directory_link(&root.join("sub"), &root.join("link"));
+    directory_link(&root, &root.join("sub/up"));
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("a", root.join("file_link")).unwrap();
+    let script = "grep -r hit tree > walked; echo \"$?\" > walked_status; \
+        grep -r hit tree/link > named; \
+        grep -R hit tree > followed; echo \"$?\" > followed_status";
+    assert_eq!(bounded_script(script, &directory), 0);
+    assert_eq!(read(&directory, "walked"), "tree/a:hit\ntree/sub/b:hit\n");
+    assert_eq!(read(&directory, "walked_status"), "0\n");
+    assert_eq!(read(&directory, "named"), "tree/link/b:hit\n");
+    let followed = read(&directory, "followed");
+    for line in ["tree/a:hit", "tree/link/b:hit", "tree/sub/b:hit"] {
+        assert!(followed.lines().any(|found| found == line), "{followed}");
+    }
+    assert_eq!(read(&directory, "followed_status"), "0\n");
+}
+
+#[cfg(windows)]
+#[test]
+fn recursive_search_skips_a_dangling_junction() {
+    let (directory, mut shell) = shell();
+    let root = directory.path().join("tree");
+    fs::create_dir_all(root.join("gone")).unwrap();
+    fs::write(root.join("a"), "hit\n").unwrap();
+    directory_link(&root.join("gone"), &root.join("link"));
+    fs::remove_dir(root.join("gone")).unwrap();
+    assert_eq!(shell.run("grep -r hit tree > walked"), 0);
+    assert_eq!(read(&directory, "walked"), "tree/a:hit\n");
 }
 
 #[test]

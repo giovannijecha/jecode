@@ -127,8 +127,9 @@ fn script_files_run_in_a_fresh_shell_with_arguments() {
     assert!(!directory.path().join("after_exit").exists());
 }
 
-/// A runaway producer must never hang the test runner if pipe closure regresses.
-fn bounded_script(script: &str, directory: &crate::test_support::Directory) -> i32 {
+/// A runaway script must never hang the test runner, for example if pipe
+/// closure regresses.
+pub(super) fn bounded_script(script: &str, directory: &crate::test_support::Directory) -> i32 {
     let mut child = command(script)
         .unwrap()
         .current_dir(directory.path())
@@ -144,7 +145,7 @@ fn bounded_script(script: &str, directory: &crate::test_support::Directory) -> i
         if Instant::now() >= deadline {
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!("shell pipeline did not stop after its reader closed: {script}");
+            panic!("shell script did not finish in time: {script}");
         }
         std::thread::sleep(Duration::from_millis(10));
     }

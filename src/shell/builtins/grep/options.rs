@@ -17,6 +17,8 @@ pub(super) struct Options {
     pub(super) words: bool,
     pub(super) whole: bool,
     pub(super) recursive: bool,
+    /// `-R`: follow links met during a recursive walk.
+    pub(super) follow: bool,
     pub(super) after: usize,
     pub(super) before: usize,
     pub(super) max: Option<usize>,
@@ -80,7 +82,8 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                 "files-without-match" => options.listed = Some(false),
                 "quiet" | "silent" => options.quiet = true,
                 "no-messages" => options.silent = true,
-                "recursive" | "dereference-recursive" => options.recursive = true,
+                "recursive" => (options.recursive, options.follow) = (true, false),
+                "dereference-recursive" => (options.recursive, options.follow) = (true, true),
                 "only-matching" => options.only = true,
                 "word-regexp" => options.words = true,
                 "line-regexp" => options.whole = true,
@@ -124,7 +127,8 @@ pub(super) fn parse(args: &[String]) -> Result<Options, String> {
                 'o' => options.only = true,
                 'w' => options.words = true,
                 'x' => options.whole = true,
-                'r' | 'R' => options.recursive = true,
+                'r' => (options.recursive, options.follow) = (true, false),
+                'R' => (options.recursive, options.follow) = (true, true),
                 'I' | 'a' | 'U' => {}
                 'e' => options.patterns.push(value()?),
                 'm' => options.max = Some(number(&value()?)?),

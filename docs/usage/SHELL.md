@@ -63,9 +63,12 @@ only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
 - `mktemp` accepts `-d` and a template ending in at least six `X` characters,
   and never replaces an existing path.
 - `head` and `tail` select lines with `-n N` or `-N`; `tail` also accepts
-  `-n +N`. `grep` supports basic and extended regular expressions, fixed
-  strings, common selection and context options, and recursive file search.
-  Perl regular expressions (`-P`) are unsupported.
+  `-n +N`.
+- `grep` supports basic and extended regular expressions, fixed strings, common
+  selection and context options, and recursive file search. Perl regular
+  expressions (`-P`) are unsupported.
+- `grep -r` follows a link named as an operand and skips links and junctions
+  met during the walk; `-R` follows them too and stops at loops.
 
 ## Not supported
 
