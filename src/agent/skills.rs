@@ -55,12 +55,21 @@ impl Agent {
     }
 }
 
-/// The skills a read result delivered: its own, or each file's of a
-/// multi-path read.
+/// The skills a read result delivered: its own, each file's of a multi-path
+/// read, or those of the reads in a `steps` result.
 pub(super) fn delivered(result: &Value) -> impl Iterator<Item = &str> {
-    let files = result.get("files").and_then(Value::as_array);
+    let steps = result
+        .get("steps")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("result"));
     std::iter::once(result)
-        .chain(files.into_iter().flatten())
+        .chain(steps)
+        .flat_map(|item| {
+            let files = item.get("files").and_then(Value::as_array);
+            std::iter::once(item).chain(files.into_iter().flatten())
+        })
         .filter_map(|item| item.get("skill_reference")?.as_str())
         .filter_map(|reference| crate::skills::parse_reference(reference).ok())
         .map(|(name, _)| name)

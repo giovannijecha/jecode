@@ -131,7 +131,7 @@ impl Agent {
                 self.record_tool_timing(call, timing);
             }
             if let Some(change) = outcome.change {
-                self.record_tool_change(call, &change);
+                self.record_tool_change(call, None, &change);
             }
         }
         if let Err(error) = self.checkpoint(Stage::ToolBatchFinished) {

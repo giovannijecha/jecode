@@ -106,6 +106,7 @@ fn build_definitions() -> Value {
     tools.push(mcp::definition());
     tools.push(lsp::definition());
     tools.push(collaboration::definition());
+    tools.push(work::steps());
     tools.push(work::todo());
     tools.push(work::ask_user());
     Value::Array(tools)
@@ -212,7 +213,7 @@ fn base_definitions() -> Vec<Value> {
         ),
         tool(
             "write",
-            "Create or replace a complete UTF-8 file; text in the assistant reply does not execute a write. Project paths need an existing parent. tmp:relative/path creates parents in session temporary storage for disposable scripts and one-off verification. Keep deliverables and durable tests in the project.",
+            "Create or replace a complete UTF-8 file, creating any missing parent directories; text in the assistant reply does not execute a write. tmp:relative/path writes to session temporary storage for disposable scripts and one-off verification. Keep deliverables and durable tests in the project.",
             Value::object([("path", string()), ("content", string())]),
             &["path", "content"],
         ),

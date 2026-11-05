@@ -300,7 +300,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
         "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
-        | "agent" | "mcp" | "lsp" => crate::events::target(tool.name, tool.arguments),
+        | "agent" | "mcp" | "lsp" | "steps" => crate::events::target(tool.name, tool.arguments),
         "read" if tool.arguments.get("paths").is_some() => summary::paths(tool.arguments),
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };

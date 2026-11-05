@@ -9,9 +9,13 @@ fn tool_catalog_and_encoded_size_are_reused() {
 #[test]
 fn every_tool_advertises_optional_parallel_boolean() {
     let tools = definitions().as_array().unwrap();
-    assert_eq!(tools.len(), 17);
+    assert_eq!(tools.len(), 18);
     for tool in tools {
         let name = tool.get("name").and_then(Value::as_str).unwrap();
+        // A steps call always runs alone; its steps run in order.
+        if name == "steps" {
+            continue;
+        }
         let parameters = tool.get("parameters").unwrap();
         let parallel = parameters
             .get("properties")
@@ -410,8 +414,9 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             "mcp",
             "lsp",
             "agent",
+            "steps",
             "todo_list",
-            "ask_user"
+            "ask_user",
         ]
     );
     for (name, required, limit_max, context_max) in [

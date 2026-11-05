@@ -119,6 +119,50 @@ fn auto_sends_the_conversation_id_and_preferences_and_lists_endpoints_once_per_w
 }
 
 #[test]
+fn a_collaborator_sends_the_main_conversation_id() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, listing()),
+        (200, served("Report", "One", 0.001)),
+    ]);
+    let mut agent = agent(&directory, &fixture.endpoint, Routing::Auto);
+    agent.enable_sessions(home.path()).unwrap();
+    agent
+        .agent_tool(&Value::object([
+            ("action", Value::string("create")),
+            (
+                "tasks",
+                Value::Array(vec![Value::object([
+                    ("title", Value::string("Inspect")),
+                    ("instructions", Value::string("Return a report")),
+                    ("workspace", Value::string("shared")),
+                ])]),
+            ),
+        ]))
+        .unwrap();
+    agent
+        .collaboration()
+        .wait(
+            Some("a1"),
+            std::time::Duration::from_secs(5),
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap();
+    agent.collaboration().stop_all();
+    let id = agent.sessions().unwrap().id();
+    let requests = fixture.finish();
+    let completion = requests
+        .iter()
+        .find(|request| request.body.get("messages").is_some())
+        .unwrap();
+    assert_eq!(
+        completion.body.get("session_id").and_then(Value::as_str),
+        Some(id.as_str())
+    );
+}
+
+#[test]
 fn a_pin_reaches_summary_requests_and_its_failures_say_how_to_change_it() {
     let directory = Directory::new();
     // Leave summary room after a rejection of the native prompt and tool contract.

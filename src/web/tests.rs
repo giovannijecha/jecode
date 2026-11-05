@@ -178,6 +178,23 @@ fn cancellation_preserves_crawl_queue() {
 }
 
 #[test]
+fn a_failed_connection_reports_its_reason() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let (_home, _project, area) = area();
+    let arguments = Value::object([
+        ("action", Value::string("fetch")),
+        ("url", Value::string(format!("http://127.0.0.1:{port}/"))),
+    ]);
+    let error = execute(&area, &arguments, &Cancellation::default()).unwrap_err();
+    let reason = error
+        .strip_prefix("HTTP transfer failed:")
+        .unwrap_or(&error);
+    assert!(!reason.trim().is_empty(), "{error}");
+}
+
+#[test]
 fn timeout_stops_a_slow_transfer() {
     let server = Server::new();
     let (_home, _project, area) = area();

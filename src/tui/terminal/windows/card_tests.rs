@@ -155,6 +155,7 @@ pub(super) fn console() {
     concurrent_cards(&terminal);
     node_failures(&terminal);
     super::multi_edit_cards::console(&terminal);
+    super::steps_cards::console(&terminal);
     drop(terminal);
 }
 

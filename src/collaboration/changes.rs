@@ -7,6 +7,39 @@ use crate::{file_change::Change, json::Value, sessions::Store};
 use std::path::Path;
 
 impl Observer {
+    /// Live session event count, used to notice changes saved after a step's
+    /// card already reported its line counts.
+    pub fn change_revision(&self, id: &str) -> Option<usize> {
+        let events = {
+            let state = self.0.state.lock().unwrap();
+            state
+                .records
+                .iter()
+                .find(|record| record.id == id)?
+                .session_events
+                .clone()
+        };
+        events.map(|events| events.lock().unwrap().len())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_change_stream(&self, id: &str, events: crate::export::Messages) {
+        let seed = Value::object([
+            ("id", Value::string(id)),
+            ("number", Value::number(1)),
+            ("state", Value::string("returned")),
+            ("workspace_closed", Value::Bool(true)),
+        ]);
+        let mut record = super::Record::from_value(&seed).unwrap();
+        record.session_events = Some(events);
+        self.0
+            .state
+            .lock()
+            .unwrap()
+            .records
+            .push(super::Tracked::new(record));
+    }
+
     /// The collaborator's changed calls in order, by call id. Empty when its
     /// session cannot be read, which leaves its cards with counts only.
     pub fn changes(&self, id: &str) -> Vec<(String, Change)> {
@@ -46,10 +79,36 @@ fn changes(events: &[Value]) -> Vec<(String, Change)> {
         .iter()
         .filter(|event| event.get("type").and_then(Value::as_str) == Some("tool_change"))
         .filter_map(|event| {
+            // Cards know a `steps` call by its steps, each with its own change.
+            let id = event.get("step").or_else(|| event.get("tool_call_id"))?;
             Some((
-                event.get("tool_call_id")?.as_str()?.to_owned(),
+                id.as_str()?.to_owned(),
                 Change::from_value(event.get("change")?).ok()?,
             ))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_inside_a_steps_call_belongs_to_its_step() {
+        let change = Change::between(None, "text\n").unwrap();
+        let event = |step: Option<&str>| {
+            let mut event = Value::object([
+                ("type", Value::string("tool_change")),
+                ("tool_call_id", Value::string("call")),
+                ("change", change.value()),
+            ]);
+            if let (Some(step), Value::Object(fields)) = (step, &mut event) {
+                fields.insert("step".into(), Value::string(step));
+            }
+            event
+        };
+        let found = changes(&[event(None), event(Some("call_s1")), event(Some("call_s2"))]);
+        let ids: Vec<_> = found.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["call", "call_s1", "call_s2"]);
+    }
 }

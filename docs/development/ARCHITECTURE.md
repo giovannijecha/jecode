@@ -75,6 +75,17 @@ Declared and automatic groups never merge, and the agent never infers
 independence from paths. `agent`, `ask_user` and `todo_list` calls are always
 serial boundaries.
 
+`agent/steps.rs` runs one `steps` call as several tools in order. The transcript
+keeps the model's call with one combined result, because `openai_items` and
+`anthropic_blocks` replay native output verbatim. Each step goes through
+`execute_one` with its own permission check, timing, events and card; while the
+chain runs, results and file changes collect in `Agent::chain` and the session's
+pending call stays the model's own. `sessions/records.rs` rebuilds one card per
+step on resume.
+
+Collaborators send the main conversation's cache key (`prompt_cache_key`,
+OpenRouter `session_id`), since they share most of its request prefix.
+
 ### Streaming and persistence
 
 Backends deliver text as deltas. The agent masks credentials incrementally,

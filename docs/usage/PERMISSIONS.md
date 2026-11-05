@@ -136,9 +136,9 @@ commands. Start Jecode in a narrower project directory, or choose Full.
   dependency, fail with `EPERM`. Use npm's `--install-links` to copy instead, or
   choose Full.
 - **Local servers on Windows.** A confined command can connect to a server on
-  your machine, but your machine cannot connect to a server running inside the
-  confinement. Start development servers in Full; you can return to Workspace
-  afterwards and the server keeps running.
+  your machine, but host clients, including `web`, cannot connect to a server
+  running inside the confinement. Start development servers in Full; you can
+  return to Workspace afterwards and the server keeps running.
 - **Windows services and CI workers.** In a service session (session 0), Windows
   cannot start some programs, including PowerShell, inside the confinement. Run
   such programs from an interactive user session, or choose Full. See the

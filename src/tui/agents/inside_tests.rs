@@ -65,6 +65,182 @@ fn inside(app: &mut App) -> String {
 }
 
 #[test]
+fn step_hunk_arriving_after_its_counts_refreshes_the_open_card() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut app = app(&home, &project, "http://127.0.0.1:1".into());
+    let change = crate::file_change::Change::between(Some("old\n"), "new\n").unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    app.collaboration_observer
+        .fixture_change_stream("a1", events.clone());
+
+    let mut shown = record(1, "running");
+    let mut tools = list(&shown, "tools")
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    set(&mut tools[0], "id", Value::string("chain_s1"));
+    set(
+        &mut tools[0],
+        "change",
+        Value::object([
+            ("added", Value::number(change.added)),
+            ("removed", Value::number(change.removed)),
+            ("created", Value::Bool(change.created)),
+        ]),
+    );
+    set(&mut shown, "tools", Value::Array(tools));
+    app.state.collaboration = vec![shown];
+    app.state.agents_panel = Some(Panel {
+        inside: Some("a1".into()),
+        ..Panel::default()
+    });
+
+    // A step's ToolChanged event publishes line counts before `steps` saves
+    // the hunk with its one outer tool result.
+    assert!(app.refresh_agent_changes());
+    let panel = app.state.agents_panel.as_ref().unwrap();
+    assert_eq!(panel.changes.counted, 1);
+    assert!(panel.changes.calls.is_empty());
+    assert!(!app.refresh_agent_changes());
+
+    events.lock().unwrap().push(Value::object([
+        ("type", Value::string("tool_change")),
+        ("after_message", Value::number(2)),
+        ("tool_call_id", Value::string("chain")),
+        ("step", Value::string("chain_s1")),
+        ("change", change.value()),
+    ]));
+    assert!(app.refresh_agent_changes());
+    let panel = app.state.agents_panel.as_ref().unwrap();
+    assert_eq!(panel.changes.counted, 1);
+    assert!(!panel.changes.calls["chain_s1"].hunks.is_empty());
+    let cards = conversation::items(&app.state.collaboration[0], &panel.changes.calls);
+    assert!(cards.iter().any(|item| matches!(item,
+        Item::Tool { change: Some(change), .. } if !change.hunks.is_empty()
+    )));
+    assert!(!app.refresh_agent_changes());
+}
+
+#[test]
+fn repeated_child_call_ids_keep_counts_without_a_mismatched_hunk() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut app = app(&home, &project, "http://127.0.0.1:1".into());
+    let first = crate::file_change::Change::between(Some("first\n"), "older\n").unwrap();
+    let second = crate::file_change::Change::between(Some("second\n"), "newer\n").unwrap();
+    assert_eq!((first.added, first.removed), (second.added, second.removed));
+    let events = Arc::new(Mutex::new(vec![
+        Value::object([
+            ("type", Value::string("tool_change")),
+            ("tool_call_id", Value::string("chain_s1")),
+            ("change", first.value()),
+        ]),
+        Value::object([
+            ("type", Value::string("tool_change")),
+            ("tool_call_id", Value::string("chain")),
+            ("step", Value::string("chain_s1")),
+            ("change", second.value()),
+        ]),
+    ]));
+    app.collaboration_observer
+        .fixture_change_stream("a1", events);
+
+    let mut shown = record(1, "running");
+    let mut tools = list(&shown, "tools")
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    set(&mut tools[0], "id", Value::string("chain_s1"));
+    set(
+        &mut tools[0],
+        "change",
+        Value::object([
+            ("added", Value::number(first.added)),
+            ("removed", Value::number(first.removed)),
+            ("created", Value::Bool(false)),
+        ]),
+    );
+    let repeated = tools[0].clone();
+    tools.push(repeated);
+    set(&mut shown, "tools", Value::Array(tools));
+    app.state.collaboration = vec![shown];
+    app.state.agents_panel = Some(Panel {
+        inside: Some("a1".into()),
+        ..Panel::default()
+    });
+
+    assert!(app.refresh_agent_changes());
+    let panel = app.state.agents_panel.as_ref().unwrap();
+    let cards = conversation::items(&app.state.collaboration[0], &panel.changes.calls);
+    let edits: Vec<_> = cards
+        .iter()
+        .filter_map(|item| match item {
+            Item::Tool {
+                change: Some(change),
+                ..
+            } => Some(change),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edits.len(), 2);
+    assert!(
+        edits
+            .iter()
+            .all(|change| change.added == 1 && change.removed == 1 && change.hunks.is_empty())
+    );
+}
+
+#[test]
+fn repeated_source_change_ids_stay_ambiguous_after_a_third_event() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut app = app(&home, &project, "http://127.0.0.1:1".into());
+    let source = ["first\n", "second\n", "third\n"]
+        .into_iter()
+        .map(|text| {
+            let change = crate::file_change::Change::between(Some("old\n"), text).unwrap();
+            Value::object([
+                ("type", Value::string("tool_change")),
+                ("tool_call_id", Value::string("c1")),
+                ("change", change.value()),
+            ])
+        })
+        .collect();
+    app.collaboration_observer
+        .fixture_change_stream("a1", Arc::new(Mutex::new(source)));
+    let mut shown = record(1, "running");
+    let mut tools = list(&shown, "tools")
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    set(
+        &mut tools[0],
+        "change",
+        Value::object([
+            ("added", Value::number(1)),
+            ("removed", Value::number(1)),
+            ("created", Value::Bool(false)),
+        ]),
+    );
+    set(&mut shown, "tools", Value::Array(tools));
+    app.state.collaboration = vec![shown];
+    app.state.agents_panel = Some(Panel {
+        inside: Some("a1".into()),
+        ..Panel::default()
+    });
+
+    assert!(app.refresh_agent_changes());
+    let panel = app.state.agents_panel.as_ref().unwrap();
+    assert!(!panel.changes.calls.contains_key("c1"));
+    let cards = conversation::items(&app.state.collaboration[0], &panel.changes.calls);
+    assert!(cards.iter().any(|item| matches!(item,
+        Item::Tool { change: Some(change), .. }
+            if change.added == 1 && change.removed == 1 && change.hunks.is_empty()
+    )));
+}
+
+#[test]
 fn inside_edit_cards_show_the_child_hunks_live_and_after_resume() {
     let home = Directory::new();
     let project = Directory::new();

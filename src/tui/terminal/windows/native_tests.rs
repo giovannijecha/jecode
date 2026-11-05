@@ -21,6 +21,9 @@ mod card_tests;
 #[path = "multi_edit_cards.rs"]
 mod multi_edit_cards;
 
+#[path = "steps_cards.rs"]
+mod steps_cards;
+
 #[path = "console_probe.rs"]
 mod console_probe;
 use console_probe::snapshot as probe;

@@ -74,6 +74,28 @@ fn compact_node_failure_leads_with_the_timeout_instead_of_runtime_boilerplate() 
 }
 
 #[test]
+fn a_refused_steps_call_names_its_tools() {
+    let step = |tool: &str| Value::object([("tool", Value::string(tool))]);
+    let arguments = Value::object([("steps", Value::Array(vec![step("edit"), step("ask_user")]))]);
+    let result = Value::object([("error", Value::string("ask_user cannot run as a step"))]);
+    let shown = Presentation::default();
+    let rendered = card(
+        Tool {
+            name: "steps",
+            arguments: &arguments,
+            result: Some(&result),
+            summary: &crate::events::tool_summary("steps", &result),
+            change: None,
+            presentation: &shown,
+        },
+        80,
+        false,
+    );
+    assert_eq!(rendered.rows[0].plain(), " STEPS  edit, ask_user");
+    assert!(rendered.rows[1].plain().contains("ask_user cannot run"));
+}
+
+#[test]
 fn expanded_node_failure_keeps_the_complete_retained_diagnostic_and_exit_code() {
     let arguments = Value::object([
         ("action", Value::string("poll")),

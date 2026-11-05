@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 mod mismatch;
 mod page;
+#[cfg(test)]
+mod parent_tests;
 mod streaming;
 pub(super) use page::read_page;
 pub(crate) use page::read_source;
@@ -263,12 +265,39 @@ pub(super) fn writable_path(root: &Path, value: &str) -> Result<PathBuf, String>
             let parent = path
                 .parent()
                 .ok_or("The path must have a parent directory")?;
-            let parent = fs::canonicalize(parent)
-                .map_err(|error| format!("The parent directory must exist: {error}"))?;
+            let parent = resolve_directory(parent)
+                .map_err(|error| format!("Could not resolve the parent directory: {error}"))?;
             check_path(root, parent.join(name))
         }
         Err(error) => Err(format!("Could not inspect path: {error}")),
     }
+}
+
+/// Where a directory is or would be created: its nearest existing ancestor,
+/// resolved through links, then the missing names. A broken link, or `..` after
+/// a missing name, has no answer until something exists there. A folder that a
+/// concurrent write creates meanwhile is no link, and its name is the same.
+pub(super) fn resolve_directory(path: &Path) -> Result<PathBuf, String> {
+    let mut missing = Vec::new();
+    let mut next = path;
+    let mut resolved = loop {
+        match fs::canonicalize(next) {
+            Ok(resolved) => break resolved,
+            Err(error)
+                if error.kind() != std::io::ErrorKind::NotFound
+                    || fs::symlink_metadata(next)
+                        .is_ok_and(|entry| entry.file_type().is_symlink()) =>
+            {
+                return Err(error.to_string());
+            }
+            Err(_) => {}
+        }
+        let unresolved = || format!("no existing folder above {}", next.display());
+        missing.push(next.file_name().ok_or_else(unresolved)?);
+        next = next.parent().ok_or_else(unresolved)?;
+    };
+    resolved.extend(missing.iter().rev());
+    Ok(resolved)
 }
 
 fn check_path(root: &Path, path: PathBuf) -> Result<PathBuf, String> {
@@ -321,6 +350,12 @@ fn replace_file(path: &Path, content: &str, cancellation: &Cancellation) -> Resu
         .is_some_and(|metadata| metadata.permissions().readonly())
     {
         return Err("File is read-only; its content was not changed".into());
+    }
+    if metadata.is_none()
+        && let Some(parent) = path.parent()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create the parent directory: {error}"))?;
     }
     let temporary = crate::disk::temporary_beside(path);
     let mut file = OpenOptions::new()

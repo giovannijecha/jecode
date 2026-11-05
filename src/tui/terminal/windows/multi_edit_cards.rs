@@ -51,7 +51,7 @@ impl Call<'_> {
 
 /// Paints `rows` through the full frame renderer and reads the native console
 /// back, after checking each `expected` text reached a row.
-fn shown(terminal: &Terminal, rows: Vec<Line>, columns: usize, expected: &[&str]) {
+pub(super) fn shown(terminal: &Terminal, rows: Vec<Line>, columns: usize, expected: &[&str]) {
     let (physical_width, height) = terminal.size;
     let plain: Vec<_> = rows.iter().map(Line::plain).collect();
     for expected in expected {

@@ -4,7 +4,10 @@ use crate::{json::Value, todo::Plan};
 impl Agent {
     /// The current plan from successful, durable tool results in this conversation.
     pub fn todo_plan(&self) -> Option<Plan> {
-        crate::todo::latest(&self.messages.lock().unwrap())
+        self.chain
+            .as_ref()
+            .and_then(super::steps::Chain::plan)
+            .or_else(|| crate::todo::latest(&self.messages.lock().unwrap()))
     }
 
     pub(super) fn todo_tool(&self, arguments: &Value) -> Result<Value, String> {

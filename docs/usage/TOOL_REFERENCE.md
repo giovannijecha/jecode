@@ -7,7 +7,7 @@ writing [skills](SKILLS.md).
 
 ## Arguments
 
-Every tool accepts an optional boolean `parallel`. The routine tools `read`,
+Every tool except `steps` accepts an optional boolean `parallel`. The routine tools `read`,
 `list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser`, `mcp` and `lsp` also
 accept two display-only strings: `work`, a short label that groups related calls
 into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
@@ -33,6 +33,28 @@ Neither changes what the call does.
 | `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
 | `ask_user` | `questions` | See [Questions and plans](QUESTIONS_AND_PLANS.md#question-format). |
 | `todo_list` | `action` | See [Questions and plans](QUESTIONS_AND_PLANS.md#plan-format). |
+| `steps` | `steps` | See [below](#steps). |
+
+## Steps
+
+`steps` runs up to 12 tools in order with one call, so the model does not pay a
+request between calls that do not need each other's results. Each entry has
+`tool` and `arguments`, the same arguments as that tool alone, and keeps its own
+permission check, checkpoint and card.
+
+The call has one result, a `steps` array in the same order. Each entry names its
+`tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
+fails on an `error`, a refused or unknown `outcome`, a timeout, a cancellation, a
+non-zero exit, a `checkpoint` restore with conflicting, failed or skipped paths
+or, for `edit`, any file that failed; a multi-file `read` reports each path and goes on.
+A successful MCP `completed` outcome continues. LSP
+statuses other than `ready` and background command timeouts stop the rest.
+A restore's reported skips also include partial-capture warnings; those stop
+the prepared sequence too, leaving the complete result for the model to assess.
+`ask_user` and `steps` cannot be steps. Media files need a `read` of their own,
+because the model is shown them only after a single read. If Jecode closes during
+the call, its outcome is unknown and the model is told to check before repeating
+it.
 
 ## Scheduling
 
@@ -44,8 +66,8 @@ overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
 `parallel: true` on adjacent calls declares them independent, including writes
 and commands; they run in waves of at most four. A call without it ends the
 declared group. `parallel: false` always runs in order. `agent`, `ask_user`,
-`todo_list`, `history:` and `skill:` reads and calls that need approval always
-run in order. Jecode never infers independence from different paths.
+`steps`, `todo_list`, `history:` and `skill:` reads and calls that need approval
+always run in order. Jecode never infers independence from different paths.
 
 In a declared group, each result is saved as it completes and shown in the TUI;
 the model receives all results in the original order. One failure does not undo

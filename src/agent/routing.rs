@@ -82,7 +82,14 @@ impl Agent {
 
     /// The OpenRouter `session_id` follows the saved conversation it belongs to.
     pub(super) fn sync_conversation(&mut self) {
-        let id = self.persistence.as_ref().map(crate::sessions::Handle::id);
-        self.client.set_conversation(id);
+        self.client.set_conversation(self.conversation_key());
+    }
+
+    /// Collaborators send the main conversation's key: they share most of its
+    /// request prefix, so they reach the same provider cache.
+    pub(super) fn conversation_key(&self) -> Option<String> {
+        self.parent_conversation
+            .clone()
+            .or_else(|| self.persistence.as_ref().map(crate::sessions::Handle::id))
     }
 }

@@ -261,6 +261,7 @@ impl Agent {
         let child_home = handle.store().collaborator_home(&handle.id());
         crate::disk::ensure_private_directory(&child_home)
             .map_err(|error| format!("Could not prepare collaborator storage: {error}"))?;
+        child.parent_conversation = Some(handle.id());
         child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
         // References the main agent hands over resolve in its own storage.
         child.tools.inherit_references(&self.tools);

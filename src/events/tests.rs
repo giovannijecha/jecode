@@ -429,4 +429,12 @@ fn exec_summary_uses_command_exit_and_background_contract() {
         ),
     ]);
     assert_eq!(target("exec", &arguments), "cargo [\"test\",\"a b\"]");
+    let chain = Value::object([(
+        "steps",
+        Value::Array(vec![
+            Value::object([("tool", Value::string("edit"))]),
+            Value::object([("tool", Value::string("ask_user"))]),
+        ]),
+    )]);
+    assert_eq!(target("steps", &chain), "edit, ask_user");
 }

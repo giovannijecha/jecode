@@ -43,6 +43,10 @@ pub struct Agent {
     naming: bool,
     inherited_project_instructions: Option<String>,
     collaboration_seen: usize,
+    /// The `steps` call now running; its steps' results collect here.
+    chain: Option<steps::Chain>,
+    /// A collaborator's main conversation, for provider cache affinity.
+    parent_conversation: Option<String>,
 }
 
 impl Agent {
@@ -102,6 +106,8 @@ impl Agent {
             naming: false,
             inherited_project_instructions: None,
             collaboration_seen: 0,
+            chain: None,
+            parent_conversation: None,
         };
         agent.register_backend(agent.client.services());
         agent.clear();
@@ -318,6 +324,12 @@ impl Agent {
     }
 
     fn tool_result(&mut self, call: &ToolCall, result: &Value) {
+        self.used_skills
+            .extend(skills::delivered(result).map(str::to_owned));
+        if let Some(chain) = &mut self.chain {
+            chain.results.push((call.name.clone(), result.clone()));
+            return;
+        }
         self.messages.lock().unwrap().push(Value::object([
             ("role", Value::string("tool")),
             ("tool_call_id", Value::string(&call.id)),
@@ -326,8 +338,6 @@ impl Agent {
                 Value::string(self.redactor.value(result).encode()),
             ),
         ]));
-        self.used_skills
-            .extend(skills::delivered(result).map(str::to_owned));
     }
 
     fn cancel_calls(&mut self, calls: &[ToolCall]) {
@@ -426,6 +436,7 @@ mod recovery;
 mod retraction;
 mod routing;
 mod skills;
+pub(crate) mod steps;
 mod streaming;
 mod summary;
 mod temporary;

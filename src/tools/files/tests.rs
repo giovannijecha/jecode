@@ -394,13 +394,6 @@ fn invalid_text_is_rejected_and_large_files_are_paged_without_losing_long_lines(
         .is_err()
     );
     assert!(read(&root, &arguments(&[("path", ".")])).is_err());
-    assert!(
-        write(
-            &root,
-            &arguments(&[("path", "missing/child"), ("content", "x")])
-        )
-        .is_err()
-    );
 }
 
 #[test]

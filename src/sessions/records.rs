@@ -99,19 +99,13 @@ impl Document {
                 let arguments = call.arguments.as_str();
                 let mut arguments =
                     json::parse(arguments).unwrap_or_else(|_| Value::string(arguments));
-                if name == "agent"
-                    && let Value::Object(fields) = &mut arguments
-                {
-                    fields.remove("display_number");
-                }
-                if name == "agent"
-                    && let Some(id) = arguments.get("id").and_then(Value::as_str)
-                    && let Some(number) = display_numbers.get(id)
-                    && let Value::Object(fields) = &mut arguments
-                {
-                    fields.insert("display_number".into(), Value::number(*number));
-                }
+                numbered(name, &mut arguments, &display_numbers);
                 let result = json::parse(string(message, "content").unwrap()).unwrap();
+                if name == "steps" && result.get("steps").is_some() {
+                    latest_tool =
+                        step_records(&mut records, id, &arguments, &result, &display_numbers);
+                    continue;
+                }
                 latest_tool = Some(records.len());
                 records.push(Record::Tool {
                     id: id.into(),
@@ -125,6 +119,68 @@ impl Document {
         }
         records
     }
+}
+
+/// An agent card shows the number saved with its collaborator, never the model's.
+fn numbered(name: &str, arguments: &mut Value, numbers: &HashMap<String, usize>) {
+    if name != "agent" {
+        return;
+    }
+    let Value::Object(fields) = arguments else {
+        return;
+    };
+    fields.remove("display_number");
+    let number = fields
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| numbers.get(id));
+    if let Some(number) = number {
+        fields.insert("display_number".into(), Value::number(*number));
+    }
+}
+
+/// One card per step that ran, with the same identifiers as when it was live.
+fn step_records(
+    records: &mut Vec<Record>,
+    id: &str,
+    arguments: &Value,
+    result: &Value,
+    numbers: &HashMap<String, usize>,
+) -> Option<usize> {
+    let calls = arguments.get("steps").and_then(Value::as_array)?;
+    let results = result.get("steps").and_then(Value::as_array)?;
+    let mut latest = None;
+    for (index, (call, entry)) in calls.iter().zip(results).enumerate() {
+        let (Some(tool), Some(result)) = (
+            entry.get("tool").and_then(Value::as_str),
+            entry.get("result"),
+        ) else {
+            continue;
+        };
+        let mut arguments = match call.get("arguments") {
+            Some(Value::String(text)) => {
+                json::parse(text).unwrap_or_else(|_| Value::string(text.as_str()))
+            }
+            Some(value) => value.clone(),
+            None => Value::object([]),
+        };
+        if let Some(coerced) = crate::tools::coerce::arguments(tool, &arguments.encode())
+            && let Ok(coerced) = json::parse(&coerced)
+        {
+            arguments = coerced;
+        }
+        numbered(tool, &mut arguments, numbers);
+        latest = Some(records.len());
+        records.push(Record::Tool {
+            id: format!("{id}_s{}", index + 1),
+            name: tool.into(),
+            arguments,
+            summary: tool_summary(tool, result),
+            result: result.clone(),
+            change: None,
+        });
+    }
+    latest
 }
 
 fn hidden(event: &Value, index: usize, returned: &BTreeSet<usize>) -> bool {
@@ -203,18 +259,26 @@ fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<us
             });
         }
         Some("tool_change") => {
-            let Some(id) = event.get("tool_call_id").and_then(Value::as_str) else {
+            // A step's change names the step; validation ties the event itself
+            // to the one tool message of the call that ran it.
+            let Some(id) = event
+                .get("step")
+                .or_else(|| event.get("tool_call_id"))
+                .and_then(Value::as_str)
+            else {
                 return;
             };
             // Validation ties the event to the immediately preceding tool message.
             // Local events may have appended other records at the same boundary.
-            if let Some(Record::Tool {
-                id: candidate,
-                change,
-                ..
-            }) = latest_tool.and_then(|index| records.get_mut(index))
-                && candidate == id
-            {
+            let end = latest_tool.map_or(0, |latest| (latest + 1).min(records.len()));
+            let target = latest_tool.and_then(|_| {
+                records[..end]
+                    .iter_mut()
+                    .rev()
+                    .take(crate::agent::steps::MAX_STEPS)
+                    .find(|record| matches!(record, Record::Tool { id: candidate, .. } if candidate == id))
+            });
+            if let Some(Record::Tool { change, .. }) = target {
                 *change = event
                     .get("change")
                     .and_then(|value| crate::file_change::Change::from_value(value).ok());

@@ -9,7 +9,10 @@ pub(super) enum Mode {
 }
 
 pub(super) fn mode(call: &ToolCall) -> Mode {
-    if matches!(call.name.as_str(), "agent" | "todo_list" | "ask_user") {
+    if matches!(
+        call.name.as_str(),
+        "agent" | "todo_list" | "ask_user" | "steps"
+    ) {
         return Mode::Serial;
     }
     let Ok(arguments) = json::parse(&call.arguments) else {
