@@ -148,9 +148,17 @@ fn bracketed_paste_keeps_control_bytes_and_arrows_as_text() {
 #[test]
 fn escape_is_bounded_and_late_cursor_reports_do_not_enter_the_draft() {
     let mut parser = Parser::default();
+    assert!(parser.wait().is_none());
     assert!(parser.push(27, false).is_empty());
+    assert!(
+        parser
+            .wait()
+            .is_some_and(|wait| wait <= super::super::ESCAPE_TIMEOUT)
+    );
     parser.escaped_at = Some(Instant::now() - Duration::from_secs(1));
+    assert_eq!(parser.wait(), Some(Duration::ZERO));
     assert_eq!(parser.idle().unwrap().code, 27);
+    assert!(parser.wait().is_none());
     let mut decoder = Decoder::default();
     assert!(decoder.bytes(b"\x1b[12;4R\x1b[?1;2c").is_empty());
     assert!(matches!(&decoder.bytes(b"kept")[0], Decoded::Text(text) if text == "k"));

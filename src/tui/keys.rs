@@ -3,6 +3,12 @@ use std::time::{Duration, Instant};
 #[cfg(any(unix, test))]
 mod vt;
 
+const ESCAPE_TIMEOUT: Duration = Duration::from_millis(150);
+
+fn escape_wait(at: Option<Instant>) -> Option<Duration> {
+    at.map(|at| ESCAPE_TIMEOUT.saturating_sub(at.elapsed()))
+}
+
 pub enum Decoded {
     Key(Key),
     Text(String),
@@ -142,15 +148,32 @@ impl Decoder {
             vec![Decoded::Key(key)]
         }
     }
+    /// Pending escape input has its own deadline, independent of animation or
+    /// background work. An active paste must not make the idle loop spin.
+    pub fn wait(&self) -> Option<Duration> {
+        let prefix = if self.paste.is_none() && !self.prefix.is_empty() {
+            escape_wait(self.escaped_at)
+        } else {
+            None
+        };
+        #[cfg(any(unix, test))]
+        {
+            match (prefix, self.vt.wait()) {
+                (Some(left), Some(right)) => Some(left.min(right)),
+                (left, right) => left.or(right),
+            }
+        }
+        #[cfg(not(any(unix, test)))]
+        prefix
+    }
+
     pub fn idle(&mut self) -> Option<Decoded> {
         #[cfg(any(unix, test))]
         if let Some(key) = self.vt.idle() {
             return Some(Decoded::Key(key));
         }
         if self.paste.is_none()
-            && self
-                .escaped_at
-                .is_some_and(|at| at.elapsed() >= Duration::from_millis(150))
+            && escape_wait(self.escaped_at).is_some_and(|wait| wait.is_zero())
             && !self.prefix.is_empty()
         {
             self.prefix.clear();
@@ -169,6 +192,32 @@ impl Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pending_escape_bounds_idle_wait_and_paste_does_not() {
+        let mut decoder = Decoder::default();
+        assert!(decoder.wait().is_none());
+        assert!(
+            decoder
+                .key(Key {
+                    code: 27,
+                    modifiers: 0,
+                    character: 27
+                })
+                .is_empty()
+        );
+        assert!(decoder.wait().is_some_and(|wait| wait <= ESCAPE_TIMEOUT));
+        decoder.escaped_at = Some(Instant::now() - ESCAPE_TIMEOUT);
+        assert_eq!(decoder.wait(), Some(Duration::ZERO));
+        assert!(matches!(decoder.idle(), Some(Decoded::Key(key)) if key.code == 27));
+        assert!(decoder.wait().is_none());
+
+        decoder.bytes(b"\x1b[200~pasted\x1b[");
+        assert!(decoder.wait().is_none());
+        assert!(
+            matches!(decoder.bytes(b"201~").as_slice(), [Decoded::Paste(text)] if text == "pasted")
+        );
+        assert!(decoder.wait().is_none());
+    }
     #[test]
     fn bracketed_paste_is_one_insert_and_never_an_enter_command() {
         let mut decoder = Decoder::default();

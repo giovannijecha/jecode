@@ -131,16 +131,17 @@ impl Parser {
     }
 
     pub(super) fn idle(&mut self) -> Option<Key> {
-        if self
-            .escaped_at
-            .is_some_and(|at| at.elapsed() >= Duration::from_millis(150))
-        {
+        if self.wait().is_some_and(|wait| wait.is_zero()) {
             let single = self.sequence == [27];
             self.sequence.clear();
             self.escaped_at = None;
             return single.then(|| key(27, 0));
         }
         None
+    }
+
+    pub(super) fn wait(&self) -> Option<Duration> {
+        super::escape_wait(self.escaped_at)
     }
 }
 
