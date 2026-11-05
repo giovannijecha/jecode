@@ -66,7 +66,7 @@ fn unsupported_https_proxy_is_a_terminal_native_failure() {
         &mut command,
         Some(input),
         Some(Duration::from_secs(2)),
-        0,
+        4096,
         &Cancellation::default(),
         None,
         &mut |_| Ok(()),
