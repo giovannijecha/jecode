@@ -4,7 +4,6 @@ use crate::tui::{
     view,
 };
 use crate::{events::Event, json::Value};
-mod screen;
 
 #[test]
 fn light_background_fills_every_cell_and_dark_background_uses_terminal_default() {
@@ -26,7 +25,7 @@ fn light_background_fills_every_cell_and_dark_background_uses_terminal_default()
     assert!(dark.contains("\x1b[49m"));
     assert!(!dark.contains("48;2;12;12;12"));
 }
-use screen::Screen;
+use crate::tui::test_screen::Screen;
 
 fn update(renderer: &mut Renderer, screen: &mut Screen, state: &mut State) -> String {
     screen.enter();

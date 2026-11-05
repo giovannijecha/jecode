@@ -138,7 +138,7 @@ fn native_unix_permissions() {
     t.send(b"3");
     t.wait_after("this conversation stays Read", saved);
     t.send(b"\x1b");
-    pause(200);
+    t.wait_screen("Ask anything", "Settings");
 
     let level = t.mark();
     command(&mut t, "/permissions");
@@ -162,9 +162,9 @@ fn native_unix_permissions() {
     t.send(b"\x04");
     t.wait("Nothing remembered");
     t.send(b"\x1b");
-    pause(180);
+    t.wait_screen("Permissions", "Permissions › Remembered");
     t.send(b"\x1b");
-    pause(180);
+    t.wait_screen("Ask anything", "Permissions");
 
     let request = t.mark();
     command(&mut t, "read outside again");

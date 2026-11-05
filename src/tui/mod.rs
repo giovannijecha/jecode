@@ -50,6 +50,8 @@ mod syntax;
 mod temporary_tests;
 mod terminal;
 mod terminal_output;
+#[cfg(test)]
+pub(crate) mod test_screen;
 mod text;
 mod theme;
 mod todo;
@@ -314,6 +316,17 @@ pub(crate) fn launch(
         if app.exit_requested {
             return Ok(());
         }
+        let (replayed, fallback) = background.expire();
+        if let Some(light) = fallback {
+            app.renderer.set_light_background(light);
+            dirty = true;
+        }
+        for event in replayed {
+            if app.terminal_event(event, &mut decoder)? {
+                return Ok(());
+            }
+            dirty = true;
+        }
         // Resolve an expired Escape before later queued keys, even if worker
         // or resize events kept the input queue busy.
         if let Some(decoded) = decoder.idle() {
@@ -342,17 +355,6 @@ pub(crate) fn launch(
                 if app.terminal_event(event, &mut decoder)? {
                     return Ok(());
                 }
-            }
-            dirty = true;
-        }
-        let (replayed, fallback) = background.expire();
-        if let Some(light) = fallback {
-            app.renderer.set_light_background(light);
-            dirty = true;
-        }
-        for event in replayed {
-            if app.terminal_event(event, &mut decoder)? {
-                return Ok(());
             }
             dirty = true;
         }

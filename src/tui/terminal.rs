@@ -30,7 +30,7 @@ impl Key {
 
 #[derive(Debug)]
 pub enum Input {
-    #[cfg(any(windows, test))]
+    /// A native key, or Escape after the background probe resolved its prefix.
     Key(Key),
     #[cfg(any(windows, test))]
     Paste(Vec<u16>),

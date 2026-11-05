@@ -93,7 +93,6 @@ impl Probe {
     /// A lone Escape that waited here is already a key: the decoder must not
     /// hold it again.
     fn release(&mut self) -> Vec<Input> {
-        #[cfg(any(windows, test))]
         if self.bytes == [27] {
             self.flush();
             return vec![Input::Key(super::terminal::Key {
@@ -129,7 +128,6 @@ impl Probe {
                 .into_iter()
                 .map(|unit| Input::Paste(vec![unit]))
                 .collect(),
-            #[cfg(any(windows, test))]
             Input::Key(key) if key.character != 0 => vec![Input::Key(key)],
             other => {
                 let mut ready = self.flush();
@@ -197,7 +195,6 @@ fn character(input: &Input) -> Option<u8> {
         Input::Bytes(bytes) => u16::from(*bytes.first()?),
         #[cfg(any(windows, test))]
         Input::Paste(units) => *units.first()?,
-        #[cfg(any(windows, test))]
         Input::Key(key) => key.character,
         _ => return None,
     };
@@ -416,18 +413,32 @@ mod tests {
 
     #[test]
     fn a_lone_escape_is_released_promptly_and_unicode_paste_is_unchanged() {
-        let mut probe = Probe::for_test();
-        let (events, light) = probe.feed(Input::Paste(vec![27]));
-        assert!(events.is_empty() && light.is_none());
-        probe.last_at = Some(Instant::now() - PREFIX_TIMEOUT);
-        let (events, fallback) = probe.expire();
-        // Released as the Escape key, which the decoder does not hold again.
-        assert!(matches!(&events[..], [Input::Key(key)] if key.code == 27 && key.character == 0));
-        assert!(fallback.is_none() && probe.active);
-        let unicode: Vec<u16> = "β🙂".encode_utf16().collect();
-        let (events, light) = probe.feed(Input::Paste(unicode.clone()));
-        assert!(light.is_none());
-        assert!(matches!(&events[..], [Input::Paste(units)] if units == &unicode));
+        let inputs = [
+            Input::Paste(vec![27]),
+            #[cfg(unix)]
+            Input::Bytes(vec![27]),
+        ];
+        for input in inputs {
+            let mut probe = Probe::for_test();
+            let (events, light) = probe.feed(input);
+            assert!(events.is_empty() && light.is_none());
+            probe.last_at = Some(Instant::now() - PREFIX_TIMEOUT);
+            let (events, fallback) = probe.expire();
+            let [Input::Key(key)] = &events[..] else {
+                panic!("expired Escape was not a key: {events:?}");
+            };
+            let mut decoder = crate::tui::keys::Decoder::default();
+            assert!(matches!(
+                decoder.key(*key).as_slice(),
+                [crate::tui::keys::Decoded::Key(key)] if key.code == 27
+            ));
+            assert!(decoder.wait().is_none(), "Escape must not wait twice");
+            assert!(fallback.is_none() && probe.active);
+            let unicode: Vec<u16> = "β🙂".encode_utf16().collect();
+            let (events, light) = probe.feed(Input::Paste(unicode.clone()));
+            assert!(light.is_none());
+            assert!(matches!(&events[..], [Input::Paste(units)] if units == &unicode));
+        }
     }
 
     #[test]

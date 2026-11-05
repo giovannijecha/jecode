@@ -8,13 +8,13 @@ struct Saved {
     y: usize,
 }
 
-pub(super) type Rgb = (u8, u8, u8);
+pub(crate) type Rgb = (u8, u8, u8);
 
 // An owned terminal model: alternate buffers, cursor movement, erasure,
 // background colours and delayed wrapping and line feeds. Erasing fills with
 // the default background, as on terminals without BCE. It has no knowledge
 // of Jecode's layout or cache.
-pub(super) struct Screen {
+pub(crate) struct Screen {
     pub rows: Vec<Vec<char>>,
     pub backs: Vec<Vec<Option<Rgb>>>,
     pub history: Vec<String>,

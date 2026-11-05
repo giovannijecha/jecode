@@ -9,6 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod frames;
+use frames::Frames;
+
 pub(super) struct Pty {
     directory: Directory,
     child: Child,
@@ -16,6 +19,8 @@ pub(super) struct Pty {
     output: Receiver<Vec<u8>>,
     reader: Option<JoinHandle<()>>,
     bytes: Vec<u8>,
+    screen_offset: usize,
+    frames: Frames,
     owner: Option<u32>,
     tty: Option<PathBuf>,
     /// The case asks for a line-based chat, which never enters the alternate screen.
@@ -138,6 +143,8 @@ impl Pty {
             output,
             reader: Some(reader),
             bytes: vec![],
+            screen_offset: 0,
+            frames: Frames::new(),
             owner: None,
             tty: None,
             line_based: matches!(case, "startup-plain" | "startup-setup-empty"),
@@ -160,6 +167,7 @@ impl Pty {
     fn poll(&mut self) {
         if let Ok(bytes) = self.output.recv_timeout(Duration::from_millis(20)) {
             self.bytes.extend(bytes);
+            self.update_screen();
             assert!(
                 self.bytes.len() <= 4 * 1024 * 1024,
                 "PTY output exceeded fixture limit"
@@ -178,6 +186,31 @@ impl Pty {
                     }
                 }
             }
+        }
+    }
+
+    fn update_screen(&mut self) {
+        self.frames.push(&self.bytes[self.screen_offset..]);
+        self.screen_offset = self.bytes.len();
+    }
+
+    /// Wait for a completed repaint, then inspect only the current terminal cells.
+    pub(super) fn wait_screen(&mut self, required: &str, absent: &str) {
+        let at = Instant::now();
+        let before = self.frames.complete;
+        loop {
+            let screen = self.frames.screen.visible();
+            if self.frames.complete > before
+                && screen.contains(required)
+                && !screen.contains(absent)
+            {
+                return;
+            }
+            assert!(
+                at.elapsed() < Duration::from_secs(10),
+                "PTY screen did not show {required:?} without {absent:?}:\n{screen}"
+            );
+            self.poll();
         }
     }
 
@@ -243,6 +276,7 @@ impl Pty {
         while let Ok(bytes) = self.output.try_recv() {
             self.bytes.extend(bytes);
         }
+        self.update_screen();
     }
 
     /// Waits until the terminal has received more than `seen` bytes.
@@ -279,6 +313,7 @@ impl Pty {
                 .unwrap()
                 .success()
         );
+        self.frames.screen.resize(columns, rows);
         let at = Instant::now();
         while at.elapsed() < Duration::from_millis(350) {
             self.poll();
@@ -362,6 +397,7 @@ impl Pty {
         while let Ok(bytes) = self.output.try_recv() {
             self.bytes.extend(bytes);
         }
+        self.update_screen();
         assert!(!String::from_utf8_lossy(&self.bytes).contains("UNEXPECTED_BASH_ENV"));
         let entered = self
             .bytes
