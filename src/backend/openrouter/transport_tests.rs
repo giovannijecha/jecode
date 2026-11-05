@@ -217,7 +217,12 @@ fn a_connection_lost_before_the_response_can_be_retried() {
     let failure = api
         .raw("POST", "/chat/completions", Some("{}"), &mut |_| Ok(()))
         .unwrap_err();
-    assert_eq!(failure.kind, crate::backend::FailureKind::Temporary);
+    assert_eq!(
+        failure.kind,
+        crate::backend::FailureKind::Temporary,
+        "{}",
+        failure.message
+    );
     assert!(
         failure.message.contains("native HTTP"),
         "{}",

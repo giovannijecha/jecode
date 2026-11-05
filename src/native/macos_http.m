@@ -31,12 +31,28 @@ static int parse_decimal(const char *text, unsigned long long *value) {
     return !errno && (end[0] == '\n' || end[0] == '\r' || end[0] == 0);
 }
 
-static int transport_error(CFReadStreamRef stream) {
+static int transport_error(CFReadStreamRef stream, int before_headers) {
+    CFErrorRef detail = CFReadStreamCopyError(stream);
+    if (detail) {
+        CFStringRef domain = CFErrorGetDomain(detail);
+        CFIndex code = CFErrorGetCode(detail);
+        int network = CFEqual(domain, kCFErrorDomainCFNetwork) ||
+                      CFEqual(domain, (__bridge CFStringRef)NSURLErrorDomain);
+        int retry = network && (code == kCFErrorHTTPConnectionLost ||
+            code == kCFURLErrorTimedOut || code == kCFURLErrorCannotFindHost ||
+            code == kCFURLErrorCannotConnectToHost ||
+            code == kCFURLErrorNetworkConnectionLost ||
+            code == kCFURLErrorDNSLookupFailed ||
+            code == kCFURLErrorNotConnectedToInternet ||
+            (before_headers && code == kCFErrorHTTPParseFailure));
+        CFRelease(detail);
+        if (retry) return 1;
+    }
     CFStreamError error = CFReadStreamGetError(stream);
     return error.domain == kCFStreamErrorDomainPOSIX ||
            error.domain == kCFStreamErrorDomainNetDB ||
-           (error.domain == kCFStreamErrorDomainHTTP &&
-            error.error == kCFErrorHTTPConnectionLost);
+           (before_headers && error.domain == kCFStreamErrorDomainHTTP &&
+            error.error == kCFStreamErrorHTTPParseFailure);
 }
 
 static int response_headers(CFHTTPMessageRef response, int head,
@@ -137,12 +153,12 @@ int main(void) {
         }
         if (timeout_ms) alarm((unsigned)((timeout_ms + 999) / 1000));
         if (!CFReadStreamOpen(stream)) {
-            if (transport_error(stream)) result = 2;
+            if (transport_error(stream, 1)) result = 2;
             goto done;
         }
         first = CFReadStreamRead(stream, buffer, sizeof(buffer));
         if (first < 0) {
-            if (transport_error(stream)) result = 2;
+            if (transport_error(stream, 1)) result = 2;
             goto done;
         }
         response = (CFHTTPMessageRef)CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
@@ -157,7 +173,7 @@ int main(void) {
                 if (fwrite(buffer, 1, (size_t)length, stdout) != (size_t)length || fflush(stdout)) goto done;
                 length = CFReadStreamRead(stream, buffer, sizeof(buffer));
                 if (length < 0) {
-                    if (transport_error(stream)) result = 2;
+                    if (transport_error(stream, 0)) result = 2;
                     goto done;
                 }
             }

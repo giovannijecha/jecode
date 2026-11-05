@@ -70,7 +70,12 @@ fn a_connection_lost_before_the_response_can_be_retried() {
         .post_stream("/responses", "{}", None, &mut |_| Ok(()))
         .err()
         .unwrap();
-    assert_eq!(failure.kind, crate::backend::FailureKind::Temporary);
+    assert_eq!(
+        failure.kind,
+        crate::backend::FailureKind::Temporary,
+        "{}",
+        failure.message
+    );
     assert!(
         failure.message.contains("native HTTP"),
         "{}",
