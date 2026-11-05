@@ -275,7 +275,8 @@ pub(super) fn writable_path(root: &Path, value: &str) -> Result<PathBuf, String>
 
 /// Where a directory is or would be created: its nearest existing ancestor,
 /// resolved through links, then the missing names. A broken link, or `..` after
-/// a missing name, has no answer until something exists there.
+/// a missing name, has no answer until something exists there. A folder that a
+/// concurrent write creates meanwhile is no link, and its name is the same.
 pub(super) fn resolve_directory(path: &Path) -> Result<PathBuf, String> {
     let mut missing = Vec::new();
     let mut next = path;
@@ -284,7 +285,8 @@ pub(super) fn resolve_directory(path: &Path) -> Result<PathBuf, String> {
             Ok(resolved) => break resolved,
             Err(error)
                 if error.kind() != std::io::ErrorKind::NotFound
-                    || fs::symlink_metadata(next).is_ok() =>
+                    || fs::symlink_metadata(next)
+                        .is_ok_and(|entry| entry.file_type().is_symlink()) =>
             {
                 return Err(error.to_string());
             }

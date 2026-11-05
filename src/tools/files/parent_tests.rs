@@ -45,17 +45,23 @@ fn write_creates_the_missing_parents_of_a_new_file() {
 fn concurrent_writes_share_the_parents_they_create() {
     let directory = Directory::new();
     let root = workspace(&directory);
-    std::thread::scope(|scope| {
-        for index in 0..4 {
-            let root = &root;
-            scope.spawn(move || {
-                let path = format!("src/core/{index}.js");
-                let result = write(root, &arguments(&path, "text\n")).unwrap();
-                assert!(result.get("error").is_none(), "{result:?}");
-            });
-        }
-    });
-    assert_eq!(fs::read_dir(root.join("src/core")).unwrap().count(), 4);
+    // Each round contends for new folders; declared parallel calls run four at once.
+    for round in 0..25 {
+        let start = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            for index in 0..4 {
+                let (root, start) = (&root, &start);
+                scope.spawn(move || {
+                    let path = format!("{round}/core/{index}.js");
+                    start.wait();
+                    let result = write(root, &arguments(&path, "text\n")).unwrap();
+                    assert!(result.get("error").is_none(), "{result:?}");
+                });
+            }
+        });
+        let folder = root.join(round.to_string()).join("core");
+        assert_eq!(fs::read_dir(folder).unwrap().count(), 4);
+    }
 }
 
 #[test]
