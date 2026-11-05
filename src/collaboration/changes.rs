@@ -7,6 +7,39 @@ use crate::{file_change::Change, json::Value, sessions::Store};
 use std::path::Path;
 
 impl Observer {
+    /// Live session event count, used to notice changes saved after a step's
+    /// card already reported its line counts.
+    pub fn change_revision(&self, id: &str) -> Option<usize> {
+        let events = {
+            let state = self.0.state.lock().unwrap();
+            state
+                .records
+                .iter()
+                .find(|record| record.id == id)?
+                .session_events
+                .clone()
+        };
+        events.map(|events| events.lock().unwrap().len())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_change_stream(&self, id: &str, events: crate::export::Messages) {
+        let seed = Value::object([
+            ("id", Value::string(id)),
+            ("number", Value::number(1)),
+            ("state", Value::string("returned")),
+            ("workspace_closed", Value::Bool(true)),
+        ]);
+        let mut record = super::Record::from_value(&seed).unwrap();
+        record.session_events = Some(events);
+        self.0
+            .state
+            .lock()
+            .unwrap()
+            .records
+            .push(super::Tracked::new(record));
+    }
+
     /// The collaborator's changed calls in order, by call id. Empty when its
     /// session cannot be read, which leaves its cards with counts only.
     pub fn changes(&self, id: &str) -> Vec<(String, Change)> {

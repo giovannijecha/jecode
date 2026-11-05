@@ -8,6 +8,7 @@ use std::fs;
 
 mod integrations;
 mod interruption;
+mod restore;
 
 fn step(tool: &str, arguments: Value) -> Value {
     Value::object([("tool", Value::string(tool)), ("arguments", arguments)])

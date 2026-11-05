@@ -298,8 +298,8 @@ impl App {
         changed
     }
 
-    /// Reads the open collaborator's changes again when it changed more
-    /// files. Its session holds the hunks; its record keeps only counts.
+    /// Reads changes when line counts or session events advance. A step's
+    /// counts can arrive before its hunk is saved at the end of `steps`.
     fn refresh_agent_changes(&mut self) -> bool {
         let Some(panel) = &mut self.state.agents_panel else {
             return false;
@@ -309,21 +309,30 @@ impl App {
             return false;
         };
         let counted = conversation::changed_calls(record);
-        if panel.changes.id == *id && panel.changes.counted == counted {
+        let revision = (counted > 0)
+            .then(|| self.collaboration_observer.change_revision(id))
+            .flatten();
+        if panel.changes.id == *id
+            && panel.changes.counted == counted
+            && panel.changes.revision == revision
+        {
             return false;
         }
         let calls = if counted == 0 {
             std::collections::HashMap::new()
         } else {
-            self.collaboration_observer
+            let changes = self
+                .collaboration_observer
                 .changes(id)
                 .into_iter()
                 .map(|(call, change)| (call, change.redacted(&self.archive.redactor)))
-                .collect()
+                .collect::<Vec<_>>();
+            conversation::unique_changes(record, changes)
         };
         panel.changes = conversation::Changes {
             id: id.clone(),
             counted,
+            revision,
             calls,
         };
         panel.rows.clear();

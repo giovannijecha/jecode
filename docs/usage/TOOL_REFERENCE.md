@@ -45,10 +45,12 @@ permission check, checkpoint and card.
 The call has one result, a `steps` array in the same order. Each entry names its
 `tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
 fails on an `error`, a refused or unknown `outcome`, a timeout, a cancellation, a
-non-zero exit, a `checkpoint` restore with conflicting or failed paths or, for
-`edit`, any file that failed; a multi-file `read` reports each path and goes on.
+non-zero exit, a `checkpoint` restore with conflicting, failed or skipped paths
+or, for `edit`, any file that failed; a multi-file `read` reports each path and goes on.
 A successful MCP `completed` outcome continues. LSP
 statuses other than `ready` and background command timeouts stop the rest.
+A restore's reported skips also include partial-capture warnings; those stop
+the prepared sequence too, leaving the complete result for the model to assess.
 `ask_user` and `steps` cannot be steps. Media files need a `read` of their own,
 because the model is shown them only after a single read. If Jecode closes during
 the call, its outcome is unknown and the model is told to check before repeating

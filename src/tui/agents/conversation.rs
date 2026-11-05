@@ -10,7 +10,7 @@ use crate::{
         state::{Item, Kind},
     },
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The open collaborator's file changes with their hunks, by call id, read
 /// from its own session when its record counted `counted` changed calls.
@@ -18,6 +18,7 @@ use std::collections::HashMap;
 pub(in crate::tui) struct Changes {
     pub id: String,
     pub counted: usize,
+    pub revision: Option<usize>,
     pub calls: HashMap<String, Change>,
 }
 
@@ -27,6 +28,33 @@ pub(in crate::tui) fn changed_calls(record: &Value) -> usize {
         .iter()
         .filter(|tool| tool.get("change").is_some())
         .count()
+}
+
+/// A reused ID cannot identify which changed card owns a session hunk.
+/// Such cards keep their recorded counts instead of showing another diff.
+pub(in crate::tui) fn unique_changes(
+    record: &Value,
+    changes: impl IntoIterator<Item = (String, Change)>,
+) -> HashMap<String, Change> {
+    let mut seen = HashSet::new();
+    let mut ambiguous = HashSet::new();
+    for tool in super::list(record, "tools")
+        .into_iter()
+        .filter(|tool| tool.get("change").is_some())
+    {
+        let id = super::value(tool, "id");
+        if !seen.insert(id) {
+            ambiguous.insert(id.to_owned());
+        }
+    }
+    let mut calls = HashMap::new();
+    for (id, change) in changes {
+        if calls.insert(id.clone(), change).is_some() {
+            ambiguous.insert(id);
+        }
+    }
+    calls.retain(|id, _| !ambiguous.contains(id));
+    calls
 }
 
 fn event(record: &Value, kind: &str, version: usize, details: Vec<String>) -> Value {
