@@ -134,7 +134,7 @@ static char *decoded_line(void) {
     return decoded_text(read_line(-1));
 }
 
-static int decimal(const char *text, unsigned long long *value) {
+static int wire_decimal(const char *text, unsigned long long *value) {
     if (!text || *text < '0' || *text > '9') return 0;
     char *end = NULL;
     errno = 0;
@@ -152,7 +152,7 @@ static void free_headers(struct header *headers, long count) {
 static long read_header_count(void) {
     char *text = read_line(-1);
     unsigned long long count = 0;
-    int valid = decimal(text, &count) && count <= 1000;
+    int valid = wire_decimal(text, &count) && count <= 1000;
     free(text);
     return valid ? (long)count : -1;
 }

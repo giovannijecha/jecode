@@ -158,7 +158,7 @@ static int socket_forward(struct channel *channel) {
     char *text = read_line(-1);
     if (!text) _exit(0);
     unsigned long long size = 0;
-    int valid = decimal(text, &size) && size <= SOCKET_MESSAGE_LIMIT;
+    int valid = wire_decimal(text, &size) && size <= SOCKET_MESSAGE_LIMIT;
     free(text);
     if (!valid) return fail('E', "Native HTTP socket message is invalid");
     unsigned char *message = malloc(size ? (size_t)size : 1);
@@ -197,7 +197,7 @@ static void socket_loop(struct channel *channel, unsigned long long idle_limit) 
 
 static int serve_socket(const char *idle_text) {
     unsigned long long idle_limit = 0;
-    if (!decimal(idle_text, &idle_limit) || idle_limit == 0) return 2;
+    if (!wire_decimal(idle_text, &idle_limit) || idle_limit == 0) return 2;
     char *url = decoded_line();
     long count = url ? read_header_count() : -1;
     struct header *headers = count >= 0 ? read_headers(count) : NULL;

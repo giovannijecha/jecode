@@ -24,7 +24,7 @@ static int read_exchange(struct exchange *exchange) {
     if (!exchange->url) return -1;
     exchange->method = decoded_line();
     char *timeout = read_line(-1);
-    int timed = decimal(timeout, &exchange->timeout_ms);
+    int timed = wire_decimal(timeout, &exchange->timeout_ms);
     free(timeout);
     exchange->header_count = read_header_count();
     if (!http_token(exchange->method) || !timed || exchange->header_count < 0) return -1;
@@ -32,7 +32,7 @@ static int read_exchange(struct exchange *exchange) {
     if (!exchange->headers) return -1;
     char *length = read_line(-1);
     unsigned long long body_size = 0;
-    int sized = decimal(length, &body_size) && body_size < SIZE_MAX;
+    int sized = wire_decimal(length, &body_size) && body_size < SIZE_MAX;
     free(length);
     if (!sized) return -1;
     exchange->body_size = (size_t)body_size;
