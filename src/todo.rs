@@ -281,7 +281,6 @@ fn parse_tasks(value: &Value) -> Result<Vec<Task>, String> {
     Ok(tasks)
 }
 
-/// Find the newest successful set result, including results removed from model context.
 /// The plan a successful `todo_list` result carries.
 pub fn plan_in(result: &Value) -> Option<Plan> {
     if result.get("error").is_some() {
@@ -301,6 +300,7 @@ fn plan_in_steps(result: &Value) -> Option<Plan> {
         .find_map(|entry| plan_in(entry.get("result")?))
 }
 
+/// Find the newest successful set result, including results removed from model context.
 pub fn latest(messages: &[Value]) -> Option<Plan> {
     let mut results: BTreeMap<String, &Value> = BTreeMap::new();
     for message in messages.iter().rev() {

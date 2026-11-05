@@ -161,8 +161,9 @@ impl Agent {
 /// A step that failed stops the rest: they were planned on its success.
 /// An outcome other than `completed` means refused, failed or unknown. LSP
 /// queries and background commands report failures through their status.
-/// A multi-file edit fails when any file does; a multi-file read reports each
-/// path and goes on, as it does alone.
+/// A multi-file edit fails when any file does, and a restore when any path
+/// conflicts or fails; a multi-file read reports each path and goes on, as it
+/// does alone.
 fn failed(tool: &str, result: &Value) -> bool {
     result.get("error").is_some()
         || result
@@ -183,6 +184,13 @@ fn failed(tool: &str, result: &Value) -> bool {
                 .get("files")
                 .and_then(Value::as_array)
                 .is_some_and(|files| files.iter().any(|file| file.get("error").is_some())))
+        || (tool == "checkpoint"
+            && ["conflict_count", "failed_count"].iter().any(|count| {
+                result
+                    .get(count)
+                    .and_then(Value::as_usize)
+                    .is_some_and(|count| count > 0)
+            }))
 }
 
 fn combined(steps: &[ToolCall], results: &[(String, Value)]) -> Value {
