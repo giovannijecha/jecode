@@ -16,6 +16,8 @@ pub(crate) enum Frame {
     Data(Vec<u8>),
     /// The response ended: empty on success, otherwise the failure message.
     End(Vec<u8>),
+    /// The transport failed; the caller may retry the request.
+    RetryableEnd(Vec<u8>),
 }
 
 pub(crate) struct Adapter {
@@ -128,6 +130,7 @@ fn read_frame(output: &mut impl Read) -> Option<Frame> {
         b'A' => Some(Frame::Accepted),
         b'D' => Some(Frame::Data(payload)),
         b'E' => Some(Frame::End(payload)),
+        b'T' => Some(Frame::RetryableEnd(payload)),
         _ => None,
     }
 }

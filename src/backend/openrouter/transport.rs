@@ -95,8 +95,12 @@ impl Api {
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 stderr.trim(),
             );
-            // The adapter never repeats a POST, and repeating this one is safe.
-            return Err(with_input_error(Failure::temporary(message), input_error));
+            let failure = if crate::http::retryable(&output) {
+                Failure::temporary(message)
+            } else {
+                Failure::from(message)
+            };
+            return Err(with_input_error(failure, input_error));
         }
         let response = String::from_utf8(output.stdout).map_err(|_| {
             with_input_error("OpenRouter returned invalid UTF-8".into(), input_error)

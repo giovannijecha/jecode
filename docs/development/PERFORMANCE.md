@@ -108,6 +108,22 @@ all four conversation requests, including the cancelled one, and `http` for the
 session title. These were functional checks, not latency benchmarks. Live MCP
 and OAuth sign-in or refresh through the pooled adapter were not repeated.
 
+### Instruction discovery metadata
+
+Recorded 2026-11-05 on Windows 11 with Rust 1.95.0, using an optimized standalone
+driver of the instruction loader against the `jecode-fast` checkout. Four
+alternating before/after/after/before blocks each warmed up five scans and measured
+21 batches of three scans. Median scan times were 15.1 and 15.3 ms before, and
+11.1 and 10.4 ms after. Every scan returned the same 4,351 bytes of instructions.
+These measure instruction discovery alone, not a model request or whole turn.
+
+The loader now obtains directory metadata from its existing `DirEntry` rather
+than looking up the path again. On Windows, that metadata is already available
+from directory enumeration; on Unix, it retains the same metadata lookup. See
+the [standard-library contract](https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata).
+The search still includes `target` and other generated directories, and still
+skips directory links and junctions. No instruction selection rule changed.
+
 ### Subscription context reuse
 
 Recorded 2026-10-31 with bounded live requests, synthetic reference records and

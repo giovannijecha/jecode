@@ -159,7 +159,11 @@ impl Api {
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 String::from_utf8_lossy(&stderr).trim()
             );
-            return Err(Failure::temporary(message));
+            return Err(if crate::http::retryable(&output) {
+                Failure::temporary(message)
+            } else {
+                Failure::from(message)
+            });
         }
         if let Some(error) = output.input_error {
             return Err(Failure::from(format!(

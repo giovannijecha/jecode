@@ -34,6 +34,8 @@ public static partial class JecodeHttp {
 
     // Environment.TickCount of the last message in either direction.
     static int activity;
+    // The idle check must not use an old timestamp after a sender starts.
+    static readonly object activityLock = new object();
 
     static int ServeSocket(int idleLimit) {
         using (var input = new BufferedStream(Console.OpenStandardInput()))
@@ -108,13 +110,15 @@ public static partial class JecodeHttp {
     }
 
     static void Touch() {
-        Volatile.Write(ref activity, Environment.TickCount);
+        lock (activityLock) activity = Environment.TickCount;
     }
 
     // The parent replaces a connection that ended, so leaving is always safe:
     // a message already read counts as activity and one still unread is sent again.
     static void ExitWhenIdle(int idleLimit) {
-        if (unchecked(Environment.TickCount - Volatile.Read(ref activity)) >= idleLimit) Environment.Exit(0);
+        lock (activityLock) {
+            if (unchecked(Environment.TickCount - activity) >= idleLimit) Environment.Exit(0);
+        }
     }
 
     // Owns stdin, so a parent that exits ends the helper even while it waits for a message.
@@ -130,7 +134,12 @@ public static partial class JecodeHttp {
                     if (read <= 0) Environment.Exit(0);
                     filled += read;
                 }
-                uint error = WinHttpWebSocketSend(socket, Utf8Message, message, (uint)message.Length);
+                uint error;
+                lock (activityLock) {
+                    activity = Environment.TickCount;
+                    error = WinHttpWebSocketSend(socket, Utf8Message, message, (uint)message.Length);
+                    activity = Environment.TickCount;
+                }
                 // Closing the handle fails the receive that reports to the parent.
                 if (error != 0) break;
             }

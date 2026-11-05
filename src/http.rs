@@ -56,6 +56,11 @@ pub(crate) fn run(
     }
 }
 
+/// Native adapters reserve exit 2 for transport failures that may clear on retry.
+pub(crate) fn retryable(output: &Output) -> bool {
+    output.exit_code == Some(2)
+}
+
 /// What opens a socket adapter; its messages follow on the same stdin.
 #[cfg(windows)]
 pub(crate) fn socket_opening(url: &str, headers: &[(&str, &str)]) -> Vec<u8> {

@@ -89,6 +89,29 @@ fn succeeded(output: &Output, seen: &[u8]) {
 }
 
 #[test]
+fn an_invalid_request_header_is_terminal() {
+    let output = Pool::new()
+        .run(
+            wire_request(&Request {
+                url: "http://127.0.0.1:1/",
+                method: "POST",
+                headers: &[("Invalid\nName", "value")],
+                body: Some(b"{}"),
+                timeout: Some(Duration::from_secs(5)),
+                idle: None,
+                output_limit: 0,
+            }),
+            limits(),
+            &Cancellation::default(),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(output.exit_code, Some(1));
+    assert!(!retryable(&output));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("header is invalid"));
+}
+
+#[test]
 fn consecutive_requests_share_one_adapter_and_one_connection() {
     let server = Server::start(|listener, stop| {
         let stream = server::accept(&listener, &stop).unwrap();
@@ -187,7 +210,7 @@ fn a_post_processed_on_a_reused_connection_is_not_sent_again() {
     let (output, seen) = send(&pool, &server.endpoint);
     succeeded(&output, &seen);
     let (output, seen) = send(&pool, &server.endpoint);
-    assert_eq!(output.exit_code, Some(1));
+    assert_eq!(output.exit_code, Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).starts_with("Native HTTP"));
     assert!(seen.is_empty());
     assert_eq!(server.finish(), (1, true));
@@ -205,7 +228,7 @@ fn a_new_connection_dropped_before_the_response_fails_once_and_keeps_the_adapter
     });
     let pool = Pool::new();
     let (output, seen) = send(&pool, &server.endpoint);
-    assert_eq!(output.exit_code, Some(1));
+    assert_eq!(output.exit_code, Some(2));
     assert!(
         String::from_utf8_lossy(&output.stderr).starts_with("Native HTTP"),
         "{}",

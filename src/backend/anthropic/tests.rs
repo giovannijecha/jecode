@@ -68,6 +68,17 @@ fn client(fixture: &HttpFixture) -> Box<dyn Backend> {
 mod api_key;
 
 #[test]
+fn invalid_native_authorization_header_is_terminal() {
+    let api = Api::fixture(
+        Session::fixture("fixture\ninvalid-token"),
+        "http://127.0.0.1:1",
+    );
+    let failure = api.post_stream("{}", &mut |_| Ok(())).err().unwrap();
+    assert_eq!(failure.kind, FailureKind::Terminal);
+    assert!(failure.message.contains("Native HTTP"));
+}
+
+#[test]
 fn catalog_reads_account_limits_and_effort_capabilities() {
     let catalog = crate::json::parse(r#"{"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5","max_input_tokens":1000000,"max_tokens":128000,"capabilities":{"effort":{"low":{"supported":true},"medium":{"supported":true},"high":{"supported":true},"xhigh":{"supported":true},"max":{"supported":false}},"thinking":{"types":{"between_tools":{"supported":true},"disabled":{"supported":false}}}}}],"has_more":false}"#).unwrap();
     let fixture = HttpFixture::new(vec![(200, catalog)]);

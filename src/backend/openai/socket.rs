@@ -185,7 +185,8 @@ impl Connection {
                         None
                     };
                 }
-                Ok(Frame::End(_)) | Err(RecvTimeoutError::Disconnected) => {
+                Ok(Frame::End(_) | Frame::RetryableEnd(_))
+                | Err(RecvTimeoutError::Disconnected) => {
                     adapter.stop();
                     return None;
                 }
@@ -201,7 +202,9 @@ impl Connection {
         // The provider may send timing or close frames after a terminal event.
         loop {
             match self.adapter.frames.try_recv() {
-                Ok(Frame::End(_)) | Err(TryRecvError::Disconnected) => return false,
+                Ok(Frame::End(_) | Frame::RetryableEnd(_)) | Err(TryRecvError::Disconnected) => {
+                    return false;
+                }
                 Ok(_) => {}
                 Err(TryRecvError::Empty) => return self.adapter.alive(),
             }
@@ -250,7 +253,8 @@ impl Connection {
                         return Round::Ended;
                     }
                 }
-                Ok(Frame::End(_)) | Err(RecvTimeoutError::Disconnected) => {
+                Ok(Frame::End(_) | Frame::RetryableEnd(_))
+                | Err(RecvTimeoutError::Disconnected) => {
                     return if answered {
                         Round::Failed(Failure::temporary(
                             "OpenAI connection closed during the response",

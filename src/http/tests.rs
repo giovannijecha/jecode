@@ -45,6 +45,38 @@ fn child_fixture() {
     assert_eq!(body, b"ok");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn unsupported_https_proxy_is_a_terminal_native_failure() {
+    let mut command = Command::new(crate::native::helper("http").unwrap());
+    crate::auth::isolate_environment(&mut command)
+        .env("HTTPS_PROXY", "https://proxy.invalid:443")
+        .env("NO_PROXY", "")
+        .env("no_proxy", "");
+    let input = wire_request(&Request {
+        url: "https://example.invalid/",
+        method: "POST",
+        headers: &[],
+        body: Some(b"{}"),
+        timeout: Some(Duration::from_secs(2)),
+        idle: None,
+        output_limit: 0,
+    });
+    let output = crate::process::run_leaf(
+        &mut command,
+        Some(input),
+        Some(Duration::from_secs(2)),
+        0,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, Some(1));
+    assert!(!retryable(&output));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("supports only http:// proxies"));
+}
+
 #[test]
 fn native_transport_ignores_curl_override_and_path() {
     let server = Server::start(|listener, stop| {

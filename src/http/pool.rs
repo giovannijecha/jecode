@@ -175,11 +175,18 @@ fn exchange(
                     return Outcome::Discard(Err(error));
                 }
             }
-            Ok(Frame::End(message)) => {
+            Ok(frame @ (Frame::End(_) | Frame::RetryableEnd(_))) => {
                 // The whole request arrived before `Accepted`, so its delivery
                 // is complete unless the adapter broke the pipe.
                 let healthy = adapter.recover(delivery);
-                let code = i32::from(!message.is_empty());
+                let (message, code) = match frame {
+                    Frame::End(message) => {
+                        let code = i32::from(!message.is_empty());
+                        (message, code)
+                    }
+                    Frame::RetryableEnd(message) => (message, 2),
+                    _ => unreachable!(),
+                };
                 let output = report.finish(Some(code), message);
                 return if healthy {
                     Outcome::Reusable(output)
@@ -191,7 +198,7 @@ fn exchange(
             Err(RecvTimeoutError::Disconnected) if !accepted => return Outcome::Unstarted,
             Err(RecvTimeoutError::Disconnected) => {
                 let message = b"Native HTTP adapter stopped during the request".to_vec();
-                return Outcome::Discard(Ok(report.finish(Some(1), message)));
+                return Outcome::Discard(Ok(report.finish(Some(2), message)));
             }
         }
     }

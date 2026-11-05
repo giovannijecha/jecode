@@ -80,6 +80,25 @@ fn a_connection_lost_before_the_response_can_be_retried() {
 }
 
 #[test]
+fn an_invalid_native_header_stops_without_retry() {
+    let api = Api::fixture(
+        Session::fixture("fixture-access-token"),
+        "http://127.0.0.1:1",
+    );
+    let failure = api
+        .post_stream(
+            "/responses",
+            "{}",
+            Some("invalid\nsession"),
+            &mut |_| Ok(()),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(failure.kind, crate::backend::FailureKind::Terminal);
+    assert!(failure.message.contains("Native HTTP"));
+}
+
+#[test]
 fn large_stream_reaches_completion_beyond_the_process_capture_limit() {
     let text = "x".repeat(96 * 1024);
     let delta = Value::object([

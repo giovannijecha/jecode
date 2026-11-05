@@ -179,6 +179,28 @@ fn native_http_failure_preserves_safe_diagnostic() {
 }
 
 #[test]
+fn invalid_native_request_is_terminal() {
+    let api = Api::fixture("http://127.0.0.1:1/chat/completions");
+    let mut output = incomplete_output(b"", b"Native HTTP request header is invalid", 1);
+    output.input_error = None;
+    assert_eq!(
+        api.response(output, None).unwrap_err().kind,
+        crate::backend::FailureKind::Terminal
+    );
+}
+
+#[test]
+fn native_transport_failure_is_temporary() {
+    let api = Api::fixture("http://127.0.0.1:1/chat/completions");
+    let mut output = incomplete_output(b"", b"Native HTTP receive failed", 2);
+    output.input_error = None;
+    assert_eq!(
+        api.response(output, None).unwrap_err().kind,
+        crate::backend::FailureKind::Temporary
+    );
+}
+
+#[test]
 fn a_connection_lost_before_the_response_can_be_retried() {
     let server = Server::start(|listener, stop| {
         let stream = server::accept(&listener, &stop).unwrap();

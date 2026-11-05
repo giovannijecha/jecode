@@ -5,8 +5,8 @@
 // limit), header count, base64 name/value pairs, body length, then the raw body.
 // Stdout, per request: frames of one tag byte, a little-endian 32-bit length and
 // that many bytes. 'A': the request arrived and nothing was sent yet. 'D': HTTP
-// headers followed by the body. 'E': the response ended; empty on success,
-// otherwise the failure message.
+// headers followed by the body. 'E': success (empty) or permanent failure.
+// 'T': retryable transport failure.
 // WinHTTP uses the system proxy configuration (automatic proxy mode);
 // HTTP(S)_PROXY variables are not read.
 using System;
@@ -34,6 +34,8 @@ public static partial class JecodeHttp {
     const uint ConnectingToServer = 0x00000004;
     const int InsufficientBuffer = 122;
     const int RequestTimeout = 12002;
+    const int NameNotResolved = 12007;
+    const int CannotConnect = 12029;
     const int ConnectionError = 12030;
     const int ConnectionReset = 12031;
     const int InvalidServerResponse = 12152;
@@ -82,6 +84,10 @@ public static partial class JecodeHttp {
         public readonly List<string[]> Headers = new List<string[]>();
         public byte[] Body;
         public string Invalid;
+    }
+
+    sealed class TransportFailure : IOException {
+        public TransportFailure(string message) : base(message) { }
     }
 
     // Kept reachable for as long as WinHTTP may call it.
@@ -163,15 +169,17 @@ public static partial class JecodeHttp {
     static void Serve(Exchange exchange, Stream output) {
         Frame(output, 'A', null, 0);
         string failure = exchange.Invalid ?? "";
+        bool retryable = false;
         if (exchange.Invalid == null) {
             try {
                 Perform(exchange, output);
             } catch (Exception error) {
                 failure = Describe(error);
+                retryable = error is TransportFailure;
             }
         }
         byte[] message = Encoding.UTF8.GetBytes(failure);
-        Frame(output, 'E', message, message.Length);
+        Frame(output, retryable ? 'T' : 'E', message, message.Length);
     }
 
     static string Describe(Exception error) {
@@ -293,7 +301,7 @@ public static partial class JecodeHttp {
             Frame(output, 'D', buffer, (int)read);
         }
         if (expected.HasValue && received != expected.Value)
-            throw new InvalidDataException("Native HTTP response is incomplete");
+            throw new TransportFailure("Native HTTP response is incomplete");
     }
 
     static void Frame(Stream output, char tag, byte[] bytes, int count) {
@@ -361,9 +369,12 @@ public static partial class JecodeHttp {
         if (!success) throw Failure(stage, Marshal.GetLastWin32Error());
     }
     static Exception Failure(string stage, int code) {
-        return new IOException(code == RequestTimeout
+        string message = code == RequestTimeout
             ? "Native HTTP request timed out"
-            : "Native HTTP " + stage + " failed (" + code + ")");
+            : "Native HTTP " + stage + " failed (" + code + ")";
+        return code == RequestTimeout || code == NameNotResolved || code == CannotConnect ||
+            code == ConnectionError || code == ConnectionReset || code == InvalidServerResponse
+            ? (Exception)new TransportFailure(message) : new IOException(message);
     }
     // The next line, or null at the end of the input.
     static string Line(Stream input) {
