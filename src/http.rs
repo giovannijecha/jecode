@@ -177,6 +177,8 @@ impl Decoder {
 
 #[cfg(test)]
 mod framing_tests;
+#[cfg(all(test, target_os = "macos"))]
+mod macos_proxy_tests;
 #[cfg(test)]
 mod pool_tests;
 #[cfg(test)]

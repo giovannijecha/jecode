@@ -198,6 +198,18 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
         checked(&mut command, "http");
         assets.push(("http".into(), binary));
     }
+    if target == "macos" {
+        let fixture = "src/test_support/macos_http_proxy.m";
+        println!("cargo:rerun-if-changed={fixture}");
+        let mut command = c_compiler();
+        command.arg("-fobjc-arc");
+        command
+            .arg(fixture)
+            .arg("-o")
+            .arg(out.join("http-proxy-fixture"));
+        command.args(["-framework", "Foundation", "-framework", "CFNetwork"]);
+        checked(&mut command, "http-proxy-fixture");
+    }
     if target == "linux" {
         let binary = out.join("jecode-clipboard_linux");
         let mut command = c_compiler();
