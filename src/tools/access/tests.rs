@@ -338,3 +338,47 @@ fn an_approved_relative_outside_path_reaches_the_approved_file() {
     let listed = run("list", &arguments(&[("path", "../other/deep")]));
     assert!(listed.encode().contains("f.txt"), "{listed:?}");
 }
+
+#[test]
+fn a_new_file_under_missing_folders_resolves_like_any_other() {
+    let parent = Directory::new();
+    let project = parent.path().join("project");
+    fs::create_dir(&project).unwrap();
+    let tools = Tools::new(&project).unwrap();
+    let canonical = fs::canonicalize(&project).unwrap();
+
+    let inside = tools
+        .access(
+            "write",
+            &arguments(&[("path", "src/core/new.rs"), ("content", "x")]),
+        )
+        .unwrap();
+    assert!(!inside.outside);
+    assert_eq!(
+        inside.target,
+        plain(&canonical.join("src").join("core").join("new.rs"))
+    );
+
+    // Outside, the call needs approval before anything is created.
+    let outside = arguments(&[("path", "../made/deep/new.txt"), ("content", "made\n")]);
+    let access = tools.access("write", &outside).unwrap();
+    assert!(access.outside);
+    let refused = tools.execute("write", &outside);
+    assert!(refused.get("error").is_some(), "{refused:?}");
+    assert!(!parent.path().join("made").exists());
+
+    let begun = Begun::default().with_base(access.base);
+    let written = tools
+        .execute_begun(
+            begun,
+            "write",
+            &outside,
+            &crate::cancel::Cancellation::default(),
+        )
+        .result;
+    assert!(written.get("error").is_none(), "{written:?}");
+    assert_eq!(
+        fs::read_to_string(parent.path().join("made/deep/new.txt")).unwrap(),
+        "made\n"
+    );
+}

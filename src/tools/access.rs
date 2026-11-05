@@ -2,7 +2,7 @@
 //! resolve as the tools resolve them; a path the tool will reject anyway is
 //! treated as inside, so the tool reports its own error.
 
-use super::{Tools, attachment, edit, exec, show};
+use super::{Tools, attachment, edit, exec, files, show};
 use crate::json::{self, Value};
 use crate::permissions::{Access, Kind, plain};
 use std::fs;
@@ -231,10 +231,10 @@ fn creates_isolated(arguments: &Value) -> bool {
         })
 }
 
-/// The canonical path, or a new file's canonical parent joined with its name.
+/// The canonical path, or where a new file and its missing parents would go.
 fn resolve(path: &Path) -> Option<PathBuf> {
     fs::canonicalize(path).ok().or_else(|| {
-        let parent = fs::canonicalize(path.parent()?).ok()?;
+        let parent = files::resolve_directory(path.parent()?).ok()?;
         Some(parent.join(path.file_name()?))
     })
 }

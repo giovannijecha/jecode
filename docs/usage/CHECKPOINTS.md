@@ -73,7 +73,8 @@ Before restoring, Jecode verifies the saved content and saves the current state
 as a new checkpoint, so every restore can be undone; the result gives the
 reference, paths and token to use. Restores happen path by path, not as one
 transaction: a partial result lists restored, conflicting, failed and skipped
-paths. Binary files can be restored but not shown.
+paths. Binary files can be restored but not shown. Restoring a file that did not
+exist removes it; folders created for it stay.
 
 The model can also read a saved file directly with
 `{"path":"checkpoint:rc-ID:src/main.rs"}`.

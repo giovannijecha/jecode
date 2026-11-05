@@ -56,6 +56,45 @@ fn saved_bytes(tools: &Tools, reference: &str, path: &str) -> Vec<u8> {
 }
 
 #[test]
+fn restoring_a_write_under_missing_folders_removes_only_the_file() {
+    let fixture = fixture();
+    let written = call(
+        &fixture.tools,
+        "write",
+        &[
+            ("path", Value::string("src/core/new.js")),
+            ("content", Value::string("one\n")),
+        ],
+    );
+    assert_eq!(text(&written, &["checkpoint", "status"]), "saved");
+    let reference = text(&written, &["checkpoint", "ref"]);
+    let inspected = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("inspect")),
+            ("ref", Value::string(reference)),
+        ],
+    );
+    let restored = call(
+        &fixture.tools,
+        "checkpoint",
+        &[
+            ("action", Value::string("restore")),
+            ("ref", Value::string(reference)),
+            ("expected", Value::string(text(&inspected, &["expected"]))),
+        ],
+    );
+    assert_eq!(
+        restored.get("restored_count").and_then(Value::as_usize),
+        Some(1)
+    );
+    let folder = fixture.root.path().join("src/core");
+    assert!(!folder.join("new.js").exists());
+    assert!(folder.is_dir());
+}
+
+#[test]
 fn write_and_edit_each_save_their_own_exact_preimage() {
     let fixture = fixture();
     let written = call(

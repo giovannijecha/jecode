@@ -64,9 +64,9 @@ than confinement. Each conversation owns and reuses its own server instances.
 ## Files
 
 `read`, `write` and `edit` work inside the working folder; paths outside it are
-refused in Read and need approval in Workspace. A new file's parent directory
-must already exist. Writes and edits replace the file through a temporary copy,
-so a failed edit leaves the original intact. Text is UTF-8.
+refused in Read and need approval in Workspace. `write` creates a new file's
+missing parent directories. Writes and edits replace the file through a temporary
+copy, so a failed edit leaves the original intact. Text is UTF-8.
 
 `edit` applies its replacements in order to the result of the previous ones.
 Each one must match exactly once, including whitespace and line endings; a
