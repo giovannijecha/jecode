@@ -33,6 +33,15 @@ impl Api {
         self.raw("POST", path, Some(body), session, observer)
     }
 
+    pub(super) fn bearer(&self) -> Result<String, Failure> {
+        match &self.credential {
+            Credential::Account(session) => session
+                .access_token(&self.cancellation)
+                .map_err(Failure::from),
+            Credential::ApiKey { key, .. } => Ok(key.clone()),
+        }
+    }
+
     fn raw(
         &self,
         method: &str,
@@ -41,12 +50,7 @@ impl Api {
         session: Option<&str>,
         observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<Response, Failure> {
-        let token = match &self.credential {
-            Credential::Account(session) => session
-                .access_token(&self.cancellation)
-                .map_err(Failure::from)?,
-            Credential::ApiKey { key, .. } => key.clone(),
-        };
+        let token = self.bearer()?;
         let url = format!("{}{path}", self.base_url);
         let authorization = format!("Bearer {token}");
         let mut headers = vec![("Authorization", authorization.as_str())];
@@ -118,16 +122,11 @@ impl Api {
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 stderr.trim()
             );
-            return Err(
-                if matches!(
-                    output.exit_code,
-                    Some(5 | 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56 | 92)
-                ) {
-                    Failure::temporary(message)
-                } else {
-                    Failure::from(message)
-                },
-            );
+            return Err(if crate::http::retryable(&output) {
+                Failure::temporary(message)
+            } else {
+                Failure::from(message)
+            });
         }
         if let Some(error) = output.input_error {
             return Err(Failure::from(format!(

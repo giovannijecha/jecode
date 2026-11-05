@@ -14,6 +14,8 @@ pub(super) struct Stream {
     has_text: bool,
     text_item: Option<usize>,
     message_boundary: bool,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    connection_expired: bool,
 }
 
 impl Stream {
@@ -140,11 +142,48 @@ impl Stream {
                 self.terminal = Some(Err(failure));
             }
             "error" => {
-                self.terminal = Some(Err(super::transport::failure(Some(&event), None)));
+                // WebSocket errors carry the status and headers of the HTTP
+                // response they replace.
+                let status = event
+                    .get("status")
+                    .and_then(Value::as_usize)
+                    .and_then(|status| u16::try_from(status).ok());
+                let mut failure = super::transport::failure(Some(&event), status);
+                failure.retry_after = event
+                    .get("headers")
+                    .and_then(|headers| headers.get("retry-after"))
+                    .and_then(Value::as_str)
+                    .and_then(crate::backend::retry::retry_delay);
+                self.connection_expired = event
+                    .get("error")
+                    .and_then(|error| error.get("code"))
+                    .and_then(Value::as_str)
+                    == Some("websocket_connection_limit_reached");
+                self.terminal = Some(Err(failure));
             }
             _ => {}
         }
         Ok(())
+    }
+
+    /// One whole event from the Responses WebSocket.
+    #[cfg(windows)]
+    pub fn message(
+        &mut self,
+        text: &str,
+        emit: &mut dyn FnMut(Update) -> Result<(), String>,
+    ) -> Result<(), String> {
+        self.event(text, emit)
+    }
+
+    #[cfg(windows)]
+    pub fn ended(&self) -> bool {
+        self.terminal.is_some()
+    }
+
+    #[cfg(windows)]
+    pub fn connection_expired(&self) -> bool {
+        self.connection_expired
     }
 
     pub fn finish(self) -> Result<Completion, Failure> {

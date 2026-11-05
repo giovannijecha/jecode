@@ -33,12 +33,17 @@ static int (*ssl_set1_host)(SSL *, const char *);
 static X509_VERIFY_PARAM *(*ssl_get0_param)(SSL *);
 static int (*verify_ip)(X509_VERIFY_PARAM *, const char *);
 static int (*ssl_connect)(SSL *);
+static int (*ssl_get_error)(const SSL *, int);
 static long (*ssl_verify_result)(const SSL *);
+static unsigned long (*err_peek_last_error)(void);
+static void (*err_clear_error)(void);
 static int (*ssl_write)(SSL *, const void *, int);
 static int (*ssl_read)(SSL *, void *, int);
+static int tls3;
 
 static int load_tls(void) {
     void *library = dlopen("libssl.so.3", RTLD_NOW | RTLD_LOCAL);
+    tls3 = library != NULL;
     if (!library) library = dlopen("libssl.so.1.1", RTLD_NOW | RTLD_LOCAL);
     if (!library) return 0;
 #define SYMBOL(slot, name) do { *(void **)(&slot) = dlsym(library, name); if (!slot) return 0; } while (0)
@@ -55,7 +60,10 @@ static int load_tls(void) {
     SYMBOL(ssl_get0_param, "SSL_get0_param");
     SYMBOL(verify_ip, "X509_VERIFY_PARAM_set1_ip_asc");
     SYMBOL(ssl_connect, "SSL_connect");
+    SYMBOL(ssl_get_error, "SSL_get_error");
     SYMBOL(ssl_verify_result, "SSL_get_verify_result");
+    SYMBOL(err_clear_error, "ERR_clear_error");
+    if (tls3) *(void **)(&err_peek_last_error) = dlsym(library, "ERR_peek_last_error");
     SYMBOL(ssl_write, "SSL_write");
     SYMBOL(ssl_read, "SSL_read");
 #undef SYMBOL
@@ -378,7 +386,12 @@ int main(void) {
     }
     struct addrinfo hints = {0}, *addresses = NULL;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(connect_host, connect_port, &hints, &addresses)) { free(hostport); free(proxy_hostport); goto done_headers; }
+    int lookup = getaddrinfo(connect_host, connect_port, &hints, &addresses);
+    if (lookup) {
+        if (lookup == EAI_AGAIN) result = 2;
+        free(hostport); free(proxy_hostport); goto done_headers;
+    }
+    result = 2;
     int attempt = timeout_ms && timeout_ms < 10000 ? (int)timeout_ms : 10000;
     for (struct addrinfo *address = addresses; address; address = address->ai_next) {
         channel.socket = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
@@ -400,12 +413,15 @@ int main(void) {
     }
     if (secure && proxy) {
         char connect_request[2048], reply[65536];
-        if (snprintf(connect_request, sizeof(connect_request),
-            "CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", host, port, host, port) >= (int)sizeof(connect_request) ||
-            !send_bytes(&channel, connect_request, strlen(connect_request)) ||
+        int connect_length = snprintf(connect_request, sizeof(connect_request),
+            "CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", host, port, host, port);
+        if (connect_length < 0 || connect_length >= (int)sizeof(connect_request)) result = 1;
+        if (result == 1 || !send_bytes(&channel, connect_request, strlen(connect_request)) ||
             !receive_line(&channel, reply, sizeof(reply))) { free(hostport); free(proxy_hostport); goto done_headers; }
         int proxy_status = 0;
         if (sscanf(reply, "HTTP/%*s %d", &proxy_status) != 1 || proxy_status != 200) {
+            result = proxy_status == 408 || proxy_status == 425 || proxy_status == 429 ||
+                     (proxy_status >= 500 && proxy_status <= 599) ? 2 : 1;
             free(hostport); free(proxy_hostport); goto done_headers;
         }
         do { if (!receive_line(&channel, reply, sizeof(reply))) { free(hostport); free(proxy_hostport); goto done_headers; } }
@@ -414,6 +430,7 @@ int main(void) {
         if (channel.start != channel.end) { free(hostport); free(proxy_hostport); goto done_headers; }
     }
     if (secure) {
+        result = 1;
         if (!load_tls()) { free(hostport); free(proxy_hostport); goto done_headers; }
         channel.ctx = ssl_ctx_new(tls_client_method());
         if (!channel.ctx) { free(hostport); free(proxy_hostport); goto done_headers; }
@@ -426,11 +443,26 @@ int main(void) {
             ? verify_ip(ssl_get0_param(channel.ssl), host)
             : ssl_set1_host(channel.ssl, host));
         if (!channel.ssl || ssl_set_fd(channel.ssl, channel.socket) != 1 ||
-            (!ip_literal && ssl_ctrl(channel.ssl, 55, 0, host) != 1) || identity_set != 1 ||
-            ssl_connect(channel.ssl) != 1 || ssl_verify_result(channel.ssl) != 0) {
+            (!ip_literal && ssl_ctrl(channel.ssl, 55, 0, host) != 1) || identity_set != 1) {
+            free(hostport); free(proxy_hostport); goto done_headers;
+        }
+        err_clear_error();
+        int handshake = ssl_connect(channel.ssl);
+        if (handshake != 1) {
+            int error = ssl_get_error(channel.ssl, handshake);
+            // OpenSSL 3 reports a peer EOF as SSL_ERROR_SSL with reason 294.
+            unsigned long detail = tls3 && err_peek_last_error ? err_peek_last_error() : 0;
+            int peer_eof = tls3 && ((detail >> 23) & 0xff) == 20 &&
+                           (detail & 0x7fffff) == 294;
+            if (ssl_verify_result(channel.ssl) == 0 &&
+                (error == 2 || error == 3 || error == 5 || error == 6 || peer_eof)) result = 2;
+            free(hostport); free(proxy_hostport); goto done_headers;
+        }
+        if (ssl_verify_result(channel.ssl) != 0) {
             free(hostport); free(proxy_hostport); goto done_headers;
         }
     }
+    result = 2;
     char start[4096];
     const char *target_path = *target == '?' ? "/" : "";
     if (snprintf(start, sizeof(start), "%s %s%s HTTP/1.1\r\nHost: %.*s\r\nConnection: close\r\n",

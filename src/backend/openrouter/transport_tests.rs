@@ -177,3 +177,56 @@ fn native_http_failure_preserves_safe_diagnostic() {
     assert!(error.message.contains("native HTTP (exit 1)"));
     assert!(error.message.contains("SocketException"));
 }
+
+#[test]
+fn invalid_native_request_is_terminal() {
+    let api = Api::fixture("http://127.0.0.1:1/chat/completions");
+    let mut output = incomplete_output(b"", b"Native HTTP request header is invalid", 1);
+    output.input_error = None;
+    assert_eq!(
+        api.response(output, None).unwrap_err().kind,
+        crate::backend::FailureKind::Terminal
+    );
+}
+
+#[test]
+fn native_transport_failure_is_temporary() {
+    let api = Api::fixture("http://127.0.0.1:1/chat/completions");
+    let mut output = incomplete_output(b"", b"Native HTTP receive failed", 2);
+    output.input_error = None;
+    assert_eq!(
+        api.response(output, None).unwrap_err().kind,
+        crate::backend::FailureKind::Temporary
+    );
+}
+
+#[test]
+fn a_connection_lost_before_the_response_can_be_retried() {
+    let server = Server::start(|listener, stop| {
+        let stream = server::accept(&listener, &stop).unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        while line != "\r\n" {
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+        }
+        // The whole request arrived; the response is lost with the connection.
+        reader.read_exact(&mut [0; 2]).unwrap();
+    });
+    let api = Api::fixture(&format!("{}/chat/completions", server.endpoint));
+    let failure = api
+        .raw("POST", "/chat/completions", Some("{}"), &mut |_| Ok(()))
+        .unwrap_err();
+    assert_eq!(
+        failure.kind,
+        crate::backend::FailureKind::Temporary,
+        "{}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("native HTTP"),
+        "{}",
+        failure.message
+    );
+    server.finish();
+}

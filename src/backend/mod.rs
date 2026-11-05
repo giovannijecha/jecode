@@ -77,6 +77,8 @@ pub enum Update {
     /// Newly generated text, appended to the current attempt's response.
     TextDelta(String),
     Working,
+    /// How this attempt reaches the provider, for its timing record.
+    Transport(&'static str),
 }
 
 pub struct Completion {

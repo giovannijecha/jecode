@@ -7,6 +7,10 @@ mod efficiency_live;
 #[cfg(test)]
 mod live;
 mod metadata;
+#[cfg(windows)]
+mod socket;
+#[cfg(all(test, windows))]
+mod socket_tests;
 mod stream;
 mod transport;
 mod wire;
@@ -40,6 +44,9 @@ pub struct Api {
     cancellation: Cancellation,
     base_url: String,
     metadata: Arc<Mutex<Option<metadata::Catalog>>>,
+    /// Whether conversations may use the Responses WebSocket before HTTP.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    sockets: bool,
 }
 
 pub struct OpenAi {
@@ -50,6 +57,8 @@ pub struct OpenAi {
     /// ChatGPT also sends it as `session-id`.
     conversation: Option<String>,
     delegation: bool,
+    #[cfg(windows)]
+    channel: Mutex<socket::Channel>,
 }
 
 impl Api {
@@ -59,6 +68,7 @@ impl Api {
             cancellation: Cancellation::default(),
             base_url: "https://api.openai.com/v1".into(),
             metadata: Arc::new(Mutex::new(None)),
+            sockets: true,
         })
     }
 
@@ -73,9 +83,11 @@ impl Api {
             cancellation,
             base_url: "https://api.openai.com/v1".into(),
             metadata: Arc::new(Mutex::new(None)),
+            sockets: true,
         })
     }
 
+    /// An HTTP-only loopback route; socket fixtures opt in with `with_sockets`.
     #[cfg(test)]
     pub fn fixture(session: Session, endpoint: &str) -> Self {
         assert!(endpoint.starts_with("http://127.0.0.1:"));
@@ -87,6 +99,7 @@ impl Api {
                 models: vec![],
                 limits: Default::default(),
             }))),
+            sockets: false,
         }
     }
 
@@ -95,7 +108,14 @@ impl Api {
         assert!(endpoint.starts_with("http://127.0.0.1:"));
         let mut api = Self::with_api_key(key.into()).unwrap();
         api.base_url = endpoint.into();
+        api.sockets = false;
         api
+    }
+
+    #[cfg(all(test, windows))]
+    fn with_sockets(mut self) -> Self {
+        self.sockets = true;
+        self
     }
 
     fn catalog(&self) -> Result<Vec<backend::Model>, String> {
@@ -179,6 +199,8 @@ impl OpenAi {
             effort: Effort::Default,
             conversation: None,
             delegation: true,
+            #[cfg(windows)]
+            channel: Mutex::default(),
         })
     }
 }
@@ -196,6 +218,7 @@ impl Service for Api {
             Credential::ApiKey { .. } => {
                 let mut api = Self::with_api_key(key)?;
                 api.base_url.clone_from(&self.base_url);
+                api.sockets = self.sockets;
                 api.cancellation = self.cancellation.clone();
                 Ok(Arc::new(api))
             }
@@ -314,17 +337,39 @@ impl Backend for OpenAi {
         })
         .map_err(backend::Failure::from)?;
         let mut stream = stream::Stream::default();
-        let response = self.api.post_stream(
-            "/responses",
-            &body,
+        #[cfg(windows)]
+        let answered = socket::exchange(
+            &self.channel,
+            &self.api,
             self.conversation.as_deref(),
-            &mut |chunk| stream.feed(chunk, emit),
-        )?;
+            request,
+            &mut stream,
+            emit,
+        )
+        .map_err(|mut failure| {
+            transport::sanitize(&mut failure, &self.api.redactor());
+            failure
+        })?;
+        #[cfg(not(windows))]
+        let answered = false;
+        let response = if answered {
+            None
+        } else {
+            emit(backend::Update::Transport("http")).map_err(backend::Failure::from)?;
+            Some(self.api.post_stream(
+                "/responses",
+                &body,
+                self.conversation.as_deref(),
+                &mut |chunk| stream.feed(chunk, emit),
+            )?)
+        };
         let mut completion = stream.finish().map_err(|mut failure| {
-            failure.message = format!("{} (HTTP {})", failure.message, response.status);
-            failure.retry_after = response.retry_after;
-            if let Some(id) = response.request_id {
-                failure.message.push_str(&format!("; request id: {id}"));
+            if let Some(response) = response {
+                failure.message = format!("{} (HTTP {})", failure.message, response.status);
+                failure.retry_after = response.retry_after;
+                if let Some(id) = response.request_id {
+                    failure.message.push_str(&format!("; request id: {id}"));
+                }
             }
             transport::sanitize(&mut failure, &self.api.redactor());
             failure
@@ -340,13 +385,21 @@ impl Backend for OpenAi {
     }
     fn set_conversation(&mut self, id: Option<String>) {
         // ChatGPT also sends this as an HTTP header, so only plain tokens qualify.
-        self.conversation = id.filter(|id| {
+        let next = id.filter(|id| {
             !id.is_empty()
                 && id.len() <= 128
                 && id
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         });
+        #[cfg(windows)]
+        if self.conversation != next {
+            self.channel
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .reset();
+        }
+        self.conversation = next;
     }
     fn services(&self) -> backend::Services {
         backend::Services::from_service(self.api.clone())

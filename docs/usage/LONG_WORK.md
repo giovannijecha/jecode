@@ -18,8 +18,9 @@ countdown, attempt number and reason, and you can keep typing or stop the turn.
   Linux, connecting has a 10-second deadline.
 - An empty response is retried; three empty responses for the same request end
   the turn with an error.
-- Invalid requests, rejected credentials, a ChatGPT plan's usage limit,
-  insufficient OpenRouter credit and other permanent errors stop immediately.
+- Invalid requests, rejected credentials, invalid local proxy settings, TLS
+  certificate failures, a ChatGPT plan's usage limit, insufficient OpenRouter
+  credit and other permanent errors stop immediately.
 - An interrupted or incomplete response never runs its partial tool calls.
   Results of tool calls from earlier requests stay in the conversation.
 

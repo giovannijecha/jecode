@@ -95,17 +95,12 @@ impl Api {
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 stderr.trim(),
             );
-            return Err(with_input_error(
-                if matches!(
-                    output.exit_code,
-                    Some(5 | 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56 | 92)
-                ) {
-                    Failure::temporary(message)
-                } else {
-                    Failure::from(message)
-                },
-                input_error,
-            ));
+            let failure = if crate::http::retryable(&output) {
+                Failure::temporary(message)
+            } else {
+                Failure::from(message)
+            };
+            return Err(with_input_error(failure, input_error));
         }
         let response = String::from_utf8(output.stdout).map_err(|_| {
             with_input_error("OpenRouter returned invalid UTF-8".into(), input_error)

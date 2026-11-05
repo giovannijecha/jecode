@@ -91,7 +91,9 @@ fn fragmented_utf8_sse_preserves_reasoning_and_assembles_tool_arguments() {
                     Update::Reasoning => thinking = true,
                     Update::Working => {}
                     Update::Usage(_) => {}
-                    Update::Waiting { .. } => unreachable!("parser cannot dispatch a request"),
+                    Update::Waiting { .. } | Update::Transport(_) => {
+                        unreachable!("parser cannot dispatch a request")
+                    }
                 };
                 Ok(())
             })

@@ -31,6 +31,30 @@ static int parse_decimal(const char *text, unsigned long long *value) {
     return !errno && (end[0] == '\n' || end[0] == '\r' || end[0] == 0);
 }
 
+static int transport_error(CFReadStreamRef stream, int before_headers) {
+    CFErrorRef detail = CFReadStreamCopyError(stream);
+    if (detail) {
+        CFStringRef domain = CFErrorGetDomain(detail);
+        CFIndex code = CFErrorGetCode(detail);
+        int network = CFEqual(domain, kCFErrorDomainCFNetwork) ||
+                      CFEqual(domain, (__bridge CFStringRef)NSURLErrorDomain);
+        int retry = network && (code == kCFErrorHTTPConnectionLost ||
+            code == kCFURLErrorTimedOut || code == kCFURLErrorCannotFindHost ||
+            code == kCFURLErrorCannotConnectToHost ||
+            code == kCFURLErrorNetworkConnectionLost ||
+            code == kCFURLErrorDNSLookupFailed ||
+            code == kCFURLErrorNotConnectedToInternet ||
+            (before_headers && code == kCFErrorHTTPParseFailure));
+        CFRelease(detail);
+        if (retry) return 1;
+    }
+    CFStreamError error = CFReadStreamGetError(stream);
+    return error.domain == kCFStreamErrorDomainPOSIX ||
+           error.domain == kCFStreamErrorDomainNetDB ||
+           (before_headers && error.domain == kCFStreamErrorDomainHTTP &&
+            error.error == kCFStreamErrorHTTPParseFailure);
+}
+
 static int response_headers(CFHTTPMessageRef response, int head,
                             unsigned long long *expected, int *has_expected) {
     CFIndex status = CFHTTPMessageGetResponseStatusCode(response);
@@ -77,6 +101,7 @@ int main(void) {
         NSMutableData *body = nil;
         CFHTTPMessageRef request = NULL, response = NULL;
         CFReadStreamRef stream = NULL;
+        CFStreamError stream_error = { 0, 0 };
         CFDictionaryRef proxy = NULL;
         unsigned long long timeout_ms = 0, count = 0, body_size = 0;
         unsigned long long expected = 0, received = 0;
@@ -127,11 +152,18 @@ int main(void) {
             if (proxy && !CFReadStreamSetProperty(stream, kCFStreamPropertyHTTPProxy, proxy)) goto done;
         }
         if (timeout_ms) alarm((unsigned)((timeout_ms + 999) / 1000));
-        if (!CFReadStreamOpen(stream)) goto done;
+        if (!CFReadStreamOpen(stream)) {
+            if (transport_error(stream, 1)) result = 2;
+            goto done;
+        }
         first = CFReadStreamRead(stream, buffer, sizeof(buffer));
+        if (first < 0) {
+            if (transport_error(stream, 1)) result = 2;
+            goto done;
+        }
         response = (CFHTTPMessageRef)CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
+        if (!response && first == 0) result = 2;
         if (!response || !response_headers(response, head, &expected, &has_expected)) goto done;
-        if (first < 0) goto done;
         if (!head) {
             CFIndex length = first;
             for (;;) {
@@ -140,19 +172,24 @@ int main(void) {
                 if (has_expected && received > expected) goto done;
                 if (fwrite(buffer, 1, (size_t)length, stdout) != (size_t)length || fflush(stdout)) goto done;
                 length = CFReadStreamRead(stream, buffer, sizeof(buffer));
-                if (length < 0) goto done;
+                if (length < 0) {
+                    if (transport_error(stream, 0)) result = 2;
+                    goto done;
+                }
             }
-            if (has_expected && received != expected) goto done;
+            if (has_expected && received != expected) { result = 2; goto done; }
         }
         result = 0;
 done:
         alarm(0);
+        if (result && stream) stream_error = CFReadStreamGetError(stream);
         if (stream) { CFReadStreamClose(stream); CFRelease(stream); }
         if (response) CFRelease(response);
         if (request) CFRelease(request);
         if (proxy) CFRelease(proxy);
         free(line);
-        if (result) fputs("Native HTTP request failed\n", stderr);
+        if (result) fprintf(stderr, "Native HTTP request failed (stream domain %ld, code %ld)\n",
+                            (long)stream_error.domain, (long)stream_error.error);
         return result;
     }
 }

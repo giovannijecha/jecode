@@ -15,6 +15,8 @@ pub(super) struct RequestTiming {
     pub(super) first_update: Option<Instant>,
     pub(super) request_bytes: Option<usize>,
     pub(super) notification: Duration,
+    /// Set by backends with more than one way to reach their provider.
+    pub(super) transport: Option<&'static str>,
 }
 
 impl RequestTiming {
@@ -25,6 +27,7 @@ impl RequestTiming {
             first_update: None,
             request_bytes: None,
             notification: Duration::ZERO,
+            transport: None,
         }
     }
 
@@ -58,6 +61,10 @@ impl RequestTiming {
             (
                 "request_bytes",
                 self.request_bytes.map_or(Value::Null, Value::number),
+            ),
+            (
+                "transport",
+                self.transport.map_or(Value::Null, Value::string),
             ),
             ("status", Value::string(status)),
             ("input_tokens", tokens(|usage| usage.input_tokens)),

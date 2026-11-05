@@ -72,8 +72,9 @@ contain a tool call whose result has not arrived yet.
 
 `request_timing` events describe each model request attempt: provider, model,
 operation (`completion`, `context_compaction` or `session_title`), effort,
-attempt number, start time, request size, outcome (`complete`, `failed` or
-`cancelled`) and the token counts the provider reported (`input_tokens`,
+attempt number, start time, request size, `transport` (`socket` or `http` for
+OpenAI routes, otherwise `null`), outcome (`complete`, `failed` or `cancelled`)
+and the token counts the provider reported (`input_tokens`,
 `output_tokens`, `total_tokens`, `cached_tokens`, `cache_write_tokens`,
 `reasoning_tokens`; missing counters are `null`). Cached tokens are already
 included in input and reasoning tokens in output, so do not add them again.

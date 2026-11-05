@@ -53,6 +53,57 @@ fn serve_with_headers(
 }
 
 #[test]
+fn a_connection_lost_before_the_response_can_be_retried() {
+    let server = Server::start(|listener, stop| {
+        let stream = server::accept(&listener, &stop).unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        while line != "\r\n" {
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+        }
+        // The whole request arrived; the response is lost with the connection.
+        reader.read_exact(&mut [0; 2]).unwrap();
+    });
+    let api = Api::fixture(Session::fixture("fixture-access-token"), &server.endpoint);
+    let failure = api
+        .post_stream("/responses", "{}", None, &mut |_| Ok(()))
+        .err()
+        .unwrap();
+    assert_eq!(
+        failure.kind,
+        crate::backend::FailureKind::Temporary,
+        "{}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("native HTTP"),
+        "{}",
+        failure.message
+    );
+    server.finish();
+}
+
+#[test]
+fn an_invalid_native_header_stops_without_retry() {
+    let api = Api::fixture(
+        Session::fixture("fixture-access-token"),
+        "http://127.0.0.1:1",
+    );
+    let failure = api
+        .post_stream(
+            "/responses",
+            "{}",
+            Some("invalid\nsession"),
+            &mut |_| Ok(()),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(failure.kind, crate::backend::FailureKind::Terminal);
+    assert!(failure.message.contains("Native HTTP"));
+}
+
+#[test]
 fn large_stream_reaches_completion_beyond_the_process_capture_limit() {
     let text = "x".repeat(96 * 1024);
     let delta = Value::object([

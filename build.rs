@@ -134,7 +134,11 @@ fn windows(out: &Path, assets: &mut Vec<(String, PathBuf)>) {
     );
     compile("checkpoint_space", &["src/checkpoints/space.cs"], &[]);
     compile("openai_crypto", &["src/auth/openai/native.cs"], &[]);
-    compile("http", &["src/native/winhttp.cs"], &[]);
+    compile(
+        "http",
+        &["src/native/winhttp.cs", "src/native/winhttp_socket.cs"],
+        &[],
+    );
 }
 
 fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {

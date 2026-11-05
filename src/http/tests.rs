@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::server::{self, Server};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::process::Command;
 
 #[test]
 fn wire_url_escapes_rejected_bytes_and_keeps_escapes() {
@@ -42,6 +43,38 @@ fn child_fixture() {
     assert_eq!(decoder.status, Some(200));
     assert_eq!(decoder.header("X-Fixture-Response"), Some("passed"));
     assert_eq!(body, b"ok");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unsupported_https_proxy_is_a_terminal_native_failure() {
+    let mut command = Command::new(crate::native::helper("http").unwrap());
+    crate::auth::isolate_environment(&mut command)
+        .env("HTTPS_PROXY", "https://proxy.invalid:443")
+        .env("NO_PROXY", "")
+        .env("no_proxy", "");
+    let input = wire_request(&Request {
+        url: "https://example.invalid/",
+        method: "POST",
+        headers: &[],
+        body: Some(b"{}"),
+        timeout: Some(Duration::from_secs(2)),
+        idle: None,
+        output_limit: 0,
+    });
+    let output = crate::process::run_leaf(
+        &mut command,
+        Some(input),
+        Some(Duration::from_secs(2)),
+        4096,
+        &Cancellation::default(),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(output.exit_code, Some(1));
+    assert!(!retryable(&output));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("supports only http:// proxies"));
 }
 
 #[test]

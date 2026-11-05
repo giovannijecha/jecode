@@ -50,6 +50,80 @@ are not reproducible probes.
 
 ## Recorded results
 
+### Provider transports
+
+Recorded 2026-11-05 on Windows 11 over one home connection, with real accounts.
+A throwaway probe sent the same synthetic conversation over each transport in
+A/B/B/A blocks, at high effort with short replies. Medians to the first output
+item, with 14 samples per cell at about 153 KB (GPT-6.1 Sol, 39k tokens; Claude
+Sonnet 5.5, 53k tokens) and 10 at about 544 KB:
+
+| Transport | GPT 153 KB | GPT 544 KB | Claude 153 KB | Claude 543 KB |
+| --- | ---: | ---: | ---: | ---: |
+| New HTTP connection per request | 4.23 s | | 3.36 s | |
+| Reused HTTP connection | 3.83 s | 4.15 s | 3.00 s | 2.03 s |
+| Reused connection, gzip request body | 4.33 s | | 3.39 s | 2.66 s |
+| WebSocket, full input | 2.56 s | 3.28 s | | |
+| WebSocket, `previous_response_id` | 2.46 s | 3.85 s | | |
+
+Both routes accepted gzip bodies and `previous_response_id` works over the
+ChatGPT route's WebSocket, but neither improved latency, so Jecode uses neither.
+A connection failed by the provider's message limit (between 7 and 27 MB here)
+falls back to HTTP after about 3 s. On a minimal request, a new WinHTTP process
+spent about 60 ms starting, 25 ms on TCP and 100 ms on TLS, 230–370 ms in all
+depending on the host. One host answered a reused connection in 118 ms, and
+HTTP/2 lowered that to 81 ms. Turning off automatic proxy detection and
+certificate revocation changed nothing measurable.
+
+The whole five-turn benchmark then compared the previous transport (`20a5ba1`)
+with the reused adapters, HTTP/2 and the WebSocket. Both ran in the same hour,
+four runs a side, eight sessions at once, on Windows only. Every run passed all
+21 hidden tests and no socket fell back to HTTP:
+
+| Measure | GPT before | GPT after | Claude before | Claude after |
+| --- | ---: | ---: | ---: | ---: |
+| First update, median | 4.53 s | 3.58 s | 2.73 s | 2.19 s |
+| First update, lower quartile | 3.75 s | 2.69 s | 1.91 s | 1.55 s |
+| Time per request | 18.3 s | 16.6 s | 10.2 s | 9.3 s |
+| Requests per run | 28.8 | 30.5 | 34.0 | 38.0 |
+| Wall time per run | 551 s | 522 s | 364 s | 371 s |
+| Cost-weighted tokens per run | 445k | 494k | 743k | 813k |
+
+Tokens per request, cache hit rate and generation speed were comparable in these
+samples; four runs a side cannot rule out a transport-related difference. The
+token totals also follow the number of requests the model chose, which varies
+between runs. Provider cache drops added 28k to the GPT average after the change
+and 4k before, mostly from one drop in one run; such drops also occur in earlier HTTP
+runs. With four runs a side, wall time does not resolve a saving this size: read
+the first-update line, which amounts to about 30 s per GPT run and 20 s per Claude
+run. The harness starts a new process each turn, so these runs lose the reused
+connection five times per conversation. They say nothing about Linux or macOS,
+other networks or task quality.
+
+Separate Windows review checks exercised the real terminal renderer through
+ConPTY with OpenAI and Anthropic API keys in isolated configuration. Both
+completed two consecutive turns, stopped an in-flight request with Esc, completed
+the next turn and exited cleanly. OpenAI's request records confirmed `socket` for
+all four conversation requests, including the cancelled one, and `http` for the
+session title. These were functional checks, not latency benchmarks. Live MCP
+and OAuth sign-in or refresh through the pooled adapter were not repeated.
+
+### Instruction discovery metadata
+
+Recorded 2026-11-05 on Windows 11 with Rust 1.95.0, using an optimized standalone
+driver of the instruction loader against the `jecode-fast` checkout. Four
+alternating before/after/after/before blocks each warmed up five scans and measured
+21 batches of three scans. Median scan times were 15.1 and 15.3 ms before, and
+11.1 and 10.4 ms after. Every scan returned the same 4,351 bytes of instructions.
+These measure instruction discovery alone, not a model request or whole turn.
+
+The loader now obtains directory metadata from its existing `DirEntry` rather
+than looking up the path again. On Windows, that metadata is already available
+from directory enumeration; on Unix, it retains the same metadata lookup. See
+the [standard-library contract](https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata).
+The search still includes `target` and other generated directories, and still
+skips directory links and junctions. No instruction selection rule changed.
+
 ### Subscription context reuse
 
 Recorded 2026-10-31 with bounded live requests, synthetic reference records and

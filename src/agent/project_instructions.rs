@@ -121,7 +121,9 @@ fn scan(
         if !file_type.is_dir() {
             continue;
         }
-        let metadata = match fs::symlink_metadata(entry.path()) {
+        // Directory entries already carry this metadata on Windows. Keep the
+        // link check without looking the same path up a second time.
+        let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == ErrorKind::NotFound => continue,
             Err(error) => {
