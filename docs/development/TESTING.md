@@ -104,6 +104,19 @@ terminal backgrounds (`native_tests::native_background::`). The fullscreen
 fixture also paints tool cards through the console, including multi-file edits
 and the steps of one `steps` call.
 
+Linux and macOS run the same conversations, from `tui::terminal::fixtures`, through
+one filter: permissions, direct terminal input, startup with and without a provider,
+the startup screen, a light background answered through OSC 11, and a terminal that
+only declares the 256-colour palette while speaking the keyboard protocol:
+
+```text
+cargo test --locked --offline tui::terminal::unix::native_tests::scenarios::native_unix -- --ignored --nocapture --test-threads=1
+```
+
+The tool card, authentication, MCP and LSP panels have no Unix fixture of their own.
+Their Windows fixtures read cells back from the console to check ConPTY's translation,
+which Unix terminals do not have; the shared rendering tests cover their content.
+
 The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
 the list, add, form and Advanced panels (including unchecked and signed-out
 states), successful calls and uncertain remote outcomes:
@@ -165,12 +178,17 @@ spaces, non-BMP text,
 CRLF and instance reuse. Their timings describe these small fixtures only.
 Record actual server versions and executed platforms when reporting results.
 
-## Windows command confinement
+## Command confinement
 
 The normal suite launches an original Rust probe inside the Workspace
 confinement and checks permitted and denied file operations, inherited
-confinement in descendants, drive-root listing only for an installed Node.js
-runtime, and rejection of interactive terminals. PowerShell and .NET
+confinement in descendants, and rejection of interactive terminals. On Linux and
+macOS, `sandbox::unix_tests` also runs the system shell, `cc`, Git and any of
+`cargo`, `node`, `npm` and `python3` the host has, and skips with a printed reason on a
+kernel without Landlock. A skipped test does not establish coverage.
+
+On Windows it also checks drive-root listing only for an installed Node.js
+runtime. PowerShell and .NET
 compatibility checks are opt-in because Windows cannot start some programs
 inside the confinement from a service session (see
 [Permissions](../usage/PERMISSIONS.md#platform-limits)). Run them from an
@@ -323,6 +341,31 @@ cargo test --locked --offline tui::terminal::unix::native_tests::npm_tests::npm_
 The second command applies to Linux and macOS. CI supplies both paths and runs
 the matching fixture through the packaged launcher and real terminal bridge.
 
+## OS floors
+
+[Platform support](PLATFORMS.md#supported-versions) lists the floors. To reproduce
+a Linux release that meets its floor, link against the Debian 10 sysroot. This
+needs `curl`, `sha256sum`, `dpkg-deb` and `cc`, and keeps its own target directory
+because Cargo does not track the compiler wrapper's contents:
+
+```sh
+eval "$(sh tools/linux-sysroot.sh target/sysroot | sed 's/^/export /')"
+CARGO_TARGET_DIR=target/floor cargo build --release --locked --offline
+node tools/npm/release.mjs stage target/floor/release/jecode target/npm-stage/linux-x64
+```
+
+To run a build on an older distribution, unpack that distribution's root
+filesystem, install its OpenSSL, and start the binary with
+`unshare --user --map-root-user --mount --pid --fork` and `chroot`. No
+administrator access is needed where unprivileged user namespaces are allowed.
+The local Linux CI runner disables nested namespaces, so CI runs the executable
+directly under the sysroot's `ld.so` instead.
+
+From a Linux host, `sh tools/check-macos-rust.sh` lints the macOS Rust for both
+architectures after `rustup target add aarch64-apple-darwin x86_64-apple-darwin`.
+It needs no Apple SDK, and it does not compile the C or Objective-C adapters or
+run anything: only macOS CI establishes those.
+
 ## CI
 
 [`CI.yml`](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml)
@@ -331,11 +374,12 @@ the platform's native terminal fixtures (on Windows, also the direct-input
 fixture). It also builds a release executable, tests npm packaging and the
 install/update/uninstall lifecycle, and runs the opt-in native terminal fixture
 through the npm launcher. The required checks are
-`Rust (Windows)`, `Rust (Linux)` and `Rust (macOS)`.
+`Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)` and `Rust (macOS Intel)`.
 
 Windows and Linux jobs run on maintainer-hosted runners with fresh checkouts and
 one-job credentials; the host rejects fork code before workflow steps run.
 These jobs queue while the maintainer's machine is offline, and a queued or
-skipped job is not a successful verification. macOS runs on GitHub's hosted
-`macos-26` ARM64 runner for native terminal checks and the `darwin-arm64`
-npm artifact.
+skipped job is not a successful verification. The Linux job links against the
+glibc floor. macOS runs on GitHub's hosted `macos-26` ARM64 and `macos-26-intel`
+runners, for native terminal checks and the `darwin-arm64` and `darwin-x64` npm
+artifacts, with `MACOSX_DEPLOYMENT_TARGET=11.0`.

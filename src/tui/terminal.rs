@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod fixtures;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -63,7 +65,7 @@ impl Waker {
 }
 
 pub(super) const LEAVE: &str =
-    "\x1b[0m\x1b[?2026l\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[?1049l\x1b[?25h";
+    "\x1b[0m\x1b[?2026l\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[<u\x1b[?1049l\x1b[?25h";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Geometry {

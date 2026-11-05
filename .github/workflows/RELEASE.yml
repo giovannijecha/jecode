@@ -31,10 +31,15 @@ jobs:
             os: macos-26
             toolchain: 1.95.0
             npm_target: darwin-arm64
+          - name: macOS x64
+            os: macos-26-intel
+            toolchain: 1.95.0
+            npm_target: darwin-x64
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
       RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -64,6 +69,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $taskLinker = Join-Path $taskSysroot 'lib/rustlib/x86_64-pc-windows-gnullvm/bin/rust-lld.exe'
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=$taskLinker"
+      - name: Link against the Linux glibc floor
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sh tools/linux-sysroot.sh "$RUNNER_TEMP/jecode-sysroot" >> "$GITHUB_ENV"
       - name: Check formatting
         run: cargo +${{ matrix.toolchain }} fmt --all -- --check
       - name: Check all targets
@@ -84,6 +93,12 @@ jobs:
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
       - name: Build release executable
         run: cargo +${{ matrix.toolchain }} build --release --locked --offline
+      - name: Run the release executable on the glibc floor
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          libraries="$RUNNER_TEMP/jecode-sysroot/lib/x86_64-linux-gnu"
+          "$libraries/ld-2.28.so" --library-path "$libraries" target/release/jecode --version
       - name: Install Node for npm packaging
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:

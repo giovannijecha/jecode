@@ -184,10 +184,13 @@ fn key(code: u16, modifiers: u8) -> Key {
 }
 
 fn modifiers(value: u16) -> Option<u8> {
-    if !(1..=8).contains(&value) {
+    // The keyboard protocol adds 64 for Caps Lock and 128 for Num Lock, which do
+    // not change a shortcut. Super, Hyper and Meta are not Jecode's to interpret.
+    let bits = value.checked_sub(1)? & !(64 | 128);
+    if bits > 7 {
         return None;
     }
-    let bits = (value - 1) as u8;
+    let bits = bits as u8;
     Some((bits & 1) << 1 | (bits & 2) >> 1 | bits & 4)
 }
 
@@ -240,6 +243,14 @@ fn sequence_key(sequence: &[u8]) -> Option<Key> {
 fn encoded_key(character: u16, modifiers: u8) -> Option<Key> {
     let code = match character {
         9 | 13 => character,
+        // The keypad's Enter, which the protocol reports separately.
+        57414 => {
+            return Some(Key {
+                code: 13,
+                modifiers,
+                character: 13,
+            });
+        }
         27 => 27,
         127 => 8,
         32..=126 => (character as u8).to_ascii_uppercase().into(),

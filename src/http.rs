@@ -1,8 +1,6 @@
 //! Native HTTP transport. Request details travel on stdin, never command arguments.
 
-#[cfg(windows)]
 pub(crate) mod adapter;
-#[cfg(windows)]
 mod pool;
 
 use crate::cancel::Cancellation;
@@ -24,36 +22,16 @@ pub(crate) fn run(
     cancellation: &Cancellation,
     observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
 ) -> Result<Output, String> {
-    let input = wire_request(&request);
-    #[cfg(windows)]
-    {
-        pool::run(
-            input,
-            pool::Limits {
-                timeout: request.timeout,
-                idle: request.idle,
-                output: request.output_limit,
-            },
-            cancellation,
-            observer,
-        )
-    }
-    #[cfg(unix)]
-    {
-        let mut command = std::process::Command::new(crate::native::helper("http")?);
-        crate::auth::isolate_environment(&mut command);
-        // The native helper owns no descendants; the runner enforces cancellation
-        // and inactivity while forwarding each response chunk to the caller.
-        crate::process::run_leaf(
-            &mut command,
-            Some(input),
-            request.timeout,
-            request.output_limit,
-            cancellation,
-            request.idle,
-            &mut |bytes| observer(bytes),
-        )
-    }
+    pool::run(
+        wire_request(&request),
+        pool::Limits {
+            timeout: request.timeout,
+            idle: request.idle,
+            output: request.output_limit,
+        },
+        cancellation,
+        observer,
+    )
 }
 
 /// Native adapters reserve exit 2 for transport failures that may clear on retry.
@@ -62,7 +40,6 @@ pub(crate) fn retryable(output: &Output) -> bool {
 }
 
 /// What opens a socket adapter; its messages follow on the same stdin.
-#[cfg(windows)]
 pub(crate) fn socket_opening(url: &str, headers: &[(&str, &str)]) -> Vec<u8> {
     let mut input = encode(wire_url(url).as_bytes());
     input.push('\n');
@@ -79,6 +56,16 @@ pub(crate) fn socket_opening(url: &str, headers: &[(&str, &str)]) -> Vec<u8> {
 
 fn wire_request(request: &Request<'_>) -> Vec<u8> {
     let body = request.body.unwrap_or_default();
+    // The adapters frame the actual bytes. Caller-supplied framing could leave
+    // part of this body in front of the next request on a reused connection.
+    let headers: Vec<_> = request
+        .headers
+        .iter()
+        .filter(|(name, _)| {
+            !name.eq_ignore_ascii_case("Content-Length")
+                && !name.eq_ignore_ascii_case("Transfer-Encoding")
+        })
+        .collect();
     let mut input = String::new();
     input.push_str(&encode(wire_url(request.url).as_bytes()));
     input.push('\n');
@@ -90,9 +77,9 @@ fn wire_request(request: &Request<'_>) -> Vec<u8> {
         .map_or(0, |timeout| timeout.as_millis().max(1));
     input.push_str(&timeout.to_string());
     input.push('\n');
-    input.push_str(&request.headers.len().to_string());
+    input.push_str(&headers.len().to_string());
     input.push('\n');
-    for (name, value) in request.headers {
+    for (name, value) in headers {
         input.push_str(&encode(name.as_bytes()));
         input.push('\n');
         input.push_str(&encode(value.as_bytes()));
@@ -188,7 +175,9 @@ impl Decoder {
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
+mod framing_tests;
+#[cfg(test)]
 mod pool_tests;
 #[cfg(test)]
 mod tests;

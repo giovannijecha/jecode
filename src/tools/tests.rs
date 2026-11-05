@@ -33,26 +33,15 @@ fn workspace_shell_uses_the_native_boundary() {
     let result = tools
         .execute_begun(begun, "bash", &arguments, &Cancellation::default())
         .result;
-    if cfg!(windows) {
-        assert_eq!(
-            result.get("exit_code"),
-            Some(&Value::number(0)),
-            "{result:?}"
-        );
-        assert_eq!(
-            fs::read_to_string(root.path().join("nested/marker.txt")).unwrap(),
-            "owned"
-        );
-    } else {
-        assert!(
-            result
-                .get("error")
-                .and_then(Value::as_str)
-                .is_some_and(|text| text.contains("only on Windows")),
-            "{result:?}"
-        );
-        assert!(!root.path().join("nested/marker.txt").exists());
-    }
+    assert_eq!(
+        result.get("exit_code"),
+        Some(&Value::number(0)),
+        "{result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("nested/marker.txt")).unwrap(),
+        "owned"
+    );
 }
 
 #[test]

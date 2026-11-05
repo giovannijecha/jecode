@@ -1,9 +1,68 @@
+#[cfg(any(unix, test))]
+use std::ffi::OsString;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Semantic roles of the v2 design; docs/tui/THEME.md records their use and
 // contrast. The renderer uses the terminal background on dark themes and a
 // local dark fill when OSC 11 reports a light theme. Weight and slant are composed
 // at the call site: `STRONG.bold()`, `MUTED.italic()`.
+
+static PALETTE_ONLY: AtomicBool = AtomicBool::new(false);
+
+/// Paint with the 256-colour palette unless the terminal declares 24-bit colour,
+/// which others misread: Terminal.app before macOS 26 shows wrong colours. Windows
+/// consoles at the supported floor all have it, so only Unix terminals ask.
+#[cfg(unix)]
+pub(in crate::tui) fn choose_color_depth(variable: impl Fn(&str) -> Option<OsString>) {
+    PALETTE_ONLY.store(!declares_true_color(variable), Ordering::Relaxed);
+}
+
+#[cfg(any(unix, test))]
+fn declares_true_color(variable: impl Fn(&str) -> Option<OsString>) -> bool {
+    let value = |name: &str| {
+        variable(name)
+            .map(|value| value.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default()
+    };
+    if matches!(value("COLORTERM").as_str(), "truecolor" | "24bit") {
+        return true;
+    }
+    let term = value("TERM");
+    if [
+        "truecolor",
+        "24bit",
+        "direct",
+        "kitty",
+        "alacritty",
+        "ghostty",
+        "foot",
+        "wezterm",
+    ]
+    .iter()
+    .any(|name| term.contains(name))
+    {
+        return true;
+    }
+    if matches!(
+        value("TERM_PROGRAM").as_str(),
+        "iterm.app" | "wezterm" | "ghostty" | "vscode" | "hyper" | "tabby" | "warpterminal"
+    ) {
+        return true;
+    }
+    // These terminals have had 24-bit colour from before their identifying variable.
+    [
+        "WT_SESSION",
+        "KONSOLE_VERSION",
+        "KITTY_WINDOW_ID",
+        "ALACRITTY_WINDOW_ID",
+    ]
+    .iter()
+    .any(|name| variable(name).is_some())
+        || value("VTE_VERSION")
+            .parse::<u32>()
+            .is_ok_and(|version| version >= 3600)
+}
 
 // Text, from strongest to faintest.
 pub const BODY: Style = Style::rgb(212, 211, 219); // #D4D3DB
@@ -67,6 +126,58 @@ pub const METER_TRACK: Style = FAINT;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rgb(u8, u8, u8);
 
+impl Rgb {
+    /// The SGR parameters for this colour; `prefix` is 38 or 48.
+    fn parameters(self, prefix: u8, palette_only: bool) -> String {
+        let Self(red, green, blue) = self;
+        if palette_only {
+            format!("{prefix};5;{}", self.nearest_palette_index())
+        } else {
+            format!("{prefix};2;{red};{green};{blue}")
+        }
+    }
+
+    /// The closest entry of the standard palette: its 6x6x6 cube or grey ramp. Dark
+    /// tints that mean something would all turn grey, so they keep a chosen hue.
+    fn nearest_palette_index(self) -> u8 {
+        const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+        const TINTS: [(Surface, u8); 7] = [
+            (DIFF_ADDED_SURFACE, 22),
+            (DIFF_ADDED_STRONG, 22),
+            (DIFF_REMOVED_SURFACE, 52),
+            (DIFF_REMOVED_STRONG, 52),
+            (BADGE_SHELL, 25),
+            (BADGE_COORD, 23),
+            (BADGE_BAD, 88),
+        ];
+        if let Some((_, index)) = TINTS.iter().find(|(surface, _)| surface.0 == Some(self)) {
+            return *index;
+        }
+        let Self(red, green, blue) = self;
+        let level = |channel: u8| {
+            (0..LEVELS.len())
+                .min_by_key(|&index| LEVELS[index].abs_diff(channel))
+                .unwrap_or(0)
+        };
+        let [r, g, b] = [red, green, blue].map(level);
+        let cube = Self(LEVELS[r], LEVELS[g], LEVELS[b]);
+        let average = (u16::from(red) + u16::from(green) + u16::from(blue)) / 3;
+        let step = (average.saturating_sub(3) / 10).min(23) as u8;
+        let grey_value = 8 + 10 * step;
+        let distance = |Self(x, y, z): Self| {
+            [(x, red), (y, green), (z, blue)]
+                .into_iter()
+                .map(|(from, to)| u32::from(from.abs_diff(to)).pow(2))
+                .sum::<u32>()
+        };
+        if distance(Self(grey_value, grey_value, grey_value)) < distance(cube) {
+            232 + step
+        } else {
+            16 + 36 * r as u8 + 6 * g as u8 + b as u8
+        }
+    }
+}
+
 // A foreground colour with SGR attributes, painted as one parameter list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Style {
@@ -125,9 +236,11 @@ impl fmt::Display for Style {
                 separator = ";";
             }
         }
-        for (prefix, color) in [("38", self.foreground), ("48", self.fill)] {
-            if let Some(Rgb(red, green, blue)) = color {
-                write!(formatter, "{separator}{prefix};2;{red};{green};{blue}")?;
+        let palette_only = PALETTE_ONLY.load(Ordering::Relaxed);
+        for (prefix, color) in [(38, self.foreground), (48, self.fill)] {
+            if let Some(color) = color {
+                let parameters = color.parameters(prefix, palette_only);
+                write!(formatter, "{separator}{parameters}")?;
                 separator = ";";
             }
         }
@@ -157,7 +270,9 @@ impl Surface {
 impl fmt::Display for Surface {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
-            Some(Rgb(red, green, blue)) => write!(formatter, "48;2;{red};{green};{blue}"),
+            Some(color) => {
+                formatter.write_str(&color.parameters(48, PALETTE_ONLY.load(Ordering::Relaxed)))
+            }
             None => formatter.write_str("49"),
         }
     }
@@ -238,6 +353,130 @@ mod tests {
         }
         assert!(contrast(LIT, BADGE_IDLE) >= 4.5);
         assert!(contrast(STRONG, SELECTED_SURFACE) >= 4.5);
+    }
+
+    fn palette_color(index: u8) -> Rgb {
+        const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+        match index {
+            16..=231 => {
+                let index = usize::from(index - 16);
+                Rgb(LEVELS[index / 36], LEVELS[index / 6 % 6], LEVELS[index % 6])
+            }
+            232..=255 => {
+                let grey = 8 + 10 * (index - 232);
+                Rgb(grey, grey, grey)
+            }
+            _ => panic!("the palette mapping must avoid the themeable first 16 colours"),
+        }
+    }
+
+    #[test]
+    fn colors_map_to_the_nearest_stable_palette_entry() {
+        for (color, index) in [
+            (Rgb(0, 0, 0), 16),
+            (Rgb(255, 255, 255), 231),
+            (Rgb(135, 95, 255), 99),
+            (Rgb(8, 8, 8), 232),
+            (Rgb(38, 38, 38), 235),
+            (Rgb(238, 238, 238), 255),
+        ] {
+            assert_eq!(color.nearest_palette_index(), index, "{color:?}");
+        }
+        assert_eq!(Rgb(195, 177, 250).parameters(38, true), "38;5;147");
+        assert_eq!(Rgb(195, 177, 250).parameters(48, false), "48;2;195;177;250");
+    }
+
+    #[test]
+    fn the_palette_keeps_text_legible_on_every_surface() {
+        let mapped = |Rgb(red, green, blue): Rgb| {
+            palette_color(Rgb(red, green, blue).nearest_palette_index())
+        };
+        let contrast_after = |foreground: Style, surface: Surface| {
+            let (fore, back) = (
+                luminance(mapped(foreground.foreground.unwrap())),
+                luminance(mapped(surface.0.unwrap())),
+            );
+            (fore.max(back) + 0.05) / (fore.min(back) + 0.05)
+        };
+        for (foreground, surface) in [
+            (BODY, USER_SURFACE),
+            (CODE_TEXT, CODE_SURFACE),
+            (CODE_TEXT, DIFF_ADDED_SURFACE),
+            (CODE_TEXT, DIFF_REMOVED_SURFACE),
+            (MUTED, DIFF_ADDED_SURFACE),
+            (MUTED, DIFF_REMOVED_SURFACE),
+            (GOOD, DIFF_ADDED_STRONG),
+            (BAD, DIFF_REMOVED_STRONG),
+            (STRONG, SELECTED_SURFACE),
+            (LIT, BADGE_IDLE),
+            (BADGE_TEXT, BADGE_READ),
+            (BADGE_TEXT, BADGE_EDIT),
+            (BADGE_TEXT, BADGE_SHELL),
+            (BADGE_TEXT, BADGE_COORD),
+            (BADGE_TEXT, BADGE_BAD),
+            (BADGE_TEXT, BADGE_WARN),
+        ] {
+            // The palette cannot hold the 24-bit floors exactly: 4 for text, and 3
+            // for the gutter numbers, the only muted text on an added row.
+            let gutter = foreground == MUTED && surface == DIFF_ADDED_SURFACE;
+            let floor = if gutter { 3.0 } else { 4.0 };
+            let ratio = contrast_after(foreground, surface);
+            assert!(ratio >= floor, "{foreground:?} on {surface:?}: {ratio:.2}");
+        }
+        // Rows keep a visible surface instead of falling to the terminal's background.
+        for surface in [
+            USER_SURFACE,
+            CODE_SURFACE,
+            SELECTED_SURFACE,
+            DIFF_ADDED_SURFACE,
+            DIFF_REMOVED_SURFACE,
+        ] {
+            assert_ne!(mapped(surface.0.unwrap()), Rgb(0, 0, 0), "{surface:?}");
+        }
+        // Colour still separates added from removed, and failure from ordinary tools.
+        assert_ne!(
+            mapped(DIFF_ADDED_SURFACE.0.unwrap()),
+            mapped(DIFF_REMOVED_SURFACE.0.unwrap())
+        );
+        assert_ne!(mapped(BADGE_BAD.0.unwrap()), mapped(BADGE_SHELL.0.unwrap()));
+    }
+
+    #[test]
+    fn only_a_declared_terminal_receives_true_color() {
+        let declares = |pairs: &[(&str, &str)]| {
+            declares_true_color(|name| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| OsString::from(value))
+            })
+        };
+        for pairs in [
+            &[("COLORTERM", "truecolor")][..],
+            &[("COLORTERM", "24bit"), ("TERM", "xterm")],
+            &[("TERM", "xterm-kitty")],
+            &[("TERM", "xterm-direct")],
+            &[("TERM_PROGRAM", "iTerm.app")],
+            &[("TERM_PROGRAM", "vscode")],
+            &[("WT_SESSION", "id")],
+            &[("VTE_VERSION", "7600")],
+        ] {
+            assert!(declares(pairs), "{pairs:?}");
+        }
+        for pairs in [
+            &[][..],
+            &[("TERM", "xterm-256color")],
+            &[
+                ("TERM", "xterm-256color"),
+                ("TERM_PROGRAM", "Apple_Terminal"),
+            ],
+            &[("TERM", "screen-256color")],
+            &[("TERM", "linux")],
+            &[("COLORTERM", "yes")],
+            &[("VTE_VERSION", "3400")],
+        ] {
+            assert!(!declares(pairs), "{pairs:?}");
+        }
     }
 
     #[test]

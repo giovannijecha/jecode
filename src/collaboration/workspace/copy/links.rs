@@ -150,27 +150,7 @@ fn strip_root(root: &Path, path: &Path) -> Option<Vec<String>> {
 /// Remove an absolute project prefix without collapsing a symlink-sensitive
 /// `..` in the remaining path.
 fn raw_suffix(root: &Path, path: &Path) -> Option<PathBuf> {
-    let key = |path: &Path| {
-        let text = path.to_string_lossy().into_owned();
-        #[cfg(windows)]
-        let text = text.to_lowercase();
-        text
-    };
-    let mut root_parts = root.components();
-    let mut parts = path.components();
-    loop {
-        match (root_parts.next(), parts.next()) {
-            (None, Some(part)) => {
-                let mut inside = PathBuf::from(part.as_os_str());
-                inside.extend(parts.map(|part| part.as_os_str()));
-                return Some(inside);
-            }
-            (None, None) => return Some(PathBuf::new()),
-            (Some(left), Some(right))
-                if key(Path::new(left.as_os_str())) == key(Path::new(right.as_os_str())) => {}
-            _ => return None,
-        }
-    }
+    crate::disk::strip_prefix(path, root).map(Path::to_path_buf)
 }
 
 fn lexical(path: &Path) -> PathBuf {
@@ -273,5 +253,43 @@ mod tests {
             retarget(&project, "node_modules/pkg", &verbatim),
             Path::new("..").join("store").join("pkg")
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn case_variants_of_the_project_are_inside() {
+        let temp = Directory::new();
+        let project = temp.path().join("Project");
+        fs::create_dir_all(project.join("store/pkg")).unwrap();
+        let project = plain(&fs::canonicalize(project).unwrap());
+        let lower = temp.path().join("project");
+        if !lower.exists() {
+            eprintln!("SKIPPED: this volume distinguishes case variants");
+            return;
+        }
+        assert_eq!(
+            retarget(&project, "node_modules/pkg", &lower.join("store/pkg")),
+            Path::new("..").join("store").join("pkg")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_case_sensitive_sibling_keeps_its_absolute_link_target() {
+        let temp = Directory::new();
+        let project = temp.path().join("Project");
+        let sibling = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        match fs::create_dir(&sibling) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                eprintln!("SKIPPED: this volume treats case variants as aliases");
+                return;
+            }
+            Err(error) => panic!("{error}"),
+        }
+        let project = fs::canonicalize(project).unwrap();
+        let target = fs::canonicalize(sibling).unwrap().join("missing/../file");
+        assert_eq!(retarget(&project, "link", &target), target);
     }
 }

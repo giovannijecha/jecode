@@ -187,10 +187,11 @@ fn same_file(listed: &fs::Metadata, opened: &fs::Metadata) -> bool {
         use std::os::unix::fs::MetadataExt;
         listed.dev() == opened.dev() && listed.ino() == opened.ino()
     }
-    #[cfg(not(unix))]
+    // Stable Rust exposes no Windows file index, but a replacement has its own creation time.
+    #[cfg(windows)]
     {
-        let _ = (listed, opened);
-        true
+        use std::os::windows::fs::MetadataExt;
+        listed.creation_time() == opened.creation_time()
     }
 }
 
@@ -233,4 +234,30 @@ fn copy_link(
         return Ok(Outcome::Omitted(format!("Could not create link: {error}")));
     }
     Ok(Outcome::Copied(files::observe(tree, name)?))
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn an_opened_file_matches_its_listing_and_a_replacement_does_not() {
+        let directory = crate::test_support::Directory::new();
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        fs::write(&first, "first").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        fs::write(&second, "second").unwrap();
+        let opened = |path: &Path| File::open(path).unwrap().metadata().unwrap();
+        let listed = fs::symlink_metadata(&first).unwrap();
+        assert!(same_file(&listed, &opened(&first)));
+        assert!(!same_file(&listed, &opened(&second)));
+        // The way a directory walk lists it, which Windows answers from the directory.
+        let entry = fs::read_dir(directory.path())
+            .unwrap()
+            .flatten()
+            .find(|entry| entry.file_name() == "first")
+            .unwrap();
+        assert!(same_file(&entry.metadata().unwrap(), &opened(&first)));
+    }
 }

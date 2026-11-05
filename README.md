@@ -44,9 +44,10 @@ jecode "Explain the structure of this project"
 
 ## Install
 
-Install Jecode with Node.js 22 or later and npm on Windows x64, Linux x64
-(glibc 2.39 or newer), or macOS Apple silicon. The macOS build
-has been tested on macOS 15; earlier versions remain unverified.
+Install Jecode with Node.js 22 or later and npm on Windows 10 1809 or later (x64),
+Linux x64 (glibc 2.28 or newer), or macOS 11 or later on Apple silicon or Intel.
+[Platform support](docs/development/PLATFORMS.md#supported-versions) records what
+has actually run on each of them.
 
 ```sh
 npm install -g @giovannijecha/jecode
@@ -66,10 +67,8 @@ covers npm updates, removal, and existing standalone installations.
    that provider's key. **Credentials** offers ChatGPT sign-in and the
    documented Claude compatibility route.
 3. Choose a model when the selector opens. This saves your configuration.
-4. **On Linux and macOS**, type `/permissions full` if the agent should run
-   commands. The default level, Workspace, confines commands only on Windows and
-   refuses them elsewhere; see [Permissions](docs/usage/PERMISSIONS.md).
-5. Type your task and press Enter.
+4. Type your task and press Enter. The default level, Workspace, confines the
+   agent's commands to this folder; see [Permissions](docs/usage/PERMISSIONS.md).
 
 Instead of steps 2 and 3, you can run `jecode setup` for a guided prompt.
 
@@ -98,7 +97,9 @@ storage formats may change between releases.
 - Windows is the primary platform. Linux and macOS are built and tested in CI;
   interactive use on macOS has not been verified. See
   [Platform support](docs/development/PLATFORMS.md).
-- Command confinement in the Workspace permission level exists only on Windows.
+- Command confinement in the Workspace permission level needs Landlock on Linux and a
+  recent Windows; elsewhere commands need the Full level. It is implemented on macOS
+  but has not yet run on a real Mac.
 - API keys use the provider's API billing, separately from subscription plans.
 
 ## Privacy and security

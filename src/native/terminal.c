@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +13,7 @@
 
 static volatile sig_atomic_t interrupted;
 static void stop(int signal_number) { interrupted = signal_number; }
-static const char leave[] = "\033[0m\033[?2026l\033[?1006l\033[?1000l\033[?2004l\033[?1049l\033[?25h";
+static const char leave[] = "\033[0m\033[?2026l\033[?1006l\033[?1000l\033[?2004l\033[<u\033[?1049l\033[?25h";
 
 static int install_signals(void) {
     struct sigaction action;
@@ -39,11 +40,41 @@ static int read_line(int secret) {
     return result;
 }
 
+static void note_resize(int signal_number) { (void)signal_number; }
+
+static void measure(int tty, struct winsize *size) {
+    if (ioctl(tty, TIOCGWINSZ, size) < 0) memset(size, 0, sizeof(*size));
+}
+
+/* Stays until its parent closes stdin, reporting each new size on stdout as
+   "ROWS COLUMNS". SIGWINCH ends the wait at once; the timeout only covers a resize
+   that lands just before poll starts. */
+static void report_sizes(int tty, struct winsize size) {
+    struct pollfd control = { STDIN_FILENO, POLLIN, 0 };
+    while (!interrupted) {
+        int polled = poll(&control, 1, 250);
+        if (polled > 0 || (polled < 0 && errno != EINTR)) return;
+        struct winsize next;
+        measure(tty, &next);
+        if (!next.ws_row || !next.ws_col) continue;
+        if (next.ws_row == size.ws_row && next.ws_col == size.ws_col) continue;
+        size = next;
+        printf("%u %u\n", size.ws_row, size.ws_col);
+        fflush(stdout);
+    }
+}
+
 static int guard(void) {
     int tty = open("/dev/tty", O_RDWR | O_CLOEXEC);
     if (tty < 0) return 2;
     struct termios saved, raw;
     if (tcgetattr(tty, &saved) < 0 || install_signals()) { close(tty); return 2; }
+    struct sigaction resize;
+    memset(&resize, 0, sizeof(resize));
+    resize.sa_handler = note_resize;
+    sigemptyset(&resize.sa_mask);
+    /* A parent that stopped reading must not keep this process from restoring. */
+    if (sigaction(SIGWINCH, &resize, NULL) || signal(SIGPIPE, SIG_IGN) == SIG_ERR) { close(tty); return 2; }
     raw = saved;
     cfmakeraw(&raw);
     raw.c_iflag &= ~(IXON | IXOFF);
@@ -52,13 +83,17 @@ static int guard(void) {
     raw.c_cc[VTIME] = 1;
     int result = 0;
     if (tcsetattr(tty, TCSANOW, &raw) < 0) { close(tty); return 2; }
-    const char enter[] = "\033[?1049h\033[?2004h\033[?1000h\033[?1006h\033[?25l";
+    /* `>1u` asks for keys with modifiers to be reported unambiguously; terminals
+       without the protocol ignore it. Each screen keeps its own request, so it
+       comes after switching screens and ends before switching back. */
+    const char enter[] = "\033[?1049h\033[?2004h\033[?1000h\033[?1006h\033[>1u\033[?25l";
     if (write(tty, enter, sizeof(enter) - 1) != (ssize_t)sizeof(enter) - 1) result = 2;
     if (!result) {
-        puts("READY");
+        struct winsize size;
+        measure(tty, &size);
+        printf("READY %u %u\n", size.ws_row, size.ws_col);
         fflush(stdout);
-        char byte;
-        while (!interrupted && read(STDIN_FILENO, &byte, 1) < 0 && errno == EINTR) {}
+        report_sizes(tty, size);
     }
     if (write(tty, leave, sizeof(leave) - 1) < 0) result = 2;
     if (tcsetattr(tty, TCSANOW, &saved) < 0) result = 2;
@@ -79,12 +114,6 @@ static int mode(int argc, char **argv) {
         printf("v2:lflag=%lx:", (unsigned long)local_flags);
         for (size_t i = 0; i < sizeof(value); ++i) printf("%02x", bytes[i]);
         putchar('\n');
-        return 0;
-    }
-    if (argc == 1 && !strcmp(argv[0], "size")) {
-        struct winsize size;
-        if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) < 0) return 2;
-        printf("%u %u\n", size.ws_row, size.ws_col);
         return 0;
     }
     if (argc == 1 && (!strncmp(argv[0], "v1:", 3) || !strncmp(argv[0], "v2:lflag=", 9))) {

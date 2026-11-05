@@ -1,4 +1,8 @@
+#ifdef __linux__
+#define _GNU_SOURCE /* O_PATH and syscall(), for Landlock. */
+#else
 #define _POSIX_C_SOURCE 200809L
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -10,6 +14,8 @@
 #include <sys/statvfs.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "process_confine.h"
 
 /* This adapter uses libc directly; no command shell or utilities are needed. */
 static char *resolve(const char *program) {
@@ -70,10 +76,28 @@ static int guard(const char *input, char **argv) {
     int source = open(input, O_RDONLY);
     if (source < 0 || dup2(source, STDIN_FILENO) < 0) { free(program); return 125; }
     if (source > STDERR_FILENO) close(source);
+    /* The guardian above stays outside: it must still clean up and signal the group. */
+    char *policy = getenv(CONFINE_MARKER);
+    int confined = policy != NULL;
+    if (confined) {
+        policy = strdup(policy);
+        unsetenv(CONFINE_MARKER);
+        if (!policy || confine(policy) < 0) {
+            /* Reported to the owner in place of READY; the target never starts. */
+            if (write(STDOUT_FILENO, "NOBOX\n", 6) != 6) {}
+            free(program);
+            return 125;
+        }
+        free(policy);
+    }
     if (write(STDOUT_FILENO, "READY\n", 6) != 6) { free(program); return 125; }
     execv(program, argv);
+    int failure = errno;
+    if (confined && (failure == EACCES || failure == EPERM)) {
+        fprintf(stderr, "%s: outside what Workspace confinement allows to run\n", program);
+    }
     free(program);
-    return errno == ENOENT ? 127 : 126;
+    return failure == ENOENT ? 127 : 126;
 }
 
 int main(int argc, char **argv) {

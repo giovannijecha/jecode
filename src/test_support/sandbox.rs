@@ -8,11 +8,20 @@ pub const PRIVATE: &str = "JECODE_SANDBOX_PROBE_PRIVATE";
 pub const ESCAPED: &str = "JECODE_SANDBOX_PROBE_ESCAPED";
 
 pub fn executable(root: &Path) -> PathBuf {
-    let fixture = root.join("jecode-sandbox-probe.exe");
+    let fixture = root.join(if cfg!(windows) {
+        "jecode-sandbox-probe.exe"
+    } else {
+        "jecode-sandbox-probe"
+    });
     std::fs::write(
         &fixture,
-        include_bytes!(concat!(env!("OUT_DIR"), "/jecode-sandbox-probe.exe")),
+        include_bytes!(concat!(env!("OUT_DIR"), "/sandbox-probe-fixture")),
     )
     .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fixture, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     fixture
 }

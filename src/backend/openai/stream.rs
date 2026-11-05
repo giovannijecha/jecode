@@ -167,7 +167,6 @@ impl Stream {
     }
 
     /// One whole event from the Responses WebSocket.
-    #[cfg(windows)]
     pub fn message(
         &mut self,
         text: &str,
@@ -176,12 +175,10 @@ impl Stream {
         self.event(text, emit)
     }
 
-    #[cfg(windows)]
     pub fn ended(&self) -> bool {
         self.terminal.is_some()
     }
 
-    #[cfg(windows)]
     pub fn connection_expired(&self) -> bool {
         self.connection_expired
     }

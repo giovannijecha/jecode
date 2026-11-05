@@ -18,6 +18,8 @@ pub(super) struct Pty {
     bytes: Vec<u8>,
     owner: Option<u32>,
     tty: Option<PathBuf>,
+    /// The case asks for a line-based chat, which never enters the alternate screen.
+    line_based: bool,
 }
 
 impl Pty {
@@ -80,9 +82,33 @@ impl Pty {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        // A result must not depend on the terminal that runs the tests. The palette
+        // case declares what Terminal.app does before macOS 26.
+        if case == "palette" {
+            helper.env("TERM_PROGRAM", "Apple_Terminal");
+            for name in [
+                "COLORTERM",
+                "WT_SESSION",
+                "KONSOLE_VERSION",
+                "KITTY_WINDOW_ID",
+                "ALACRITTY_WINDOW_ID",
+                "VTE_VERSION",
+            ] {
+                helper.env_remove(name);
+            }
+        } else {
+            helper.env("COLORTERM", "truecolor");
+        }
         if case == "npm-launcher" {
+            helper.env("JECODE_HOME", directory.path().join("home"));
+        } else {
+            helper.current_dir(directory.path());
+        }
+        if case.starts_with("startup-") {
+            helper.env("JECODE_HOME", directory.path());
+        }
+        if case == "npm-launcher" || case.starts_with("startup-") {
             helper
-                .env("JECODE_HOME", directory.path().join("home"))
                 .env_remove("OPENROUTER_API_KEY")
                 .env_remove("OPENROUTER_MODEL");
         }
@@ -114,6 +140,7 @@ impl Pty {
             bytes: vec![],
             owner: None,
             tty: None,
+            line_based: matches!(case, "startup-plain" | "startup-setup-empty"),
         }
     }
 
@@ -139,7 +166,11 @@ impl Pty {
             );
             if self.owner.is_none() {
                 let text = String::from_utf8_lossy(&self.bytes);
-                if let Some(line) = text.lines().find(|line| line.starts_with("PTY_META|")) {
+                // A read can end inside the line, which would leave a truncated path.
+                if let Some(line) = text
+                    .split_inclusive('\n')
+                    .find(|line| line.starts_with("PTY_META|") && line.ends_with('\n'))
+                {
                     let fields: Vec<_> = line.trim().split('|').collect();
                     if fields.len() == 3 {
                         self.owner = fields[1].parse().ok().filter(|pid| *pid > 1);
@@ -168,6 +199,59 @@ impl Pty {
                 at.elapsed() < Duration::from_secs(10),
                 "PTY did not show {text:?}: {}",
                 String::from_utf8_lossy(&self.bytes)
+            );
+            self.poll();
+        }
+    }
+
+    /// Everything the terminal has received, escape sequences included.
+    pub(super) fn raw(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(super) fn wait_raw(&mut self, expected: &[u8], start: usize) -> usize {
+        let at = Instant::now();
+        loop {
+            if let Some(offset) = self.bytes[start..]
+                .windows(expected.len())
+                .position(|bytes| bytes == expected)
+            {
+                return start + offset + expected.len();
+            }
+            assert!(
+                at.elapsed() < Duration::from_secs(10),
+                "PTY did not send {:?}: {}",
+                String::from_utf8_lossy(expected),
+                String::from_utf8_lossy(&self.bytes)
+            );
+            self.poll();
+        }
+    }
+
+    pub(super) fn ensure_no_text(&self, text: &str, start: usize) {
+        let visible = plain(&self.bytes);
+        assert!(
+            !visible[start..]
+                .windows(text.len())
+                .any(|bytes| bytes == text.as_bytes()),
+            "PTY showed {text:?}"
+        );
+    }
+
+    /// Takes output that already arrived, so that the next wait sees only new bytes.
+    pub(super) fn drain(&mut self) {
+        while let Ok(bytes) = self.output.try_recv() {
+            self.bytes.extend(bytes);
+        }
+    }
+
+    /// Waits until the terminal has received more than `seen` bytes.
+    pub(super) fn wait_for_output(&mut self, seen: usize) {
+        let at = Instant::now();
+        while self.bytes.len() <= seen {
+            assert!(
+                at.elapsed() < Duration::from_secs(10),
+                "PTY stopped responding"
             );
             self.poll();
         }
@@ -210,6 +294,29 @@ impl Pty {
                 .success()
         );
         self.owner = None;
+    }
+
+    /// Sends a quit key and finishes. A turn that has just shown its answer may still
+    /// be closing, in which case the TUI asks first; this accepts that question.
+    pub(super) fn quit_with(&mut self, keys: &[u8], marker: &str) {
+        let start = self.mark();
+        self.send(keys);
+        let question = b"Stop it and quit?";
+        let at = Instant::now();
+        let mut answered = false;
+        while at.elapsed() < Duration::from_secs(10) {
+            let visible = plain(&self.bytes);
+            let shown = |text: &[u8]| visible[start..].windows(text.len()).any(|b| b == text);
+            if shown(marker.as_bytes()) {
+                break;
+            }
+            if !answered && shown(question) {
+                self.send(b"\r");
+                answered = true;
+            }
+            self.poll();
+        }
+        self.finish(marker);
     }
 
     pub(super) fn finish(&mut self, marker: &str) {
@@ -266,7 +373,7 @@ impl Pty {
             .windows(8)
             .filter(|bytes| *bytes == b"\x1b[?1049l")
             .count();
-        if marker != "SETUP_NATIVE_DONE" {
+        if marker != "SETUP_NATIVE_DONE" && !self.line_based {
             assert!(
                 entered > 0 && entered == left,
                 "alternate screen was not restored ({entered} entries, {left} exits)"

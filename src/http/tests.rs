@@ -72,9 +72,15 @@ fn unsupported_https_proxy_is_a_terminal_native_failure() {
         &mut |_| Ok(()),
     )
     .unwrap();
-    assert_eq!(output.exit_code, Some(1));
-    assert!(!retryable(&output));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("supports only http:// proxies"));
+    // The adapter reports in frames, then ends with its stdin: 'E' is permanent.
+    let message = b"Native HTTP supports only http:// proxies";
+    let start = output
+        .stdout
+        .windows(message.len())
+        .position(|part| part == message)
+        .unwrap();
+    assert_eq!(output.stdout[start - 5], b'E');
+    assert_eq!(output.exit_code, Some(0));
 }
 
 #[test]
@@ -129,7 +135,6 @@ fn native_transport_ignores_curl_override_and_path() {
     assert_eq!(body, b"pay\nload\0\r\n");
 }
 
-#[cfg(windows)]
 #[test]
 fn ipv6_loopback_connects_without_proxy() {
     use std::io::Write;
@@ -203,7 +208,6 @@ fn ipv6_loopback_connects_without_proxy() {
     assert_eq!(body, b"ok");
 }
 
-#[cfg(windows)]
 #[test]
 fn native_http_finishes_framed_responses_before_the_peer_closes() {
     for length in [0, 2, 65_537] {
@@ -264,7 +268,6 @@ fn native_http_finishes_framed_responses_before_the_peer_closes() {
     }
 }
 
-#[cfg(windows)]
 #[test]
 fn native_http_rejects_truncated_and_malformed_responses() {
     for reply in [

@@ -8,9 +8,9 @@ Install Jecode with npm, or build a standalone executable from source.
 
 | Platform | Required | Needed only for some features |
 | --- | --- | --- |
-| Windows 10 or later | The native console. | Windows PowerShell 5.1 for `/copy` and clipboard images (Alt+V). ConPTY, included in Windows 10 and later, for interactive commands. |
-| Linux | A VT-compatible terminal. The system OpenSSL libraries (`libssl.so.3` and `libcrypto.so.3`, or the 1.1 versions) for HTTPS. | `libX11.so.6` or `libwayland-client.so.0` for clipboard images, GdkPixbuf for image conversion, and a terminal that accepts OSC 52 for `/copy`. |
-| macOS | A VT-compatible terminal. | None beyond the system tools. |
+| Windows 10 1809 or later, x64 | The native console. | Windows PowerShell 5.1 for `/copy` and clipboard images (Alt+V). |
+| Linux x64, glibc 2.28 or newer | A VT-compatible terminal. The system OpenSSL libraries (`libssl.so.3` and `libcrypto.so.3`, or the 1.1 versions) for HTTPS and for hashing session and permission data. Minimal container images often lack them. | `libX11.so.6` or `libwayland-client.so.0` for clipboard images, GdkPixbuf for image conversion, and a terminal that accepts OSC 52 for `/copy`. |
+| macOS 11 or later, Apple silicon or Intel | A VT-compatible terminal. | None beyond the system tools. |
 
 The `browser` tool needs Google Chrome or Microsoft Edge, or another browser
 named by `JECODE_BROWSER`; see [Tools](TOOLS.md#web-and-browser). Commands that
@@ -20,14 +20,15 @@ own toolchain. Jecode never installs or downloads programs to enable its tools.
 Verification differs by platform. Windows is the primary development platform;
 Linux and macOS are built and tested in CI. See
 [Platform support](../development/PLATFORMS.md) before relying on Linux or
-macOS, and note that on those platforms commands require the Full
+macOS. Where the system cannot confine commands, they require the Full
 [permission level](PERMISSIONS.md#platform-limits).
 
 ## Install with npm
 
-The npm package supports Windows x64, Linux x64 with glibc 2.39 or newer, and
-macOS on Apple silicon. Its macOS build is verified on macOS 15; earlier
-versions have not been tested. Install Node.js 22 or later and npm, then run:
+The npm package supports the systems in the table above; see
+[Platform support](../development/PLATFORMS.md#supported-versions) for what has
+actually run on each. Install Node.js 22 or later and npm. On macOS 11 to 13.4
+use Node.js 22, because Node.js 24 needs macOS 13.5. Then run:
 
 ```sh
 npm install -g @giovannijecha/jecode

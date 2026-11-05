@@ -63,9 +63,10 @@ Jecode keeps local data under `~/.jecode/`, including sensitive copies of:
 ## Boundaries
 
 [Permission levels](docs/usage/PERMISSIONS.md) govern what the agent's tools may
-do. On supported Windows hosts, Workspace commands and their descendants run
-under an OS-enforced filesystem policy; on Linux and macOS, commands require
-Full and run unconfined. Full commands run with your normal user permissions.
+do. On supported hosts, Workspace commands and their descendants run under an
+OS-enforced filesystem policy (Process Security Environment on Windows, Landlock
+on Linux, Seatbelt on macOS); elsewhere commands require Full and run unconfined.
+Full commands run with your normal user permissions.
 Permissions do not isolate the whole Jecode process, remote services or
 everything a browser does.
 

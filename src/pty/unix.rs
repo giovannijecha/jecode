@@ -26,6 +26,9 @@ pub(super) fn command(
     if columns == 0 || rows == 0 {
         return Err("PTY dimensions must be positive".into());
     }
+    if crate::process::sandbox_policy(target).is_some() {
+        return Err("Workspace interactive terminals are not confined; use Full for tty or run exec without tty".into());
+    }
     let helper = helper(cancellation)?;
     let mut command = Command::new(helper);
     command

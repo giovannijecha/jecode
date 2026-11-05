@@ -1,6 +1,7 @@
-//! A per-launch filesystem boundary for user shell commands on Windows.
-//! Native process launch consumes the trusted environment marker and removes
-//! it before the target process starts.
+//! A per-launch filesystem boundary for user shell commands: a Process Security
+//! Environment on Windows, Landlock on Linux and Seatbelt on macOS. Native
+//! process launch consumes the trusted environment marker and removes it before
+//! the target process starts.
 
 #[cfg(any(windows, test))]
 use crate::json::Value;
@@ -9,18 +10,25 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod runtime;
+#[cfg(any(unix, test))]
+mod unix;
+
 pub const MARKER: &str = "JECODE_INTERNAL_SANDBOX_POLICY";
 
 #[derive(Debug)]
 pub struct Policy {
     read: Vec<PathBuf>,
     write: Vec<PathBuf>,
+    temporary: Option<PathBuf>,
     cargo_home: Option<PathBuf>,
     git_config: Option<PathBuf>,
     /// Real toolchain homes passed to the confined process by name.
     runtime_homes: Vec<(&'static str, PathBuf)>,
     /// Installed Node.js runtime locations. Empty when Node.js is absent.
     node_paths: Vec<PathBuf>,
+    #[cfg(unix)]
+    protected_home: Option<PathBuf>,
 }
 
 impl Policy {
@@ -54,15 +62,19 @@ impl Policy {
         let mut policy = Self {
             read: vec![root.clone()],
             write: vec![root.clone()],
+            temporary: None,
             cargo_home: None,
             git_config: None,
             runtime_homes: Vec::new(),
             node_paths: Vec::new(),
+            #[cfg(unix)]
+            protected_home: None,
         };
         if let Some(temporary) = temporary {
             let temporary = canonical_directory(temporary)?;
             policy.cargo_home = Some(temporary.join("cargo"));
             policy.git_config = Some(temporary.join("gitconfig"));
+            policy.temporary = Some(temporary.clone());
             policy.read.push(temporary.clone());
             policy.write.push(temporary);
         }
@@ -82,56 +94,55 @@ impl Policy {
     }
 
     pub fn attach(&self, command: &mut Command) -> Result<(), String> {
-        #[cfg(not(windows))]
-        {
-            let _ = command;
-            Err("Workspace command confinement is supported only on Windows. Choose /permissions full to run without confinement on this platform.".into())
-        }
-        #[cfg(windows)]
-        {
-            command.env(MARKER, self.encode());
-            Ok(())
-        }
+        command.env(MARKER, self.native_policy()?);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn native_policy(&self) -> Result<OsString, String> {
+        Ok(self.encode().into())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn native_policy(&self) -> Result<OsString, String> {
+        use std::os::unix::ffi::OsStringExt;
+        // Name resolution reads this file, and systems link it outside /etc.
+        let resolver = std::fs::canonicalize("/etc/resolv.conf").ok();
+        let rules = unix::landlock_rules(
+            &self.read,
+            &self.write,
+            resolver.as_slice(),
+            self.protected_home.as_deref(),
+        )?;
+        Ok(OsString::from_vec(rules))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn native_policy(&self) -> Result<OsString, String> {
+        unix::seatbelt_profile(&self.read, &self.write, self.protected_home.as_deref())
+            .map(Into::into)
     }
 
     /// A recursive workspace write grant cannot safely contain credentials
     /// or other saved conversations in Jecode's configuration directory.
-    pub fn protect_session_home(&self, home: Option<&Path>) -> Result<(), String> {
+    pub fn protect_session_home(&mut self, home: Option<&Path>) -> Result<(), String> {
         let Some(home) = home else { return Ok(()) };
         let home = canonical_directory(home)?;
         if self.write.iter().any(|root| home.starts_with(root)) {
             return Err("Jecode's configuration or other sessions are inside the working folder. Workspace commands cannot be confined here; choose a narrower working folder or /permissions full.".into());
         }
-        Ok(())
-    }
-
-    /// Existing Rustup data and Cargo launchers are read-only runtime inputs.
-    /// Never grant the Cargo home itself: it can contain credentials.
-    pub fn allow_installed_rust_tools(
-        &mut self,
-        protected_home: Option<&Path>,
-    ) -> Result<(), String> {
-        let profile = std::env::var_os("USERPROFILE").map(PathBuf::from);
-        let rustup = std::env::var_os("RUSTUP_HOME")
-            .map(PathBuf::from)
-            .or_else(|| profile.as_ref().map(|profile| profile.join(".rustup")));
-        let cargo = std::env::var_os("CARGO_HOME")
-            .map(PathBuf::from)
-            .or_else(|| profile.map(|profile| profile.join(".cargo")));
-        for path in [rustup, cargo.map(|cargo| cargo.join("bin"))]
-            .into_iter()
-            .flatten()
+        #[cfg(unix)]
         {
-            self.allow_existing_read_directory(&path, protected_home)?;
+            self.protected_home = Some(home);
         }
         Ok(())
     }
 
     /// Node version managers keep runtimes in the user profile, but a confined
-    /// process sees its own container as LOCALAPPDATA. Pass each manager's real
-    /// home and grant it read-only, so shims resolve the selected runtime. Any
-    /// installed runtime, including the first `node.exe` on PATH, also needs
-    /// its drive roots enumerable; see `enumerable_roots`.
+    /// Windows process sees its own container as LOCALAPPDATA. Pass each manager's
+    /// real home and grant it read-only, so shims resolve the selected runtime. On
+    /// Windows, any installed runtime, including the first `node.exe` on PATH, also
+    /// needs its drive roots enumerable; see `enumerable_roots`.
     pub fn allow_installed_node_tools(
         &mut self,
         protected_home: Option<&Path>,
@@ -145,16 +156,35 @@ impl Policy {
         protected_home: Option<&Path>,
     ) -> Result<(), String> {
         let local = variable("LOCALAPPDATA").map(PathBuf::from);
+        let home = variable("HOME").map(PathBuf::from);
+        let in_home = |relative: &str| {
+            home.as_ref()
+                .map(|home| home.join(relative))
+                .filter(|path| path.is_dir())
+        };
         let homes = [
             (
                 "VOLTA_HOME",
                 variable("VOLTA_HOME")
                     .map(PathBuf::from)
-                    .or_else(|| local.map(|local| local.join("Volta"))),
+                    .or_else(|| local.map(|local| local.join("Volta")))
+                    .or_else(|| in_home(".volta")),
             ),
             ("NVM_HOME", variable("NVM_HOME").map(PathBuf::from)),
             ("NVM_SYMLINK", variable("NVM_SYMLINK").map(PathBuf::from)),
-            ("FNM_DIR", variable("FNM_DIR").map(PathBuf::from)),
+            (
+                "NVM_DIR",
+                variable("NVM_DIR")
+                    .map(PathBuf::from)
+                    .or_else(|| in_home(".nvm")),
+            ),
+            (
+                "FNM_DIR",
+                variable("FNM_DIR")
+                    .map(PathBuf::from)
+                    .or_else(|| in_home(".local/share/fnm"))
+                    .or_else(|| in_home("Library/Application Support/fnm")),
+            ),
         ];
         let mut manager_paths = Vec::new();
         for (name, path) in homes {
@@ -165,14 +195,34 @@ impl Policy {
             manager_paths.push(path.clone());
             self.runtime_homes.push((name, path));
         }
+        let node_in = |directory: &Path| {
+            ["node.exe", "node"]
+                .into_iter()
+                .map(|name| directory.join(name))
+                .find(|file| file.is_file())
+        };
         if let Some(directory) = variable("PATH").and_then(|path| {
             std::env::split_paths(&path)
-                .find(|directory| directory.is_absolute() && directory.join("node.exe").is_file())
+                .find(|directory| directory.is_absolute() && node_in(directory).is_some())
         }) {
             self.add_node_path(&directory);
+            // A Unix install keeps npm and global packages beside `bin`. The home
+            // itself can look like such a prefix and is never granted.
+            if let Some(prefix) = std::fs::canonicalize(&directory)
+                .ok()
+                .and_then(|bin| bin.parent().map(Path::to_path_buf))
+                .filter(|prefix| prefix.join("lib/node_modules").is_dir())
+                && !home
+                    .as_deref()
+                    .and_then(|home| std::fs::canonicalize(home).ok())
+                    .is_some_and(|home| home.starts_with(&prefix))
+            {
+                self.allow_existing_read_directory(&prefix, protected_home)?;
+            }
             // A file link can place node.exe on another drive even when its
             // PATH directory is not itself linked.
-            if let Ok(target) = std::fs::canonicalize(directory.join("node.exe"))
+            if let Some(target) =
+                node_in(&directory).and_then(|file| std::fs::canonicalize(file).ok())
                 && let Some(parent) = target.parent()
             {
                 self.add_node_path(parent);
@@ -330,6 +380,29 @@ fn confined_environment(
             command.env(name, home);
         }
     }
+    // A Windows container gives each command its own application data. On Unix,
+    // point the caches and settings programs write under the user's home at the
+    // temporary area, so they work without access to the real ones.
+    if cfg!(unix)
+        && let Some(temporary) = &policy.temporary
+    {
+        for (name, folder) in [
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_STATE_HOME", "state"),
+            ("npm_config_cache", "npm"),
+            ("CLANG_MODULE_CACHE_PATH", "clang-modules"),
+        ] {
+            if !explicit.iter().any(|(key, _)| key == name) {
+                command.env(name, temporary.join(folder));
+            }
+        }
+    }
+}
+
+fn user_home() -> Option<PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
 
 fn allowed_parent_variable(key: &OsStr) -> bool {
@@ -371,9 +444,21 @@ fn allowed_parent_variable(key: &OsStr) -> bool {
         "CXX",
         "AR",
         "LINKER",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "LANGUAGE",
+        "TZ",
+        "TERM",
+        "COLORTERM",
+        "DEVELOPER_DIR",
+        "SDKROOT",
     ]
     .iter()
     .any(|allowed| key.eq_ignore_ascii_case(allowed))
+        || key.starts_with("LC_")
 }
 
 #[cfg(any(windows, test))]
@@ -404,5 +489,7 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, unix))]
+mod unix_tests;
 #[cfg(all(test, windows))]
 mod windows_tests;

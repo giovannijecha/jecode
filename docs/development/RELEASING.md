@@ -1,48 +1,50 @@
 # Preparing an npm release
 
 The `@giovannijecha/jecode` npm package contains prebuilt native executables for
-Windows x64, Linux x64 (GNU libc 2.39 or newer), and macOS ARM64. npm installs the package
+Windows x64, Linux x64, and macOS on ARM64 and x64. npm installs the package
 and exposes a small Node standard-library launcher as the `jecode` command.
 The launcher selects and runs the matching executable. Installing the package needs no Rust
 toolchain, native compiler, third-party npm dependency, or install script. Node
 must remain available when launching this npm distribution. The existing
 standalone packages continue to run without Node.
 
-Inspection of this release build's ELF version requirements found GLIBC_2.39
-in the main executable and embedded Rust shell helper, and at most GLIBC_2.34
-in the six embedded C helpers. The Linux runner uses GNU libc 2.43. The 2.39
-threshold comes from the binaries; runtime behavior on older hosts has not
-been tested. The Linux stage checks the main executable and all seven embedded
-ELF helpers with `readelf` and rejects any version requirement above 2.39.
+## OS floors
 
-The macOS ARM64 build and terminal fixture run on macOS 15. The deployment
-targets of the executable and embedded native helpers have not been inspected,
-and earlier macOS versions have not been tested.
+[Platform support](PLATFORMS.md#supported-versions) lists the floors and what
+has run on each. `npm/targets.cjs` holds their values. `release.mjs stage` audits
+the executable and every helper embedded in it, and fails rather than record a
+floor the build does not meet:
 
-macOS Intel is not in the npm package. Cross compilation from macOS ARM64 is
-possible in the build script, but no native macOS Intel release check has been
-recorded. Add a native build and lifecycle test on a standard
-`macos-15-intel` runner before shipping that target.
+- **Linux, glibc 2.28.** `readelf` must report no version requirement above the
+  floor. The runner has glibc 2.43, so the workflows link against the Debian 10
+  sysroot from `tools/linux-sysroot.sh`. Weak `std` symbols stay unversioned and
+  still resolve at run time on newer glibc.
+- **macOS 11.0.** Each Mach-O file's recorded deployment target must not exceed
+  the floor. The workflows set `MACOSX_DEPLOYMENT_TARGET`. Without it, the C
+  helpers would take the build host's macOS version.
+- **Windows build 17763.** A PE file records no minimum build, so the stage
+  checks its subsystem version and that it imports only libraries reviewed in
+  `tools/npm/windows-abi.mjs`. P/Invokes bind at run time, so
+  `tools/npm/release.test.mjs` fails on one that is not reviewed there.
 
 ## Version and contents
 
 `Cargo.toml` is the only source for the Jecode version. The release tool reads
 its package version and generates `package.json`; do not edit a second version
 number. A release stage records its target, version, source revision, whether
-its source checkout was clean, and binary SHA-256. Complete packaging requires
-all three targets to agree with a clean checked-out source and rejects any
-artifact staged from a dirty checkout. The package allowlist contains the
-launcher, the three executables, and public documentation and license files.
+its source checkout was clean, its OS floor, and binary SHA-256. Complete packaging
+requires all four targets to agree with a clean checked-out source and rejects any
+artifact staged from a dirty checkout or against another floor. The package allowlist
+contains the launcher, the four executables, and public documentation and license files.
 Keep `AGENTS.md`, local configuration, credentials, and internal reports out of
 the tarball.
 
 The checked-in [CI workflow](../../.github/workflows/CI.yml) runs the Rust
 checks, launcher tests, release build, local native package, npm lifecycle
 fixture, and a native terminal check through the npm launcher on Windows x64
-and Linux x64 using the existing local runners, and on hosted macOS ARM64. Its
-required job names remain `Rust (Windows)`,
-`Rust (Linux)`, and `Rust (macOS)`. A queued or skipped job is not a passing
-release check.
+and Linux x64 using the existing local runners, and on hosted macOS ARM64 and x64.
+Its required job names are `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)`, and
+`Rust (macOS Intel)`. A queued or skipped job is not a passing release check.
 
 ## Prepare a complete tarball
 
@@ -54,13 +56,13 @@ release check.
    release version in `Cargo.toml` and review the corresponding lockfile and
    user documentation in that revision.
 3. Run the **Prepare npm release** workflow manually for that revision. Its
-   Windows and Linux jobs use this project's local runners; its macOS job uses
-   GitHub's standard hosted `macos-15` ARM64 runner. Each job builds and tests
-   the native executable, checks a local npm install/update/uninstall fixture
-   and native terminal interaction through the launcher, then uploads a target
-   artifact.
-4. The final hosted macOS job downloads all three artifacts, verifies their
-   version, revision, checkout cleanliness, and digests, assembles
+   Windows and Linux jobs use this project's local runners; its macOS jobs use
+   GitHub's standard hosted `macos-26` ARM64 and `macos-26-intel` x64 runners. Each
+   job builds and tests the native executable, checks a local npm
+   install/update/uninstall fixture and native terminal interaction through the
+   launcher, then uploads a target artifact.
+4. The final hosted macOS job downloads all four artifacts, verifies their
+   version, revision, checkout cleanliness, OS floor and digests, assembles
    `giovannijecha-jecode-<version>.tgz`, runs the
    lifecycle fixture, and previews `npm publish <tarball> --dry-run` against
    those exact bytes. Download its `jecode-npm-tarball` artifact, including
@@ -76,7 +78,8 @@ Once two public versions exist, also verify
 version.
 
 To check one platform from a local checkout, build its release executable with
-`cargo build --release --locked --offline`, then run:
+`cargo build --release --locked --offline` (on Linux, against the sysroot; see
+[Development and testing](TESTING.md#os-floors)), then run:
 
 ```text
 node tools/npm/release.mjs stage <path-to-native-executable> target/npm-stage/<target>
@@ -84,7 +87,7 @@ node tools/npm/release.mjs pack target/npm-stage target/npm-local --local
 node tools/npm/lifecycle.mjs target/npm-local/giovannijecha-jecode-<version>.tgz
 ```
 
-Use `win32-x64`, `linux-x64`, or `darwin-arm64` as `<target>`. Local packaging
+Use `win32-x64`, `linux-x64`, `darwin-arm64`, or `darwin-x64` as `<target>`. Local packaging
 accepts a subset of targets and permits dirty development checkouts, but marks
 its package private so it cannot be mistaken for a complete release. Complete
 packaging requires a clean current checkout and artifacts staged from clean

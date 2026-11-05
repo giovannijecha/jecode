@@ -10,7 +10,7 @@ use std::{
 pub(super) struct Mode {
     child: Child,
     control: Option<ChildStdin>,
-    ready: Option<JoinHandle<()>>,
+    reports: Option<JoinHandle<()>>,
     tty: File,
     saved: String,
 }
@@ -34,8 +34,24 @@ pub(super) fn stty(tty: &File, arguments: &[&str]) -> Result<String, String> {
         .map_err(|_| "Invalid native terminal settings".into())
 }
 
+/// `rows columns` as (width, height), when both are positive.
+fn parse_size(text: &str) -> Option<(usize, usize)> {
+    let mut values = text.split_whitespace().map(str::parse::<usize>);
+    match (values.next(), values.next(), values.next()) {
+        (Some(Ok(height)), Some(Ok(width)), None) if height > 0 && width > 0 => {
+            Some((width, height))
+        }
+        _ => None,
+    }
+}
+
 impl Mode {
-    pub(super) fn open(tty: File) -> Result<Self, String> {
+    /// Starts the guardian. It returns the terminal's size and gives every later
+    /// one to `report`, which returns false once nobody is listening.
+    pub(super) fn open(
+        tty: File,
+        mut report: impl FnMut((usize, usize)) -> bool + Send + 'static,
+    ) -> Result<(Self, (usize, usize)), String> {
         let saved = stty(&tty, &["-g"])?;
         let mut command = Command::new(crate::native::helper("terminal_unix")?);
         command
@@ -51,23 +67,33 @@ impl Mode {
         let control = child.stdin.take();
         let output = child.stdout.take().unwrap();
         let (sender, receiver) = mpsc::channel();
-        let ready = thread::spawn(move || {
+        let reports = thread::spawn(move || {
+            let mut output = BufReader::new(output);
             let mut line = String::new();
-            let _ = BufReader::new(output).read_line(&mut line);
-            let _ = sender.send(line);
+            let _ = output.read_line(&mut line);
+            let _ = sender.send(std::mem::take(&mut line));
+            // Ends with the guardian, which closes this pipe when it exits.
+            while matches!(output.read_line(&mut line), Ok(count) if count > 0) {
+                if parse_size(&line).is_some_and(|size| !report(size)) {
+                    break;
+                }
+                line.clear();
+            }
         });
-        let mut mode = Self {
+        let mode = Self {
             child,
             control,
-            ready: Some(ready),
+            reports: Some(reports),
             tty,
             saved,
         };
-        if receiver.recv_timeout(Duration::from_secs(5)).as_deref() != Ok("READY\n") {
+        let line = receiver.recv_timeout(Duration::from_secs(5)).ok();
+        let Some(measured) = line.as_deref().and_then(|line| line.strip_prefix("READY")) else {
             return Err("Unix terminal input did not initialize. Use jecode --plain.".into());
-        }
-        let _ = mode.ready.take().unwrap().join();
-        Ok(mode)
+        };
+        let size =
+            parse_size(measured).ok_or("Could not measure terminal size. Use jecode --plain.")?;
+        Ok((mode, size))
     }
 
     pub(super) fn check(&mut self) -> Result<(), String> {
@@ -108,8 +134,8 @@ impl Drop for Mode {
             let _ = self.child.kill();
         }
         let _ = self.child.wait();
-        if let Some(ready) = self.ready.take() {
-            let _ = ready.join();
+        if let Some(reports) = self.reports.take() {
+            let _ = reports.join();
         }
         // A second restoration covers a killed or failed guardian as well.
         if let Err(error) = stty(&self.tty, &[&self.saved]) {

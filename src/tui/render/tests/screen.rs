@@ -151,6 +151,8 @@ impl Screen {
                         }
                         'm' => self.graphics(&code),
                         'h' | 'l' => {}
+                        // Leaving ends the keyboard protocol request; it paints nothing.
+                        'u' if code == "<" => {}
                         _ => panic!("unsupported sequence {code}{end}"),
                     }
                 }

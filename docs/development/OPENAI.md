@@ -94,10 +94,12 @@ sign-in. It is stopped and reaped before setup reads the next prompt.
 Random bytes, SHA-256 and RSA signature checks use Windows .NET cryptography,
 macOS Security and CommonCrypto, or the system Linux libcrypto. HTTPS uses
 Windows WinHTTP, macOS CFNetwork, or Linux sockets with the system libssl and
-its certificate and hostname verification. The adapters are compiled at build
-time and embedded in the executable. Request bodies and bearer tokens reach them
-on stdin, never in arguments or files. No external crate or copied
-cryptographic code is used.
+its certificate and hostname verification. The WebSocket uses WinHTTP on Windows,
+`NSURLSessionWebSocketTask` on macOS, and on Linux an owned RFC 6455 client over
+the same TLS channel, which checks the upgrade's accept value with libcrypto's
+SHA-1. The adapters are compiled at build time and embedded in the executable.
+Request bodies and bearer tokens reach them on stdin, never in arguments or files.
+No external crate or copied cryptographic code is used.
 
 ## Responses route
 
@@ -115,7 +117,7 @@ define this route; it is narrower than the API-key Responses API.
   `stream: true`, `store: false` and the full required history in `input`. No
   continuation IDs, server conversations, output-token caps or unsupported
   sampling parameters are sent.
-- **WebSocket.** On Windows, conversations send the same request as a
+- **WebSocket.** Conversations send the same request as a
   `response.create` event over one WebSocket on the same path, on both the
   ChatGPT and API-key routes; it answers about a second sooner than HTTP POST
   (see [Performance](PERFORMANCE.md#provider-transports)). The full history is
@@ -129,8 +131,7 @@ define this route; it is narrower than the API-key Responses API.
   access token as HTTP does: a refreshed token replaces the connection and a
   sign-out closes it, since the upgrade authenticates only once. Changing the
   conversation closes its socket so the upgrade's `session-id` follows the new
-  conversation. Requests without a conversation, such as titles, stay on HTTP, as
-  do Linux and macOS.
+  conversation. Requests without a conversation, such as titles, stay on HTTP.
 - **Tools.** System instructions become `instructions`; local calls and results
   become function-call items, with function definitions grouped in a namespace.
 - **Native state.** Ordered output items, encrypted reasoning and assistant

@@ -63,6 +63,32 @@ fn incomplete_terminal_sequences_do_not_swallow_stop_or_quit() {
 }
 
 #[test]
+fn the_keyboard_protocol_decodes_like_legacy_keys_whatever_locks_are_on() {
+    for (sequence, code, modifiers) in [
+        (&b"\x1b[27u"[..], 27, 0), // Esc
+        (b"\x1b[27;65u", 27, 0),   // Esc with Caps Lock on
+        (b"\x1b[99;5u", 67, 4),    // Ctrl+C
+        (b"\x1b[99;133u", 67, 4),  // Ctrl+C with Num Lock on
+        (b"\x1b[118;3u", 86, 1),   // Alt+V
+        (b"\x1b[118;5u", 86, 4),   // Ctrl+V
+        (b"\x1b[13;2u", 13, 2),    // Shift+Enter
+        (b"\x1b[13;3u", 13, 1),    // Alt+Enter
+        (b"\x1b[57414u", 13, 0),   // Keypad Enter
+        (b"\x1b[106;5u", 74, 4),   // Ctrl+J
+    ] {
+        let keys = decoded_keys(sequence);
+        assert_eq!(keys.len(), 1, "{sequence:?}");
+        assert_eq!(
+            (keys[0].code, keys[0].modifiers),
+            (code, modifiers),
+            "{sequence:?}"
+        );
+    }
+    // Cmd on a Mac, reported as Super, must not become a plain letter.
+    assert!(decoded_keys(b"\x1b[99;9u").is_empty());
+}
+
+#[test]
 fn csi_ss3_and_modified_navigation_use_the_shared_editor_keys() {
     let keys = decoded_keys(b"\x1b[A\x1bOB\x1b[1;5D\x1b[1;3A\x1b[1;6B\x1b[3~\x1b[5~\x1b[6~\x1b[H\x1bOF\x1bOP\x1b[Z\x1b\r\x1b[13;2u");
     assert_eq!(

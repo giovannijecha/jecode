@@ -7,9 +7,8 @@ mod efficiency_live;
 #[cfg(test)]
 mod live;
 mod metadata;
-#[cfg(windows)]
 mod socket;
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod socket_tests;
 mod stream;
 mod transport;
@@ -45,7 +44,6 @@ pub struct Api {
     base_url: String,
     metadata: Arc<Mutex<Option<metadata::Catalog>>>,
     /// Whether conversations may use the Responses WebSocket before HTTP.
-    #[cfg_attr(not(windows), allow(dead_code))]
     sockets: bool,
 }
 
@@ -57,7 +55,6 @@ pub struct OpenAi {
     /// ChatGPT also sends it as `session-id`.
     conversation: Option<String>,
     delegation: bool,
-    #[cfg(windows)]
     channel: Mutex<socket::Channel>,
 }
 
@@ -112,7 +109,7 @@ impl Api {
         api
     }
 
-    #[cfg(all(test, windows))]
+    #[cfg(test)]
     fn with_sockets(mut self) -> Self {
         self.sockets = true;
         self
@@ -199,7 +196,6 @@ impl OpenAi {
             effort: Effort::Default,
             conversation: None,
             delegation: true,
-            #[cfg(windows)]
             channel: Mutex::default(),
         })
     }
@@ -337,7 +333,6 @@ impl Backend for OpenAi {
         })
         .map_err(backend::Failure::from)?;
         let mut stream = stream::Stream::default();
-        #[cfg(windows)]
         let answered = socket::exchange(
             &self.channel,
             &self.api,
@@ -350,8 +345,6 @@ impl Backend for OpenAi {
             transport::sanitize(&mut failure, &self.api.redactor());
             failure
         })?;
-        #[cfg(not(windows))]
-        let answered = false;
         let response = if answered {
             None
         } else {
@@ -392,7 +385,6 @@ impl Backend for OpenAi {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         });
-        #[cfg(windows)]
         if self.conversation != next {
             self.channel
                 .get_mut()

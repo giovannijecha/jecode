@@ -10,9 +10,9 @@ terminal host by hand.
 
 | Platform | Automated verification | Interactive and live use |
 | --- | --- | --- |
-| Windows 10 or later, x86_64 | CI on pull requests from this repository: build, formatting, Clippy, the full test suite and the ConPTY terminal fixtures. Opt-in confinement, browser and light-background fixtures run locally. | Primary development platform. Live ChatGPT and Claude sign-in, inference and token refresh have been exercised. |
-| Linux, x86_64 | CI on pull requests from this repository: build, formatting, Clippy, the full test suite and the PTY terminal fixture. Browser fixtures and X11 clipboard transfer have been run locally. | Exercised under WSL on a native Linux filesystem. Wayland clipboard access is implemented but has not been exercised with a real compositor. |
-| macOS 15, ARM64 | CI on every pull request on GitHub's hosted `macos-15` runner: build, formatting, Clippy, the full test suite and the PTY terminal fixture. | No interactive, browser or live-provider use has been recorded on a Mac. |
+| Windows, x86_64 | CI on pull requests from this repository, on Windows 11: build, formatting, Clippy, the full test suite and the ConPTY terminal fixtures. Opt-in confinement, browser and light-background fixtures run locally. | Primary development platform. Live ChatGPT and Claude sign-in, inference and token refresh have been exercised. |
+| Linux, x86_64 | CI on pull requests from this repository: build, formatting, Clippy, the full test suite, the PTY terminal fixture and the native conversation scenarios. Browser fixtures and X11 clipboard transfer have been run locally. | Exercised under WSL on a native Linux filesystem, including live OpenAI and Anthropic conversations with API keys on Debian 10 and Ubuntu 26.04. Wayland clipboard access is implemented but has not been exercised with a real compositor. |
+| macOS, ARM64 and Intel | CI on every pull request on GitHub's hosted `macos-26` and `macos-26-intel` runners: build, formatting, Clippy, the full test suite, the PTY terminal fixture and the native conversation scenarios. | No interactive, browser or live-provider use has been recorded on a Mac. |
 
 The Windows and Linux runners reject fork code before workflow steps. Queued,
 skipped or rejected checks do not establish verification.
@@ -21,18 +21,30 @@ Other architectures, such as Windows or Linux on ARM64, have no recorded
 verification. CI results apply to the revision they ran on; check the jobs for
 the revision you are reviewing.
 
-The prebuilt npm Linux x64 executable and embedded Rust shell helper reference
-GLIBC_2.39; their embedded C helpers reference versions up to GLIBC_2.34. The
-runner uses glibc 2.43, so behavior on older hosts remains untested. The npm
-launcher checks for glibc 2.39 or newer before starting the executable. The
-macOS ARM64 build's deployment target has not been inspected; macOS versions
-earlier than the CI runner's version are unverified.
+## Supported versions
+
+Each floor is the oldest system Jecode promises to run on. Node.js 22 and 24 set
+the same Linux floor and a lower Windows one, and Node.js 22 the same macOS one, so
+the npm launcher cannot start below these on Linux or macOS.
+
+| System | Floor | What sets it | Enforced by | Evidence |
+| --- | --- | --- | --- | --- |
+| Linux x86_64 | glibc 2.28 (Debian 10, RHEL 8, Ubuntu 20.04) | Node.js's own requirement. | CI links against a Debian 10 sysroot and runs the release under its `ld.so`. The release stage rejects any version requirement above 2.28 in the executable and its helpers; the npm launcher refuses an older glibc. | **Executed** under WSL2, on kernel 6.18, in unprivileged chroots of real images: the full test suite on Debian 10, AlmaLinux 8, Ubuntu 20.04, Ubuntu 22.04 and Debian 12, and the PTY fixture and conversation scenarios on the first three. Older kernels (Node.js asks for 4.18) have not been run. |
+| Windows x64 | Windows 10 1809, build 17763 (and Server 2019) | ConPTY, for `exec` with `tty: true`. | The release stage rejects a system library outside a reviewed list, and a test rejects a new P/Invoke until it has been reviewed. | **Static only.** Imports and P/Invokes were read from the build and compared with Microsoft's documented minimums; a Windows build older than the CI host's has not run Jecode. |
+| macOS, ARM64 and Intel | macOS 11.0 | Rust's own minimum on ARM, and Node.js 22's on both. Node.js 24 needs macOS 13.5. | CI and releases set `MACOSX_DEPLOYMENT_TARGET=11.0`, and the release stage rejects a higher deployment target in the executable or a helper. Adapters using an API newer than the target fail to compile. | **Not executed below the CI runner's macOS 26.** The floor comes from the recorded deployment target; no older Mac has run Jecode. |
+
+Two Windows features depend on newer builds and turn off rather than fail. HTTP/2
+needs Windows 10 1607, which is below the floor. Workspace command confinement
+needs Process Security Environment support, which only recent Windows releases
+have; elsewhere commands require the Full level, as on Linux kernels below 5.13.
+See [Permissions](../usage/PERMISSIONS.md#platform-limits).
 
 ## Platform limitations
 
 - **Command confinement.** Workspace confinement for `bash` and `exec` uses a
-  Windows-only OS facility. On Linux and macOS, and on Windows hosts without it,
-  commands require the Full level. See
+  Process Security Environment on Windows, Landlock on Linux 5.13 or later, and
+  Seatbelt on macOS. Hosts without them refuse those commands until you choose the
+  Full level. Seatbelt's policy has not yet run on a Mac. See
   [Permissions](../usage/PERMISSIONS.md#platform-limits).
 - **Interactive terminals.** Interactive `exec` (`tty: true`) requires Full on
   every platform. The `/terminal` view shows a transcript of the output; it does
@@ -49,12 +61,20 @@ earlier than the CI runner's version are unverified.
   PowerShell (Windows and WSL), `osascript` and `sips` (macOS), or X11 or
   Wayland data control and GdkPixbuf (Linux). See
   [Attachments](../usage/ATTACHMENTS.md#platform-requirements).
+- **File names.** Windows compares root prefixes without case. On Linux and
+  macOS, differently spelled prefixes must identify the same directory on the
+  filesystem. This preserves case-sensitive volumes and lets the filesystem
+  resolve case and Unicode normalization aliases. This has not run on a Mac.
+- **Stopping commands.** Windows ends a command's whole job. Linux and macOS end its
+  process group, so a descendant that calls `setsid` keeps running; many build
+  daemons do this on purpose.
 - **Connection deadline.** The native HTTP adapters apply a 10-second connection
   deadline on Windows and Linux; the macOS adapter has none.
-- **Provider latency.** Only Windows keeps HTTP adapters and their connections
-  alive between requests and uses HTTP/2 and the OpenAI Responses WebSocket. Linux
-  and macOS start one adapter per HTTP/1.1 request and use HTTP POST on OpenAI
-  routes. See [Performance](PERFORMANCE.md#provider-transports).
+- **Provider latency.** All three keep HTTP adapters alive between requests and
+  use the OpenAI Responses WebSocket. Only Windows uses HTTP/2; Linux and macOS use
+  HTTP/1.1. Reuse and the WebSocket have been measured on Windows and Linux. macOS
+  has run neither, and there CFNetwork decides whether a connection is kept. See
+  [Performance](PERFORMANCE.md#provider-transports).
 
 ## Interactive terminal bridge
 
@@ -93,6 +113,7 @@ version, architecture and terminal with the result.
 
 | Check | Expected result |
 | --- | --- |
+| Compare `/help` and a diff with the 24-bit colours | Text is readable on every surface and added and removed rows look different. Without declared 24-bit colour, the palette's greener and redder diff rows are expected. |
 | Paste multiline Unicode text, then press Ctrl+J | The text stays in the composer until you send it. Shift+Enter and Alt+Enter work only if the terminal reports them. |
 | Scroll up during a response, then resize wide and narrow | The reading position stays anchored; Alt+End returns to following new output. |
 | Open `/help`, `/settings` and `/routing` with a draft | Each panel keeps the draft and caret; Esc returns to the previous state. |
@@ -100,4 +121,5 @@ version, architecture and terminal with the result.
 | Delete a disposable conversation from `/resume` | Ctrl+D marks it, Enter confirms, the list stays open and the content stays gone after a resize. |
 | Quit with Ctrl+Q | The previous shell screen and terminal modes are restored. |
 | `/copy` an answer with Unicode, trailing spaces, a code block and a quote | Each pasted selection matches the source exactly. |
-| Drop a file whose path contains spaces, and paste an image with Alt+V | Both attach; after resume and `/export`, the export references the attachment without copying it. |
+| Drop a file whose path contains spaces, and paste an image with Alt+V or, on Linux and macOS, Ctrl+V | Both attach; after resume and `/export`, the export references the attachment without copying it. |
+| On a Mac, type `@`, `[` and `{` with Option on your keyboard layout | The characters appear in the draft; none triggers a shortcut. |

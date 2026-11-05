@@ -9,7 +9,7 @@ use std::{
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub struct Terminal {
@@ -26,36 +26,22 @@ impl Terminal {
         if std::env::var("TERM").is_ok_and(|term| term == "dumb") {
             return Err("The TUI needs a VT terminal. Use jecode --plain.".into());
         }
+        crate::tui::theme::choose_color_depth(|name| std::env::var_os(name));
         let mut tty = File::open("/dev/tty").map_err(|error| {
             format!("Could not open terminal input: {error}. Use jecode --plain.")
         })?;
-        let mode = mode::Mode::open(tty.try_clone().map_err(|e| e.to_string())?)?;
-        let size = size(&tty)?;
         let stopped = Arc::new(AtomicBool::new(false));
         let token = stopped.clone();
         let (sender, input) = mpsc::sync_channel(16);
         let wake = sender.clone();
+        let (reporter, reporting) = (sender.clone(), stopped.clone());
+        let (mode, size) =
+            mode::Mode::open(tty.try_clone().map_err(|e| e.to_string())?, move |next| {
+                send(&reporter, &reporting, Input::Size(geometry(next)))
+            })?;
         let reader = thread::spawn(move || {
             let mut buffer = [0u8; 16 * 1024];
-            let mut measured = size;
-            let mut checked = Instant::now();
             while !token.load(Ordering::Relaxed) {
-                if checked.elapsed() >= Duration::from_millis(200) {
-                    match self::size(&tty) {
-                        Ok(next) if next != measured => {
-                            measured = next;
-                            if !send(&sender, &token, Input::Size(geometry(next))) {
-                                break;
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(error) => {
-                            send(&sender, &token, Input::Error(error));
-                            break;
-                        }
-                    }
-                    checked = Instant::now();
-                }
                 match tty.read(&mut buffer) {
                     Ok(0) => thread::sleep(Duration::from_millis(1)),
                     Ok(count) => {
@@ -114,15 +100,6 @@ fn geometry(size: (usize, usize)) -> Geometry {
     Geometry {
         width: size.0,
         height: size.1,
-    }
-}
-
-fn size(tty: &File) -> Result<(usize, usize), String> {
-    let value = mode::stty(tty, &["size"])?;
-    let mut values = value.split_whitespace().map(str::parse::<usize>);
-    match (values.next(), values.next(), values.next()) {
-        (Some(Ok(height)), Some(Ok(width)), None) if height > 0 && width > 0 => Ok((width, height)),
-        _ => Err("Could not measure terminal size. Use jecode --plain.".into()),
     }
 }
 

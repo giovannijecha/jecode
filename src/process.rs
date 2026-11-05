@@ -14,6 +14,8 @@ mod windows;
 mod capture;
 pub(crate) mod duplex;
 use capture::{Capture, Events, capture};
+#[cfg(unix)]
+pub(crate) use unix::sandbox_policy;
 #[cfg(windows)]
 pub(crate) use windows::{CREATE_NO_WINDOW, ordinary_path, sandbox_policy};
 

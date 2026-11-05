@@ -39,6 +39,39 @@ export function regularFile(file) {
   return fs.readFileSync(file);
 }
 
+export function exceeds(version, ceiling) {
+  const left = version.split('.').map(Number), right = ceiling.split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    if ((left[i] ?? 0) !== (right[i] ?? 0)) return (left[i] ?? 0) > (right[i] ?? 0);
+  }
+  return false;
+}
+
+// The native helpers a release executable carries, by name. Cargo keeps stale
+// build outputs, so only files whose exact bytes are embedded are returned.
+export function embeddedFiles(binary, mainBytes, isNative) {
+  const build = path.join(path.dirname(binary), 'build');
+  if (!fs.existsSync(build)) throw new Error('Stage release binaries from their Cargo release output directory.');
+  const files = new Map();
+  for (const entry of fs.readdirSync(build, {withFileTypes: true})) {
+    if (!entry.isDirectory() || !entry.name.startsWith('jecode-')) continue;
+    const output = path.join(build, entry.name, 'out');
+    if (!fs.existsSync(output)) continue;
+    for (const helper of fs.readdirSync(output, {withFileTypes: true})) {
+      if (!helper.isFile() || !helper.name.startsWith('jecode-')) continue;
+      const file = path.join(output, helper.name), bytes = fs.readFileSync(file);
+      if (isNative(bytes) && mainBytes.indexOf(bytes) >= 0) files.set(helper.name, file);
+    }
+  }
+  return files;
+}
+
+export function requireFiles(files, expected, platform) {
+  for (const name of expected) {
+    if (!files.has(name)) throw new Error(`Cannot audit embedded ${platform} helper ${name}; rebuild the release first.`);
+  }
+}
+
 export function freshDirectory(directory) {
   const absolute = path.resolve(directory);
   fs.mkdirSync(path.dirname(absolute), {recursive: true});

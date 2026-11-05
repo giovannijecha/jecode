@@ -12,11 +12,10 @@ npm install -g @giovannijecha/jecode
 jecode --version
 ```
 
-The npm package supports Windows x64, Linux x64 with glibc 2.39 or newer, and
-macOS on Apple silicon (verified on macOS 15). Earlier macOS versions remain
-unverified. It includes the platform executables; it does not build code or fetch
-a binary when you first run it. Node.js starts the npm command. A standalone
-build of Jecode does not need Node.js.
+The npm package supports Windows 10 1809 or later (x64), Linux x64 with glibc 2.28
+or newer, and macOS 11 or later on Apple silicon or Intel. It includes the platform
+executables; it does not build code or fetch a binary when you first run it.
+Node.js starts the npm command. A standalone build of Jecode does not need Node.js.
 
 Update the npm installation with:
 

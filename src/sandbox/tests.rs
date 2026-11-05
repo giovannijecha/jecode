@@ -57,7 +57,7 @@ fn actual_session_home_inside_workspace_fails_closed() {
     let storage = project.path().join(".jecode");
     let scratch = storage.join("tmp/current");
     std::fs::create_dir_all(&scratch).unwrap();
-    let policy = Policy::for_command(Level::Workspace, project.path(), Some(&scratch), None)
+    let mut policy = Policy::for_command(Level::Workspace, project.path(), Some(&scratch), None)
         .unwrap()
         .unwrap();
     assert!(policy.protect_session_home(None).is_ok());
@@ -167,6 +167,78 @@ fn rust_runtime_roots_are_read_only_and_cargo_cache_uses_session_scratch() {
 }
 
 #[test]
+fn cargo_configuration_in_ancestors_is_readable_but_its_credentials_are_not() {
+    let home = Directory::new();
+    let project = home.path().join("work/project");
+    let cargo = home.path().join(".cargo");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&cargo).unwrap();
+    std::fs::write(cargo.join("config.toml"), "").unwrap();
+    std::fs::write(cargo.join("credentials.toml"), "").unwrap();
+    let mut policy = Policy::for_command(Level::Workspace, &project, None, None)
+        .unwrap()
+        .unwrap();
+    policy.allow_cargo_configuration(None).unwrap();
+    let canonical = |path: PathBuf| std::fs::canonicalize(path).unwrap();
+    assert!(policy.read.contains(&canonical(cargo.join("config.toml"))));
+    assert!(
+        !policy
+            .read
+            .contains(&canonical(cargo.join("credentials.toml")))
+    );
+    assert!(!policy.read.contains(&canonical(cargo)));
+}
+
+#[cfg(unix)]
+#[test]
+fn cargo_configuration_cannot_link_into_the_protected_session_home() {
+    let home = Directory::new();
+    let project = home.path().join("work/project");
+    let cargo = home.path().join(".cargo");
+    let storage = home.path().join("private-jecode");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&cargo).unwrap();
+    std::fs::create_dir(&storage).unwrap();
+    let secret = storage.join("config.json");
+    std::fs::write(&secret, "synthetic-secret").unwrap();
+    std::os::unix::fs::symlink(&secret, cargo.join("config.toml")).unwrap();
+    let mut policy = Policy::for_command(Level::Workspace, &project, None, None)
+        .unwrap()
+        .unwrap();
+    let error = policy
+        .allow_cargo_configuration(Some(&storage))
+        .unwrap_err();
+    assert!(error.contains("resolves inside Jecode's configuration"));
+    assert!(
+        !policy
+            .read
+            .contains(&std::fs::canonicalize(secret).unwrap())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ancestor_cargo_configuration_link_cannot_grant_a_private_file() {
+    let home = Directory::new();
+    let project = home.path().join("work/project");
+    let cargo = home.path().join(".cargo");
+    let private = home.path().join("private-key");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&cargo).unwrap();
+    std::fs::write(&private, "synthetic-secret").unwrap();
+    std::os::unix::fs::symlink(&private, cargo.join("config.toml")).unwrap();
+    let mut policy = Policy::for_command(Level::Workspace, &project, None, None)
+        .unwrap()
+        .unwrap();
+    policy.allow_cargo_configuration(None).unwrap();
+    assert!(
+        !policy
+            .read
+            .contains(&std::fs::canonicalize(private).unwrap())
+    );
+}
+
+#[test]
 fn confined_environment_drops_parent_secrets_and_keeps_explicit_overrides() {
     let project = Directory::new();
     let scratch = project.path().join("scratch");
@@ -238,19 +310,14 @@ fn trusted_marker_replaces_user_environment_and_full_clears_it() {
         .unwrap();
     let mut command = Command::new("example");
     command.env(MARKER, "user supplied");
-    let result = apply(&mut command, Some(&policy));
-    if cfg!(windows) {
-        result.unwrap();
-        let value = command
-            .get_envs()
-            .find(|(key, _)| *key == MARKER)
-            .unwrap()
-            .1
-            .unwrap();
-        assert_eq!(value.to_string_lossy(), policy.encode());
-    } else {
-        assert!(result.unwrap_err().contains("only on Windows"));
-    }
+    apply(&mut command, Some(&policy)).unwrap();
+    let value = command
+        .get_envs()
+        .find(|(key, _)| *key == MARKER)
+        .unwrap()
+        .1
+        .unwrap();
+    assert_eq!(value, policy.native_policy().unwrap().as_os_str());
     apply(&mut command, None).unwrap();
     assert!(
         command
@@ -297,8 +364,7 @@ fn node_manager_homes_are_read_only_and_passed_by_name() {
     assert_eq!(policy.write.len(), 1);
     let mut command = Command::new("example");
     command.env("NVM_HOME", "explicit");
-    // Confinement attaches only on Windows; the environment is set everywhere.
-    let _ = apply(&mut command, Some(&policy));
+    apply(&mut command, Some(&policy)).unwrap();
     let variable = |name: &str| {
         command
             .get_envs()
@@ -309,6 +375,43 @@ fn node_manager_homes_are_read_only_and_passed_by_name() {
     assert_eq!(variable("VOLTA_HOME"), Some(volta.clone().into_os_string()));
     assert_eq!(variable("NVM_HOME"), Some("explicit".into()));
     assert_eq!(variable("FNM_DIR"), None);
+}
+
+#[test]
+fn a_node_prefix_is_readable_but_a_home_shaped_like_one_is_not() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let prefix = home.path().join("tools/node");
+    for path in [prefix.join("bin"), prefix.join("lib/node_modules")] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    std::fs::write(prefix.join("bin/node"), "").unwrap();
+    let grant = |bin: &Path| {
+        let mut policy = Policy::for_command(Level::Workspace, project.path(), None, None)
+            .unwrap()
+            .unwrap();
+        let (home, bin) = (home.path().to_path_buf(), bin.to_path_buf());
+        policy
+            .allow_node_tools_from(
+                move |name| match name {
+                    "HOME" => Some(home.clone().into()),
+                    "PATH" => Some(bin.clone().into()),
+                    _ => None,
+                },
+                None,
+            )
+            .unwrap();
+        policy.read
+    };
+    let read = grant(&prefix.join("bin"));
+    assert!(read.contains(&std::fs::canonicalize(&prefix).unwrap()));
+
+    // `~/bin/node` beside `~/lib/node_modules` must not open the whole home.
+    std::fs::create_dir_all(home.path().join("bin")).unwrap();
+    std::fs::create_dir_all(home.path().join("lib/node_modules")).unwrap();
+    std::fs::write(home.path().join("bin/node"), "").unwrap();
+    let read = grant(&home.path().join("bin"));
+    assert!(!read.contains(&std::fs::canonicalize(home.path()).unwrap()));
 }
 
 #[test]
