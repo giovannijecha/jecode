@@ -44,7 +44,8 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
 - **Command confinement.** Workspace confinement for `bash` and `exec` uses a
   Process Security Environment on Windows, Landlock on Linux 5.13 or later, and
   Seatbelt on macOS. Hosts without them refuse those commands until you choose the
-  Full level. Seatbelt's policy has not yet run on a Mac. See
+  Full level. Seatbelt's policy is exercised by macOS CI; macOS 11 remains
+  unverified. See
   [Permissions](../usage/PERMISSIONS.md#platform-limits).
 - **Interactive terminals.** Interactive `exec` (`tty: true`) requires Full on
   every platform. The `/terminal` view shows a transcript of the output; it does
@@ -64,16 +65,18 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
 - **File names.** Windows compares root prefixes without case. On Linux and
   macOS, differently spelled prefixes must identify the same directory on the
   filesystem. This preserves case-sensitive volumes and lets the filesystem
-  resolve case and Unicode normalization aliases. This has not run on a Mac.
+  resolve case and Unicode normalization aliases. Case-sensitive APFS volumes
+  remain unverified.
 - **Stopping commands.** Windows ends a command's whole job. Linux and macOS end its
   process group, so a descendant that calls `setsid` keeps running; many build
   daemons do this on purpose.
 - **Connection deadline.** The native HTTP adapters apply a 10-second connection
-  deadline on Windows and Linux; the macOS adapter has none.
+  deadline; on Unix it bounds each address attempt.
 - **Provider latency.** All three keep HTTP adapters alive between requests and
   use the OpenAI Responses WebSocket. Only Windows uses HTTP/2; Linux and macOS use
-  HTTP/1.1. Reuse and the WebSocket have been measured on Windows and Linux. macOS
-  has run neither, and there CFNetwork decides whether a connection is kept. See
+  HTTP/1.1. Provider latency has been measured on Windows and Linux; no comparable
+  macOS timing is recorded. Linux and macOS share the owned
+  HTTP/1.1 parser, connection cache and replay policy, with OS TLS underneath. See
   [Performance](PERFORMANCE.md#provider-transports).
 
 ## Interactive terminal bridge

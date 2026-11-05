@@ -274,6 +274,7 @@ fn native_http_rejects_truncated_and_malformed_responses() {
         &b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhi"[..],
         &b"invalid status\r\n\r\n"[..],
     ] {
+        let case = String::from_utf8_lossy(reply).into_owned();
         let reply = reply.to_vec();
         let server = Server::start(move |listener, stop| {
             let mut stream = server::accept(&listener, &stop).unwrap();
@@ -302,7 +303,11 @@ fn native_http_rejects_truncated_and_malformed_responses() {
         )
         .unwrap();
         server.finish();
-        assert_ne!(output.exit_code, Some(0));
+        assert_ne!(
+            output.exit_code,
+            Some(0),
+            "accepted malformed response: {case:?}"
+        );
     }
 }
 
@@ -450,4 +455,39 @@ fn trusted_https_uses_os_tls_policy() {
     assert_eq!(output.exit_code, Some(0), "{:?}", output.stderr);
     assert_eq!(decoder.status, Some(200));
     assert!(body.windows(14).any(|part| part == b"Example Domain"));
+
+    let mut untrusted_bytes = Vec::new();
+    let rejected = run(
+        Request {
+            url: "https://self-signed.badssl.com/",
+            method: "GET",
+            headers: &[],
+            body: None,
+            timeout: Some(Duration::from_secs(20)),
+            idle: None,
+            output_limit: 4096,
+        },
+        &Cancellation::default(),
+        &mut |bytes| {
+            untrusted_bytes.extend_from_slice(bytes);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        rejected.exit_code,
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    assert!(
+        untrusted_bytes.is_empty(),
+        "untrusted HTTPS delivered response bytes"
+    );
+    #[cfg(unix)]
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("TLS"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
 }

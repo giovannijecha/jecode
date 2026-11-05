@@ -27,21 +27,6 @@ static int random_bytes(unsigned char *bytes, size_t size) {
     return 1;
 }
 
-static void base64_encode(const unsigned char *bytes, size_t size, char *text) {
-    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    size_t written = 0;
-    for (size_t i = 0; i < size; i += 3) {
-        unsigned int block = (unsigned int)bytes[i] << 16;
-        if (i + 1 < size) block |= (unsigned int)bytes[i + 1] << 8;
-        if (i + 2 < size) block |= bytes[i + 2];
-        text[written++] = alphabet[block >> 18 & 63];
-        text[written++] = alphabet[block >> 12 & 63];
-        text[written++] = i + 1 < size ? alphabet[block >> 6 & 63] : '=';
-        text[written++] = i + 2 < size ? alphabet[block & 63] : '=';
-    }
-    text[written] = 0;
-}
-
 // Clients mask every frame with a fresh key.
 static int socket_send(struct channel *channel, int opcode, const unsigned char *bytes, size_t size) {
     unsigned char *wire = malloc(size + 14);

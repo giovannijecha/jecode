@@ -217,8 +217,9 @@ cargo test --locked --offline browser::snapshot::tests::live_chromium_snapshot_v
 cargo test --locked --offline browser::live_tests::live_chromium_visible_viewport -- --exact --ignored --test-threads=1
 ```
 
-`http::tests::trusted_https_uses_os_tls_policy` checks the native TLS boundary
-against `https://example.com/` without credentials.
+`http::tests::trusted_https_uses_os_tls_policy` accepts `https://example.com/`
+and rejects `https://self-signed.badssl.com/` without account credentials. macOS
+CI and release preparation run it explicitly to verify the native TLS boundary.
 
 ## Live provider checks
 

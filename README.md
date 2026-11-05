@@ -98,8 +98,8 @@ storage formats may change between releases.
   interactive use on macOS has not been verified. See
   [Platform support](docs/development/PLATFORMS.md).
 - Command confinement in the Workspace permission level needs Landlock on Linux and a
-  recent Windows; elsewhere commands need the Full level. It is implemented on macOS
-  but has not yet run on a real Mac.
+  recent Windows, and uses Seatbelt on macOS. Hosts without confinement need the
+  Full level; macOS terminal hosts still need manual validation.
 - API keys use the provider's API billing, separately from subscription plans.
 
 ## Privacy and security

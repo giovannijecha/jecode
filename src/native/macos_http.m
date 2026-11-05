@@ -1,7 +1,6 @@
 // macOS HTTP adapter. It serves requests in order and exits when stdin closes or
-// after an idle period; its protocol is winhttp.cs's. HTTP uses CFNetwork's
-// blocking read stream for prompt body delivery: CFReadStreamRead returns available
-// bytes without waiting for the full response. With the arguments `socket` and an
+// after an idle period; its protocol is winhttp.cs's. HTTP framing and replay
+// policy are shared with Linux over OS sockets and CFStream TLS. With `socket` and an
 // idle limit in milliseconds it instead serves one WebSocket connection.
 #import <Foundation/Foundation.h>
 #import <CFNetwork/CFNetwork.h>
@@ -13,35 +12,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/event.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
-// CFNetwork's HTTP stream is deprecated but is the system API with a documented
-// partial-read contract; NSURLSession can coalesce a short unfinished response.
+// CFStream socket TLS is a system boundary; HTTP framing and retries are owned.
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
+enum { IDLE_LIMIT_MS = 300000, CONNECT_LIMIT_MS = 10000, RECEIVE_LIMIT_MS = 120000, STALE_RETRIES = 2 };
 enum { IDLE_LIMIT_SECONDS = 300, SOCKET_MESSAGE_LIMIT = 64 * 1024 * 1024 };
 
-static void write_output(const void *bytes, size_t size) {
-    const unsigned char *cursor = bytes;
-    while (size) {
-        ssize_t count = write(STDOUT_FILENO, cursor, size);
-        if (count < 0 && errno == EINTR) continue;
-        // The parent stopped reading; nothing is left to report to.
-        if (count <= 0) _exit(1);
-        cursor += count;
-        size -= (size_t)count;
-    }
-}
-
-static void frame(char tag, const void *bytes, size_t count) {
-    unsigned char head[5] = { (unsigned char)tag, (unsigned char)count, (unsigned char)(count >> 8),
-                              (unsigned char)(count >> 16), (unsigned char)(count >> 24) };
-    write_output(head, sizeof(head));
-    if (count) write_output(bytes, count);
-}
+#include "unix_http_io.h"
+#include "unix_http_net.h"
+#include "unix_http_exchange.h"
 
 static void frame_text(char tag, const char *text) {
     frame(tag, text, strlen(text));
@@ -85,190 +70,6 @@ static int parse_decimal(const char *text, unsigned long long *value) {
     char *end;
     *value = strtoull(text, &end, 10);
     return !errno && (end[0] == '\n' || end[0] == '\r' || end[0] == 0);
-}
-
-static int transport_error(CFReadStreamRef stream, int before_headers) {
-    CFErrorRef detail = CFReadStreamCopyError(stream);
-    if (detail) {
-        CFStringRef domain = CFErrorGetDomain(detail);
-        CFIndex code = CFErrorGetCode(detail);
-        int network = CFEqual(domain, kCFErrorDomainCFNetwork) ||
-                      CFEqual(domain, (__bridge CFStringRef)NSURLErrorDomain);
-        int retry = network && (code == kCFErrorHTTPConnectionLost ||
-            code == kCFURLErrorTimedOut || code == kCFURLErrorCannotFindHost ||
-            code == kCFURLErrorCannotConnectToHost ||
-            code == kCFURLErrorNetworkConnectionLost ||
-            code == kCFURLErrorDNSLookupFailed ||
-            code == kCFURLErrorNotConnectedToInternet ||
-            (before_headers && code == kCFErrorHTTPParseFailure));
-        CFRelease(detail);
-        if (retry) return 1;
-    }
-    CFStreamError error = CFReadStreamGetError(stream);
-    return error.domain == kCFStreamErrorDomainPOSIX ||
-           error.domain == kCFStreamErrorDomainNetDB ||
-           (before_headers && error.domain == kCFStreamErrorDomainHTTP &&
-            error.error == kCFStreamErrorHTTPParseFailure);
-}
-
-static int response_headers(CFHTTPMessageRef response, int head,
-                            unsigned long long *expected, int *has_expected) {
-    CFIndex status = CFHTTPMessageGetResponseStatusCode(response);
-    if (status < 100 || status > 999) return 0;
-    CFDictionaryRef fields = CFHTTPMessageCopyAllHeaderFields(response);
-    if (!fields) return 0;
-    NSDictionary *headers = (__bridge NSDictionary *)fields;
-    NSString *length = CFBridgingRelease(CFHTTPMessageCopyHeaderFieldValue(response, CFSTR("Content-Length")));
-    NSString *encoding = CFBridgingRelease(CFHTTPMessageCopyHeaderFieldValue(response, CFSTR("Transfer-Encoding")));
-    *has_expected = length != nil && !head && status >= 200 && status != 204 && status != 304;
-    if (length) {
-        const char *digits = length.UTF8String;
-        if (!digits || !*digits || *digits < '0' || *digits > '9') { CFRelease(fields); return 0; }
-        errno = 0;
-        char *end;
-        *expected = strtoull(digits, &end, 10);
-        if (errno || *end) { CFRelease(fields); return 0; }
-    }
-    if (length && encoding) { CFRelease(fields); return 0; }
-    NSMutableData *text = [NSMutableData data];
-    [text appendData:[[NSString stringWithFormat:@"HTTP/1.1 %ld Response\r\n", (long)status]
-        dataUsingEncoding:NSISOLatin1StringEncoding]];
-    for (NSString *key in headers) {
-        NSString *line = [NSString stringWithFormat:@"%@: %@\r\n", key, headers[key]];
-        NSData *bytes = [line dataUsingEncoding:NSISOLatin1StringEncoding allowLossyConversion:YES];
-        if (!bytes) { CFRelease(fields); return 0; }
-        [text appendData:bytes];
-    }
-    CFRelease(fields);
-    [text appendBytes:"\r\n" length:2];
-    frame('D', text.bytes, text.length);
-    return 1;
-}
-
-// One request, reported in frames. Returns 0 at the end of stdin; < 0 when invalid.
-static int serve_request(void) {
-    int result = 1;
-    char *line = NULL;
-    size_t capacity = 0;
-    size_t size = 0;
-    NSString *url_text = nil, *method = nil, *host = nil;
-    NSURL *url = nil;
-    NSMutableData *body = nil;
-    CFHTTPMessageRef request = NULL, response = NULL;
-    CFReadStreamRef stream = NULL;
-    CFStreamError stream_error = { 0, 0 };
-    CFDictionaryRef proxy = NULL;
-    unsigned long long timeout_ms = 0, count = 0, body_size = 0;
-    unsigned long long expected = 0, received = 0;
-    int has_expected = 0, head = 0, invalid = 0;
-    const char *invalid_reason = "Native HTTP request is invalid";
-    BOOL loopback = NO;
-    CFIndex first = 0;
-    unsigned char buffer[16384];
-
-    // The idle limit covers only the wait for a request.
-    alarm(IDLE_LIMIT_SECONDS);
-    if (getline(&line, &capacity, stdin) < 0) { alarm(0); free(line); return 0; }
-    alarm(0);
-    invalid = 1;
-    url_text = decoded(line);
-    if (getline(&line, &capacity, stdin) < 0) goto done;
-    method = decoded(line);
-    // A zero timeout means no total limit; the caller enforces inactivity and deadlines.
-    if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &timeout_ms) ||
-        timeout_ms > (unsigned long long)UINT_MAX * 1000) goto done;
-    if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &count) || count > 1000) goto done;
-    if (!url_text || !method) goto done;
-    url = [NSURL URLWithString:url_text];
-    if (!url || !([url.scheme isEqual:@"http"] || [url.scheme isEqual:@"https"])) goto done;
-    request = CFHTTPMessageCreateRequest(NULL, (__bridge CFStringRef)method,
-        (__bridge CFURLRef)url, kCFHTTPVersion1_1);
-    if (!request) goto done;
-    for (unsigned long long i = 0; i < count; i++) {
-        if (getline(&line, &capacity, stdin) < 0) goto done;
-        NSString *name = decoded(line);
-        if (getline(&line, &capacity, stdin) < 0) goto done;
-        NSString *value = decoded(line);
-        if (!name || !value || [name containsString:@"\r"] || [name containsString:@"\n"] ||
-            [value containsString:@"\r"] || [value containsString:@"\n"]) {
-            invalid_reason = "Native HTTP request header is invalid";
-            goto done;
-        }
-        CFHTTPMessageSetHeaderFieldValue(request, (__bridge CFStringRef)name, (__bridge CFStringRef)value);
-    }
-    // The raw body follows its decimal length line.
-    if (getline(&line, &capacity, stdin) < 0 || !parse_decimal(line, &body_size) ||
-        body_size >= SIZE_MAX) goto done;
-    size = (size_t)body_size;
-    body = [NSMutableData dataWithLength:size];
-    if (!body || (size && fread(body.mutableBytes, 1, size, stdin) != size)) goto done;
-    invalid = 0;
-    frame('A', NULL, 0);
-    if (body.length || [method isEqual:@"POST"] || [method isEqual:@"PUT"] || [method isEqual:@"PATCH"])
-        CFHTTPMessageSetBody(request, (__bridge CFDataRef)body);
-    head = [method isEqual:@"HEAD"];
-
-    stream = CFReadStreamCreateForHTTPRequest(NULL, request);
-    if (!stream) goto done;
-    // Later requests to the same host then skip connecting when the system can.
-    CFReadStreamSetProperty(stream, kCFStreamPropertyHTTPAttemptPersistentConnection, kCFBooleanTrue);
-    host = url.host.lowercaseString;
-    loopback = [host isEqual:@"localhost"] || [host isEqual:@"::1"] || [host hasPrefix:@"127."];
-    if (!loopback) {
-        proxy = CFNetworkCopySystemProxySettings();
-        if (proxy && !CFReadStreamSetProperty(stream, kCFStreamPropertyHTTPProxy, proxy)) goto done;
-    }
-    if (!CFReadStreamOpen(stream)) {
-        if (transport_error(stream, 1)) result = 2;
-        goto done;
-    }
-    first = CFReadStreamRead(stream, buffer, sizeof(buffer));
-    if (first < 0) {
-        if (transport_error(stream, 1)) result = 2;
-        goto done;
-    }
-    response = (CFHTTPMessageRef)CFReadStreamCopyProperty(stream, kCFStreamPropertyHTTPResponseHeader);
-    if (!response && first == 0) result = 2;
-    if (!response || !response_headers(response, head, &expected, &has_expected)) goto done;
-    if (!head) {
-        CFIndex length = first;
-        for (;;) {
-            if (length == 0) break;
-            received += (unsigned long long)length;
-            if (has_expected && received > expected) goto done;
-            frame('D', buffer, (size_t)length);
-            // A framed response is complete at its length; a later close must not fail it.
-            if (has_expected && received == expected) break;
-            length = CFReadStreamRead(stream, buffer, sizeof(buffer));
-            if (length < 0) {
-                if (transport_error(stream, 0)) result = 2;
-                goto done;
-            }
-        }
-        if (has_expected && received != expected) { result = 2; goto done; }
-    }
-    result = 0;
-done:
-    if (result && stream) stream_error = CFReadStreamGetError(stream);
-    if (stream) { CFReadStreamClose(stream); CFRelease(stream); }
-    if (response) CFRelease(response);
-    if (request) CFRelease(request);
-    if (proxy) CFRelease(proxy);
-    free(line);
-    if (invalid) {
-        frame('A', NULL, 0);
-        frame_text('E', invalid_reason);
-        return -1;
-    }
-    if (result == 0) {
-        frame('E', NULL, 0);
-    } else {
-        char message[128];
-        snprintf(message, sizeof(message), "Native HTTP request failed (stream domain %ld, code %ld)",
-                 (long)stream_error.domain, (long)stream_error.error);
-        frame_text(result == 2 ? 'T' : 'E', message);
-    }
-    return 1;
 }
 
 @interface SocketDelegate : NSObject <NSURLSessionWebSocketDelegate>
@@ -406,16 +207,9 @@ static int serve_socket(const char *idle_text) {
 
 int main(int argc, char **argv) {
     @autoreleasepool {
-        // Writes to a closed connection report an error instead of ending the helper.
         signal(SIGPIPE, SIG_IGN);
         start_parent_watch();
         if (argc == 3 && !strcmp(argv[1], "socket")) return serve_socket(argv[2]);
-    }
-    for (;;) {
-        @autoreleasepool {
-            int state = serve_request();
-            if (state == 0) return 0;
-            if (state < 0) return 1;
-        }
+        return serve_requests();
     }
 }
