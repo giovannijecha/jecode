@@ -236,7 +236,8 @@ fn run_once(
             body: options.body.as_ref().map(|body| body.as_bytes()),
             timeout: Some(timeout),
             idle: None,
-            output_limit: 0,
+            // The body streams to the file; this keeps the failure's reason.
+            output_limit: 4 * 1024,
         },
         cancellation,
         &mut |bytes| {
