@@ -77,6 +77,7 @@ impl Agent {
                                     has_usage = true;
                                     usage.update(snapshot);
                                 }
+                                Update::Transport(name) => timing.transport = Some(name),
                                 Update::TextDelta(_) | Update::Reasoning | Update::Working => {
                                     timing.first_update.get_or_insert_with(Instant::now);
                                 }

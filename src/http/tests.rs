@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::server::{self, Server};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::process::Command;
 
 #[test]
 fn wire_url_escapes_rejected_bytes_and_keeps_escapes() {

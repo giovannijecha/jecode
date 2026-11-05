@@ -115,6 +115,19 @@ define this route; it is narrower than the API-key Responses API.
   `stream: true`, `store: false` and the full required history in `input`. No
   continuation IDs, server conversations, output-token caps or unsupported
   sampling parameters are sent.
+- **WebSocket.** On Windows, conversations send the same request as a
+  `response.create` event over one WebSocket on the same path, on both the
+  ChatGPT and API-key routes; it answers about a second sooner than HTTP POST
+  (see [Performance](PERFORMANCE.md#provider-transports)). The full history is
+  still sent and `previous_response_id` is not used, because it measured no
+  better, so nothing depends on connection state. A refused upgrade or a
+  connection that closes twice before answering sends the request over HTTP and
+  keeps that conversation on HTTP for 5 minutes. A connection that closes during
+  a response is an ordinary temporary failure. Connections are replaced after 55
+  minutes, ahead of the provider's 60-minute limit. Changing the conversation
+  closes its socket so the upgrade's `session-id` follows the new conversation.
+  Requests without a conversation, such as titles, stay on HTTP, as do Linux
+  and macOS.
 - **Tools.** System instructions become `instructions`; local calls and results
   become function-call items, with function definitions grouped in a namespace.
 - **Native state.** Ordered output items, encrypted reasoning and assistant

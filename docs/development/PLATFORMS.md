@@ -51,6 +51,10 @@ earlier than the CI runner's version are unverified.
   [Attachments](../usage/ATTACHMENTS.md#platform-requirements).
 - **Connection deadline.** The native HTTP adapters apply a 10-second connection
   deadline on Windows and Linux; the macOS adapter has none.
+- **Provider latency.** Only Windows keeps HTTP adapters and their connections
+  alive between requests and uses HTTP/2 and the OpenAI Responses WebSocket. Linux
+  and macOS start one adapter per HTTP/1.1 request and use HTTP POST on OpenAI
+  routes. See [Performance](PERFORMANCE.md#provider-transports).
 
 ## Interactive terminal bridge
 

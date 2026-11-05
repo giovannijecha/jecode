@@ -75,6 +75,7 @@ pub fn run_observed(
 /// Like `run_observed`, for an executable that starts no child processes,
 /// such as an owned HTTP adapter. Windows launches it directly instead of through the Job
 /// Object supervisor; Unix keeps its process-group boundary.
+#[cfg(any(unix, test))]
 pub fn run_leaf(
     command: &mut Command,
     input: Option<Vec<u8>>,

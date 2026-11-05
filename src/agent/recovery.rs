@@ -94,8 +94,10 @@ impl Agent {
             output_tokens,
             self.tools.attachments(),
             &mut |update| {
-                if !matches!(&update, Update::Waiting { .. } | Update::Usage(_))
-                    && !matches!(&update, Update::TextDelta(delta) if delta.trim().is_empty())
+                if !matches!(
+                    &update,
+                    Update::Waiting { .. } | Update::Usage(_) | Update::Transport(_)
+                ) && !matches!(&update, Update::TextDelta(delta) if delta.trim().is_empty())
                 {
                     timing.first_update.get_or_insert_with(Instant::now);
                 }
@@ -123,6 +125,10 @@ impl Agent {
                     }
                     Update::Reasoning => emit(Event::Reasoning),
                     Update::Working => emit(Event::Working),
+                    Update::Transport(name) => {
+                        timing.transport = Some(name);
+                        Ok(())
+                    }
                     Update::Usage(usage) => {
                         has_usage = true;
                         reported_usage.update(usage);

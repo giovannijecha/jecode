@@ -1,8 +1,12 @@
 //! Native HTTP transport. Request details travel on stdin, never command arguments.
 
+#[cfg(windows)]
+pub(crate) mod adapter;
+#[cfg(windows)]
+mod pool;
+
 use crate::cancel::Cancellation;
-use crate::process::{self, Output};
-use std::process::Command;
+use crate::process::Output;
 use std::time::Duration;
 
 pub(crate) struct Request<'a> {
@@ -20,13 +24,55 @@ pub(crate) fn run(
     cancellation: &Cancellation,
     observer: &mut dyn FnMut(&[u8]) -> Result<(), String>,
 ) -> Result<Output, String> {
-    let mut command = Command::new(crate::native::helper("http")?);
-    crate::auth::isolate_environment(&mut command);
+    let input = wire_request(&request);
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(crate::process::CREATE_NO_WINDOW);
+        pool::run(
+            input,
+            pool::Limits {
+                timeout: request.timeout,
+                idle: request.idle,
+                output: request.output_limit,
+            },
+            cancellation,
+            observer,
+        )
     }
+    #[cfg(unix)]
+    {
+        let mut command = std::process::Command::new(crate::native::helper("http")?);
+        crate::auth::isolate_environment(&mut command);
+        // The native helper owns no descendants; the runner enforces cancellation
+        // and inactivity while forwarding each response chunk to the caller.
+        crate::process::run_leaf(
+            &mut command,
+            Some(input),
+            request.timeout,
+            request.output_limit,
+            cancellation,
+            request.idle,
+            &mut |bytes| observer(bytes),
+        )
+    }
+}
+
+/// What opens a socket adapter; its messages follow on the same stdin.
+#[cfg(windows)]
+pub(crate) fn socket_opening(url: &str, headers: &[(&str, &str)]) -> Vec<u8> {
+    let mut input = encode(wire_url(url).as_bytes());
+    input.push('\n');
+    input.push_str(&headers.len().to_string());
+    input.push('\n');
+    for (name, value) in headers {
+        input.push_str(&encode(name.as_bytes()));
+        input.push('\n');
+        input.push_str(&encode(value.as_bytes()));
+        input.push('\n');
+    }
+    input.into_bytes()
+}
+
+fn wire_request(request: &Request<'_>) -> Vec<u8> {
     let body = request.body.unwrap_or_default();
     let mut input = String::new();
     input.push_str(&encode(wire_url(request.url).as_bytes()));
@@ -51,17 +97,7 @@ pub(crate) fn run(
     input.push('\n');
     let mut input = input.into_bytes();
     input.extend_from_slice(body);
-    // The native helper owns no descendants; the runner enforces cancellation
-    // and inactivity while forwarding each response chunk to the caller.
-    process::run_leaf(
-        &mut command,
-        Some(input),
-        request.timeout,
-        request.output_limit,
-        cancellation,
-        request.idle,
-        &mut |bytes| observer(bytes),
-    )
+    input
 }
 
 fn encode(bytes: &[u8]) -> String {
@@ -147,5 +183,7 @@ impl Decoder {
     }
 }
 
+#[cfg(all(test, windows))]
+mod pool_tests;
 #[cfg(test)]
 mod tests;
