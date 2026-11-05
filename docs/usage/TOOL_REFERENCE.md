@@ -46,7 +46,8 @@ The call has one result, a `steps` array in the same order. Each entry names its
 `tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
 fails on an `error`, a refused or unknown `outcome`, a timeout, a cancellation, a
 non-zero exit or, for `edit`, any file that failed; a multi-file `read` reports
-each path and goes on.
+each path and goes on. A successful MCP `completed` outcome continues. LSP
+statuses other than `ready` and background command timeouts stop the rest.
 `ask_user` and `steps` cannot be steps. Media files need a `read` of their own,
 because the model is shown them only after a single read. If Jecode closes during
 the call, its outcome is unknown and the model is told to check before repeating
@@ -62,8 +63,8 @@ overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
 `parallel: true` on adjacent calls declares them independent, including writes
 and commands; they run in waves of at most four. A call without it ends the
 declared group. `parallel: false` always runs in order. `agent`, `ask_user`,
-`todo_list`, `history:` and `skill:` reads and calls that need approval always
-run in order. Jecode never infers independence from different paths.
+`steps`, `todo_list`, `history:` and `skill:` reads and calls that need approval
+always run in order. Jecode never infers independence from different paths.
 
 In a declared group, each result is saved as it completes and shown in the TUI;
 the model receives all results in the original order. One failure does not undo

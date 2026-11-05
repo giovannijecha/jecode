@@ -164,6 +164,11 @@ fn step_records(
             Some(value) => value.clone(),
             None => Value::object([]),
         };
+        if let Some(coerced) = crate::tools::coerce::arguments(tool, &arguments.encode())
+            && let Ok(coerced) = json::parse(&coerced)
+        {
+            arguments = coerced;
+        }
         numbered(tool, &mut arguments, numbers);
         latest = Some(records.len());
         records.push(Record::Tool {

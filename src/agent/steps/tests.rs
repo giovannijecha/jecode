@@ -6,6 +6,9 @@ use crate::{
 };
 use std::fs;
 
+mod integrations;
+mod interruption;
+
 fn step(tool: &str, arguments: Value) -> Value {
     Value::object([("tool", Value::string(tool)), ("arguments", arguments)])
 }
@@ -299,35 +302,6 @@ fn a_namespaced_tool_name_runs_the_tool() {
     assert_eq!(
         fs::read_to_string(project.path().join("a.txt")).unwrap(),
         "first"
-    );
-}
-
-#[test]
-fn arguments_sent_as_json_text_run_at_every_level() {
-    let project = Directory::new();
-    fs::write(project.path().join("a.txt"), "old").unwrap();
-    let files = r#"[{"path":"a.txt","edits":[{"old_text":"old","new_text":"new"}]}]"#;
-    let edit = Value::object([("files", Value::string(files))]).encode();
-    let write = r#"{"path":"b.txt","content":"text"}"#;
-    let fixture = fixture(vec![
-        Value::object([
-            ("tool", Value::string("edit")),
-            ("arguments", Value::string(edit)),
-        ]),
-        Value::object([
-            ("tool", Value::string("write")),
-            ("arguments", Value::string(write)),
-        ]),
-    ]);
-    let mut agent = agent(&project, &fixture);
-    agent.run_turn("Do it", &mut |_| Ok(())).unwrap();
-    assert_eq!(
-        fs::read_to_string(project.path().join("a.txt")).unwrap(),
-        "new"
-    );
-    assert_eq!(
-        fs::read_to_string(project.path().join("b.txt")).unwrap(),
-        "text"
     );
 }
 

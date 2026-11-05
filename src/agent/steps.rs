@@ -158,15 +158,25 @@ impl Agent {
     }
 }
 
-/// A step that failed stops the rest: they were planned on its success. Every
-/// `outcome` a tool reports means it did not finish: refused, not executed or
-/// unknown. A multi-file edit fails when any file does; a multi-file read
-/// reports each path and goes on, as it does alone.
+/// A step that failed stops the rest: they were planned on its success.
+/// An outcome other than `completed` means refused, failed or unknown. LSP
+/// queries and background commands report failures through their status.
+/// A multi-file edit fails when any file does; a multi-file read reports each
+/// path and goes on, as it does alone.
 fn failed(tool: &str, result: &Value) -> bool {
     result.get("error").is_some()
-        || result.get("outcome").is_some()
+        || result
+            .get("outcome")
+            .is_some_and(|outcome| outcome.as_str() != Some("completed"))
         || result.get("timed_out") == Some(&Value::Bool(true))
         || result.get("cancelled") == Some(&Value::Bool(true))
+        || (tool == "lsp"
+            && result
+                .get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| status != "ready"))
+        || (matches!(tool, "bash" | "exec" | "process")
+            && result.get("status").and_then(Value::as_str) == Some("timed_out"))
         || matches!(result.get("exit_code"), Some(Value::Number(code)) if code != "0")
         || (tool == "edit"
             && result
