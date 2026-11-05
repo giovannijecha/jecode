@@ -1,7 +1,9 @@
 use super::*;
 use crate::backend::FailureKind;
+use crate::http::adapter::{Adapter, Frame};
 use crate::test_support::server::{self, Server};
 use std::io::{Read, Write};
+use std::sync::Arc;
 use std::time::Duration;
 
 mod fixture;
@@ -105,6 +107,107 @@ fn changing_conversation_closes_the_old_socket_and_uses_the_new_session_header()
         Some("conversation-2")
     );
     assert_eq!(second.text, "Two");
+}
+
+#[test]
+fn a_replaced_access_token_opens_a_new_connection() {
+    let server = Server::start(|listener, stop| {
+        let mut first = Peer::new(server::accept(&listener, &stop).unwrap());
+        first.upgrade();
+        first.message().unwrap();
+        first.answer("One");
+        let old_closed = first.message().is_none();
+        if !old_closed {
+            first.answer("Old token");
+            return (old_closed, None);
+        }
+        let mut second = Peer::new(server::accept(&listener, &stop).unwrap());
+        let headers = second.upgrade();
+        second.message().unwrap();
+        second.answer("Two");
+        (old_closed, Some(headers))
+    });
+    let session = Session::fixture("fixture-access-token");
+    let api = Api::fixture(session.clone(), &server.endpoint).with_sockets();
+    let mut backend = OpenAi::with_api(api, "gpt-fixture".into()).unwrap();
+    backend.set_conversation(Some("conversation-1".into()));
+    assert_eq!(sample(&backend, "first").unwrap().text, "One");
+    session.fixture_replace_token("replaced-access-token");
+    assert_eq!(sample(&backend, "second").unwrap().text, "Two");
+    let (old_closed, headers) = server.finish();
+    assert!(old_closed);
+    assert_eq!(
+        header(&headers.unwrap(), "authorization"),
+        Some("Bearer replaced-access-token")
+    );
+}
+
+#[test]
+fn signing_out_closes_the_connection_and_reports_it_like_http() {
+    let server = Server::start(|listener, stop| {
+        let mut peer = Peer::new(server::accept(&listener, &stop).unwrap());
+        peer.upgrade();
+        peer.message().unwrap();
+        peer.answer("One");
+        let closed = peer.message().is_none();
+        if !closed {
+            peer.answer("After sign-out");
+        }
+        // A second connection would mean the signed-out request went elsewhere.
+        (closed, server::accept(&listener, &stop).is_err())
+    });
+    let session = Session::fixture("fixture-access-token");
+    let api = Api::fixture(session.clone(), &server.endpoint).with_sockets();
+    let mut backend = OpenAi::with_api(api, "gpt-fixture".into()).unwrap();
+    backend.set_conversation(Some("conversation-1".into()));
+    assert_eq!(sample(&backend, "first").unwrap().text, "One");
+    session.fixture_replace_token("");
+    let failure = sample(&backend, "second").err().unwrap();
+    assert!(
+        failure.message.contains("signed out"),
+        "{}",
+        failure.message
+    );
+    assert!(matches!(failure.kind, FailureKind::Terminal));
+    assert_eq!(server.finish(), (true, true));
+}
+
+#[test]
+fn dropping_the_backend_closes_its_connection() {
+    let server = Server::start(|listener, stop| {
+        let mut peer = Peer::new(server::accept(&listener, &stop).unwrap());
+        peer.upgrade();
+        peer.message().unwrap();
+        peer.answer("One");
+        // Only the adapter noticing its closed stdin can end this read.
+        peer.message().is_none()
+    });
+    let backend = backend(&server.endpoint);
+    assert_eq!(sample(&backend, "first").unwrap().text, "One");
+    drop(backend);
+    assert!(server.finish());
+}
+
+#[test]
+fn an_idle_socket_adapter_exits_and_closes_its_connection() {
+    let server = Server::start(|listener, stop| {
+        let mut peer = Peer::new(server::accept(&listener, &stop).unwrap());
+        peer.upgrade();
+        peer.message().is_none()
+    });
+    let url = format!("{}/responses", server.endpoint);
+    let mut adapter = Adapter::start(&["socket", "300"]).unwrap();
+    let opening = Arc::new(crate::http::socket_opening(&url, &[]));
+    let delivery = adapter.deliver(opening).unwrap();
+    assert!(matches!(adapter.frames.recv().unwrap(), Frame::Accepted));
+    assert!(adapter.recover(delivery));
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while adapter.alive() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    adapter.stop();
+    assert!(server.finish());
 }
 
 #[test]

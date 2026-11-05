@@ -95,17 +95,8 @@ impl Api {
                     .map_or_else(|| "unknown".into(), |code| code.to_string()),
                 stderr.trim(),
             );
-            return Err(with_input_error(
-                if matches!(
-                    output.exit_code,
-                    Some(5 | 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56 | 92)
-                ) {
-                    Failure::temporary(message)
-                } else {
-                    Failure::from(message)
-                },
-                input_error,
-            ));
+            // The adapter never repeats a POST, and repeating this one is safe.
+            return Err(with_input_error(Failure::temporary(message), input_error));
         }
         let response = String::from_utf8(output.stdout).map_err(|_| {
             with_input_error("OpenRouter returned invalid UTF-8".into(), input_error)

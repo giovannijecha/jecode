@@ -95,7 +95,7 @@ token totals also follow the number of requests the model chose, which varies
 between runs. Provider cache drops added 28k to the GPT average after the change
 and 4k before, mostly from one drop in one run; such drops also occur in earlier HTTP
 runs. With four runs a side, wall time does not resolve a saving this size: read
-the per-request lines, which amount to about 30 s per GPT run and 15 s per Claude
+the first-update line, which amounts to about 30 s per GPT run and 20 s per Claude
 run. The harness starts a new process each turn, so these runs lose the reused
 connection five times per conversation. They say nothing about Linux or macOS,
 other networks or task quality.

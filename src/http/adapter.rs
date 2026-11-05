@@ -102,6 +102,12 @@ impl Adapter {
         self.child.id()
     }
 
+    /// What the parent exiting does to the adapter.
+    #[cfg(test)]
+    pub(crate) fn close_input_for_test(&mut self) {
+        self.input = None;
+    }
+
     #[cfg(test)]
     pub(crate) fn exit_for_test(&mut self) {
         self.child.kill().unwrap();

@@ -124,10 +124,13 @@ define this route; it is narrower than the API-key Responses API.
   connection that closes twice before answering sends the request over HTTP and
   keeps that conversation on HTTP for 5 minutes. A connection that closes during
   a response is an ordinary temporary failure. Connections are replaced after 55
-  minutes, ahead of the provider's 60-minute limit. Changing the conversation
-  closes its socket so the upgrade's `session-id` follows the new conversation.
-  Requests without a conversation, such as titles, stay on HTTP, as do Linux
-  and macOS.
+  minutes, ahead of the provider's 60-minute limit, and close after 5 idle minutes,
+  because a finished collaborator keeps its backend. Each request asks for the
+  access token as HTTP does: a refreshed token replaces the connection and a
+  sign-out closes it, since the upgrade authenticates only once. Changing the
+  conversation closes its socket so the upgrade's `session-id` follows the new
+  conversation. Requests without a conversation, such as titles, stay on HTTP, as
+  do Linux and macOS.
 - **Tools.** System instructions become `instructions`; local calls and results
   become function-call items, with function definitions grouped in a namespace.
 - **Native state.** Ordered output items, encrypted reasoning and assistant

@@ -307,6 +307,18 @@ impl Session {
         session._fixture_dir = Some(directory);
         session
     }
+    /// Rewrites the record as a refresh or another process does; an empty token
+    /// is a signed-out account.
+    #[cfg(test)]
+    pub fn fixture_replace_token(&self, token: &str) {
+        let cancel = Cancellation::default();
+        let files = self.store.files();
+        let mut record = files
+            .record(&self.client_id, &self.subject, &cancel)
+            .unwrap();
+        record.access_token = token.into();
+        files.save_record(&record, &cancel).unwrap();
+    }
     pub fn client_id(&self) -> &str {
         &self.client_id
     }

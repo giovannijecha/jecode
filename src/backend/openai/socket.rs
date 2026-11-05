@@ -22,6 +22,9 @@ const LIFETIME: Duration = Duration::from_secs(55 * 60);
 /// After a refusal or repeated closes this conversation uses HTTP for a while,
 /// instead of paying for a failed connection on every request.
 const REFUSAL_PAUSE: Duration = Duration::from_secs(5 * 60);
+/// Milliseconds. A finished collaborator keeps its backend, so without this it
+/// would hold a process and a provider connection it may never use again.
+const IDLE_LIMIT: &str = "300000";
 const POLL: Duration = Duration::from_millis(10);
 
 #[derive(Default)]
@@ -33,6 +36,8 @@ pub(super) struct Channel {
 struct Connection {
     adapter: Adapter,
     opened: Instant,
+    /// The upgrade authenticates once, with this token.
+    token: String,
 }
 
 enum Round {
@@ -72,7 +77,16 @@ pub(super) fn exchange(
         if api.cancellation.requested() {
             return Err(Failure::from("Operation cancelled"));
         }
-        let Some(connection) = channel.ready(api, conversation) else {
+        // Asked per request, as HTTP does, so that a sign-out or a refreshed
+        // token also ends the connection authenticated with the old one.
+        let token = match api.bearer() {
+            Ok(token) => token,
+            Err(failure) => {
+                channel.discard();
+                return Err(failure);
+            }
+        };
+        let Some(connection) = channel.ready(api, conversation, token) else {
             if api.cancellation.requested() {
                 return Err(Failure::from("Operation cancelled"));
             }
@@ -115,12 +129,16 @@ impl Channel {
         self.paused_until = None;
     }
 
-    fn ready(&mut self, api: &Api, conversation: &str) -> Option<&mut Connection> {
-        if self.connection.as_mut().is_some_and(Connection::usable) {
+    fn ready(&mut self, api: &Api, conversation: &str, token: String) -> Option<&mut Connection> {
+        if self
+            .connection
+            .as_mut()
+            .is_some_and(|connection| connection.token == token && connection.usable())
+        {
             return self.connection.as_mut();
         }
         self.discard();
-        self.connection = Connection::open(api, conversation);
+        self.connection = Connection::open(api, conversation, token);
         self.connection.as_mut()
     }
 
@@ -132,9 +150,7 @@ impl Channel {
 }
 
 impl Connection {
-    fn open(api: &Api, conversation: &str) -> Option<Self> {
-        // A credential failure is reported by the HTTP path this falls back to.
-        let token = api.bearer().ok()?;
+    fn open(api: &Api, conversation: &str, token: String) -> Option<Self> {
         let authorization = format!("Bearer {token}");
         let mut headers = vec![
             ("Authorization", authorization.as_str()),
@@ -145,7 +161,7 @@ impl Connection {
         }
         let url = format!("{}/responses", api.base_url);
         let opening = crate::http::socket_opening(&url, &headers);
-        let mut adapter = Adapter::start(&["socket"]).ok()?;
+        let mut adapter = Adapter::start(&["socket", IDLE_LIMIT]).ok()?;
         let Some(delivery) = adapter.deliver(Arc::new(opening)) else {
             adapter.stop();
             return None;
@@ -159,7 +175,11 @@ impl Connection {
             match adapter.frames.recv_timeout(POLL) {
                 Ok(Frame::Accepted) => {
                     return if adapter.recover(delivery) {
-                        Some(Self { adapter, opened })
+                        Some(Self {
+                            adapter,
+                            opened,
+                            token,
+                        })
                     } else {
                         adapter.stop();
                         None

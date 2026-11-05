@@ -1,3 +1,4 @@
+use super::adapter::{Adapter, Frame};
 use super::pool::{Limits, Pool};
 use super::*;
 use crate::test_support::server::{self, Server};
@@ -339,6 +340,43 @@ fn the_output_limit_bounds_the_report_but_not_the_observer() {
     assert!(output.stdout_truncated);
     assert_eq!(output.stdout_bytes, seen.len());
     assert!(seen.ends_with(b"ok"));
+    server.finish();
+}
+
+fn exits_within_seconds(adapter: &mut Adapter) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while adapter.alive() {
+        assert!(Instant::now() < deadline, "the adapter outlived its parent");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn an_adapter_exits_with_its_parent_while_idle_and_during_a_response() {
+    let mut idle = Adapter::start(&[]).unwrap();
+    idle.close_input_for_test();
+    exits_within_seconds(&mut idle);
+    idle.stop();
+
+    let received = Arc::new(Barrier::new(2));
+    let server = Server::start({
+        let received = Arc::clone(&received);
+        move |listener, stop| {
+            let stream = server::accept(&listener, &stop).unwrap();
+            let mut reader = BufReader::new(stream);
+            assert!(read_request(&mut reader));
+            received.wait();
+            let _ = stop.wait(Duration::from_secs(30));
+        }
+    });
+    let mut busy = Adapter::start(&[]).unwrap();
+    let delivery = busy.deliver(Arc::new(input(&server.endpoint))).unwrap();
+    assert!(matches!(busy.frames.recv().unwrap(), Frame::Accepted));
+    assert!(busy.recover(delivery));
+    received.wait();
+    busy.close_input_for_test();
+    exits_within_seconds(&mut busy);
+    busy.stop();
     server.finish();
 }
 

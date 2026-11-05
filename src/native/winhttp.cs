@@ -93,7 +93,7 @@ public static partial class JecodeHttp {
     static bool opened;
 
     public static int Main(string[] arguments) {
-        if (arguments.Length == 1 && arguments[0] == "socket") return ServeSocket();
+        if (arguments.Length == 2 && arguments[0] == "socket") return ServeSocket(Number(arguments[1]));
         var queue = new BlockingCollection<Exchange>();
         var reader = new Thread(() => Receive(queue));
         reader.IsBackground = true;

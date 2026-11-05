@@ -1,4 +1,5 @@
-// One WebSocket connection per helper process, selected by the `socket` argument.
+// One WebSocket connection per helper process, selected by the arguments `socket`
+// and an idle limit in milliseconds, after which the helper exits without a frame.
 // Stdin: base64 URL, header count, base64 name/value pairs, then for each message
 // its byte length on a line and its UTF-8 bytes. Closing stdin ends the helper.
 // Stdout, in the frames of winhttp.cs: 'A' once connected, 'D' per whole message,
@@ -31,7 +32,10 @@ public static partial class JecodeHttp {
     static extern uint WinHttpWebSocketReceive(IntPtr socket, byte[] buffer, uint length,
         out uint read, out uint type);
 
-    static int ServeSocket() {
+    // Environment.TickCount of the last message in either direction.
+    static int activity;
+
+    static int ServeSocket(int idleLimit) {
         using (var input = new BufferedStream(Console.OpenStandardInput()))
         using (var output = Console.OpenStandardOutput()) {
             try {
@@ -47,11 +51,15 @@ public static partial class JecodeHttp {
                     exchange.Headers.Add(new string[] { name, value });
                 }
                 IntPtr socket = Upgrade(uri, exchange);
-                Frame(output, 'A', null, 0);
-                var sender = new Thread(() => SendMessages(input, socket));
-                sender.IsBackground = true;
-                sender.Start();
-                ReceiveMessages(socket, output);
+                Touch();
+                int check = idleLimit / 4 + 1;
+                using (new Timer(_ => ExitWhenIdle(idleLimit), null, check, check)) {
+                    Frame(output, 'A', null, 0);
+                    var sender = new Thread(() => SendMessages(input, socket));
+                    sender.IsBackground = true;
+                    sender.Start();
+                    ReceiveMessages(socket, output);
+                }
             } catch (Exception error) {
                 byte[] message = Encoding.UTF8.GetBytes(Describe(error));
                 try {
@@ -99,12 +107,23 @@ public static partial class JecodeHttp {
         return socket;
     }
 
+    static void Touch() {
+        Volatile.Write(ref activity, Environment.TickCount);
+    }
+
+    // The parent replaces a connection that ended, so leaving is always safe:
+    // a message already read counts as activity and one still unread is sent again.
+    static void ExitWhenIdle(int idleLimit) {
+        if (unchecked(Environment.TickCount - Volatile.Read(ref activity)) >= idleLimit) Environment.Exit(0);
+    }
+
     // Owns stdin, so a parent that exits ends the helper even while it waits for a message.
     static void SendMessages(Stream input, IntPtr socket) {
         try {
             for (;;) {
                 string line = Line(input);
                 if (line == null) Environment.Exit(0);
+                Touch();
                 byte[] message = new byte[Number(line)];
                 for (int filled = 0; filled < message.Length;) {
                     int read = input.Read(message, filled, message.Length - filled);
@@ -129,6 +148,7 @@ public static partial class JecodeHttp {
             uint error = WinHttpWebSocketReceive(socket, buffer, (uint)buffer.Length, out read, out type);
             if (error != 0) throw new IOException("Native HTTP socket failed (" + error + ")");
             if (type == CloseMessage) throw new IOException("Native HTTP socket was closed");
+            Touch();
             message.Write(buffer, 0, (int)read);
             if (type == Utf8Message || type == BinaryMessage) {
                 Frame(output, 'D', message.GetBuffer(), (int)message.Length);
