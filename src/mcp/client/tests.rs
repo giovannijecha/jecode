@@ -39,7 +39,7 @@ fn reply(stream: &mut TcpStream, status: u16, headers: &str, body: &str) {
     };
     write!(
         stream,
-        "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\n{kind}{headers}\r\n{body}",
+        "HTTP/1.1 {status} OK\r\nConnection: close\r\nContent-Length: {}\r\n{kind}{headers}\r\n{body}",
         body.len()
     )
     .unwrap();
@@ -102,7 +102,7 @@ fn modern_discovery_pagination_and_single_tool_dispatch() {
             requests.push(read_request(&mut stream));
             if id == 4 {
                 let event = format!("data: {}\n\n", fixture_response(id, result));
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n", event.len()).unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n", event.len()).unwrap();
                 for part in event.as_bytes().chunks(3) {
                     stream.write_all(part).unwrap();
                 }
