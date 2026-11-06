@@ -9,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod diagnostics;
 mod frames;
 use frames::Frames;
 

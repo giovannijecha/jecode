@@ -110,6 +110,7 @@ pub(super) fn edit_with_change(
                 if index == 0 { "original" } else { "staged" },
                 updated.len() as u64,
                 [position as u64, second as u64],
+                old.len(),
                 |start, size| Ok(updated.as_bytes()[start as usize..start as usize + size].to_vec()),
             )?;
             return Ok((result, None));

@@ -1,6 +1,82 @@
 use super::*;
 
 #[test]
+fn long_ambiguous_matches_supply_trailing_context_for_original_and_staged_retries() {
+    let needle = format!("BEGIN{}END", "Ω".repeat(180));
+    for padding in [5000, MAX_DIFF_BYTES / 2] {
+        let directory = Directory::new();
+        let root = fs::canonicalize(directory.path()).unwrap();
+        let path = root.join("source.txt");
+        let original = format!(
+            "{}{}{needle} LEFT {}\n{}{}{needle} RIGHT {}\n{}",
+            "x".repeat(padding),
+            "p".repeat(128),
+            "日本".repeat(80),
+            "x".repeat(padding),
+            "p".repeat(128),
+            "🦀".repeat(80),
+            "x".repeat(padding)
+        );
+        for staged in [false, true] {
+            fs::write(&path, &original).unwrap();
+            let edits = if staged {
+                vec![(" RIGHT", " STAGED_RIGHT"), (needle.as_str(), "wrong")]
+            } else {
+                vec![(needle.as_str(), "wrong")]
+            };
+            let rejected = edit(&root, &batch(&edits)).unwrap();
+            let matching = if staged {
+                original.replacen(" RIGHT", " STAGED_RIGHT", 1)
+            } else {
+                original.clone()
+            };
+            assert_eq!(
+                rejected.get("match_context_source").and_then(Value::as_str),
+                Some(if staged { "staged" } else { "original" })
+            );
+            let windows = rejected
+                .get("match_context")
+                .and_then(Value::as_array)
+                .unwrap();
+            for (index, window) in windows.iter().enumerate() {
+                let offset = window.get("offset").and_then(Value::as_usize).unwrap();
+                let after = window
+                    .get("after_text")
+                    .and_then(Value::as_str)
+                    .expect("long matches need text after their end");
+                let after_offset = window
+                    .get("after_byte_offset")
+                    .and_then(Value::as_usize)
+                    .unwrap();
+                assert_eq!(after_offset, offset + needle.len());
+                assert_eq!(&matching[after_offset..after_offset + after.len()], after);
+                assert!(after.starts_with(if index == 0 {
+                    " LEFT"
+                } else if staged {
+                    " STAGED_RIGHT"
+                } else {
+                    " RIGHT"
+                }));
+                assert!(after.len() <= 96);
+            }
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+            let exact = format!("{needle}{}", if staged { " STAGED_RIGHT" } else { " LEFT" });
+            let retry = if staged {
+                vec![(" RIGHT", " STAGED_RIGHT"), (exact.as_str(), "fixed")]
+            } else {
+                vec![(exact.as_str(), "fixed")]
+            };
+            let corrected = edit(&root, &batch(&retry)).unwrap();
+            assert!(corrected.get("error").is_none(), "{corrected:?}");
+            assert_eq!(
+                fs::read_to_string(&path).unwrap(),
+                matching.replacen(&exact, "fixed", 1)
+            );
+        }
+    }
+}
+
+#[test]
 fn middle_ambiguity_returns_exact_windows_for_a_corrected_retry() {
     for padding in [5000, MAX_DIFF_BYTES / 2] {
         let directory = Directory::new();

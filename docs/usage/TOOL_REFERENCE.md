@@ -145,7 +145,9 @@ An ambiguous edit returns two bounded literal `match_context` excerpts with
 match byte offsets and `excerpt_byte_offset`. `match_context_source` says
 `original` for the first replacement or `staged` after preceding replacements;
 only `original` offsets apply to `read` with `byte_offset`, because staged text
-is not on disk. Use these excerpts to make the next exact match unique.
+is not on disk. Long matches also provide a bounded `after_text` excerpt at
+`after_byte_offset`, so the text after the match remains available without
+repeating the whole match. Use these excerpts to make the next exact match unique.
 `current_content` still previews the unchanged original file; no replacement
 was saved. For a missing match, read the required section before retrying.
 

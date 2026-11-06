@@ -168,6 +168,58 @@ fn independent_reads_overlap_and_results_keep_source_order() {
 }
 
 #[test]
+fn duplicate_ids_split_declared_batches_without_serializing_distinct_suffix() {
+    let project = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    let calls = [
+        ("reused", "first.txt"),
+        ("reused", "second.txt"),
+        ("third", "third.txt"),
+        ("fourth", "fourth.txt"),
+    ]
+    .map(|(id, path)| ToolCall {
+        id: id.into(),
+        name: "write".into(),
+        arguments: Value::object([
+            ("path", Value::string(path)),
+            ("content", Value::string(path)),
+            ("parallel", Value::Bool(true)),
+        ])
+        .encode(),
+    });
+    let mut events = Vec::new();
+    agent
+        .execute_calls(&calls, &mut |event| {
+            match event {
+                Event::ToolStarted { arguments, .. } => events.push(format!(
+                    "start:{}",
+                    arguments.get("path").and_then(Value::as_str).unwrap()
+                )),
+                Event::ToolFinished { id, .. } => events.push(format!("finish:{id}")),
+                _ => (),
+            }
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(&events[..2], ["start:first.txt", "finish:reused"]);
+    assert_eq!(
+        &events[2..5],
+        ["start:second.txt", "start:third.txt", "start:fourth.txt"]
+    );
+    assert_eq!(events.len(), 8);
+    assert!(events[5..].iter().all(|event| event.starts_with("finish:")));
+    for path in ["first.txt", "second.txt", "third.txt", "fourth.txt"] {
+        assert_eq!(fs::read_to_string(project.path().join(path)).unwrap(), path);
+    }
+    fixture.finish();
+}
+
+#[test]
 fn cancellation_waits_for_every_started_read() {
     let started = Arc::new((Mutex::new(0usize), Condvar::new()));
     let finished = AtomicUsize::new(0);

@@ -180,6 +180,7 @@ pub(super) fn edit(
                     if index == 0 { "original" } else { "staged" },
                     view.len(),
                     [position.unwrap(), second],
+                    old.len(),
                     |start, size| {
                         view.read_range(&mut original, start, size)
                             .map_err(|error| error.to_string())

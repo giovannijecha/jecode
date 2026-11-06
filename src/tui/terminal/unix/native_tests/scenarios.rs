@@ -293,7 +293,7 @@ fn native_unix_direct_input() {
     t.wait("NATIVE_SECOND_READY");
     t.send(b"finish\r");
     t.wait_after("NATIVE_PTY_END", detached);
-    t.wait_after("exited 0", detached);
+    t.wait_for_terminal_exit(detached);
     // Two Escapes inside the parser's wait for a sequence would count as one.
     t.send(b"\x1b");
     pause(200);
