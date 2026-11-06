@@ -1,9 +1,8 @@
 //! Keyboard behavior checked through the public browser actions in Chromium.
-use super::Registry;
 use crate::cancel::Cancellation;
 use crate::json::Value;
-use crate::scratch::Area;
-use crate::test_support::Directory;
+mod session;
+use session::Session;
 
 const PAGE: &str = r#"document.body.innerHTML = `
 <input id="before"><textarea id="editor"></textarea><input id="after">
@@ -20,75 +19,6 @@ for (const type of ['keydown', 'keypress', 'keyup', 'beforeinput', 'input']) {
 window.submitted = 0;
 document.querySelector('form').onsubmit = e => { e.preventDefault(); submitted++; };
 true"#;
-
-struct Session {
-    registry: Registry,
-    area: Area,
-    _directory: Directory,
-}
-
-impl Session {
-    fn new() -> Self {
-        let directory = Directory::new();
-        let area = Area::new(
-            directory.path().join("123456-789"),
-            directory.path().into(),
-            "123456-789",
-        )
-        .unwrap();
-        let session = Self {
-            registry: Registry::default(),
-            area,
-            _directory: directory,
-        };
-        session.run("open", &[]);
-        assert_eq!(session.value(PAGE), Value::Bool(true));
-        session
-    }
-
-    fn attempt(&self, action: &str, fields: &[(&str, Value)]) -> Result<Value, String> {
-        let mut arguments = Value::object([("action", Value::string(action))]);
-        if let Value::Object(entries) = &mut arguments {
-            for (key, value) in fields {
-                entries.insert((*key).into(), value.clone());
-            }
-        }
-        self.registry
-            .execute(&self.area, None, &arguments, &Cancellation::default())
-    }
-
-    fn run(&self, action: &str, fields: &[(&str, Value)]) -> Value {
-        self.attempt(action, fields)
-            .unwrap_or_else(|error| panic!("{action}: {error}"))
-    }
-
-    fn value(&self, expression: &str) -> Value {
-        self.run("evaluate", &[("expression", Value::string(expression))])
-            .get("value")
-            .unwrap()
-            .clone()
-    }
-
-    fn press(&self, key: &str, modifiers: usize) {
-        self.run(
-            "press",
-            &[
-                ("key", Value::string(key)),
-                ("modifiers", Value::number(modifiers)),
-            ],
-        );
-    }
-
-    fn click(&self, selector: &str) {
-        self.run("click", &[("selector", Value::string(selector))]);
-    }
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        self.registry.stop_all();
-    }
-}
 
 #[test]
 #[ignore = "requires installed Chromium"]
@@ -410,4 +340,91 @@ fn live_chromium_dialog_opened_by_a_key_is_reported_and_can_be_answered() {
     assert_eq!(session.value("answer"), Value::Bool(true));
     session.run("type", &[("text", Value::string("cd"))]);
     assert_eq!(session.value("editor.value"), Value::string("abcd"));
+}
+
+#[test]
+#[ignore = "requires installed Chromium"]
+fn live_chromium_dialog_closed_elsewhere_unblocks_the_original_connection() {
+    let session = Session::new();
+    let port = session.registry.browsers.lock().unwrap()[0].port;
+    let targets = super::transport::http_get(port, "/json/list").unwrap();
+    let url = targets
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|target| target.get("type").and_then(Value::as_str) == Some("page"))
+        .unwrap()
+        .get("webSocketDebuggerUrl")
+        .and_then(Value::as_str)
+        .unwrap();
+    let mut outside = super::transport::Cdp::connect(url).unwrap();
+    outside
+        .call(
+            "Page.enable",
+            Value::object([]),
+            &Cancellation::default(),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
+    session.value("window.answer = 'none'; editor.onkeydown = e => { e.preventDefault(); answer = confirm('External close?'); }; true");
+    let error = session
+        .attempt(
+            "press",
+            &[
+                ("selector", Value::string("#editor")),
+                ("key", Value::string("q")),
+            ],
+        )
+        .unwrap_err();
+    assert!(error.contains("External close?"), "{error}");
+    // A browser-side command must remain responsive while the renderer is blocked.
+    let version = outside
+        .call(
+            "Browser.getVersion",
+            Value::object([]),
+            &Cancellation::default(),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
+    assert!(version.get("product").and_then(Value::as_str).is_some());
+    // Another controller closes the dialog, as a person can in a visible window.
+    outside
+        .call(
+            "Page.handleJavaScriptDialog",
+            Value::object([("accept", Value::Bool(true))]),
+            &Cancellation::default(),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
+    assert_eq!(session.value("answer"), Value::Bool(true));
+}
+
+#[test]
+#[ignore = "requires installed Chromium"]
+fn live_chromium_interrupted_key_release_reports_input_already_applied() {
+    let session = Session::new();
+    session.value("editor.onkeyup = e => { if (e.key === 'b') confirm('Release b?'); }; true");
+    let error = session
+        .attempt(
+            "type",
+            &[
+                ("selector", Value::string("#editor")),
+                ("text", Value::string("abc")),
+            ],
+        )
+        .unwrap_err();
+    session.run(
+        "cdp",
+        &[
+            ("method", Value::string("Page.handleJavaScriptDialog")),
+            ("params", Value::object([("accept", Value::Bool(false))])),
+        ],
+    );
+    // The second key's down event changed the page before its release failed.
+    assert_eq!(session.value("editor.value"), Value::string("ab"));
+    assert!(error.starts_with("1 of 3 keys completed: "), "{error}");
+    assert!(
+        error.contains("keyUp") && error.contains("may already have acted"),
+        "{error}"
+    );
 }

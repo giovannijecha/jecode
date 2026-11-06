@@ -177,6 +177,15 @@ fn a_dialog_stops_input_at_once_and_blocks_calls_until_answered() {
             .unwrap();
             return (vec![opening], None);
         }
+        if method == "Page.handleJavaScriptDialog" {
+            return (
+                vec![Value::object([(
+                    "method",
+                    Value::string("Page.javascriptDialogClosed"),
+                )])],
+                Some(Value::object([])),
+            );
+        }
         (vec![], Some(Value::object([])))
     });
     let mut connection = Cdp::connect(&url).unwrap();
@@ -194,8 +203,8 @@ fn a_dialog_stops_input_at_once_and_blocks_calls_until_answered() {
     assert!(error.starts_with("1 of 3 keys completed: "), "{error}");
     assert!(error.contains("confirm") && error.contains("\"Sure?\""));
     assert!(error.contains("Page.handleJavaScriptDialog"));
-    // Further calls are refused without reaching the page or losing the
-    // connection, which is what lets the model answer the dialog.
+    // A browser-side probe refreshes events without dispatching renderer input
+    // or losing the connection needed to answer the dialog.
     let refused = connection
         .call(
             "Runtime.evaluate",
@@ -206,7 +215,8 @@ fn a_dialog_stops_input_at_once_and_blocks_calls_until_answered() {
         .unwrap_err();
     assert!(refused.contains("\"Sure?\""));
     assert!(connection.usable());
-    assert_eq!(calls.lock().unwrap().len(), 3);
+    assert_eq!(calls.lock().unwrap().len(), 4);
+    assert_eq!(calls.lock().unwrap()[3].0, "Browser.getVersion");
     connection
         .call(
             "Page.handleJavaScriptDialog",
@@ -226,8 +236,8 @@ fn a_dialog_stops_input_at_once_and_blocks_calls_until_answered() {
     drop(connection);
     server.join().unwrap();
     let calls = calls.lock().unwrap();
-    assert_eq!(calls[3].0, "Page.handleJavaScriptDialog");
-    assert_eq!(calls[4].0, "Runtime.evaluate");
+    assert_eq!(calls[4].0, "Page.handleJavaScriptDialog");
+    assert_eq!(calls[5].0, "Runtime.evaluate");
 }
 
 #[test]

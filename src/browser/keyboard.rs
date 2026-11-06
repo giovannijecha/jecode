@@ -68,7 +68,15 @@ pub(super) fn run(
                 })
                 // Delivered keys stay applied, so a retry needs to know them.
                 .map_err(|error| {
-                    if completed == 0 || cancellation.requested() {
+                    if cancellation.requested() {
+                        return error;
+                    }
+                    let error = if kind == "keyUp" {
+                        format!("keyUp did not complete; the current key may already have acted: {error}")
+                    } else {
+                        error
+                    };
+                    if completed == 0 {
                         error
                     } else {
                         format!("{completed} of {total} keys completed: {error}")

@@ -7,6 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(super) use crate::attachments::base64::encode as base64;
 
 #[cfg(test)]
+mod dialog_tests;
+#[cfg(test)]
 mod tests;
 
 /// Whether a `Cdp::call` error came from its deadline rather than the page.
@@ -57,6 +59,7 @@ pub(super) fn http_get(port: u16, path: &str) -> Result<Value, String> {
 }
 
 const ANSWER_DIALOG: &str = "Page.handleJavaScriptDialog";
+const DIALOG_STATUS: &str = "Browser.getVersion";
 
 pub(super) struct Cdp {
     stream: TcpStream,
@@ -173,15 +176,32 @@ impl Cdp {
         cancellation: &Cancellation,
         timeout: Duration,
     ) -> Result<Value, String> {
+        let started = Instant::now();
+        if self.dialog.is_some() && !matches!(method, ANSWER_DIALOG | DIALOG_STATUS) {
+            // This browser-side round trip stays responsive during a dialog and
+            // receives any close event queued by a person or another controller.
+            self.exchange(DIALOG_STATUS, Value::object([]), cancellation, timeout)?;
+            if let Some(dialog) = &self.dialog {
+                return Err(dialog.clone());
+            }
+        }
+        self.exchange(
+            method,
+            params,
+            cancellation,
+            timeout.saturating_sub(started.elapsed()),
+        )
+    }
+
+    fn exchange(
+        &mut self,
+        method: &str,
+        params: Value,
+        cancellation: &Cancellation,
+        timeout: Duration,
+    ) -> Result<Value, String> {
         if !self.usable {
             return Err("DevTools connection is no longer usable".into());
-        }
-        // A blocked call would time out and force a reconnection that the open
-        // dialog also blocks, so report it and keep this connection to answer it.
-        if method != ANSWER_DIALOG
-            && let Some(dialog) = &self.dialog
-        {
-            return Err(dialog.clone());
         }
         self.next_id += 1;
         let id = self.next_id;
@@ -232,15 +252,12 @@ impl Cdp {
                 if let Some(error) = value.get("error") {
                     return Err(format!("DevTools {method}: {}", error.encode()));
                 }
-                if method == ANSWER_DIALOG {
-                    self.dialog = None;
-                }
                 return Ok(value.get("result").cloned().unwrap_or(Value::Null));
             }
             if value.get("method").is_some() {
                 self.track_dialog(&value);
                 self.events.push(value);
-                if method != ANSWER_DIALOG
+                if !matches!(method, ANSWER_DIALOG | DIALOG_STATUS)
                     && let Some(dialog) = &self.dialog
                 {
                     return Err(dialog.clone());

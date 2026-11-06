@@ -336,7 +336,9 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`, `type
   focus, including navigation performed by the app. An element that neither takes
   focus nor contains it is an error. The whole keyboard action shares `timeout_ms`
   (default 15,000). Keys already delivered stay applied, so an error after a partial
-  sequence says how many completed. A key that navigates replaces the page later keys
+  sequence says how many key-down/key-up pairs completed. If key-up fails, the
+  current key may already have acted; inspect the page before retrying.
+  A key that navigates replaces the page later keys
   would reach: send those in a new call after `wait`.
 - `fill` replaces an input's value using text insertion, without per-character
   keyboard events. Use `type` and `press` when verifying an editor, shortcuts or
@@ -345,8 +347,11 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`, `type
   Enter, types `second`, presses Tab, then types `third` wherever focus moved.
 - A JavaScript dialog (`alert`, `confirm`, `prompt`, `beforeunload`) blocks its page.
   The action that meets one fails at once with its type and text, and later actions
-  on that tab fail the same way until `cdp` calls `Page.handleJavaScriptDialog` with
-  `params` such as `{"accept":true}`.
+  on that tab fail the same way while it remains open. Use `cdp` with
+  `Page.handleJavaScriptDialog` and `params` such as `{"accept":true}`, or close it
+  in a visible window. Before refusing a later action, Jecode refreshes pending
+  dialog events through a browser-side command, so an external close also resumes
+  the tab. A second dialog remains pending until it is answered in turn.
 - `wait` waits for `text` in the page or the selected element, up to
   `timeout_ms` (default 15,000). On timeout it reports the elapsed time, tab,
   URL and whether the selector or the text was missing.
