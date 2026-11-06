@@ -84,8 +84,11 @@ impl Parser {
             13 => (13, false),
             1..=26 => (u16::from(byte) + 64, true),
             29 => (221, true), // Ctrl+] leaves direct terminal input.
-            0 | 28..=31 => return vec![],
-            _ => (u16::from(byte.to_ascii_uppercase()), false),
+            0 => (32, true),
+            28 => (220, true),
+            30 => (54, true),
+            31 => (189, true),
+            _ => (key_code(byte), false),
         };
         vec![Key {
             code,
@@ -195,14 +198,52 @@ fn modifiers(value: u16) -> Option<u8> {
     Some((bits & 1) << 1 | (bits & 2) >> 1 | bits & 4)
 }
 
+/// The shared input model uses Windows virtual-key codes, where the values of ASCII
+/// punctuation mean navigation: `.` would read as Delete and `'` as Right. Letters,
+/// digits and Space have the same value in both.
+fn key_code(byte: u8) -> u16 {
+    match byte {
+        b')' => 48,
+        b'!' => 49,
+        b'@' => 50,
+        b'#' => 51,
+        b'$' => 52,
+        b'%' => 53,
+        b'^' => 54,
+        b'&' => 55,
+        b'*' => 56,
+        b'(' => 57,
+        b';' | b':' => 186,
+        b'=' | b'+' => 187,
+        b',' | b'<' => 188,
+        b'-' | b'_' => 189,
+        b'.' | b'>' => 190,
+        b'/' | b'?' => 191,
+        b'`' | b'~' => 192,
+        b'[' | b'{' => 219,
+        b'\\' | b'|' => 220,
+        b']' | b'}' => 221,
+        b'\'' | b'"' => 222,
+        _ => byte.to_ascii_uppercase().into(),
+    }
+}
+
 fn sequence_key(sequence: &[u8]) -> Option<Key> {
     let (&last, body) = sequence[2..].split_last()?;
     let body = std::str::from_utf8(body).ok()?;
+    // A parameter can carry `:`-separated details. For a key the third one is its
+    // position on the base layout: `1089::99` is the key that types `c` on a US keyboard.
+    let base = body
+        .split(';')
+        .next()?
+        .split(':')
+        .nth(2)
+        .and_then(|value| value.parse().ok());
     let parameters: Vec<u16> = if body.is_empty() {
         vec![]
     } else {
         body.split(';')
-            .map(str::parse)
+            .map(|field| field.split(':').next().unwrap_or(field).parse())
             .collect::<Result<_, _>>()
             .ok()?
     };
@@ -232,7 +273,15 @@ fn sequence_key(sequence: &[u8]) -> Option<Key> {
             11..=15 => 112 + parameters[0] - 11,
             _ => return None,
         },
-        b'u' if parameters.len() <= 2 => return encoded_key(*parameters.first()?, modifier),
+        b'u' if parameters.len() <= 2 => {
+            let reported = *parameters.first()?;
+            // Shortcuts follow the base layout on a Cyrillic or Greek keyboard.
+            let named = match (reported, base) {
+                (128..=57343, Some(base)) => base,
+                _ => reported,
+            };
+            return encoded_key(named, modifier);
+        }
         _ => return None,
     };
     if last != b'~' && parameters.len() > 2 {
@@ -240,6 +289,9 @@ fn sequence_key(sequence: &[u8]) -> Option<Key> {
     }
     Some(key(code, modifier))
 }
+
+/// The keypad's navigation keys with Num Lock off, from 57417 in the protocol's order.
+const KEYPAD_NAVIGATION: [u16; 10] = [37, 39, 38, 40, 33, 34, 36, 35, 45, 46];
 
 fn encoded_key(character: u16, modifiers: u8) -> Option<Key> {
     let code = match character {
@@ -252,15 +304,26 @@ fn encoded_key(character: u16, modifiers: u8) -> Option<Key> {
                 character: 13,
             });
         }
+        57417..=57426 => {
+            return Some(key(
+                KEYPAD_NAVIGATION[usize::from(character - 57417)],
+                modifiers,
+            ));
+        }
+        // Ctrl+[ is the Escape key in every legacy encoding.
+        91 if modifiers == 4 => return Some(key(27, 0)),
         27 => 27,
         127 => 8,
-        32..=126 => (character as u8).to_ascii_uppercase().into(),
+        32..=126 => key_code(character as u8),
         _ => return None,
     };
+    // The protocol reports AltGr text as plain text, so Ctrl+Alt here is a chord. The
+    // shared decoder would read a character with both modifiers as Windows AltGr text.
+    let chord = modifiers & 5 == 5;
     Some(Key {
         code,
         modifiers,
-        character: if character == 127 || character == 27 {
+        character: if character == 127 || character == 27 || chord {
             0
         } else {
             character

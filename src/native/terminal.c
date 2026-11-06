@@ -83,10 +83,11 @@ static int guard(void) {
     raw.c_cc[VTIME] = 1;
     int result = 0;
     if (tcsetattr(tty, TCSANOW, &raw) < 0) { close(tty); return 2; }
-    /* `>1u` asks for keys with modifiers to be reported unambiguously; terminals
-       without the protocol ignore it. Each screen keeps its own request, so it
-       comes after switching screens and ends before switching back. */
-    const char enter[] = "\033[?1049h\033[?2004h\033[?1000h\033[?1006h\033[>1u\033[?25l";
+    /* `>5u` asks for keys with modifiers to be reported unambiguously, with their
+       base layout key so shortcuts work on non-Latin keyboards; terminals without
+       the protocol ignore it. Each screen keeps its own request, so it comes after
+       switching screens and ends before switching back. */
+    const char enter[] = "\033[?1049h\033[?2004h\033[?1000h\033[?1006h\033[>5u\033[?25l";
     if (write(tty, enter, sizeof(enter) - 1) != (ssize_t)sizeof(enter) - 1) result = 2;
     if (!result) {
         struct winsize size;

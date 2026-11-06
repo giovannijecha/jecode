@@ -89,6 +89,53 @@ fn the_keyboard_protocol_decodes_like_legacy_keys_whatever_locks_are_on() {
 }
 
 #[test]
+fn protocol_punctuation_keeps_its_shortcuts_and_never_reads_as_navigation() {
+    for (sequence, code, modifiers, character) in [
+        (&b"\x1b[93;5u"[..], 221, 4, 93), // Ctrl+] leaves direct input.
+        (b"\x1b[92;5u", 220, 4, 92),      // Ctrl+\ is the terminal's quit signal.
+        (b"\x1b[46;5u", 190, 4, 46),      // Ctrl+. is not Ctrl+Delete.
+        (b"\x1b[39;5u", 222, 4, 39),      // Ctrl+' is not Ctrl+Right.
+        (b"\x1b[38;5u", 55, 4, 38),       // Ctrl+& on AZERTY is not Ctrl+Up.
+        (b"\x1b[91;5u", 27, 0, 0),        // Ctrl+[ is Escape.
+        (b"\x1b[46;3u", 190, 1, 46),      // Alt+.
+        (b"\x1b.", 190, 1, 46),           // Alt+. without the protocol.
+        (b"\x1b[97;7u", 65, 5, 0),        // Ctrl+Alt+A is a chord, not the text `a`.
+        (&[0x1c][..], 220, 4, 28),        // Ctrl+\ without the protocol.
+        (&[0x00][..], 32, 4, 0),          // Ctrl+Space without the protocol.
+    ] {
+        let keys = decoded_keys(sequence);
+        assert_eq!(keys.len(), 1, "{sequence:?}");
+        assert_eq!(
+            (keys[0].code, keys[0].modifiers, keys[0].character),
+            (code, modifiers, character),
+            "{sequence:?}"
+        );
+    }
+}
+
+#[test]
+fn protocol_keys_follow_the_base_layout_and_the_keypad() {
+    for (sequence, code, modifiers) in [
+        (&b"\x1b[1089::99;5u"[..], 67, 4), // Ctrl+C on a Russian layout.
+        (b"\x1b[99::99;5u", 67, 4),        // Reported alternates on a US layout.
+        (b"\x1b[99:67:99;6u", 67, 6),      // A shifted alternate is not the base.
+        (b"\x1b[57417u", 37, 0),           // Keypad Left.
+        (b"\x1b[57419;5u", 38, 4),         // Ctrl+keypad Up.
+        (b"\x1b[57426u", 46, 0),           // Keypad Delete.
+    ] {
+        let keys = decoded_keys(sequence);
+        assert_eq!(keys.len(), 1, "{sequence:?}");
+        assert_eq!(
+            (keys[0].code, keys[0].modifiers),
+            (code, modifiers),
+            "{sequence:?}"
+        );
+    }
+    // Without the terminal's base layout there is no key to act on.
+    assert!(decoded_keys(b"\x1b[1089;5u").is_empty());
+}
+
+#[test]
 fn csi_ss3_and_modified_navigation_use_the_shared_editor_keys() {
     let keys = decoded_keys(b"\x1b[A\x1bOB\x1b[1;5D\x1b[1;3A\x1b[1;6B\x1b[3~\x1b[5~\x1b[6~\x1b[H\x1bOF\x1bOP\x1b[Z\x1b\r\x1b[13;2u");
     assert_eq!(

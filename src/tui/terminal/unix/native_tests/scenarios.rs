@@ -283,6 +283,13 @@ fn native_unix_direct_input() {
     let reattached = t.mark();
     t.send(b"i");
     t.wait_after("Ctrl+]  back", reattached);
+    // The keyboard protocol reports the same key differently, and it must still leave.
+    let reported = t.mark();
+    t.send(b"\x1b[93;5u");
+    t.wait_after("i  input", reported);
+    let again = t.mark();
+    t.send(b"i");
+    t.wait_after("Ctrl+]  back", again);
     t.wait("NATIVE_SECOND_READY");
     t.send(b"finish\r");
     t.wait_after("NATIVE_PTY_END", detached);
@@ -348,7 +355,7 @@ fn native_unix_palette_and_keyboard_protocol() {
     t.quit_with(b"\x1b[113;5u", "NATIVE_PALETTE_RESTORED");
     let raw = t.raw();
     assert!(
-        contains(raw, b"\x1b[>1u"),
+        contains(raw, b"\x1b[>5u"),
         "keyboard protocol not requested"
     );
     assert!(contains(raw, b"\x1b[<u"), "keyboard protocol not released");

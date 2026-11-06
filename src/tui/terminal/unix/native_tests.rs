@@ -102,13 +102,11 @@ fn controls_and_terminal_lifetime() {
     terminal.wait_after("Settings · saved defaults", providers);
     terminal.send(b"\x03");
     // The guardian reports each size; a report that never arrives leaves no repaint.
+    // The opening keeps blinking, so only a clearing repaint proves one arrived.
     for (columns, rows) in [(40, 12), (5, 2), (80, 24)] {
         let before = terminal.mark();
         terminal.resize(columns, rows);
-        assert!(
-            terminal.mark() > before,
-            "{columns}x{rows} did not repaint the terminal"
-        );
+        terminal.wait_raw(b"\x1b[2J", before);
     }
     terminal.send("\x1b[200~first α🙂\nline\x1b[201~".as_bytes());
     thread::sleep(Duration::from_millis(200));
