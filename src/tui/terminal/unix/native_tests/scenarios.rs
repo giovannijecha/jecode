@@ -268,7 +268,7 @@ fn native_unix_direct_input() {
     command(&mut t, "/terminal");
     t.wait("1 running");
     t.send(b"\r");
-    t.wait("i  input");
+    t.wait("i input");
     let started = t.mark();
     t.send(b"i");
     t.wait_after("Ctrl+] back", started);
@@ -278,7 +278,7 @@ fn native_unix_direct_input() {
     t.ensure_no_text("NATIVE_SECRET_42", started);
     let detached = t.mark();
     t.send(b"\x1d");
-    t.wait_after("i  input", detached);
+    t.wait_after("i input", detached);
     // Match the new input-mode frame, not an earlier queued repaint.
     let reattached = t.mark();
     t.send(b"i");
@@ -286,7 +286,7 @@ fn native_unix_direct_input() {
     // The keyboard protocol reports the same key differently, and it must still leave.
     let reported = t.mark();
     t.send(b"\x1b[93;5u");
-    t.wait_after("i  input", reported);
+    t.wait_after("i input", reported);
     let again = t.mark();
     t.send(b"i");
     t.wait_after("Ctrl+] back", again);
@@ -305,11 +305,64 @@ fn native_unix_direct_input() {
 }
 
 /// What the light palette draws, as the bytes a terminal receives.
-fn light_escape(style: crate::tui::theme::Style) -> Vec<u8> {
+fn light_escape(style: impl std::fmt::Display) -> Vec<u8> {
     crate::tui::theme::set_light(true);
     let escape = escape_for(style);
     crate::tui::theme::set_light(false);
     escape
+}
+
+/// The live opening paints only the caret, level chip and AGENTS badge; every
+/// other cell must retain the terminal background. Check all complete SGR fills,
+/// as well as the resulting screen, rather than banning those intentional fills.
+fn opening_backgrounds(raw: &[u8], painted: usize) {
+    use crate::tui::theme::{BADGE_EDIT, BADGE_IDLE, CURSOR};
+
+    let background = |escape: Vec<u8>| {
+        let start = escape
+            .windows(5)
+            .position(|bytes| bytes == b"48;2;")
+            .expect("explicit native background");
+        escape[start..].to_vec()
+    };
+    let allowed = [
+        background(escape_for(CURSOR)),
+        background(light_escape(CURSOR)),
+        escape_for(BADGE_IDLE),
+        light_escape(BADGE_IDLE),
+        escape_for(BADGE_EDIT),
+        light_escape(BADGE_EDIT),
+    ];
+    let mut position = 0;
+    let mut fills = 0;
+    while let Some(offset) = raw[position..]
+        .windows(5)
+        .position(|bytes| bytes == b"48;2;")
+    {
+        let start = position + offset;
+        let Some(end) = raw[start..].iter().position(|byte| *byte == b'm') else {
+            break; // A read may end inside the last, incomplete SGR sequence.
+        };
+        let sequence = &raw[start..=start + end];
+        assert!(
+            allowed.iter().any(|role| role == sequence),
+            "unexpected background escape: {}",
+            String::from_utf8_lossy(sequence)
+        );
+        fills += 1;
+        position = start + end + 1;
+    }
+    assert!(fills > 0, "the opening did not paint its caret or chips");
+    assert!(
+        contains(raw, b";49m"),
+        "default background was never restored"
+    );
+    let max_painted = " Workspace ".len() + " AGENTS ".len() + 1; // one caret
+    assert!(painted > 0, "no complete opening frame was inspected");
+    assert!(
+        painted <= max_painted,
+        "opening painted {painted} cells, beyond its caret and chips"
+    );
 }
 
 #[test]
@@ -333,12 +386,13 @@ fn native_unix_light_background() {
         t.wait("Ask anything");
         pause(300);
         t.wait_for_output(0);
+        t.drain();
         if light {
             t.wait_raw(&placeholder, 0);
         } else {
             assert!(!contains(t.raw(), &placeholder));
         }
-        assert!(!contains(t.raw(), b"48;2;"));
+        opening_backgrounds(t.raw(), t.painted_cells());
         t.send(b"\x11");
         t.finish("NATIVE_BACKGROUND_DETECTED_RESTORED");
     }
@@ -457,16 +511,24 @@ fn native_unix_startup_splash() {
     t.wait("Ask anything");
     let full = t.mark();
     t.resize(100, 32);
-    t.wait_after("Tip  /permissions sets what Jecode may change here", full);
+    let image_key = if cfg!(target_os = "macos") {
+        "Ctrl+V"
+    } else {
+        "Alt+V"
+    };
+    t.wait_after(
+        &format!("/ commands   {image_key} image   Ctrl+Q quit"),
+        full,
+    );
     t.wait_after("✓ 1 skill   ✓ AGENTS.md", full);
     t.wait_after("Recent in this folder", full);
     t.wait_after("Fix the session expiry check in auth", full);
-    t.wait_after("/resume  all conversations", full);
+    t.wait_after("/resume all", full);
     t.wait_raw(&escape_for(crate::tui::theme::ACCENT), 0);
     t.wait_raw(&escape_for(crate::tui::theme::LIT), 0);
 
     let medium = t.mark();
-    t.resize(64, 20);
+    t.resize(64, 16);
     t.wait_after("▄", medium);
     t.wait_after("Recent in this folder", medium);
 
@@ -477,7 +539,22 @@ fn native_unix_startup_splash() {
 
     let restored = t.mark();
     t.resize(100, 32);
-    t.wait_after("Tip  /permissions", restored);
+    t.wait_after("/ commands", restored);
+
+    // The command key arrives in the same input burst as the still unsent draft.
+    let commands = t.mark();
+    t.send(b"burst draft\x07");
+    t.wait_after("draft kept", commands);
+    t.wait_after("21 commands", commands);
+    let filtered = t.mark();
+    t.send(b"mod");
+    t.wait_after("1 of 21 commands", filtered);
+    let returned = t.mark();
+    t.send(b"\x1b");
+    t.wait_after("Ctrl+G commands", returned);
+    t.wait_after("burst draft", returned);
+    t.send(b"\x15");
+    pause(200);
 
     let prompted = t.mark();
     t.send(b"first prompt");

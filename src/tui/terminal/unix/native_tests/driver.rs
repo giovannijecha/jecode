@@ -242,6 +242,11 @@ impl Pty {
         &self.bytes
     }
 
+    /// Number of cells with a painted background in the latest complete frame.
+    pub(super) fn painted_cells(&self) -> usize {
+        self.frames.screen.painted().len()
+    }
+
     pub(super) fn wait_raw(&mut self, expected: &[u8], start: usize) -> usize {
         let at = Instant::now();
         loop {

@@ -65,9 +65,14 @@ fn the_full_splash_centres_its_rows_above_the_unchanged_dock() {
     assert!(rows[mark + 9].ends_with("2h"));
     assert!(rows[mark + 11].contains("Migrate the config loader"));
     assert!(rows[mark + 12].trim().is_empty());
+    let image_key = if cfg!(target_os = "macos") {
+        "Ctrl+V"
+    } else {
+        "Alt+V"
+    };
     assert_eq!(
         rows[mark + 13].trim(),
-        "/ commands   Alt+V image   Ctrl+Q quit"
+        format!("/ commands   {image_key} image   Ctrl+Q quit")
     );
     assert!(
         rows.iter()
