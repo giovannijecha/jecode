@@ -45,6 +45,8 @@ Changes since 0.2.5.
 - `/settings` → **Theme** chooses **Auto**, **Dark** or **Light**.
 - Ctrl+G opens the commands in a sheet with its own filter while your draft waits
   above it; Esc goes back one level.
+- Enter accepts the selected slash command before queueing it during a turn,
+  so a prefix such as `/ne` waits as `/new` instead of an unknown command.
 - Tool badges, status text, the startup screen and the browser sign-in pages share
   the new design.
 - Long approval requests scroll with PgUp and PgDn and keep their choices on screen.

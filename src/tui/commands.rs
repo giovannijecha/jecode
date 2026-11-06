@@ -29,9 +29,7 @@ impl App {
         }
         self.state.sent();
         let turn = self.held.is_some();
-        let now = |name: &str| immediate(name) || (turn && menu(name));
-        if (self.worker.is_none() || self.state.suggestions.chosen().is_some_and(now))
-            && self.state.suggestions.visible
+        if self.state.suggestions.visible
             && prompt.attachments.is_empty()
             && let Some(chosen) = self.state.suggestions.chosen()
         {

@@ -79,7 +79,7 @@ a real one.
 | Ctrl+U | Delete to the start of the line. |
 | Ctrl+P, Ctrl+N | Browse your last 50 sent messages; Esc returns to the draft. |
 | Alt+V, or Ctrl+V on Linux and macOS | Attach an image from the clipboard. On Windows, Ctrl+V stays your terminal's text paste. |
-| `/` | Open the command list; Up/Down select, Tab completes, Enter runs. Use it to type arguments. During a turn, Enter queues exactly what you typed for a command that waits, so press Tab first or type the full name. |
+| `/` | Open the command list; Up/Down select, Tab completes, Enter accepts the selected full command and runs or queues it. Use it to type arguments; commands with arguments keep their typed text. |
 | Ctrl+G | Open the **Commands** sheet whenever the composer holds the keys, also during a turn, but not over a question or a permission request. A **Filter** field narrows the list; Enter runs the selected command. Your draft is untouched and waits above the sheet as `draft kept`. A command that opens a menu shows it over the draft, Esc goes back one level, and a choice returns to the composer. `/new` and `/resume` carry the draft into the conversation they open; a resumed conversation's own saved draft joins below it. |
 
 ### Conversation and work

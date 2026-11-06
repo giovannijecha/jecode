@@ -77,8 +77,9 @@ generated. The counts appear while no tool progress is shown. The composer stays
   conversation, such as `/init`, `/new`, `/resume`, `/export`, `/tmp`,
   `/checkpoints` and `/exit`, wait until the turn completes and any open menu
   closes; if the turn stops or fails, they return as a draft and do not run.
-  For these, Enter queues exactly what you typed, so press Tab first or type the
-  full name. Ctrl+G lists them too, in dim text marked `after this turn`; they
+  With slash completion open, Enter accepts the selected full command before
+  queueing it. Commands with arguments keep their typed text. Ctrl+G lists
+  waiting commands too, in dim text marked `after this turn`; they
   cannot be selected there and are never queued.
 
 When the turn ends, the status row keeps `Done`, `Stopped` or `Failed` with its
