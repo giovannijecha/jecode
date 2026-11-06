@@ -52,9 +52,10 @@ Its required job names are `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)`, and
    and `npm view @giovannijecha/jecode time --json`. Removed
    versions may be absent from `versions` but remain in `time`; npm permanently
    reserves them. Choose a version that has never been published.
-2. Merge the intended revision to `main` after its four CI jobs pass. Set the
-   release version in `Cargo.toml` and review the corresponding lockfile and
-   user documentation in that revision.
+2. On a release branch, set the version in `Cargo.toml` and review its lockfile,
+   [release notes](../../CHANGELOG.md) and user documentation together. Open a
+   pull request, wait for all four CI jobs on its final revision to pass, then
+   merge it to `main`. The version change must be part of that verified revision.
 3. Run the **Prepare npm release** workflow manually for that revision. Its
    Windows and Linux jobs use this project's local runners; its macOS jobs use
    GitHub's standard hosted `macos-26` ARM64 and `macos-26-intel` x64 runners. Each

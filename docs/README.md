@@ -10,9 +10,11 @@ repository root.
 | Guide | Covers |
 | --- | --- |
 | [Installation](usage/INSTALLATION.md) | Requirements, building, installing, updating and uninstalling. |
-| [Providers](usage/PROVIDERS.md) | Connecting OpenRouter, a ChatGPT account or a Claude account. |
+| [Providers](usage/PROVIDERS.md) | OpenRouter, OpenAI and Anthropic API keys; ChatGPT sign-in and the Claude account compatibility route. |
 | [Terminal interface](tui/INTERFACE.md) | Working in the fullscreen interface: sending, queueing, stopping, reading and quitting. |
 | [Command line](usage/CLI.md) | Single prompts, pipes, plain chat, options and exit codes. |
+| [Agent benchmark](development/AGENT_BENCHMARK.md) | Measured efficiency against Codex and Claude Code, with per-run results and limits. |
+| [Release notes](../CHANGELOG.md) | Changes prepared for 0.3.5. |
 
 ## Work with Jecode
 
@@ -57,4 +59,4 @@ repository root.
 | [GitHub MCP App](development/GITHUB_MCP_APP.md) | App registration and public client ID for device sign-in. |
 | [Vercel MCP client](development/VERCEL_MCP_CLIENT.md) | Public OAuth metadata, hosting and Jecode client setup. |
 | [TUI theme](tui/THEME.md) | Colour tokens, grid and drawing rules. |
-| [Performance measurement](development/PERFORMANCE.md) | Probes, method and recorded results. |
+| [Performance measurement](development/PERFORMANCE.md) | Local probes, transport latency, context reuse and recorded results. |

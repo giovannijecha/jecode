@@ -2,18 +2,46 @@
 
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
-Jecode is a coding agent that works in your terminal. You describe a task; the
-model you choose reads your project, edits files, runs commands and checks the
-result, while you watch each step and keep control of what it may change.
+Jecode is a fast, efficient coding agent for your terminal. You describe a task;
+the model you choose reads your project, edits files, runs commands and checks
+the result, while you watch each step and control what it may change.
 
 It is a single native executable written in Rust, without third-party Rust
 crates. Connect an OpenRouter, OpenAI or Anthropic API key, or sign in with
 your ChatGPT account. A Claude subscription compatibility route is also
 available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
-## What it looks like
+![Jecode running in Windows Terminal, with its startup screen, composer and model status](docs/images/jecode-startup.png)
 
-![Jecode startup screen](docs/images/jecode-startup.png)
+*Windows Terminal capture on 0.2.5, before the 0.3.5 version bump.*
+
+## Measured efficiency
+
+On our five-turn coding benchmark, Jecode used **21% fewer cost-weighted tokens
+than Codex** with GPT-6.1 Sol and **36% fewer than Claude Code** with Claude
+Sonnet 5.5. Every run passed all 21 hidden acceptance tests.
+
+| Same model, high effort | Weighted token use | Active time |
+| --- | ---: | ---: |
+| Jecode vs Codex 0.166, GPT-6.1 Sol | **21% less** | 11% longer |
+| Jecode vs Claude Code 2.1.318, Sonnet 5.5 | **36% less** | **30% shorter** |
+
+These are maintainer measurements from one Node project on Windows, recorded
+2026-11-04: 7 vs 6 GPT runs and 4 vs 3 Claude runs. Jecode used account sign-in;
+its API-key routes were not compared.
+Time excludes two deliberate 6.5-minute pauses. Weighted tokens account for
+cache reads, writes and output; they are not raw token totals, API bills or a
+multiplier for your plan's quota. Read the
+[method, per-run data and limits](docs/development/AGENT_BENCHMARK.md).
+
+Jecode supports prompt caching, batched file operations and prepared tool
+sequences in one request. Native HTTP connections persist between requests;
+OpenAI conversations use WebSocket with HTTP fallback.
+Separate [transport measurements](docs/development/PERFORMANCE.md#provider-transports)
+record lower first-update latency on Windows; the comparison above predates
+that work.
+
+## Work in your project
 
 Start `jecode` in a project directory and type a request, such as *"The tests in
 `src/parser` fail since the last change. Find out why and fix it."* The agent
@@ -26,7 +54,9 @@ then works through the task in the same window:
 - at the default permission level, it asks you before touching anything outside
   the project directory;
 - checkpoints let you inspect and restore captured file changes; each receipt
-  tells you what was saved.
+  tells you what was saved;
+- Ctrl+G opens commands over your draft; menus keep it intact, and dark and
+  light themes keep your terminal's own background.
 
 When you quit, Jecode prints a summary and the command to continue later:
 
@@ -48,6 +78,8 @@ Install Jecode with Node.js 22 or later and npm on Windows 10 1809 or later (x64
 Linux x64 (glibc 2.28 or newer), or macOS 11 or later on Apple silicon or Intel.
 [Platform support](docs/development/PLATFORMS.md#supported-versions) records what
 has actually run on each of them.
+
+On macOS 11–13.4, use Node.js 22; Node.js 24 needs macOS 13.5 or later.
 
 ```sh
 npm install -g @giovannijecha/jecode
@@ -79,6 +111,8 @@ quit, and `/help` or F1 for commands and common shortcuts.
 
 - [Providers](docs/usage/PROVIDERS.md): account setup, usage and provider-specific
   compatibility limits.
+- [Agent benchmark](docs/development/AGENT_BENCHMARK.md): Jecode vs Codex and
+  Claude Code, with the measurements behind the comparison.
 - [Terminal interface](docs/tui/INTERFACE.md): sending, queueing, stopping and
   reading the agent's work.
 - [Permissions](docs/usage/PERMISSIONS.md): what the agent may do, and approvals.
@@ -91,11 +125,12 @@ quit, and `/help` or F1 for commands and common shortcuts.
 
 ## Status
 
-Jecode is at version 0.2.5: usable, and still evolving. Commands, settings and
-storage formats may change between releases.
+Jecode is usable and still evolving. Commands, settings and storage formats may
+change between releases. See the [0.3.5 release notes](CHANGELOG.md).
 
-- Windows is the primary platform. Linux and macOS are built and tested in CI;
-  interactive use on macOS has not been verified. See
+- Windows x64, Linux x64, and macOS on Apple silicon and Intel have native
+  builds and terminal fixtures in CI. Interactive use on macOS has not been
+  verified. See
   [Platform support](docs/development/PLATFORMS.md).
 - Command confinement in the Workspace permission level needs Landlock on Linux and a
   recent Windows, and uses Seatbelt on macOS. Hosts without confinement need the

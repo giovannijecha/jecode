@@ -6,6 +6,11 @@ them and records results that still describe the current design. Results were
 measured on Windows unless stated; CI on other platforms does not establish
 their performance.
 
+For comparisons with other coding agents, see the
+[Jecode vs Codex and Claude Code benchmark](AGENT_BENCHMARK.md). It records
+coding work with Jecode's account routes; the probes below measure separate parts of
+Jecode and do not establish a lead over another harness.
+
 ## Measurement rules
 
 - Build before timing and use release builds (`--release`) unless a probe says

@@ -17,10 +17,10 @@ named by `JECODE_BROWSER`; see [Tools](TOOLS.md#web-and-browser). Commands that
 the agent runs for your project, such as `cargo` or `npm`, need that project's
 own toolchain. Jecode never installs or downloads programs to enable its tools.
 
-Verification differs by platform. Windows is the primary development platform;
-Linux and macOS are built and tested in CI. See
-[Platform support](../development/PLATFORMS.md) before relying on Linux or
-macOS. Where the system cannot confine commands, they require the Full
+All four native targets are built and tested in CI, including terminal fixtures.
+Windows and Linux have recorded live-provider use; manual interactive use on a
+Mac remains unverified. See [Platform support](../development/PLATFORMS.md).
+Where the system cannot confine commands, they require the Full
 [permission level](PERMISSIONS.md#platform-limits).
 
 ## Install with npm
@@ -35,10 +35,11 @@ npm install -g @giovannijecha/jecode
 jecode --version
 ```
 
-The version command should print a line beginning with `jecode 0.2.5` for this
-release. The package includes the native executables and does not build
-Rust code or download a binary when you first run it. Node.js starts the npm
-command; the standalone executable below needs no Node.js.
+The command installs the current npm release. A 0.3.5 build prints a line
+beginning with `jecode 0.3.5`; until that version is published, npm installs the
+earlier published version. The package includes the native executables and
+does not build Rust code or download a binary when you first run it. Node.js
+starts the npm command; the standalone executable below needs no Node.js.
 
 If a global npm install fails with a permissions error, follow
 [npm's user-owned installation guidance](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally/).
@@ -123,7 +124,7 @@ build runs offline. The result is
 ./target/release/jecode --version
 ```
 
-The output looks like `jecode 0.2.5 (linux-x86_64-release, exe fnv1a64:…)`: the
+The output looks like `jecode 0.3.5 (linux-x86_64-release, exe fnv1a64:…)`: the
 version, the platform and build profile, and a fingerprint of the executable
 that helps tell builds apart.
 
