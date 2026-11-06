@@ -84,6 +84,42 @@ fn workspace_rust_child_and_grandchild_enforce_file_policy() {
 }
 
 #[test]
+fn workspace_rust_probe_can_rename_inside_granted_root() {
+    let root = Directory::new();
+    let fixture = probe::executable(root.path());
+    let mut tools = Tools::new(root.path()).unwrap();
+    tools.configure_output(root.path().join("logs"), Redactor::empty());
+    let arguments = Value::object([
+        ("executable", Value::string(fixture.to_string_lossy())),
+        (
+            "env",
+            Value::object([
+                (probe::ROLE, Value::string("rename")),
+                (probe::ALLOWED, Value::string(root.path().to_string_lossy())),
+            ]),
+        ),
+        ("timeout_ms", Value::number(5000)),
+    ]);
+    let result = tools
+        .execute_begun(
+            Begun::default().with_permission(Level::Workspace, None),
+            "exec",
+            &arguments.encode(),
+            &Cancellation::default(),
+        )
+        .result;
+    assert_eq!(
+        result.get("exit_code"),
+        Some(&Value::number(0)),
+        "{result:?}"
+    );
+    assert!(
+        text(&result, "stdout").contains("RENAMED:after"),
+        "{result:?}"
+    );
+}
+
+#[test]
 #[ignore = "PSEC cannot initialize .NET workloads in a Windows service session; run interactively"]
 fn workspace_native_child_and_grandchild_enforce_file_policy() {
     let root = Directory::new();

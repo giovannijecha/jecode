@@ -11,6 +11,8 @@ mod grep;
 mod regex;
 #[path = "builtins/text.rs"]
 mod text;
+#[path = "builtins/wc.rs"]
+mod wc;
 use files::{copy_move, mktemp, remove};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -126,14 +128,7 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         }
         "printf" => printf(&args[1..]),
         "cat" => cat(shell, args, io),
-        "wc" => {
-            if args.get(1).map(String::as_str) != Some("-c") || args.len() != 2 {
-                return Err("wc: only -c from stdin is supported".into());
-            }
-            let count =
-                io::copy(&mut &io.stdin, &mut io::sink()).map_err(|e| format!("wc: {e}"))?;
-            ok(format!("{count}\n").into_bytes())
-        }
+        "wc" => wc::wc(shell, args, io),
         "wait" => {
             if args.len() != 1 {
                 return Err("wait: positional job IDs are unsupported".into());

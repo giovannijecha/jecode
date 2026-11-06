@@ -19,10 +19,22 @@ fn object(properties: Value, required: &[&str]) -> Value {
     ])
 }
 
-pub(super) fn steps() -> Value {
+pub(super) fn steps(tools: &[Value]) -> Value {
+    let names = tools
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .filter(|name| !matches!(*name, "steps" | "ask_user"))
+        .map(Value::string)
+        .collect();
     let step = object(
         Value::object([
-            ("tool", string("The tool to run")),
+            (
+                "tool",
+                Value::object([
+                    ("type", Value::string("string")),
+                    ("enum", Value::Array(names)),
+                ]),
+            ),
             (
                 "arguments",
                 Value::object([
@@ -52,7 +64,6 @@ pub(super) fn steps() -> Value {
                     Value::object([
                         ("type", Value::string("array")),
                         ("minItems", Value::number(1)),
-                        ("maxItems", Value::number(crate::agent::steps::MAX_STEPS)),
                         ("items", step),
                     ]),
                 )]),
@@ -199,6 +210,45 @@ pub(super) fn ask_user() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_sequences_offer_only_tools_that_can_run_inside_them() {
+        for delegation in [false, true] {
+            let tools = super::super::definitions_for(delegation)
+                .as_array()
+                .unwrap();
+            let steps = tools
+                .iter()
+                .find(|tool| tool.get("name").and_then(Value::as_str) == Some("steps"))
+                .unwrap();
+            let array = steps
+                .get("parameters")
+                .unwrap()
+                .get("properties")
+                .unwrap()
+                .get("steps")
+                .unwrap();
+            assert!(
+                array.get("maxItems").is_none(),
+                "prepared sequences have no fixed length cap"
+            );
+            let names = array
+                .get("items")
+                .unwrap()
+                .get("properties")
+                .unwrap()
+                .get("tool")
+                .unwrap()
+                .get("enum")
+                .and_then(Value::as_array)
+                .expect("the model needs the supported step names");
+            assert!(!names.contains(&Value::string("ask_user")));
+            assert!(!names.contains(&Value::string("steps")));
+            assert_eq!(names.contains(&Value::string("agent")), delegation);
+            assert!(names.contains(&Value::string("todo_list")));
+            assert!(names.contains(&Value::string("write")));
+        }
+    }
 
     #[test]
     fn work_tool_schemas_and_child_catalog_have_the_expected_contracts() {

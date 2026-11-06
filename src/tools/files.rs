@@ -95,18 +95,24 @@ pub(super) fn edit_with_change(
         };
         // Include overlapping matches, which are ambiguous too.
         let next = position + updated[position..].chars().next().unwrap().len_utf8();
-        if updated[next..].contains(old) {
-            return Ok((
-                mismatch::result(
-                    &content,
-                    &edit_mismatch_error(
-                        index,
-                        "old text occurs more than once",
-                        "include more exact surrounding text from the supplied file context or read the file",
-                    ),
+        if let Some(second) = updated[next..].find(old).map(|found| next + found) {
+            let mut result = mismatch::bounded(
+                &content,
+                &edit_mismatch_error(
+                    index,
+                    "old text occurs more than once",
+                    "include more exact surrounding text from the supplied file context or read the file",
                 ),
-                None,
-            ));
+                if content.len() <= 4096 { 8192 } else { 1024 },
+            );
+            mismatch::matches(
+                &mut result,
+                if index == 0 { "original" } else { "staged" },
+                updated.len() as u64,
+                [position as u64, second as u64],
+                |start, size| Ok(updated.as_bytes()[start as usize..start as usize + size].to_vec()),
+            )?;
+            return Ok((result, None));
         }
         updated.replace_range(position..position + old.len(), new);
     }

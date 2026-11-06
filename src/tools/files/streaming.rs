@@ -21,7 +21,7 @@ fn locate(
     mut source: impl Read,
     pattern: &[u8],
     cancellation: &Cancellation,
-) -> Result<(Option<u64>, bool), String> {
+) -> Result<(Option<u64>, Option<u64>), String> {
     let mut failure = vec![0; pattern.len()];
     for index in 1..pattern.len() {
         let mut matched = failure[index - 1];
@@ -38,7 +38,7 @@ fn locate(
     let mut matched = 0;
     let mut offset = 0u64;
     let mut position = None;
-    let mut ambiguous = false;
+    let mut second = None;
     loop {
         check_cancelled(cancellation)?;
         let count = source
@@ -59,7 +59,7 @@ fn locate(
             if matched == pattern.len() {
                 let found = offset - pattern.len() as u64;
                 if position.is_some() {
-                    ambiguous = true;
+                    second.get_or_insert(found);
                 } else {
                     position = Some(found);
                 }
@@ -68,22 +68,25 @@ fn locate(
         }
     }
     text.finish()?;
-    Ok((position, ambiguous))
+    Ok((position, second))
 }
 
-fn mismatch(source: &mut fs::File, length: u64, error: &str) -> Result<Value, String> {
+fn mismatch(source: &mut fs::File, length: u64, error: &str, limit: u64) -> Result<Value, String> {
     source.rewind().map_err(|error| error.to_string())?;
     let mut context = Vec::new();
     source
-        .take(8192)
+        .take(limit)
         .read_to_end(&mut context)
         .map_err(|error| error.to_string())?;
     let valid = match std::str::from_utf8(&context) {
         Ok(_) => context.len(),
         Err(error) => error.valid_up_to(),
     };
-    let mut result =
-        super::mismatch::result(std::str::from_utf8(&context[..valid]).unwrap(), error);
+    let mut result = super::mismatch::bounded(
+        std::str::from_utf8(&context[..valid]).unwrap(),
+        error,
+        limit as usize,
+    );
     if let Value::Object(fields) = &mut result {
         fields.insert("current_bytes".into(), Value::number(length));
         fields.insert(
@@ -149,15 +152,14 @@ pub(super) fn edit(
     let mut changed = false;
     for (index, &(old, new)) in edits.iter().enumerate() {
         check_cancelled(cancellation)?;
-        let (position, ambiguous) =
-            locate(view.reader(&mut original), old.as_bytes(), cancellation)?;
+        let (position, second) = locate(view.reader(&mut original), old.as_bytes(), cancellation)?;
         unchanged(path, &original, &metadata)?;
         let reason = if position.is_none() {
             Some((
                 "old text was not found",
                 "read the file and use exact current text",
             ))
-        } else if ambiguous {
+        } else if second.is_some() {
             Some((
                 "old text occurs more than once",
                 "include more exact surrounding text",
@@ -166,14 +168,25 @@ pub(super) fn edit(
             None
         };
         if let Some((reason, initial_advice)) = reason {
-            return Ok((
-                mismatch(
-                    &mut original,
-                    metadata.len(),
-                    &edit_mismatch_error(index, reason, initial_advice),
-                )?,
-                None,
-            ));
+            let mut result = mismatch(
+                &mut original,
+                metadata.len(),
+                &edit_mismatch_error(index, reason, initial_advice),
+                if second.is_some() { 1024 } else { 8192 },
+            )?;
+            if let Some(second) = second {
+                super::mismatch::matches(
+                    &mut result,
+                    if index == 0 { "original" } else { "staged" },
+                    view.len(),
+                    [position.unwrap(), second],
+                    |start, size| {
+                        view.read_range(&mut original, start, size)
+                            .map_err(|error| error.to_string())
+                    },
+                )?;
+            }
+            return Ok((result, None));
         }
         if old == new {
             continue;
@@ -285,11 +298,11 @@ mod tests {
                 &Cancellation::default()
             )
             .unwrap(),
-            (Some((BLOCK - 2) as u64), false)
+            (Some((BLOCK - 2) as u64), None)
         );
         assert_eq!(
             locate(b"ababa".as_slice(), b"aba", &Cancellation::default()).unwrap(),
-            (Some(0), true)
+            (Some(0), Some(2))
         );
         assert!(locate(b"one\xfftwo".as_slice(), b"one", &Cancellation::default()).is_err());
     }

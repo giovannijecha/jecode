@@ -59,6 +59,24 @@ impl<'a> View<'a> {
         }
     }
 
+    pub(super) fn read_range(
+        &self,
+        original: &mut File,
+        start: u64,
+        length: usize,
+    ) -> io::Result<Vec<u8>> {
+        let end = start.saturating_add(length as u64).min(self.length);
+        let mut pieces = Vec::new();
+        self.append_range(&mut pieces, start, end);
+        let range = Self {
+            pieces,
+            length: end - start,
+        };
+        let mut bytes = Vec::with_capacity(length);
+        range.reader(original).read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
     pub(super) fn replace(
         &mut self,
         position: u64,

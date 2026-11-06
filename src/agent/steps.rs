@@ -13,9 +13,6 @@ use crate::{
     sessions::Stage,
 };
 
-/// Steps one call may run.
-pub(crate) const MAX_STEPS: usize = 12;
-
 /// The running call: step results in order, and its file changes, which the
 /// session ties to the one tool message recorded when the call ends.
 pub(super) struct Chain {
@@ -90,8 +87,8 @@ impl Agent {
             .get("steps")
             .and_then(Value::as_array)
             .ok_or("steps must be an array")?;
-        if steps.is_empty() || steps.len() > MAX_STEPS {
-            return Err(format!("steps must contain 1-{MAX_STEPS} entries"));
+        if steps.is_empty() {
+            return Err("steps must contain at least one entry".into());
         }
         steps
             .iter()

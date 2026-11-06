@@ -91,6 +91,12 @@ overwritten. Integration works file by file, not as one transaction, saves a
 [checkpoint](CHECKPOINTS.md) of the files it replaces, and handles ordinary file
 additions, edits and deletions. Check the combined project afterwards.
 
+For shared work, `diff` lists recorded changed files. With `path`, it pages the
+collaborator's recorded edit hunks in call order, including multi-file edits.
+This is edit history, not a separate baseline or a complete project diff:
+command changes and later writes may be absent. Read the current files when
+reviewing. Shared work needs no integration.
+
 ### Agent actions
 
 | Action | Fields | Behavior |
@@ -102,7 +108,7 @@ additions, edits and deletions. Check the combined project afterwards.
 | `wait` | optional `id`, `timeout_ms` (0–60,000) | Waits for running work; stays cancellable. |
 | `stop` | `id` | Requests cancellation. |
 | `review` | `id`, `report_version`, `note` | Records the main agent's assessment of the latest report. |
-| `diff` | `id`; optional `path`, `offset`, `limit` | Compares an isolated copy with its start and with your project, with a review token. Pages default to 16,384 bytes, at most 65,536. |
+| `diff` | `id`; optional `path`, `offset`, `limit` | Isolated: compares the copy with its start and your project, with a review token. Shared: recorded changed files and paged edit history, without a review token. Use the returned path and `next_offset` for subsequent pages. Pages default to 16,384 bytes, at most 65,536. |
 | `integrate` | `id`, `paths`, `expected_review_token` | Applies selected files after rechecking for conflicts. |
 | `close` | `id` | Releases the collaborator and its isolated copy. |
 

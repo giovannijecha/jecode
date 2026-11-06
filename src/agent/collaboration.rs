@@ -167,12 +167,16 @@ impl Agent {
                 required(arguments, "note")?.into(),
             ),
             "diff" => {
-                let workspace = observer.workspace(id()?)?;
+                let id = id()?;
+                let workspace = observer.workspace(id)?;
                 let path = optional_text(arguments, "path")?;
                 let offset = optional_number(arguments, "offset")?.unwrap_or(0);
                 let limit = optional_number(arguments, "limit")?.unwrap_or(16_384);
                 if limit == 0 || limit > 65_536 {
                     return Err("limit must be 1-65536".into());
+                }
+                if workspace.mode() == Mode::Shared {
+                    return diff::shared(&observer, id, path, offset, limit);
                 }
                 match path {
                     Some(path) => workspace.inspect_file(path, offset, limit),
@@ -305,6 +309,7 @@ fn optional_number(value: &Value, name: &str) -> Result<Option<usize>, String> {
         .transpose()
 }
 
+mod diff;
 mod view;
 
 #[cfg(test)]
