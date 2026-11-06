@@ -28,8 +28,10 @@ available and whether the folder has an
 [`AGENTS.md`](../usage/PROJECT_INSTRUCTIONS.md). If this folder has saved
 conversations, up to three recent ones are listed under **Recent in this
 folder**, with a `/resume` shortcut for all of them. A configured model with no
-local conversations shows **No saved conversations in this folder**. Until a
-model is selected, **Start here** suggests `/model`, `/permissions` and `/help`.
+local conversations shows **No saved conversations in this folder**. With saved
+conversations and no model, the recent list stays visible alongside the **No model**
+warning. With neither a model nor saved conversations, **Start here** suggests
+`/model`, `/permissions` and `/help`.
 A row of keys follows:
 `/ commands`, `Alt+V image` (`Ctrl+V` on macOS) and `Ctrl+Q quit`. On small
 terminals the screen drops the keys, then shrinks the mark, then falls back to a

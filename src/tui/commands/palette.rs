@@ -24,10 +24,8 @@ impl App {
         self.dispatch(Prompt::plain(COMMANDS[index].name))
     }
 
-    /// Keeps the rows honest as work starts and ends under an open sheet. Work may also
-    /// have closed what the sheet opened, which leaves nothing for Esc to go back from.
+    /// Keeps the rows honest as work starts and ends under an open sheet.
     pub(in crate::tui) fn sync_commands(&mut self) -> bool {
-        self.follow_commands(false);
         let (busy, turn) = (self.busy(), self.held.is_some());
         self.state
             .selector
@@ -41,6 +39,7 @@ impl App {
         let state = &self.state;
         let open = state.selector.is_some()
             || state.information.is_some()
+            || self.checkpoint_job.is_some()
             || state.processes.is_some()
             || state.agents_panel.is_some()
             || state.ask_panel.is_some()

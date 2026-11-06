@@ -110,9 +110,9 @@ pub const HAIRLINE: Style = Style::ink(0x3B3D40, 0xCFD1D5);
 pub const ACCENT: Style = Style::ink(0xC7AFFF, 0x552B9A);
 pub const LIT: Style = Style::ink(0xDACEFF, 0x48198A);
 pub const KEYWORD: Style = Style::ink(0xC8B7FF, 0x553494);
-pub const GOOD: Style = Style::ink(0x7CD992, 0x067132);
+pub const GOOD: Style = Style::ink(0x7CD992, 0x066F32);
 pub const BAD: Style = Style::ink(0xF48684, 0xB32228);
-pub const WARNING: Style = Style::ink(0xEDC06B, 0x875800);
+pub const WARNING: Style = Style::ink(0xEDC06B, 0x875500);
 pub const BADGE_TEXT: Style = Style::ink(0xEFF0F3, 0xEFF0F3);
 
 // The activity shimmer: a five-cell band `S0 S1 S2 S1 S0` over `S_BASE`.

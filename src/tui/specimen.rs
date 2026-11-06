@@ -264,16 +264,23 @@ fn glyphs(rows: &mut Vec<Line>) {
 #[test]
 #[ignore = "prints the design specimen for review in a native terminal"]
 fn specimen() {
-    let mut rows = vec![Line::new("Jecode design specimen", STRONG.bold())];
-    palette(&mut rows);
-    attributes(&mut rows);
-    scanner(&mut rows);
-    glyphs(&mut rows);
+    let mut painted = String::new();
+    for (name, light) in [("Dark", false), ("Light", true)] {
+        set_light(light);
+        let mut rows = vec![Line::new(
+            &format!("Jecode design specimen · {name}"),
+            STRONG.bold(),
+        )];
+        palette(&mut rows);
+        attributes(&mut rows);
+        scanner(&mut rows);
+        glyphs(&mut rows);
+        for row in rows {
+            painted.push_str(&format!("{}\n", row.paint(COLUMNS)));
+        }
+    }
+    set_light(false);
     // One write keeps the output whole when the tool specimen runs alongside.
-    let painted: String = rows
-        .iter()
-        .map(|row| format!("{}\n", row.paint(COLUMNS)))
-        .collect();
     print!("{painted}");
 }
 

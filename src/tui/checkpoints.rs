@@ -46,6 +46,17 @@ impl App {
         {
             return false;
         }
+        // A user may open another sheet while the checkpoint worker runs. Its
+        // completion must not replace that sheet or wait behind it for later.
+        let occupied = self.state.selector.is_some()
+            || self.state.information.is_some()
+            || self.state.processes.is_some()
+            || self.state.agents_panel.is_some()
+            || self.state.ask_panel.is_some()
+            || self.state.todo_panel.is_some()
+            || self.state.permission.is_some()
+            || self.state.quitting.is_some();
+        let previous_information = self.state.information.take();
         let result = self.checkpoint_job.take().unwrap().finish();
         match result {
             Ok(output) if output.raw.is_some() => {
@@ -62,6 +73,9 @@ impl App {
             }
             Ok(output) => self.local_finish(Kind::Notice, &output.title, output.details),
             Err(error) => self.local_finish(Kind::Error, &error, vec![]),
+        }
+        if occupied {
+            self.state.information = previous_information;
         }
         true
     }

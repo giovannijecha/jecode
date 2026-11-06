@@ -51,12 +51,12 @@ Text roles, with the ink for each kind of terminal:
 | `LIT` | `#DACEFF` | `#48198A` | The caret's blinking `_`, background badge names, command names in Work chapters, `new output`, attachment chips. |
 | `BODY` | `#D1D2D6` | `#2C2E31` | Assistant prose, tool targets, diagnostics. |
 | `CODE_TEXT` | `#D1D2D6` | `#2C2E31` | Default code, inline code, command output, diff context. |
-| `GOOD` | `#7CD992` | `#067132` | The `Done` and `✓` marks, added lines, `☑`. |
+| `GOOD` | `#7CD992` | `#066F32` | The `Done` and `✓` marks, added lines, `☑`. |
 | `ACCENT` | `#C7AFFF` | `#552B9A` | The `>_` mark, `›` and `●` markers, matches, level 1 headings, links, the words `current` and `recommended`, the active tab mark, the gauge fill. |
 | `KEYWORD` | `#C8B7FF` | `#553494` | Code keywords. |
 | `CODE_STRING` | `#99D3DA` | `#016770` | Code strings. |
 | `CODE_NUMBER` | `#E6B2CF` | `#943171` | Code numbers. |
-| `WARNING` | `#EDC06B` | `#875800` | Retry, stopped and warning glyphs, `paused`, the gauge and its percent near compaction. |
+| `WARNING` | `#EDC06B` | `#875500` | Retry, stopped and warning glyphs, `paused`, the gauge and its percent near compaction. |
 | `BAD` | `#F48684` | `#B32228` | Failures, removed lines, destructive questions. |
 | `MUTED` | `#A4A6AA` | `#515256` | Secondary facts, field labels, link hosts, quotes, list markers, the model and effort in the footer; `DIM` text on a selected row. |
 | `DIM` | `#8C8E92` | `#616367` | Status-row facts, key labels, the footer path, tree gutters, group headings, line numbers, placeholders, struck text. |
@@ -156,7 +156,8 @@ mark in `ACCENT` with its blinking `_` in `LIT`:
   whether this folder has an `AGENTS.md`;
 - for saved conversations, `Recent in this folder` in `DIM` with `/resume all`
   on the right, then up to three titles in `BODY` with compact ages such as
-  `2h` in `MUTED`; on a first run, `Start here` in `DIM` and three commands,
+  `2h` in `MUTED`, even without a model (the dock keeps its `No model` warning);
+  with neither a model nor saved conversations, `Start here` in `DIM` and three commands,
   `/model`, `/permissions` and `/help`, in `STRONG`, each with a `MUTED` fact;
 - the keys `/ commands`, `Alt+V image` and `Ctrl+Q quit`, with `Ctrl+V image` on
   macOS.

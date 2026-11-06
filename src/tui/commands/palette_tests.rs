@@ -16,6 +16,9 @@ use crate::{
     },
 };
 
+#[path = "palette_async_tests.rs"]
+mod async_tests;
+
 const DRAFT: &str = "keep every word";
 
 fn app(home: &Directory, project: &Directory) -> App {

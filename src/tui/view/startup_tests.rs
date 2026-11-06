@@ -90,6 +90,26 @@ fn the_full_splash_centres_its_rows_above_the_unchanged_dock() {
 }
 
 #[test]
+fn saved_conversations_remain_available_when_no_model_is_selected() {
+    for (columns, height) in [(44, 16), (100, 32)] {
+        let mut state = state(&[("Earlier work", "2h")], columns, height);
+        state.opening.needs_model = true;
+        state.notice = Some(Feedback::result(Kind::Warning, "No model").action("/model", "choose"));
+        let frame = frame(&state, "", "fixture-folder");
+        let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
+        for expected in [
+            "Recent in this folder",
+            "Earlier work",
+            "No model",
+            "/model",
+        ] {
+            assert!(rows.iter().any(|row| row.contains(expected)), "{rows:#?}");
+        }
+        assert!(rows.iter().all(|row| !row.contains("Start here")));
+    }
+}
+
+#[test]
 fn scanline_mark_has_the_approved_width_ink_and_caret_timing() {
     let state = state(&[], 100, 32);
     motion::set_frame(0);

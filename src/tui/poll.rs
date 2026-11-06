@@ -186,6 +186,8 @@ impl App {
         dirty |= self.refresh_permission();
         dirty |= self.refresh_todo();
         dirty |= self.start_collaboration_continuation();
+        // Settle the command sheet's origin after every async owner has refreshed.
+        self.follow_commands(false);
         Ok(dirty)
     }
 }
