@@ -145,7 +145,7 @@ pub fn target(name: &str, arguments: &Value) -> String {
         } else {
             match action {
                 "open" | "navigate" => field("url"),
-                "click" | "fill" | "wait" => field("selector"),
+                "click" | "fill" | "type" | "wait" => field("selector"),
                 "press" => field("key"),
                 "evaluate" => field("expression"),
                 "cdp" => field("method"),
