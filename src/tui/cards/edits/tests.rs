@@ -483,7 +483,7 @@ fn nine_files_open_three_diffs_and_count_the_rest_beside_the_keycap() {
         assert_eq!(rows.iter().filter(|row| row.contains("2 + new")).count(), 3);
         let last = rows.last().unwrap();
         assert!(last.starts_with("  +5 diffs · 15 rows"), "{last}");
-        assert!(last.ends_with("Ctrl+O  expand"), "{last}");
+        assert!(last.ends_with("Ctrl+O expand"), "{last}");
         let docs = rows
             .iter()
             .position(|row| row.starts_with("  docs/AUTH.md · not changed"))
@@ -513,7 +513,7 @@ fn expanded_collapse_keycap_never_splits_a_wrapped_title() {
     let expanded = call(&three(), false, true);
     // A wide row keeps the keycap on the first title row.
     let rows = plain(&card(&expanded, 140, true).rows);
-    assert!(rows[0].ends_with("Ctrl+O  collapse"), "{rows:#?}");
+    assert!(rows[0].ends_with("Ctrl+O collapse"), "{rows:#?}");
     for columns in [44, 80, 100] {
         let card = card(&expanded, columns, true);
         let rows = plain(&card.rows);
@@ -521,7 +521,7 @@ fn expanded_collapse_keycap_never_splits_a_wrapped_title() {
             .iter()
             .take_while(|row| !row.contains("Ctrl+O"))
             .count();
-        assert_eq!(rows[title].trim(), "Ctrl+O  collapse", "{rows:#?}");
+        assert_eq!(rows[title].trim(), "Ctrl+O collapse", "{rows:#?}");
         // Every row above it belongs to the title: the paths, in order.
         let target = rows[..title]
             .iter()

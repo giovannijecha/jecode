@@ -54,6 +54,11 @@ mod native_lsp;
 mod native_script;
 
 fn native_pty_source() -> String {
+    use crate::tui::theme;
+    // What the light palette draws, as the bytes a terminal receives.
+    theme::set_light(true);
+    let (light_body, light_placeholder) = (format!("{}m", theme::BODY), format!("{}m", theme::DIM));
+    theme::set_light(false);
     format!(
         "{}\n{}\n{}",
         include_str!("native_pty.cs"),
@@ -64,10 +69,8 @@ fn native_pty_source() -> String {
         "JECODE_WARNING_FOREGROUND",
         &format!("\\x1b[{}m", crate::tui::theme::WARNING),
     )
-    .replace(
-        "JECODE_WARNING_SURFACE",
-        &format!("\\x1b[{}m", crate::tui::theme::PILL_SURFACE),
-    )
+    .replace("JECODE_LIGHT_BODY", &light_body)
+    .replace("JECODE_LIGHT_PLACEHOLDER", &light_placeholder)
     .replace(
         "JECODE_SPLASH_ACCENT",
         &format!("\\x1b[{}m", crate::tui::theme::ACCENT),

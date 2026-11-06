@@ -1,7 +1,18 @@
-use super::{App, Decoded, Feedback, Kind, selector::Purpose, terminal::Key};
+use super::{
+    App, Decoded, Feedback, Kind,
+    selector::{Choice, Purpose},
+    terminal::Key,
+};
 
 impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
+        let escaped = matches!(&decoded, Decoded::Key(key) if key.code == 27);
+        let exit = self.route(decoded)?;
+        self.follow_commands(escaped);
+        Ok(exit)
+    }
+
+    fn route(&mut self, decoded: Decoded) -> Result<bool, String> {
         // The quit question holds every key but reading the conversation.
         if self.state.quitting.is_some() {
             match &decoded {
@@ -51,15 +62,21 @@ impl App {
                 self.ask_text(&text, true);
                 return Ok(false);
             }
-            // The Todo menu has nothing to type into.
-            Decoded::Text(_) | Decoded::Paste(_) if self.state.todo_panel.is_some() => {
+            // A read-only sheet has nothing to type into and leaves the hidden draft alone.
+            Decoded::Text(_) | Decoded::Paste(_)
+                if self.state.todo_panel.is_some() || self.state.information.is_some() =>
+            {
                 return Ok(false);
             }
             Decoded::Error if self.state.agents_panel.is_some() => {
                 self.warn("Input exceeds 1 MiB · agent filter unchanged");
                 return Ok(false);
             }
-            Decoded::Error if self.state.ask_panel.is_some() || self.state.todo_panel.is_some() => {
+            Decoded::Error
+                if self.state.ask_panel.is_some()
+                    || self.state.todo_panel.is_some()
+                    || self.state.information.is_some() =>
+            {
                 self.warn("Input exceeds 1 MiB · panel input unchanged");
                 return Ok(false);
             }
@@ -69,7 +86,6 @@ impl App {
                     && let Some(paths) = crate::attachments::paths::dropped(&text)
                 {
                     self.state.feedback_input(true);
-                    self.state.information = None;
                     self.attach(super::attach::Source::Paths(paths));
                     return Ok(false);
                 }
@@ -92,7 +108,6 @@ impl App {
                     return Ok(false);
                 }
                 self.state.feedback_input(true);
-                self.state.information = None;
                 if let Some(selector) = &mut self.state.selector {
                     if selector.cancel_delete() && !selector.searchable {
                         return Ok(false);
@@ -181,9 +196,8 @@ impl App {
             }
             if !key.ctrl() && !key.alt() && matches!(key.code, 33..=40) {
                 super::view::scroll_information(&mut self.state, key.code);
-                return Ok(false);
             }
-            self.state.information = None;
+            return Ok(false);
         }
         if key.ctrl() && key.code == 67 {
             if self.state.selector.is_some() {
@@ -213,6 +227,12 @@ impl App {
         }
         if self.state.selector.is_some() {
             return self.selector_key(key);
+        }
+        // Reached only while the composer holds the keys: everything that owns them, such
+        // as a request or Ask, took them above.
+        if key.code == 71 && key.ctrl() && !key.alt() && !key.shift() {
+            self.open_commands();
+            return Ok(false);
         }
         if !key.ctrl() && !key.alt() && matches!(key.code, 33 | 34) {
             self.renderer
@@ -358,6 +378,8 @@ impl App {
                     self.save_key();
                 } else if matches!(menu.purpose, Purpose::AutoCompact) {
                     self.save_auto_compact();
+                } else if let Some(Choice::Command(index)) = menu.chosen() {
+                    return self.run_command(index);
                 } else if let Some(choice) = menu.chosen() {
                     self.choose(choice)?;
                 } else {
@@ -412,6 +434,15 @@ impl App {
         }
     }
     pub(super) fn close_selector(&mut self) {
+        if self
+            .state
+            .selector
+            .as_ref()
+            .is_some_and(|menu| matches!(menu.purpose, Purpose::Commands { .. }))
+        {
+            self.state.selector = None;
+            return;
+        }
         if self.close_lsp_panel() {
             return;
         }

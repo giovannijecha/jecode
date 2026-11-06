@@ -167,6 +167,8 @@ impl App {
 
     pub(super) fn resume_session(&mut self, id: &str) {
         self.cancel_copy();
+        // A draft still in the composer, from the commands sheet, comes along.
+        let carried = self.take_composer();
         self.capture_input();
         let result = self.agent.as_mut().unwrap().resume(id);
         match result {
@@ -395,6 +397,7 @@ impl App {
                 let cursor = document.input.draft.cursor;
                 self.state.editor.set(document.input.draft.prompt());
                 self.state.editor.cursor = cursor;
+                super::recovery::carry_draft(&mut self.state.editor, carried);
                 self.state.history.restore(document.input.history);
                 self.state.suggestions.refresh(&self.state.editor.text);
                 let pending_question = agent.has_pending_question();
@@ -420,6 +423,8 @@ impl App {
                 self.state.changed();
             }
             Err(error) => {
+                super::recovery::carry_draft(&mut self.state.editor, carried);
+                self.edited();
                 self.state.selector = None;
                 self.local_start(&format!("/resume {id}"));
                 self.local_finish(Kind::Error, &error, vec![]);

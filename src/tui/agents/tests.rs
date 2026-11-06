@@ -270,13 +270,13 @@ fn panel_list_inside_and_nested_escape_keep_the_exact_main_draft() {
     assert!(app.state.agents_panel.as_ref().unwrap().inside.is_some());
     let inside = text(&view::frame(&app.state, "fixture/model", "fixture").live);
     assert!(inside.contains("Implement search"), "{inside}");
-    assert!(inside.contains("UPDATE  src/search.rs"), "{inside}");
+    assert!(inside.contains(" UPDATE  src/search.rs"), "{inside}");
     assert!(
         inside.contains("AGENT 2  Returned · Search part 2"),
         "{inside}"
     );
     assert_eq!(inside.matches("Esc").count(), 1, "{inside}");
-    assert!(inside.contains("Esc  back to agents"), "{inside}");
+    assert!(inside.contains("Esc back to agents"), "{inside}");
     assert!(!inside.contains("Filter agents") && !inside.contains("Esc interrupt"));
     key(&mut app, 27);
     assert!(app.state.agents_panel.as_ref().unwrap().inside.is_none());
@@ -284,7 +284,7 @@ fn panel_list_inside_and_nested_escape_keep_the_exact_main_draft() {
     let list = text(&view::composer_frame(&app.state, "fixture/model", "fixture").live);
     assert_eq!(list.matches("Esc").count(), 1, "{list}");
     assert!(
-        list.contains("Esc  close") && list.contains("Enter  open"),
+        list.contains("Esc close") && list.contains("Enter open"),
         "{list}"
     );
     key(&mut app, 27);
@@ -435,7 +435,7 @@ fn inside_follows_new_rows_until_the_reader_pauses() {
     assert!(following.contains("TOOL-29") && !following.contains("Alt+End"));
     state.agents_panel.as_mut().unwrap().follow = false;
     let paused = text(&view::frame(&state, "fixture/model", "fixture").live);
-    assert!(paused.contains("Alt+End  back to bottom"), "{paused}");
+    assert!(paused.contains("Alt+End back to bottom"), "{paused}");
     assert!(paused.contains("TOOL-00") && !paused.contains("TOOL-29"));
 }
 

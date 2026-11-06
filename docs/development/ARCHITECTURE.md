@@ -15,7 +15,7 @@ Paths are relative to `src/`.
 | Area | Modules |
 | --- | --- |
 | Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `bootstrap/`, `setup/` |
-| Settings, credentials and effort | `config/`, `auth/accounts.rs`, `auth/openai/`, `auth/anthropic/`, `effort.rs`, `identity.rs` |
+| Settings, credentials and effort | `config/`, `auth/accounts.rs`, `auth/openai/`, `auth/anthropic/`, `auth/landing.rs`, `effort.rs`, `identity.rs` |
 | Agent loop, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs`, `events/` |
 | Input during a turn | `inbox.rs`, `inbox/`, `input.rs`, `agent/input.rs` |
 | Questions and plans | `ask.rs`, `ask/`, `todo.rs`, `todo/`, `agent/ask/`, `agent/todo/` |

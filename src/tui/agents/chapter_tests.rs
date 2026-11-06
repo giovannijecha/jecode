@@ -48,7 +48,7 @@ fn agent_events_join_the_chapter_they_follow_and_stand_alone_after_prose() {
     state.collaboration_event(received);
     let chapter = all(&state);
     assert!(
-        chapter.contains("WORK  Update agents  3 calls"),
+        chapter.contains("  WORK   Update agents  3 calls"),
         "{chapter}"
     );
     assert!(

@@ -1,7 +1,7 @@
-//! The status row: one row above the composer for every turn state and
-//! notice. A pill ` glyph label ` on its surface, `dim` facts joined by
-//! ` · ` and dropped from the right, then an optional keycap ending two cells
-//! from the edge, which drops after the facts.
+//! The status row: one row above the dock's owner for every turn state and notice, as
+//! text. The two-cell glyph, one space, the label, `dim` facts joined by ` · ` and
+//! dropped from the right, then an optional key ending two cells from the edge, which
+//! drops after the facts. The glyph carries the state, so a failure reads by its colour.
 use super::panel;
 use crate::{
     json::Value,
@@ -12,7 +12,7 @@ use crate::{
         motion,
         state::{Item, Kind, State},
         text,
-        theme::{ACCENT, BAD, BODY, DIM, GOOD, MUTED, PILL_SURFACE, STRONG, WARNING},
+        theme::{ACCENT, BAD, BODY, DIM, GOOD, STRONG, WARNING},
     },
 };
 use std::time::Instant;
@@ -21,8 +21,8 @@ use std::time::Instant;
 const FACT_MIN: usize = 6;
 /// The narrowest a label is shortened to so its first fact fits.
 const LABEL_MIN: usize = 12;
-/// The pill around its label: padding, the two-cell glyph and its gap.
-const PILL_CHROME: usize = 5;
+/// What precedes the label: the two-cell glyph and its gap.
+const GLYPH_CHROME: usize = 3;
 
 /// `escape` says whether Esc interrupts the turn from here: not while a
 /// panel or a draft edit holds it.
@@ -40,8 +40,8 @@ pub(super) fn row(state: &State, columns: usize, escape: bool) -> Line {
     }
     if state.question.is_some() && !stopping {
         let hint = state.ask_panel.is_none().then(|| {
-            let mut hint = Line::new("/ask", ACCENT);
-            hint.push(" answer", MUTED);
+            let mut hint = panel::keycap("/ask");
+            hint.push(" answer", DIM);
             hint
         });
         return waiting("Waiting for you", columns, hint);
@@ -156,29 +156,20 @@ fn notice_row(notice: &Feedback, columns: usize) -> Line {
     let (subject, facts) = facts(notice);
     let key = notice.action.map(|(key, label)| {
         let mut line = panel::keycap(key);
-        line.push(&format!(" {label}"), MUTED);
+        line.push(&format!(" {label}"), DIM);
         line
     });
     fitted(glyph, Line::new(&subject, STRONG), facts, key, columns)
 }
 
-/// ` glyph label ` on the pill surface; the glyph column is two cells.
-fn pill(glyph: Line, label: Line) -> Line {
-    let mut line = Line::default();
-    panel::push(&mut line, " ", BODY, Some(PILL_SURFACE));
-    for span in glyph
-        .spans
-        .into_iter()
-        .chain(Line::new(" ", BODY).spans)
-        .chain(label.spans)
-    {
-        panel::push(&mut line, &span.text, span.style, Some(PILL_SURFACE));
-    }
-    panel::push(&mut line, " ", BODY, Some(PILL_SURFACE));
-    line
+/// `glyph label`; the glyph column is two cells, so labels line up across states.
+fn headed(glyph: Line, label: Line) -> Line {
+    let mut line = glyph;
+    line.push(" ", BODY);
+    line.append(label)
 }
 
-/// A static waiting state uses the same two-cell glyph and pill geometry as
+/// A static waiting state uses the same two-cell glyph and geometry as
 /// the turn states. The optional command is an action hint, not a status fact.
 fn waiting(label: &str, columns: usize, hint: Option<Line>) -> Line {
     fitted(
@@ -190,7 +181,7 @@ fn waiting(label: &str, columns: usize, hint: Option<Line>) -> Line {
     )
 }
 
-/// The pill, then as many facts as fit with the keycap; then without it.
+/// The label, then as many facts as fit with the key; then without it.
 /// A long label yields room to the first fact down to half the row, so a
 /// cause stays readable; a lone first fact is shortened rather than dropped
 /// while it can be read.
@@ -213,7 +204,7 @@ fn fitted(glyph: Line, label: Line, facts: Vec<Line>, key: Option<Line>, columns
         let room = columns.saturating_sub(2 + reserved);
         let label_cells = panel::cells(&label);
         let wanted = facts.first().map_or(0, |first| {
-            PILL_CHROME + label_cells + 2 + panel::cells(first)
+            GLYPH_CHROME + label_cells + 2 + panel::cells(first)
         });
         let cut = wanted.saturating_sub(room);
         let kept = label_cells.saturating_sub(cut).max(LABEL_MIN.max(room / 2));
@@ -221,17 +212,16 @@ fn fitted(glyph: Line, label: Line, facts: Vec<Line>, key: Option<Line>, columns
         // only costs the label its last letters.
         let worth = kept + cut <= label_cells
             || label_cells.saturating_sub(kept) >= FACT_MIN
-            || PILL_CHROME + label_cells > room;
-        let pill = if cut > 0 && worth {
-            pill(glyph.clone(), label.shortened(kept))
+            || GLYPH_CHROME + label_cells > room;
+        let mut row = if cut > 0 && worth {
+            headed(glyph.clone(), label.shortened(kept))
         } else {
-            pill(glyph.clone(), label.clone())
+            headed(glyph.clone(), label.clone())
         };
-        let used = panel::cells(&pill);
+        let used = panel::cells(&row);
         if key.is_some() && used > room {
             continue;
         }
-        let mut row = pill.clone();
         let space = room.saturating_sub(used + 2);
         let kept = (0..=facts.len())
             .rev()
@@ -251,7 +241,7 @@ fn fitted(glyph: Line, label: Line, facts: Vec<Line>, key: Option<Line>, columns
         }
         return row.shortened(columns);
     }
-    pill(glyph, label).shortened(columns)
+    headed(glyph, label).shortened(columns)
 }
 
 /// `Subject · fact · fact`, or `Subject: fact`: the label and its facts.

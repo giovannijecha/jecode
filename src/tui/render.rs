@@ -1,6 +1,6 @@
 use super::{
     line::Line,
-    theme::{BASE, BODY, Surface},
+    theme::{BASE, BODY},
     view::Frame,
 };
 
@@ -11,7 +11,6 @@ pub struct Renderer {
     previous: Vec<Line>,
     size: (usize, usize),
     cursor: Option<(usize, usize)>,
-    base: Surface,
 }
 
 impl Renderer {
@@ -19,17 +18,10 @@ impl Renderer {
         Self::default()
     }
 
-    pub fn set_light_background(&mut self, light: bool) {
-        let base = if light {
-            Surface::rgb(12, 12, 12)
-        } else {
-            BASE
-        };
-        if self.base != base {
-            self.base = base;
-            self.previous.clear();
-            self.size = (0, 0);
-        }
+    /// Forgets what is on screen, so the next frame paints every row: the inks changed.
+    pub fn repaint(&mut self) {
+        self.previous.clear();
+        self.size = (0, 0);
     }
 
     pub fn paint(&mut self, frame: &Frame, width: usize, height: usize) -> String {
@@ -42,16 +34,16 @@ impl Renderer {
         // Erasing fills with the current background only on terminals with
         // BCE, so rows are painted cell by cell; the erase just drops stale
         // glyphs a mis-measured row could leave behind.
-        let erase = format!("\x1b[0m\x1b[{BODY};{}m\x1b[2K", self.base);
+        let erase = format!("\x1b[0m\x1b[{BODY};{BASE}m\x1b[2K");
         if resized {
-            output.push_str(&format!("\x1b[0m\x1b[{BODY};{}m\x1b[2J", self.base));
+            output.push_str(&format!("\x1b[0m\x1b[{BODY};{BASE}m\x1b[2J"));
         }
         for (row, line) in frame.live.iter().enumerate().take(height) {
             if resized || self.previous.get(row) != Some(line) {
                 output.push_str(&format!(
                     "\x1b[{};1H{erase}{}",
                     row + 1,
-                    line.paint_on(columns, self.base)
+                    line.paint(columns)
                 ));
             }
         }
@@ -60,7 +52,7 @@ impl Renderer {
         } else {
             self.previous.len().min(height)
         };
-        let blank = Line::default().paint_on(columns, self.base);
+        let blank = Line::default().paint(columns);
         for row in frame.live.len()..stale {
             output.push_str(&format!("\x1b[{};1H{erase}{blank}", row + 1));
         }

@@ -192,9 +192,10 @@ impl Store {
         {
             return Err("Saved OpenAI account belongs to a different host identity".into());
         }
-        let record = flow::sign_in(&host, previous.as_ref(), &cancel, emit)?;
+        let (record, landing) = flow::sign_in(&host, previous.as_ref(), &cancel, emit)?;
         let _lock = files.lock(&cancel)?;
         files.save_record(&record, &cancel)?;
+        landing.authenticated();
         Ok(self.make_session(&record))
     }
 

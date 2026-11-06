@@ -1,12 +1,12 @@
-//! The panel grammar: a panel opens below the composer in place of the
-//! footer. Its title and aside ride the composer's bottom rule, typed input
-//! stays in the composer, and its rows follow: tabs or a column header, a
-//! list or text, one blank row, then keycaps or a confirmation.
+//! The sheet: one owner of the dock at a time. A panel takes the composer's place, with
+//! one anatomy: the status row, the title rule with its aside, an optional field, tabs
+//! or a column header, a list or text, one blank row, then keys or a confirmation.
+//! Completion alone keeps the composer, because there the draft is the query.
 
 use crate::tui::{
     line::{Line, Span},
     text,
-    theme::{ACCENT, BAD, FAINT, MUTED, SELECTED_SURFACE, STRONG, Style, Surface},
+    theme::{ACCENT, BAD, DIM, FAINT, HAIRLINE, MUTED, SELECTED_SURFACE, STRONG, Style, Surface},
 };
 
 pub(super) fn position(start: usize, end: usize, total: usize) -> String {
@@ -54,10 +54,14 @@ pub(super) fn spread(left: Line, right: Line, width: usize, fill: Option<Surface
     fit(line, width, fill)
 }
 
-/// Spans without their own surface take `surface`, as a focused row does.
+/// Spans without their own surface take `surface`, as a focused row does. Dim text
+/// would fall under its floor there, so it reads muted.
 pub(super) fn surfaced(mut line: Line, surface: Surface) -> Line {
     for span in &mut line.spans {
         span.background.get_or_insert(surface);
+        if span.style == DIM {
+            span.style = MUTED;
+        }
     }
     line
 }
@@ -97,24 +101,24 @@ pub(super) fn title(parent: Option<&str>, title: &str, context: &str) -> Vec<Lin
 }
 
 /// Section names at column 2, the active one bold over an accent `━` on a
-/// faint divider to the edge; `mode` ends two cells before the edge.
+/// hairline divider to the edge; `mode` ends two cells before the edge.
 pub(super) fn tabs(names: &[&str], active: usize, mode: Line, columns: usize) -> [Line; 2] {
     let mut strip = Line::default();
     let mut under = Line::new("  ", MUTED);
     for (index, name) in names.iter().enumerate() {
         if index > 0 {
             strip.push("   ", MUTED);
-            under.push("───", FAINT);
+            under.push("───", HAIRLINE);
         }
         let on = index == active;
         strip.push(name, if on { STRONG.bold() } else { MUTED });
         under.push(
             &(if on { "━" } else { "─" }).repeat(text::cells(name)),
-            if on { ACCENT } else { FAINT },
+            if on { ACCENT } else { HAIRLINE },
         );
     }
     let rest = columns.saturating_sub(cells(&under));
-    under.push(&"─".repeat(rest), FAINT);
+    under.push(&"─".repeat(rest), HAIRLINE);
     let strip = spread(strip, mode, text_width(columns), None);
     [indent(strip, columns), under.shortened(columns)]
 }
@@ -224,15 +228,10 @@ impl Key<'_> {
     }
 }
 
+/// A key as text: bold strong, its label dim. Fill is kept for what means something, so
+/// routine keys never compete with the cards.
 pub(super) fn keycap(key: &str) -> Line {
-    let mut line = Line::default();
-    push(
-        &mut line,
-        &format!(" {key} "),
-        STRONG,
-        Some(SELECTED_SURFACE),
-    );
-    line
+    Line::new(key, STRONG.bold())
 }
 
 fn caps(keys: &[Key], first: Style) -> Line {
@@ -244,21 +243,21 @@ fn caps(keys: &[Key], first: Style) -> Line {
         line.spans.extend(keycap(key.key).spans);
         line.push(
             &format!(" {}", key.label),
-            if index == 0 { first } else { MUTED },
+            if index == 0 { first } else { DIM },
         );
     }
     line
 }
 
-/// One row of keycaps; movement and secondary keys leave before the action
+/// One row of keys; movement and secondary keys leave before the action
 /// and exit controls when it is too narrow.
 pub(super) fn row(keys: &[Key], width: usize) -> Line {
     let mut shown = keys.to_vec();
     trim_keys(&mut shown, width, true);
-    caps(&shown, MUTED).shortened(width)
+    caps(&shown, DIM).shortened(width)
 }
 
-/// The key row as keycaps; what still does not fit wraps onto more rows.
+/// The key row; what still does not fit wraps onto more rows.
 pub(super) fn keys(keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
     let mut shown: Vec<Key> = keys
         .iter()
@@ -270,13 +269,13 @@ pub(super) fn keys(keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
     for key in shown {
         let last = rows.last_mut().unwrap();
         last.push(key);
-        if last.len() > 1 && cells(&caps(last, MUTED)) > width {
+        if last.len() > 1 && cells(&caps(last, DIM)) > width {
             last.pop();
             rows.push(vec![key]);
         }
     }
     rows.iter()
-        .map(|row| caps(row, MUTED).shortened(width))
+        .map(|row| caps(row, DIM).shortened(width))
         .collect()
 }
 
@@ -287,7 +286,7 @@ pub(super) fn keys(keys: &[Key], width: usize, overflow: bool) -> Vec<Line> {
 /// them is cut by `shortened` instead.
 fn trim_keys(shown: &mut Vec<Key<'_>>, width: usize, single_row: bool) {
     let moves = |key: &Key<'_>| matches!(key.label, "move" | "scroll" | "questions");
-    while shown.len() > 1 && cells(&caps(shown, MUTED)) > width {
+    while shown.len() > 1 && cells(&caps(shown, DIM)) > width {
         let has_escape = shown.iter().any(|key| key.key == "Esc");
         let primary = shown.iter().position(|key| !moves(key));
         let protected = |index: usize| {
@@ -325,7 +324,7 @@ pub(super) fn confirm(question: &str, keys: &[Key], width: usize) -> Vec<Line> {
     }
 }
 
-/// Text typed in the composer for a panel: its top rule names the field.
+/// Text typed in a sheet: it names itself on its own row and holds the only caret.
 pub(super) struct Field {
     pub label: String,
     /// The visible value, one dot per character for a secret.
@@ -345,9 +344,8 @@ pub(super) struct Sheet<'a> {
     /// The rule title, longest first; later entries drop detail.
     pub title: Vec<Line>,
     pub aside: Line,
-    /// The composer shows the draft when no field takes its place; the
-    /// draft keeps its caret only when it is the panel's filter.
     pub field: Option<Field>,
+    /// Completion: the draft is the filter, so the composer stays.
     pub draft_caret: bool,
     /// Tabs or a column header, full width.
     pub head: Vec<Line>,

@@ -13,13 +13,25 @@ fn draft() -> State {
     state
 }
 
-/// The composer's bottom rule, below the caret's row, carries the panel's
-/// title and count.
+/// Completion keeps the composer, so the panel's title and count sit on the bottom
+/// rule, below the caret's row.
 fn title(frame: &Frame) -> String {
     let (row, _) = frame.cursor.unwrap();
     let rule = frame.live[row + 1].plain();
     assert!(rule.starts_with("─ "), "{rule}");
     rule
+}
+
+/// A sheet replaces the composer: its title and count sit on the rule above the field
+/// that holds the caret.
+fn sheet_title(frame: &Frame) -> String {
+    let (row, _) = frame.cursor.unwrap();
+    frame.live[..row]
+        .iter()
+        .rev()
+        .map(Line::plain)
+        .find(|row| row.starts_with("─ "))
+        .expect("a title rule above the field")
 }
 
 #[test]
@@ -87,7 +99,7 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
     for selected in [0, 9, 11] {
         state.selector.as_mut().unwrap().selected = selected;
         let frame = composer_frame(&state, "model", "directory");
-        assert!(title(&frame).contains("12 models"));
+        assert!(sheet_title(&frame).contains("12 models"));
         let focus = format!("› fixture/model-{selected} ");
         assert!(
             frame
@@ -108,7 +120,7 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
     menu.editor.insert("model-10");
     menu.refresh();
     let filtered = composer_frame(&state, "model", "directory");
-    assert!(title(&filtered).contains("1 of 12 models"));
+    assert!(sheet_title(&filtered).contains("1 of 12 models"));
     assert!(
         filtered
             .live
@@ -125,7 +137,7 @@ fn selector_counts_and_scrollbar_follow_navigation_filtering_and_empty_results()
             .iter()
             .any(|row| row.plain().contains("No matching option"))
     );
-    assert!(title(&empty).contains("0 of 12 models"));
+    assert!(sheet_title(&empty).contains("0 of 12 models"));
 }
 
 #[test]

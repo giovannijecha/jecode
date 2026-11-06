@@ -8,16 +8,24 @@ use crate::tui::{
 };
 
 const MARK_WIDTH: usize = 49;
+/// With the keys, without them, with the compact mark.
+const LEVELS: usize = 3;
+/// Setup advice while no model is selected; otherwise the saved conversations.
+const START: [(&str, &str); 3] = [
+    ("/model", "Choose the model"),
+    ("/permissions", "Set what Jecode may change here"),
+    ("/help", "Show commands and keys"),
+];
 
-/// The B13 startup splash occupies the empty conversation. A first prompt
-/// restores the one-line header and the ordinary transcript grid.
+/// While the conversation is empty, the mark and one block inside its two edges. A first
+/// prompt restores the one-line header and the ordinary transcript grid.
 pub(in crate::tui) fn rows(state: &State, columns: usize) -> Vec<Line> {
     if state.items.iter().any(Item::is_visible) {
         return slim(state, columns);
     }
     let room = room(state, columns);
     if columns >= MARK_WIDTH + 4 {
-        for level in 0..4 {
+        for level in 0..LEVELS {
             let body = splash(state, columns, level);
             if body.len() <= room {
                 let top = (room - body.len()) / 2;
@@ -37,7 +45,7 @@ pub(in crate::tui) fn animated(state: &State) -> bool {
         return false;
     }
     let room = room(state, state.width);
-    (0..4).any(|level| splash(state, state.width, level).len() <= room)
+    (0..LEVELS).any(|level| splash(state, state.width, level).len() <= room)
 }
 
 fn room(state: &State, columns: usize) -> usize {
@@ -55,7 +63,6 @@ fn room(state: &State, columns: usize) -> usize {
 }
 
 fn slim(state: &State, columns: usize) -> Vec<Line> {
-    let opening = &state.opening;
     let mut title = Line::new(">_", ACCENT.bold());
     title.push(" jecode", STRONG.bold());
     title.push(&format!(" {}", env!("CARGO_PKG_VERSION")), MUTED);
@@ -64,43 +71,33 @@ fn slim(state: &State, columns: usize) -> Vec<Line> {
         return rows;
     }
     let width = panel::text_width(columns);
-    if opening.recent.is_empty() {
-        rows.push(panel::indent(keys(width), columns));
-        return rows;
-    }
-    rows.push(panel::indent(
-        Line::new("Recent in this folder", DIM),
-        columns,
-    ));
-    for recent in &opening.recent {
-        let title = Line::new(&text::clean(&recent.title), BODY);
-        let age = Line::new(&recent.age, MUTED);
-        rows.push(panel::indent(
-            panel::spread(title, age, width, None),
-            columns,
-        ));
-    }
-    rows.push(Line::default());
-    let resume = [key("/resume", "all conversations")];
-    rows.push(panel::indent(panel::row(&resume, width), columns));
+    rows.extend(
+        content(state, width)
+            .into_iter()
+            .map(|line| panel::indent(line, columns)),
+    );
     rows
 }
 
+/// Everything inside the mark's two edges: version and facts, then what comes next, then
+/// the keys. Short or narrow, the keys leave, then the mark turns compact.
 fn splash(state: &State, columns: usize, level: usize) -> Vec<Line> {
-    let compact = level >= 3;
-    let mut rows: Vec<_> = wordmark(compact)
-        .into_iter()
-        .map(|line| centre(line, columns))
-        .collect();
+    let mut rows = wordmark(level == 2);
     rows.push(Line::default());
-    rows.push(centre(Line::new(env!("CARGO_PKG_VERSION"), MUTED), columns));
+    rows.push(facts(state));
     rows.push(Line::default());
+    rows.extend(content(state, MARK_WIDTH));
     if level == 0 {
-        let mut tip = Line::new("Tip ", ACCENT.bold());
-        tip.push(" /permissions", STRONG);
-        tip.push(" sets what Jecode may change here", MUTED);
-        rows.push(centre(tip, columns));
+        rows.push(Line::default());
+        rows.push(keys(MARK_WIDTH));
     }
+    let indent = " ".repeat(columns.saturating_sub(MARK_WIDTH) / 2);
+    rows.into_iter()
+        .map(|line| line.indent(&indent, MUTED))
+        .collect()
+}
+
+fn facts(state: &State) -> Line {
     let mut facts = Line::new("✓ ", GOOD);
     facts.push(
         &format!(
@@ -117,18 +114,50 @@ fn splash(state: &State, columns: usize, level: usize) -> Vec<Line> {
     } else {
         facts.push("– no AGENTS.md", DIM);
     }
-    rows.push(centre(facts, columns));
-    if level < 2 || state.opening.recent.is_empty() {
-        rows.push(Line::default());
-        rows.push(centre(keys(columns.saturating_sub(4)), columns));
+    panel::spread(
+        Line::new(env!("CARGO_PKG_VERSION"), MUTED),
+        facts,
+        MARK_WIDTH,
+        None,
+    )
+}
+
+/// A selected model without conversations gets an empty state, not setup advice.
+fn content(state: &State, width: usize) -> Vec<Line> {
+    if state.opening.recent.is_empty() {
+        if !state.opening.needs_model {
+            return vec![
+                Line::new("No saved conversations in this folder", MUTED).shortened(width),
+            ];
+        }
+        let names = START.iter().map(|(name, _)| name.len()).max().unwrap_or(0) + 2;
+        let mut rows = vec![Line::new("Start here", DIM)];
+        rows.extend(START.iter().map(|(name, fact)| {
+            let line = panel::fit(Line::new(name, STRONG), names, None);
+            line.append(Line::new(fact, MUTED)).shortened(width)
+        }));
+        return rows;
     }
-    if !state.opening.recent.is_empty() {
-        rows.push(Line::default());
-        rows.extend(recents(state).into_iter().map(|line| centre(line, columns)));
+    let mut resume = panel::keycap("/resume");
+    resume.push(" all", DIM);
+    let mut rows = vec![panel::spread(
+        Line::new("Recent in this folder", DIM),
+        resume,
+        width,
+        None,
+    )];
+    for recent in state.opening.recent.iter().take(3) {
+        rows.push(panel::spread(
+            Line::new(&text::clean(&recent.title), BODY),
+            Line::new(&recent.age, MUTED),
+            width,
+            None,
+        ));
     }
     rows
 }
 
+/// Nothing to expand yet, so Ctrl+O is absent.
 fn keys(width: usize) -> Line {
     panel::row(
         &[
@@ -142,39 +171,10 @@ fn keys(width: usize) -> Line {
                 },
                 "image",
             ),
-            key("Ctrl+O", "expand"),
             key("Ctrl+Q", "quit"),
         ],
         width,
     )
-}
-
-fn recents(state: &State) -> Vec<Line> {
-    let mut rows = vec![panel::fit(
-        Line::new("Recent in this folder", DIM),
-        MARK_WIDTH,
-        None,
-    )];
-    for recent in state.opening.recent.iter().take(3) {
-        rows.push(panel::spread(
-            Line::new(&text::clean(&recent.title), BODY),
-            Line::new(&recent.age, MUTED),
-            MARK_WIDTH,
-            None,
-        ));
-    }
-    rows.push(Line::default());
-    rows.push(panel::fit(
-        panel::row(&[key("/resume", "all conversations")], MARK_WIDTH),
-        MARK_WIDTH,
-        None,
-    ));
-    rows
-}
-
-fn centre(line: Line, columns: usize) -> Line {
-    let indent = columns.saturating_sub(text::cells(&line.plain())) / 2;
-    line.indent(&" ".repeat(indent), MUTED)
 }
 
 // Five-cell glyphs with two-cell strokes. One cell separates letters, and

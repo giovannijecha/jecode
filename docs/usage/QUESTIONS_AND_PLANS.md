@@ -80,7 +80,7 @@ The plan belongs to the model; to change it, ask in the conversation. When the
 model creates a plan, the conversation shows one `TODO` row with its title and
 task count. Later updates add no rows.
 
-`/todo` opens the current plan below the composer and updates live: the title,
+`/todo` opens the current plan in place of the composer and updates live: the title,
 a progress bar, `N of M done`, and each task with its number, owner and state
 (`done`, `in progress`, `waiting`, `awaiting review`, `failed` or `cancelled`; a
 task not started shows no state). Arrow keys scroll; Esc closes. It makes no

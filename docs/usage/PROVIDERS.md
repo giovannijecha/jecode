@@ -102,7 +102,10 @@ a switch to subscription credentials.
 Choose **Credentials** → **OpenAI** → **Add account**. Jecode opens your browser
 on OpenAI's sign-in page and waits for the redirect on a local `127.0.0.1` port.
 Complete the sign-in within five minutes. In `jecode setup`, press Enter while
-it waits to cancel and return to the provider list.
+it waits to cancel and return to the provider list. When the tokens
+are saved, the browser shows a black page reading `jecode authenticated` and
+`close this tab`; if the sign-in fails it reads `jecode not authenticated` and
+`close this tab and try again`.
 
 This uses OpenAI's documented
 [Sign in with ChatGPT flow for open-source apps](https://developers.openai.com/siwc/token-sharing-open-source/sign-in).
@@ -120,7 +123,9 @@ account's catalog. Implementation details are in
 
 Choose **Credentials** → **Anthropic** → **Add account**. Jecode opens your
 browser on claude.ai's authorization page and waits for the redirect on a local
-port. Complete the sign-in within five minutes.
+port. Complete the sign-in within five minutes. The browser
+ends on the same black `jecode authenticated` page once the tokens are saved, or
+`jecode not authenticated` if the sign-in failed.
 
 Read this before using it:
 

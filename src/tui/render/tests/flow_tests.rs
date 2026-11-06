@@ -29,7 +29,7 @@ fn live_tool_time_updates_without_events_then_freezes_on_completion() {
         .lines()
         .find(|line| line.contains("fixture command"))
         .unwrap();
-    assert!(header.starts_with(" BASH  fixture command"));
+    assert!(header.starts_with("  BASH   fixture command"));
     let summary = visible
         .lines()
         .find(|line| {
@@ -98,15 +98,15 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     display.scroll(Scroll::Start);
     display.scroll(Scroll::Rows(2));
     step(&mut display, &mut screen, &state, now);
-    assert!(screen.visible().starts_with(" WORK  Activity  2 calls"));
+    assert!(screen.visible().starts_with("  WORK   Activity  2 calls"));
     assert!(!screen.visible().contains("  │ one"));
     let generation = state.generation;
     state.toggle_tools();
     step(&mut display, &mut screen, &state, now);
     assert_eq!(state.generation, generation);
-    assert!(screen.visible().starts_with(" WORK  Activity  2 calls"));
+    assert!(screen.visible().starts_with("  WORK   Activity  2 calls"));
     assert!(screen.visible().contains("  │ one"));
-    assert_eq!(screen.visible().matches(" BASH  first").count(), 1);
+    assert_eq!(screen.visible().matches("  BASH   first").count(), 1);
 
     geometry(&mut screen, &mut state, &mut display, 40, 20, now);
     drain(
@@ -117,8 +117,8 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     );
     // At 40 columns the collapse keycap shortens the expanded title.
     let title = screen.visible().lines().next().unwrap().to_owned();
-    assert!(title.starts_with(" WORK  Activity  2 ca"), "{title}");
-    assert!(title.trim_end().ends_with("Ctrl+O  collapse"), "{title}");
+    assert!(title.starts_with("  WORK   Activity  2 "), "{title}");
+    assert!(title.trim_end().ends_with("Ctrl+O collapse"), "{title}");
     assert!(screen.visible().contains("  │ one"));
     state.toggle_tools();
     step(
@@ -149,9 +149,9 @@ fn tail_rows_above_a_growing_work_chapter_never_move_down() {
             step(&mut display, &mut screen, state, now);
             drain(&mut display, &mut screen, state, now);
             let title = if state.items.len() == 2 {
-                " BASH  printf one"
+                "  BASH   printf one"
             } else {
-                " WORK  Inspect sources"
+                "  WORK   Inspect source"
             };
             let current = screen
                 .visible()

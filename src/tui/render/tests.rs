@@ -6,7 +6,7 @@ use crate::tui::{
 use crate::{events::Event, json::Value};
 
 #[test]
-fn light_background_fills_every_cell_and_dark_background_uses_terminal_default() {
+fn neither_palette_paints_a_background() {
     let frame = view::Frame {
         header: vec![],
         history: vec![],
@@ -15,15 +15,18 @@ fn light_background_fills_every_cell_and_dark_background_uses_terminal_default()
         composer: 1,
     };
     let mut renderer = Renderer::new();
-    renderer.set_light_background(true);
-    let light = renderer.paint(&frame, 4, 3);
-    assert!(light.contains("48;2;12;12;12"));
-    assert!(light.matches("48;2;12;12;12").count() >= 8);
-    assert!(!light.contains("\x1b[49m"));
-    renderer.set_light_background(false);
     let dark = renderer.paint(&frame, 4, 3);
-    assert!(dark.contains("\x1b[49m"));
-    assert!(!dark.contains("48;2;12;12;12"));
+    assert!(crate::tui::theme::set_light(true));
+    renderer.repaint();
+    let light = renderer.paint(&frame, 4, 3);
+    crate::tui::theme::set_light(false);
+    for painted in [&dark, &light] {
+        assert!(painted.contains("\x1b[49m"));
+        assert!(!painted.contains("48;2;"));
+        assert!(!painted.contains("48;5;"));
+    }
+    // Only the inks differ.
+    assert_ne!(dark, light);
 }
 use crate::tui::test_screen::Screen;
 
@@ -127,7 +130,7 @@ fn out_of_order_tool_results_remain_in_source_order_and_never_duplicate_cards() 
     let visible = screen.visible();
     assert!(visible.find("first output").unwrap() < visible.find("second output").unwrap());
     assert_eq!(visible.matches("first output").count(), 1);
-    assert_eq!(visible.matches(" BASH  second").count(), 1);
+    assert_eq!(visible.matches("  BASH   second").count(), 1);
     assert!(screen.history.is_empty());
 }
 

@@ -108,6 +108,16 @@ impl App {
         self.state.queue.park(draft);
     }
 
+    /// The composer's draft, taken away from this conversation. An edited recall stays
+    /// behind as its paused draft, as when a request comes back.
+    pub(super) fn take_composer(&mut self) -> super::editor::Editor {
+        if self.state.history.has_edited_recall() {
+            self.park_composer();
+        }
+        self.state.history.cancel(&mut self.state.editor);
+        std::mem::take(&mut self.state.editor)
+    }
+
     fn park_composer_for_restore(&mut self) {
         if self.state.history.has_edited_recall() {
             self.park_composer();
@@ -122,6 +132,18 @@ impl App {
         self.state.editor.set(prompt);
         self.edited();
         self.capture_input();
+    }
+}
+
+/// A draft that came along goes first, the conversation's own joins below it, and the
+/// caret stays where it was written.
+pub(super) fn carry_draft(editor: &mut super::editor::Editor, carried: super::editor::Editor) {
+    let saved = editor.prompt();
+    if saved.is_empty() {
+        *editor = carried;
+    } else if !carried.prompt().is_empty() {
+        editor.set(carried.prompt().join(saved));
+        editor.cursor = carried.cursor;
     }
 }
 

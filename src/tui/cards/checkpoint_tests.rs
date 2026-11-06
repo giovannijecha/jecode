@@ -52,7 +52,10 @@ fn a_running_command_shows_its_checkpoint_in_the_running_line() {
     ));
     assert_eq!(
         rows,
-        [" BASH  cargo fmt", "  └ Running · checkpoint rc-12 · saved"]
+        [
+            "  BASH   cargo fmt",
+            "  └ Running · checkpoint rc-12 · saved"
+        ]
     );
 }
 
@@ -152,7 +155,7 @@ fn checkpoint_cards_fit_narrow_and_wide_terminals() {
             &Presentation::default(),
         );
         let text = plain(&rows);
-        assert!(text[0].starts_with(" CHECKPOINT  restore"), "{text:?}");
+        assert!(text[0].starts_with("  SAVE   restore"), "{text:?}");
         assert!(text.iter().any(|row| row.starts_with("  └ ")), "{text:?}");
         for row in &text {
             assert!(row.chars().count() <= columns, "{columns}: {row:?}");

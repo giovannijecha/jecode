@@ -35,10 +35,14 @@ fn block(rows: &[Line]) -> String {
     rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n")
 }
 
-/// A title row opens on a ` NAME ` badge; hung rows open on the gutter.
+/// A title row opens on a centred NAME badge; hung rows open on the gutter.
 fn titled(row: &Line) -> bool {
     let plain = row.plain();
-    plain.starts_with(' ') && plain.chars().nth(1).is_some_and(char::is_uppercase)
+    plain
+        .trim_start()
+        .chars()
+        .next()
+        .is_some_and(char::is_uppercase)
 }
 
 fn heading(rows: &[Line]) -> &Line {
@@ -218,7 +222,7 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
 
     let rows = state.rows();
     assert_eq!(rows.len(), 5);
-    assert_eq!(heading(&rows[0]).plain(), " WORK  Inspect app  5 calls");
+    assert_eq!(heading(&rows[0]).plain(), "  WORK   Inspect app  5 calls");
     let summary = block(&rows[0]);
     for fact in [
         "1 file read",
@@ -237,11 +241,11 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     assert_eq!(state.toggle_tools(), Some((true, 5)));
     let opened = state.rows();
     for (index, target) in [
-        " READ  src/main.rs",
-        " BASH  printf example",
-        " WEB  fetch",
-        " BROWSER  screenshot",
-        " PROCESS  list",
+        "  READ   src/main.rs",
+        "  BASH   printf example",
+        "  WEB    fetch",
+        "BROWSER  screenshot",
+        "PROCESS  list",
     ]
     .into_iter()
     .enumerate()
@@ -284,11 +288,11 @@ fn trimmed_labels_group_and_missing_or_blank_labels_use_activity() {
     }
     state.close_tools();
     let rows = state.rows();
-    assert_eq!(heading(&rows[0]).plain(), " WORK  Audit  2 calls");
+    assert_eq!(heading(&rows[0]).plain(), "  WORK   Audit  2 calls");
     assert!(block(&rows[1]).contains("READ src/a.rs"));
-    assert_eq!(heading(&rows[2]).plain(), " WORK  Activity  2 calls");
+    assert_eq!(heading(&rows[2]).plain(), "  WORK   Activity  2 calls");
     assert!(block(&rows[3]).contains("READ src/a.rs"));
-    assert!(heading(&rows[4]).plain().starts_with(" READ  src/a.rs"));
+    assert!(heading(&rows[4]).plain().starts_with("  READ   src/a.rs"));
 }
 
 #[test]
@@ -343,11 +347,11 @@ fn narration_mutations_checkpoint_and_skill_reads_break_chapters() {
     assert_eq!(
         headings
             .iter()
-            .filter(|text| text.starts_with(" READ  "))
+            .filter(|text| text.starts_with("  READ   "))
             .count(),
         6
     );
-    for expected in [" WRITE  ", " UPDATE  ", " CHECKPOINT  ", " SKILL  "] {
+    for expected in [" WRITE   ", " UPDATE  ", "  SAVE   ", " SKILL   "] {
         assert!(
             headings.iter().any(|text| text.contains(expected)),
             "{headings:?}"
@@ -374,16 +378,16 @@ fn adjacent_turns_never_merge_and_ctrl_o_opens_only_the_latest() {
         state.finish_tool_turn();
     }
     let rows = state.rows();
-    assert_eq!(heading(&rows[0]).plain(), " WORK  Inspect  2 calls");
+    assert_eq!(heading(&rows[0]).plain(), "  WORK   Inspect  2 calls");
     assert!(block(&rows[1]).contains("READ old-1.rs"));
-    assert_eq!(heading(&rows[2]).plain(), " WORK  Inspect  2 calls");
+    assert_eq!(heading(&rows[2]).plain(), "  WORK   Inspect  2 calls");
     assert!(block(&rows[3]).contains("READ new-1.rs"));
     assert_eq!(state.toggle_tools(), Some((true, 2)));
     let opened = state.rows();
-    assert!(!block(&opened[0]).contains(" READ  old-0.rs"));
-    assert!(!block(&opened[1]).contains(" READ  old-1.rs"));
-    assert!(block(&opened[2]).contains(" READ  new-0.rs"));
-    assert!(block(&opened[3]).contains(" READ  new-1.rs"));
+    assert!(!block(&opened[0]).contains("  READ   old-0.rs"));
+    assert!(!block(&opened[1]).contains("  READ   old-1.rs"));
+    assert!(block(&opened[2]).contains("  READ   new-0.rs"));
+    assert!(block(&opened[3]).contains("  READ   new-1.rs"));
 }
 
 #[test]
@@ -414,10 +418,10 @@ fn a_pending_call_reopens_its_chapter_header_until_results_arrive() {
     let rows = state.rows();
     let title = heading(&rows[0]);
     assert_eq!(title.spans[0].background, Some(BADGE_IDLE));
-    assert_eq!(title.spans[1].text, "WORK");
-    assert_ne!(title.spans[1].style, STRONG.bold());
+    assert_eq!(title.spans[0].text, "  WORK  ");
+    assert_ne!(title.spans[0].style, STRONG.bold());
     let working = block(&rows[0]);
-    assert!(working.contains(" WORK  Verify  3 calls\n"), "{working}");
+    assert!(working.contains("  WORK   Verify  3 calls\n"), "{working}");
     assert!(!working.contains("calls · running"));
     assert!(working.contains("2 commands · 1 running"));
     finish(
@@ -427,7 +431,7 @@ fn a_pending_call_reopens_its_chapter_header_until_results_arrive() {
         Value::object([("exit_code", Value::number(0))]),
     );
     let finished = block(&state.rows()[0]);
-    assert!(finished.contains(" WORK  Verify  3 calls"));
+    assert!(finished.contains("  WORK   Verify  3 calls"));
     let rows = state.rows();
     assert_eq!(heading(&rows[0]).spans[0].style, STRONG.bold());
     assert_eq!(heading(&rows[0]).spans[0].background, Some(BADGE_IDLE));
@@ -459,7 +463,7 @@ fn a_failed_call_stays_red_and_explicit_after_later_success() {
     assert_eq!(heading(&rows[0]).spans[0].style, BADGE_TEXT.bold());
     assert_eq!(heading(&rows[0]).spans[0].background, Some(BADGE_BAD));
     let visible = block(&rows[0]);
-    assert!(visible.contains(" WORK  Inspect  2 calls · 1 failed"));
+    assert!(visible.contains("  WORK   Inspect  2 calls · 1 failed"));
     assert!(visible.contains("1 command"));
     assert!(!visible.contains("1 command · 1 failed"));
     assert!(visible.contains("READ missing.rs") && visible.contains("permission denied"));
@@ -488,7 +492,7 @@ fn a_long_replayed_chapter_keeps_one_compact_heading() {
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(text.matches(" WORK  Replay work  10000 calls").count(), 1);
+    assert_eq!(text.matches("  WORK   Replay work  10000 calls").count(), 1);
     assert!(text.contains("10000 commands"));
     assert_eq!(state.settled_len(), state.items.len());
 }
@@ -515,7 +519,7 @@ fn removing_withdrawn_items_rebuilds_chapters_without_merging_execution_turns() 
     state.reindex_chapters();
     state.reset_tool_details();
     let rows = state.rows();
-    assert!(block(&rows[0]).contains(" WORK  Inspect  2 calls"));
+    assert!(block(&rows[0]).contains("  WORK   Inspect  2 calls"));
     assert!(block(&rows[1]).contains("BASH fixture"));
-    assert!(block(&rows[2]).contains(" BASH  fixture"));
+    assert!(block(&rows[2]).contains("  BASH   fixture"));
 }

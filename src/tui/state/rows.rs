@@ -174,24 +174,16 @@ pub(in crate::tui) fn tool_card(
     (!chapter.rows.is_empty()).then_some(chapter)
 }
 
-/// The sent request: `› ` on the full-row user surface between two padding
-/// rows, the text hanging at column 2 and attachment labels drawn as chips.
+/// The sent request: `› ` on one band of the full-row user surface, the text hanging
+/// at column 2 and attachment labels drawn as chips.
 fn request(value: &str, columns: usize) -> Vec<Line> {
     let mut line = chips(&text::clean(value)).at_source(0);
     line.background = Some(USER_SURFACE);
-    let pad = || Line {
-        background: Some(USER_SURFACE),
-        ..Line::default()
-    };
-    let mut lines = vec![pad()];
-    lines.extend(
-        line.wrap(columns.saturating_sub(4), true)
-            .into_iter()
-            .enumerate()
-            .map(|(index, line)| line.indent(if index == 0 { "› " } else { "  " }, ACCENT.bold())),
-    );
-    lines.push(pad());
-    lines
+    line.wrap(columns.saturating_sub(4), true)
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| line.indent(if index == 0 { "› " } else { "  " }, ACCENT.bold()))
+        .collect()
 }
 
 /// `[1# Image]` and `[2# File: wake.log]` become ` 1 Image ` and ` 2 wake.log `

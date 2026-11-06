@@ -7,7 +7,7 @@ use crate::{
     tui::{
         selector::{Purpose, Selector},
         state::Kind,
-        theme::{BADGE_IDLE, CURSOR, LIT, USER_SURFACE},
+        theme::{ACCENT, CURSOR, USER_SURFACE},
     },
 };
 
@@ -37,7 +37,7 @@ mod controls_tests;
 mod field_tests;
 
 #[test]
-fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
+fn every_menu_replaces_the_composer_with_a_titled_sheet_and_its_keys() {
     let models: Vec<_> = (0..12).map(model).collect();
     let mut key = Selector::key("openrouter");
     key.editor.insert("isolated-fixture-key");
@@ -49,7 +49,7 @@ fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
             Default::default(),
             &crate::backend::openrouter::Routing::Auto,
             Default::default(),
-            std::path::Path::new("fixture/config.json"),
+            Default::default(),
         ),
         Selector::models(&models, false, "fixture/model-1"),
         Selector::efforts(model(1), false, Effort::High),
@@ -71,31 +71,39 @@ fn every_menu_docks_below_the_composer_rules_with_its_title_and_keys() {
         let title = menu.title.clone();
         let frame = frame(&state, "fixture/model", "directory");
         let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
-        // Status row, top rule, one input row, then the title's bottom rule.
-        assert_eq!(rows[0].trim(), "", "{rows:#?}");
-        assert!(rows[1].starts_with('─'), "{rows:#?}");
+        // The sheet replaces the composer: the draft row, the status row, then the title
+        // rule. The draft appears once, on its own row, without a caret.
         assert!(
-            rows[3].starts_with("─ ") && rows[3].contains(&title),
+            rows[0].starts_with("› kept private draft") && rows[0].ends_with("draft kept"),
+            "{rows:#?}"
+        );
+        assert_eq!(rows[1].trim(), "", "{rows:#?}");
+        assert!(
+            rows[2].starts_with("─ ") && rows[2].contains(&title),
             "{title}: {rows:#?}"
         );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.contains("kept private draft"))
+                .count(),
+            1,
+            "{rows:#?}"
+        );
         if typed {
-            // A typed field takes the input row and the caret.
-            assert_eq!(frame.cursor.map(|(row, _)| row), Some(2), "{rows:#?}");
-            assert!(!rows.iter().any(|row| row.contains("kept private draft")));
+            // A typed field takes its own row below the title rule and holds the caret.
+            assert_eq!(frame.cursor.map(|(row, _)| row), Some(3), "{rows:#?}");
         } else {
-            // Otherwise the draft stays visible, without a caret.
             assert_eq!(frame.cursor, None);
-            assert_eq!(rows[2].trim_end(), "› kept private draft");
         }
-        // The keys end the panel after one blank row; a form without body
-        // rows puts them right below its title.
+        // The keys end the sheet after one blank row; a form without body rows puts
+        // them right below its field.
         let (keys, body) = rows.split_last().unwrap();
-        assert!(keys.starts_with("   ") && keys.contains("Esc"), "{rows:#?}");
+        assert!(keys.starts_with("  ") && keys.contains("Esc"), "{rows:#?}");
         if form {
-            assert_eq!(body.len(), 4, "{rows:#?}");
+            assert!(body.last().unwrap().is_empty(), "{rows:#?}");
         } else {
             assert!(
-                body.len() > 5 && body.last().unwrap().is_empty(),
+                body.len() >= 5 && body.last().unwrap().is_empty(),
                 "{rows:#?}"
             );
         }
@@ -204,7 +212,12 @@ fn searchable_menus_keep_the_title_and_count_separate_from_the_query() {
     assert!(!title.plain().contains("Saved request"));
     let (row, _) = frame.cursor.unwrap();
     assert!(frame.live[row].plain().contains(" Saved request"));
-    assert!(!frame.live[row].plain().contains("conversations"));
+    assert!(
+        frame.live[row]
+            .plain()
+            .starts_with("  Filter conversations")
+    );
+    assert!(!frame.live[row].plain().contains("12 conversations"));
 }
 
 #[test]
@@ -218,7 +231,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
             Default::default(),
             &crate::backend::openrouter::Routing::Auto,
             Default::default(),
-            std::path::Path::new("fixture/config.json"),
+            Default::default(),
         )),
         notice: Some(crate::tui::Feedback::result(
             Kind::Error,
@@ -233,7 +246,7 @@ fn settings_feedback_stays_visible_above_the_panel_in_a_short_window() {
     assert_eq!(rows.len(), 6, "{rows:#?}");
     assert_eq!(
         rows[0].trim_end(),
-        " ✕  Could not save settings",
+        "✕  Could not save settings",
         "{rows:#?}"
     );
     assert!(
@@ -343,13 +356,13 @@ fn options_align_facts_in_one_column_and_mark_the_current_choice() {
     // Names start at column 2; the current choice ends with its chip two
     // cells before the edge.
     assert!(options.iter().all(|row| row.chars().nth(2) == Some('f')));
-    assert!(options[2].contains("fixture/b") && options[2].ends_with(" current   "));
+    assert!(options[2].contains("fixture/b") && options[2].ends_with(" current  "));
     let current = live
         .iter()
         .find(|line| line.plain().contains("fixture/b"))
         .unwrap();
     assert!(current.spans.iter().any(|span| {
-        span.text == " current " && span.style == LIT && span.background == Some(BADGE_IDLE)
+        span.text == "current" && span.style == ACCENT && span.background.is_none()
     }));
     assert!(
         !rows

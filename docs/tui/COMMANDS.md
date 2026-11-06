@@ -7,10 +7,13 @@ commands are listed in
 
 ## Slash commands
 
-Type `/` to see the commands grouped as below. **During a turn** says what
-happens if you run a command while the agent is working: *now* runs it
-immediately, *opens* shows the menu at once and applies conversation changes
-from the next turn, *waits* queues it until the turn ends.
+Type `/` to see the commands grouped as below, or press Ctrl+G for the same
+catalogue, groups and order in a **Commands** sheet (see [Keys](#keys)).
+**During a turn** says what happens if you run a command while the agent is
+working: *now* runs it immediately, *opens* shows the menu at once and applies
+conversation changes from the next turn, *waits* queues it until the turn ends.
+The Ctrl+G sheet never queues: commands that wait stay listed in dim text marked
+`after this turn` and cannot be selected.
 
 ### Conversation
 
@@ -18,11 +21,9 @@ from the next turn, *waits* queues it until the turn ends.
 | --- | --- | --- |
 | `/new` | Start a new conversation with your saved defaults. Alias: `/clear`. | Waits |
 | `/resume [ID]` | Open a saved conversation from this folder, or delete one. See [Saved conversations](../usage/SESSIONS.md). | Waits |
-| `/copy` | Copy the latest answer or one of its code blocks or quotes. See [Copy and export](../usage/COPY_AND_EXPORT.md). | Now |
 | `/export` | Save the conversation as a JSON file in the working directory. | Waits |
+| `/copy` | Copy the latest answer or one of its code blocks or quotes. See [Copy and export](../usage/COPY_AND_EXPORT.md). | Now |
 | `/agents` | Inspect collaborators. See [Collaborating agents](../usage/COLLABORATION.md#watch-in-the-tui). | Now |
-| `/mcp` | Inspect globally configured MCP connections and their tools. Configure them in Settings → MCP. | Now |
-| `/lsp` | Inspect configured language servers and this conversation's observed instances without starting one. Configure in Settings → LSP. | Now |
 | `/ask` | Return to questions the agent is waiting on. | Now |
 | `/todo` | Show the conversation's plan. See [Questions and plans](../usage/QUESTIONS_AND_PLANS.md#plans). | Now |
 | `/exit` | Quit after pending work completes. Alias: `/quit`. | Waits |
@@ -51,7 +52,9 @@ from the next turn, *waits* queues it until the turn ends.
 | Command | Purpose | During a turn |
 | --- | --- | --- |
 | `/settings` | Change saved defaults and connect providers. Alias: `/setup`. See [Configuration](../usage/CONFIGURATION.md). | Opens |
-| `/help` | Show commands and keys. | Opens |
+| `/mcp` | Inspect globally configured MCP connections and their tools. Configure them in Settings → MCP. | Now |
+| `/lsp` | Inspect configured language servers and this conversation's observed instances without starting one. Configure in Settings → LSP. | Now |
+| `/help` | Show commands and keys, including Ctrl+G. | Opens |
 
 An unknown command reports an error, with a suggestion when the name is close to
 a real one.
@@ -74,7 +77,8 @@ a real one.
 | Ctrl+U | Delete to the start of the line. |
 | Ctrl+P, Ctrl+N | Browse your last 50 sent messages; Esc returns to the draft. |
 | Alt+V, or Ctrl+V on Linux and macOS | Attach an image from the clipboard. On Windows, Ctrl+V stays your terminal's text paste. |
-| `/` | Open the command list; Up/Down select, Tab completes, Enter runs. |
+| `/` | Open the command list; Up/Down select, Tab completes, Enter runs. Use it to type arguments. |
+| Ctrl+G | Open the **Commands** sheet whenever the composer holds the keys, also during a turn, but not over a question or a permission request. A **Filter** field narrows the list; Enter runs the selected command. Your draft is untouched and waits above the sheet as `draft kept`. A command that opens a menu shows it over the draft, Esc goes back one level, and a choice returns to the composer. `/new` and `/resume` carry the draft into the conversation they open; a resumed conversation's own saved draft joins below it. |
 
 ### Conversation and work
 
@@ -82,7 +86,7 @@ a real one.
 | --- | --- |
 | Esc | Close the open menu or panel, or leave prompt history; otherwise stop the running turn. Never scrolls. |
 | Ctrl+C | Close a menu, leave prompt history, stop the running turn or, when idle, clear the draft. Never quits. |
-| Ctrl+O | Expand or collapse the tool cards of the latest finished turn. Works only when idle with no panel open. See [Tool activity](TOOL_ACTIVITY.md#expand-with-ctrlo). |
+| Ctrl+O | Expand or collapse the tool cards of the latest finished turn. Works only when idle with no panel open; the key is shown on that turn only. See [Tool activity](TOOL_ACTIVITY.md#expand-with-ctrlo). |
 | Ctrl+Q | Quit, asking first while work is running. |
 | F1 | Open help, also during a turn. |
 | Page Up, Page Down, mouse wheel | Scroll the conversation. |
@@ -99,7 +103,7 @@ end with the wheel or sending a message also returns to the latest output.
 | Key | Action |
 | --- | --- |
 | Up, Down, Enter | Move and choose. |
-| `1`–`9` | Choose directly in menus with up to eight options. |
+| `1`–`9` | Choose directly in menus with up to nine options. |
 | Typing | Filter longer lists. |
 | Left, Right | Switch tabs, such as **Commands** and **Keys** in `/help`. |
 | Esc | Go back or close; first cancels a pending deletion mark. |

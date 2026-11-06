@@ -1,6 +1,8 @@
 mod storage;
+mod theme;
 
 pub use storage::Store;
+pub use theme::Theme;
 
 use crate::backend::{CacheRetention, Routing};
 pub use crate::backend::{validate_id as validate_backend_id, validate_model};
@@ -22,6 +24,8 @@ pub struct Settings {
     pub auto_compact: u8,
     /// `context.prompt_cache`: how long Claude prompt caches last, for every conversation.
     pub cache_retention: CacheRetention,
+    /// `appearance.theme`: which inks the interface draws with, for every conversation.
+    pub theme: Theme,
     /// Optional routing for the selected backend, scoped by backend in the file.
     pub routing: BTreeMap<String, Routing>,
     /// `permissions.default`: the level new conversations start at.
@@ -62,6 +66,7 @@ impl Settings {
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             cache_retention: CacheRetention::default(),
+            theme: Theme::default(),
             routing: BTreeMap::new(),
             default_permissions: crate::permissions::Level::default(),
         }
@@ -141,6 +146,7 @@ impl Settings {
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             cache_retention: CacheRetention::default(),
+            theme: Theme::default(),
             routing: BTreeMap::new(),
             default_permissions: crate::permissions::Level::default(),
         })
@@ -276,6 +282,7 @@ impl Settings {
             effort: Effort::Default,
             auto_compact: crate::context::AUTO_COMPACT_DEFAULT,
             cache_retention: CacheRetention::default(),
+            theme: Theme::default(),
             routing: BTreeMap::new(),
             default_permissions: crate::permissions::Level::default(),
         };
@@ -342,6 +349,18 @@ impl Settings {
                     .ok_or_else(|| "Prompt cache must be \"5m\" or \"1h\"".into())
                     .and_then(CacheRetention::parse)
                     .map_err(|error| format!("Invalid context.prompt_cache: {error}"))?;
+            }
+        }
+        if let Some(appearance) = document.get("appearance") {
+            if !matches!(appearance, Value::Object(_)) {
+                return Err("appearance must be an object".into());
+            }
+            if let Some(value) = appearance.get("theme") {
+                settings.theme = value
+                    .as_str()
+                    .ok_or_else(|| "Theme must be \"auto\", \"dark\" or \"light\"".into())
+                    .and_then(Theme::parse)
+                    .map_err(|error| format!("Invalid appearance.theme: {error}"))?;
             }
         }
         // Configurations written before permissions start new conversations

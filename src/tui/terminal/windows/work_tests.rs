@@ -69,13 +69,13 @@ pub(super) fn console() {
     let ask = view::frame(&state, "fixture/model", "fixture");
     let shown: Vec<String> = ask.live.iter().map(Line::plain).collect();
     for expected in [
-        " ?  Waiting for you ",
+        "?  Waiting for you",
         "  Export scope   Formats",
         "  Which report rows should the CSV include?",
         "› ○ Visible rows",
         "  ○ All rows",
         "  ○ Other",
-        "Enter  next",
+        "Enter next",
     ] {
         assert!(
             shown.iter().any(|row| row.contains(expected)),

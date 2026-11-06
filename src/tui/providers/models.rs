@@ -13,7 +13,7 @@ impl App {
             settings.cache_retention,
             &settings.routing_for(&settings.model),
             settings.default_permissions,
-            self.config.store.path(),
+            settings.theme,
         )
     }
 

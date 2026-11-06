@@ -108,7 +108,7 @@ fn pending_tools_and_following_notices_remain_live_until_the_result_arrives() {
         completed
             .live
             .iter()
-            .any(|line| line.plain().starts_with(" BASH  fixture-command"))
+            .any(|line| line.plain().starts_with("  BASH   fixture-command"))
     );
     assert!(completed.live.iter().any(|line| line.plain() == "  └ Done"));
     assert!(
@@ -146,15 +146,20 @@ fn help_uses_a_temporary_panel_and_keeps_the_draft() {
             .any(|line| line.plain().contains("Ctrl+O"))
     );
     assert!(state.items.is_empty());
-    // The composer keeps showing the draft above the panel, without a caret.
+    // The panel replaces the composer: the draft waits on one row, without a caret, then
+    // the status row and the panel's title rule.
     assert!(open.cursor.is_none());
-    let draft = open.composer + 2;
-    assert_eq!(open.live[draft].plain().trim_end(), "› first");
-    assert_eq!(open.live[draft + 1].plain().trim_end(), "  second");
+    let rows: Vec<_> = open.live.iter().map(Line::plain).collect();
+    let kept = rows
+        .iter()
+        .position(|row| row.starts_with("› first"))
+        .unwrap();
+    assert!(rows[kept].ends_with("draft kept"), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("second")), "{rows:#?}");
+    assert!(rows[kept + 1].trim().is_empty(), "{rows:#?}");
     assert!(
-        open.live[draft + 2]
-            .plain()
-            .starts_with("─ Commands and controls ─")
+        rows[kept + 2].starts_with("─ Commands and controls ─"),
+        "{rows:#?}"
     );
     state.information = None;
     let closed = frame(&state, "fixture", "folder");
@@ -210,7 +215,7 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
         provisional
             .live
             .iter()
-            .any(|line| line.plain().starts_with(" BASH  fixture-command"))
+            .any(|line| line.plain().starts_with("  BASH   fixture-command"))
     );
     state.event(Event::Waiting {
         model: "fixture".into(),
@@ -221,7 +226,7 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
         waiting
             .live
             .iter()
-            .any(|line| line.plain().starts_with(" BASH  fixture-command"))
+            .any(|line| line.plain().starts_with("  BASH   fixture-command"))
     );
     state.message(Kind::Assistant, "Finished.");
     let settled = frame(&state, "fixture", "folder");
@@ -229,14 +234,14 @@ fn a_finished_tool_stays_live_until_bookkeeping_is_settled() {
     assert!(
         settled.history[0][0]
             .plain()
-            .starts_with(" BASH  fixture-command")
+            .starts_with("  BASH   fixture-command")
     );
     assert_eq!(
         settled.history[0],
         provisional.live[provisional
             .live
             .iter()
-            .position(|line| line.plain().starts_with(" BASH  fixture-command"))
+            .position(|line| line.plain().starts_with("  BASH   fixture-command"))
             .unwrap()..]
             .iter()
             .take(2)

@@ -42,7 +42,10 @@ fn mcp_cards_follow_the_shared_rhythm_and_preserve_remote_uncertainty() {
             &Presentation::default(),
         );
         let value = plain(&rows);
-        assert!(value.starts_with(" MCP  GitHub › create_issue"), "{value}");
+        assert!(
+            value.starts_with("  MCP    GitHub › create_issue"),
+            "{value}"
+        );
         assert!(value.contains("│ title \"Fix sleep\""), "{value}");
         assert!(value.contains("└ Created #7"), "{value}");
         assert_eq!(rows[0].spans[0].background, Some(BADGE_IDLE));

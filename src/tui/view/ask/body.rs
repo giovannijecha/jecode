@@ -9,7 +9,7 @@ use crate::{
         ask::Entry,
         line::Line,
         text,
-        theme::{ACCENT, BADGE_IDLE, CURSOR, LIT, MUTED, SELECTED_SURFACE, STRONG, Style},
+        theme::{ACCENT, CURSOR, MUTED, SELECTED_SURFACE, STRONG, Style},
     },
 };
 use std::ops::Range;
@@ -17,7 +17,7 @@ use std::ops::Range;
 const OTHER: &str = "Other";
 const OTHER_FACT: &str = "Type your own answer";
 const PLACEHOLDER: &str = "Type your answer";
-const CHIP: &str = " recommended ";
+const CHIP: &str = "recommended";
 
 pub(super) struct Body {
     pub rows: Vec<Line>,
@@ -125,7 +125,7 @@ fn options(question: &Question, entry: &Entry, columns: usize) -> Answers {
         .map(|label| text::cells(label))
         .max()
         .unwrap_or(0);
-    let fact_at = (widest + 6).min((end / 2).max(12));
+    let fact_at = (widest + 6).min((end * 3 / 5).max(12));
     let chips = end >= text::cells(CHIP) + 14;
     let mut answers = Answers {
         rows: Vec::new(),
@@ -190,7 +190,7 @@ fn options(question: &Question, entry: &Entry, columns: usize) -> Answers {
                     &" ".repeat(end.saturating_sub(used + chip_cells - 2)),
                     MUTED,
                 );
-                line.push_on(CHIP, LIT, BADGE_IDLE);
+                line.push(CHIP, ACCENT);
             }
             let mut line = finish(line, columns, cursor);
             if cursor && own {

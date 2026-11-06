@@ -45,7 +45,7 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
         .unwrap();
     let name = marked.spans.iter().find(|span| span.text.contains("Saved"));
     assert_eq!(name.unwrap().style, BAD);
-    // The question in BAD replaces the keys, with its own keycaps.
+    // The question in BAD replaces the keys, with its own keys as text.
     let confirmation = |frame: &Frame| {
         frame
             .live
@@ -56,7 +56,7 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
     let question = confirmation(&full).unwrap();
     assert_eq!(
         question.plain().trim_end(),
-        "  Delete this conversation and its files?    Enter  delete    Esc  cancel"
+        "  Delete this conversation and its files?   Enter delete   Esc cancel"
     );
     assert_eq!(
         question
@@ -67,7 +67,7 @@ fn resume_marks_deletion_in_the_existing_list_and_keeps_confirmation_visible_in_
             .style,
         BAD
     );
-    assert!(!rendered.contains("↑↓  move"));
+    assert!(!rendered.contains("↑↓ move"));
     let marked = |line: &Line| {
         line.plain().starts_with("› ")
             && focused(line)
@@ -119,7 +119,7 @@ fn resume_exposes_delete_control_and_shows_loading_error_and_success_in_the_same
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains(" Ctrl+D  delete"));
+    assert!(rendered.contains(" Ctrl+D delete"));
     state.height = 8;
     state.selector.as_mut().unwrap().toggle_delete();
     if let Purpose::Sessions { working, .. } = &mut state.selector.as_mut().unwrap().purpose {
@@ -132,8 +132,8 @@ fn resume_exposes_delete_control_and_shows_loading_error_and_success_in_the_same
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(busy.matches("Deleting conversation…").count(), 1);
-    assert!(!busy.contains(" Enter  delete"));
-    assert!(busy.contains(" Ctrl+Q  quit after cleanup"));
+    assert!(!busy.contains(" Enter delete"));
+    assert!(busy.contains(" Ctrl+Q quit after cleanup"));
     state.selector = Some(Selector::sessions(&entries, &entries[3].id));
     for (kind, message) in [
         (Kind::Error, "Session is already open"),

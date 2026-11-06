@@ -72,6 +72,7 @@ impl App {
         dirty |= self.poll_imports();
         dirty |= self.finish_delete(false)?;
         dirty |= self.finish_checkpoints(false);
+        dirty |= self.sync_commands();
         for _ in 0..32 {
             let Some(event) = self.next_event() else {
                 break;
@@ -185,6 +186,8 @@ impl App {
         dirty |= self.refresh_permission();
         dirty |= self.refresh_todo();
         dirty |= self.start_collaboration_continuation();
+        // Settle the command sheet's origin after every async owner has refreshed.
+        self.follow_commands(false);
         Ok(dirty)
     }
 }

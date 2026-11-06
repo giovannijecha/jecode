@@ -18,7 +18,7 @@ fn tiny_menu_and_command_panels_fit_preserve_their_editors_and_restore_after_res
             Default::default(),
             &crate::backend::openrouter::Routing::Auto,
             Default::default(),
-            std::path::Path::new("fixture/config.json"),
+            Default::default(),
         )),
     ] {
         let mut state = State {
@@ -86,6 +86,57 @@ fn narrow_selector_fields_show_typed_text_when_a_cell_can_hold_it() {
     state.selector = Some(key);
     let frame = frame(&state, "fixture/model", "directory");
     let (row, _) = frame.cursor.unwrap();
-    assert!(frame.live[row].plain().contains('•'));
-    assert!(!frame.live[row].plain().contains("fixture-secret"));
+    // The dots wrap under the field; a full last row puts the caret on the next one.
+    let dots = frame
+        .live
+        .iter()
+        .rposition(|line| line.plain().contains('•'))
+        .unwrap();
+    assert!(row == dots || row == dots + 1);
+    assert!(
+        !frame
+            .live
+            .iter()
+            .any(|line| line.plain().contains("fixture-secret"))
+    );
+}
+
+#[test]
+fn a_long_value_wraps_under_itself_and_a_long_label_stacks_above_it() {
+    let mut key = Selector::key("openrouter");
+    key.editor.insert(&"k".repeat(200));
+    let mut state = State {
+        width: 80,
+        height: 40,
+        selector: Some(key),
+        ..State::default()
+    };
+    let frame = frame(&state, "fixture/model", "directory");
+    let rows: Vec<String> = frame.live.iter().map(Line::plain).collect();
+    let first = rows
+        .iter()
+        .position(|row| row.starts_with("  Paste your key  •"))
+        .unwrap();
+    // The value ends two cells from the edge and continues under itself.
+    let width = 80 - "  Paste your key  ".len() - 2;
+    assert_eq!(rows[first].trim_end().len(), 18 + "•".len() * width);
+    for row in &rows[first + 1..first + 3] {
+        assert!(
+            row.starts_with(&format!("{}•", " ".repeat(18))),
+            "{rows:#?}"
+        );
+    }
+    let (row, column) = frame.cursor.unwrap();
+    assert_eq!(row, first + 3, "{rows:#?}");
+    assert_eq!(column, 18 + 200 - 2 * width - width);
+    assert!(frame.live[row].paint(80).contains(&CURSOR.to_string()));
+    // No room beside the label: it takes its own row, and the value has the cells it needs.
+    state.width = 30;
+    let frame = super::frame(&state, "fixture/model", "directory");
+    let rows: Vec<String> = frame.live.iter().map(Line::plain).collect();
+    let label = rows
+        .iter()
+        .position(|row| row.trim() == "Paste your key")
+        .unwrap();
+    assert!(rows[label + 1].starts_with("  •"), "{rows:#?}");
 }

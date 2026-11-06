@@ -32,7 +32,7 @@ pub(super) fn client(
             if let Some(model) = model {
                 return services.create(model).map(|client| (client, None));
             }
-            let text = "No model selected · Choose a model to finish configuration".to_string();
+            let text = "No model · Choose a model to finish configuration".to_string();
             return Ok((
                 unconfigured::client(services.id(), None, Some(services), text.clone()),
                 Some(StartupNotice {

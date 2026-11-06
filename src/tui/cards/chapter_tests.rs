@@ -3,7 +3,7 @@ mod concurrency;
 
 use super::*;
 use crate::tui::theme::{
-    BADGE_BAD, BADGE_IDLE, BADGE_TEXT, BADGE_WARN, LIT, S_BASE, STRONG, Style, Surface,
+    BADGE_BAD, BADGE_IDLE, BADGE_TEXT, BADGE_WARN, DIM, LIT, STRONG, Style, Surface,
 };
 use std::time::Duration;
 
@@ -151,7 +151,7 @@ fn displayed_work_label_is_one_line_and_bounded_without_changing_arguments() {
             .collect::<Vec<_>>();
         assert_eq!(title.len(), 1, "{title:?}");
         let label = title[0]
-            .strip_prefix(" WORK  ")
+            .strip_prefix("  WORK   ")
             .unwrap()
             .split("  2 calls")
             .next()
@@ -260,8 +260,8 @@ fn status_priority_counts_every_outcome_without_summing_durations() {
 
     let running = chapter::header(&tools[1..], 200, false);
     // Running shimmers across the name on the quiet surface; frame 0 rests.
-    assert_eq!(badge(&running), (S_BASE.bold(), Some(BADGE_IDLE)));
-    assert_eq!(running.rows[0].spans[1].text, "WORK");
+    assert_eq!(badge(&running), (DIM.bold(), Some(BADGE_IDLE)));
+    assert_eq!(running.rows[0].spans[0].text, "  WORK  ");
     let background = chapter::header(&tools[2..], 200, false);
     assert_eq!(badge(&background), (LIT.bold(), Some(BADGE_IDLE)));
     let stopped = chapter::header(&tools[3..], 200, false);
@@ -426,7 +426,7 @@ fn facts_omit_repeated_uniform_states_but_keep_mixed_outcomes() {
     let card = chapter::header(&calls, 80, false);
     assert_eq!(
         plain(&card),
-        " WORK  Verify  2 calls · 2 failed\n  │ 0 completed"
+        "  WORK   Verify  2 calls · 2 failed\n  │ 0 completed"
     );
     let mixed = chapter::header(
         &[calls[0], tool("bash", &args, Some(&stopped), &shown)],
@@ -435,7 +435,7 @@ fn facts_omit_repeated_uniform_states_but_keep_mixed_outcomes() {
     );
     assert_eq!(
         plain(&mixed),
-        " WORK  Verify  2 calls · 1 failed\n  │ 1 stopped"
+        "  WORK   Verify  2 calls · 1 failed\n  │ 1 stopped"
     );
 }
 

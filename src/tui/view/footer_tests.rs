@@ -7,7 +7,7 @@ use crate::{
         activity::Activity,
         line::Line,
         selector::Selector,
-        theme::{METER_FILL, METER_TRACK, WARNING},
+        theme::{METER_FILL, METER_TRACK, MUTED, STRONG, WARNING},
     },
 };
 
@@ -29,6 +29,28 @@ fn footer(state: &State) -> String {
 }
 
 #[test]
+fn a_failed_agent_keeps_the_chip_readable_on_both_terminals() {
+    let state = State {
+        width: 80,
+        height: 24,
+        collaboration: vec![crate::json::Value::object([(
+            "state",
+            crate::json::Value::string("failed"),
+        )])],
+        ..State::default()
+    };
+    let frame = frame(&state, "provider/model", r"C:\project");
+    let footer = frame.live.last().unwrap();
+    assert!(
+        footer.spans.iter().any(|span| span.text == " AGENTS "
+            && span.style == crate::tui::theme::BADGE_TEXT
+            && span.background == Some(crate::tui::theme::BADGE_BAD)),
+        "{:?}",
+        footer.spans
+    );
+}
+
+#[test]
 fn the_footer_shows_the_latest_provider_usage() {
     let mut state = with_status(61_000, Some(100_000));
     let idle = frame(&state, "provider/model", r"C:\project");
@@ -38,7 +60,7 @@ fn the_footer_shows_the_latest_provider_usage() {
     // 61% of an 80% threshold fills six of eight cells.
     assert!(
         line.plain()
-            .ends_with(" provider/model · default   ▰▰▰▰▰▰▱▱ 61%")
+            .ends_with("provider/model · default  ▰▰▰▰▰▰▱▱ 61%")
     );
     let styles = |line: &Line, glyph: &str| -> Vec<_> {
         let spans = line.spans.iter().filter(|span| span.text.contains(glyph));
@@ -46,11 +68,20 @@ fn the_footer_shows_the_latest_provider_usage() {
     };
     assert_eq!(styles(line, "▰"), [METER_FILL]);
     assert_eq!(styles(line, "▱▱"), [METER_TRACK]);
+    // The percent is its own bold span, so the gauge keeps one style.
+    assert_eq!(styles(line, "61%"), [STRONG.bold()]);
+    // The model and effort are plain muted text: no chip surface or padding.
+    let model = line
+        .spans
+        .iter()
+        .find(|span| span.text.contains("provider/model"))
+        .unwrap();
+    assert_eq!((model.style, model.background), (MUTED, None));
     state.activity = Some(Activity::new());
     assert!(footer(&state).contains("▰▰▰▰▰▰▱▱ 61%"));
     assert!(footer(&with_status(5, Some(1_000_000))).contains("▱▱▱▱▱▱▱▱ <1%"));
     // Without an engine status the footer keeps the model chip.
-    assert!(footer(&State::default()).ends_with("  provider/model · default "));
+    assert!(footer(&State::default()).ends_with("  provider/model · default"));
 }
 
 #[test]
@@ -59,10 +90,14 @@ fn the_meter_turns_gold_near_the_threshold_and_stays_empty_when_unknown() {
     let near = frame(&state, "provider/model", r"C:\project");
     let line = near.live.last().unwrap();
     assert!(line.plain().contains("▰▰▰▰▰▰▰▰ 78%"));
-    let warning = line.spans.iter().filter(|span| span.style == WARNING);
+    // The gauge and its bold percent are separate spans, both gold.
+    let warning = line
+        .spans
+        .iter()
+        .filter(|span| span.style == WARNING || span.style == WARNING.bold());
     assert_eq!(
         warning.map(|span| span.text.trim()).collect::<Vec<_>>(),
-        ["▰▰▰▰▰▰▰▰ 78%"]
+        ["▰▰▰▰▰▰▰▰", "78%"]
     );
     let mut unknown = with_status(5000, None);
     for width in [80, 30, 12] {
@@ -106,17 +141,17 @@ fn a_low_auto_compact_threshold_is_not_warned_at_zero_percent() {
 #[test]
 fn narrow_footers_shorten_the_directory_and_model_before_the_meter() {
     let mut state = with_status(61_000, Some(100_000));
-    let full = " provider/model · default   ▰▰▰▰▰▰▱▱ 61%";
-    let detailed = " model · default   ▰▰▰▰▰▰▱▱ 61%";
-    let short = " model   ▰▰▰▰▰▰▱▱ 61%";
+    let full = "provider/model · default  ▰▰▰▰▰▰▱▱ 61%";
+    let detailed = "model · default  ▰▰▰▰▰▰▱▱ 61%";
+    let short = "model  ▰▰▰▰▰▰▱▱ 61%";
     for (width, left, right) in [
-        (52, r"C:\project", full),
-        (51, r"C:\project", detailed),
-        (43, r"C:\project", detailed),
-        (42, "project", detailed),
-        (39, "project", short),
-        (29, "", short),
-        (20, "", "▰▰▰▰▰▰▱▱ 61%"),
+        (50, r"C:\project", full),
+        (49, r"C:\project", detailed),
+        (41, r"C:\project", detailed),
+        (40, "project", detailed),
+        (37, "project", short),
+        (27, "", short),
+        (18, "", "▰▰▰▰▰▰▱▱ 61%"),
     ] {
         state.width = width;
         let gap = " ".repeat(width - text::cells(left) - text::cells(right));
@@ -181,20 +216,20 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
                 Default::default(),
                 &crate::backend::openrouter::Routing::Auto,
                 Default::default(),
-                std::path::Path::new("fixture/config.json"),
+                Default::default(),
             ),
-            "   ↑↓  move    Enter  change    Esc  close",
+            "  ↑↓ move   Enter change   Esc close",
             "Default routing",
         ),
         (
             Selector::auto_compact(80),
-            "   Enter  save    Esc  back",
+            "  Enter save   Esc back",
             "Auto-compact at",
         ),
     ] {
         let mut state = with_status(61_000, Some(100_000));
         let idle = footer(&state);
-        assert!(idle.ends_with(" provider/model · default   ▰▰▰▰▰▰▱▱ 61%"));
+        assert!(idle.ends_with("provider/model · default  ▰▰▰▰▰▰▱▱ 61%"));
         state.selector = Some(menu);
         for height in [24, 12] {
             state.height = height;
@@ -221,15 +256,24 @@ fn open_panels_replace_the_footer_on_the_terminal_surface() {
         .iter()
         .map(|line| line.plain())
         .collect::<Vec<_>>();
-    // The value is the composer's field with the caret after it; a form
-    // without body rows has no blank row before its keys.
+    // The title rule sits above the field, which holds the caret; one blank row
+    // precedes the keys.
     let (row, column) = open.cursor.unwrap();
-    assert_eq!(rows[row], "› 80% of the context window");
-    assert_eq!(column, 4);
-    assert!(rows[row - 1].starts_with("─ Threshold ─"));
-    assert!(rows[row + 1].starts_with("─ Context › Auto-compact at "));
-    assert!(rows[row + 1].ends_with(" this and new conversations ─"));
-    assert_eq!(rows[row + 2], "   Enter  save    Esc  back");
+    assert_eq!(
+        rows[row], "  Threshold  80% of the context window",
+        "{rows:#?}"
+    );
+    assert_eq!(column, 15, "{rows:#?}");
+    assert!(
+        rows[row - 1].starts_with("─ Context › Auto-compact at "),
+        "{rows:#?}"
+    );
+    assert!(
+        rows[row - 1].ends_with(" this and new conversations ─"),
+        "{rows:#?}"
+    );
+    assert_eq!(rows[row + 1], "", "{rows:#?}");
+    assert_eq!(rows[row + 2], "  Enter save   Esc back", "{rows:#?}");
     assert_eq!(rows.len(), row + 3);
     assert!(rows.iter().all(|row| text::cells(row) <= state.width));
 }

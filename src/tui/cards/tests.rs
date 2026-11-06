@@ -48,7 +48,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("url", Value::string("https://example.org/")),
             ]),
             Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]),
-            " WEB  fetch https://example.org/",
+            "  WEB    fetch https://example.org/",
             "HTTP 200 · 42 B",
         ),
         (
@@ -58,7 +58,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("tab_id", Value::string("tab-1")),
             ]),
             Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]),
-            " BROWSER  screenshot",
+            "BROWSER  screenshot",
             "Screenshot · tmp:browser/shot.png",
         ),
     ];
@@ -96,10 +96,10 @@ fn title_and_result_are_left_aligned_without_a_tree_or_status_column() {
     );
     assert_eq!(
         rows.iter().map(Line::plain).collect::<Vec<_>>(),
-        [" BASH  cargo test", "  └ Done"]
+        ["  BASH   cargo test", "  └ Done"]
     );
     // Done is the badge on the shell family surface; no status dot.
-    assert_eq!(rows[0].spans[0].text, " BASH ");
+    assert_eq!(rows[0].spans[0].text, "  BASH  ");
     assert_eq!(rows[0].spans[0].style, BADGE_TEXT.bold());
     assert_eq!(rows[0].spans[0].background, Some(BADGE_SHELL));
     assert!(!plain(&rows).contains('●'));
@@ -125,7 +125,7 @@ fn expanded_titles_keep_long_unicode_commands_and_fit_narrow_views() {
             .iter()
             .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
             .collect();
-        assert!(title[0].plain().starts_with(" BASH  cargo"));
+        assert!(title[0].plain().starts_with("  BASH   cargo"));
         assert!(!title.iter().any(|row| row.plain().contains('…')));
         // Wrapped rows hang two cells in, under the badge.
         assert!(title[1..].iter().all(|row| row.plain().starts_with("  ")));
@@ -217,8 +217,7 @@ fn running_states_stay_explicit_without_a_selection_mode() {
     assert!(rows[0].background.is_none());
     // Running is the quiet badge with the shimmer across its name.
     assert_eq!(rows[0].spans[0].background, Some(BADGE_IDLE));
-    assert_eq!(rows[0].spans[1].text, "BASH");
-    assert_eq!(rows[0].spans[1].background, Some(BADGE_IDLE));
+    assert_eq!(rows[0].spans[0].text, "  BASH  ");
     assert!(plain(&rows).contains("└ Running · 2.4s"));
     assert!(rows[1..].iter().all(|row| row.background.is_none()));
 }
@@ -339,9 +338,9 @@ fn process_states_and_lists_name_their_actual_outcomes() {
         assert_eq!(
             rows[0].plain(),
             if background {
-                " PROCESS  poll p1 &"
+                "PROCESS  poll p1 &"
             } else {
-                " PROCESS  poll p1"
+                "PROCESS  poll p1"
             }
         );
         assert!(plain(&rows).contains(expected));
@@ -434,7 +433,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
         80,
         &Presentation::default(),
     );
-    assert!(plain(&rows).starts_with(" WRITE  notes.txt  Wrote 1 line"));
+    assert!(plain(&rows).starts_with(" WRITE   notes.txt  Wrote 1 line"));
     assert!(rows.iter().all(|row| row.background.is_none()));
     let change = Change::between(None, "").unwrap();
     let rows = draw(
@@ -447,7 +446,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
     );
     // The fact joins the title and no preview rows are invented.
     assert_eq!(rows.len(), 1);
-    assert_eq!(plain(&rows), " WRITE  notes.txt  New file · 0 lines");
+    assert_eq!(plain(&rows), " WRITE   notes.txt  New file · 0 lines");
 }
 
 #[test]

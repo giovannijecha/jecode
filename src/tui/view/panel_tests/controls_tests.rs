@@ -21,13 +21,13 @@ fn active_command_controls_describe_execution_queueing_and_closing() {
             frame
                 .live
                 .iter()
-                .any(|line| line.plain().contains(&format!(" Enter  {action}")))
+                .any(|line| line.plain().contains(&format!(" Enter {action}")))
         );
         assert!(
             frame
                 .live
                 .iter()
-                .any(|line| line.plain().contains(" Esc  close"))
+                .any(|line| line.plain().contains(" Esc close"))
         );
         assert!(
             !frame
@@ -53,9 +53,9 @@ fn narrow_panels_keep_the_keyboard_controls_readable_instead_of_cutting_the_foot
         .map(Line::plain)
         .filter(|line| line.contains("Ctrl+D") || line.contains(" Esc "))
         .collect();
-    assert!(controls.contains(" Enter  resume"), "{controls}");
-    assert!(controls.contains(" Ctrl+D  delete"), "{controls}");
-    assert!(controls.contains(" Esc  close"), "{controls}");
+    assert!(controls.contains(" Enter resume"), "{controls}");
+    assert!(controls.contains(" Ctrl+D delete"), "{controls}");
+    assert!(controls.contains(" Esc close"), "{controls}");
     assert!(!controls.contains('…'));
     // The key form's keys end the dock whole, wrapping when they must.
     state.selector = Some(Selector::key("openrouter"));
@@ -63,14 +63,18 @@ fn narrow_panels_keep_the_keyboard_controls_readable_instead_of_cutting_the_foot
         state.width = width;
         let key = frame(&state, "fixture/model", "directory");
         let rows: Vec<_> = key.live.iter().map(Line::plain).collect();
-        let title = key.cursor.unwrap().0 + 1;
-        assert!(rows[title].starts_with("─ Providers"), "{rows:#?}");
-        let controls = rows[title + 1..].concat();
-        assert!(controls.contains(" Enter  validate and save"), "{rows:#?}");
-        assert!(controls.contains(" Esc  back"), "{rows:#?}");
+        // The title rule sits above the field, which holds the only caret.
+        let title = rows
+            .iter()
+            .position(|row| row.starts_with("─ Providers"))
+            .unwrap();
+        assert!(title < key.cursor.unwrap().0, "{rows:#?}");
+        let controls = rows[key.cursor.unwrap().0 + 1..].concat();
+        assert!(controls.contains(" Enter validate and save"), "{rows:#?}");
+        assert!(controls.contains(" Esc back"), "{rows:#?}");
         assert!(!controls.contains('…'), "{rows:#?}");
     }
-    // With room, the bottom rule names where the key is stored.
+    // With room, the title rule names where the key is stored.
     assert!(
         frame(&state, "fixture/model", "directory")
             .live
@@ -86,7 +90,7 @@ fn narrow_key_rows_keep_enter_and_escape_before_movement() {
         panel::key("↑↓", "move"),
         panel::key("Esc", "close"),
     ];
-    for width in [30, 36] {
+    for width in [24, 30] {
         let one = panel::row(&hints, width).plain();
         let many = panel::keys(&hints, width, true)
             .into_iter()
@@ -107,7 +111,7 @@ fn narrow_key_rows_keep_enter_and_escape_before_movement() {
         panel::key("↑↓", "move"),
         panel::key("Esc", "close"),
     ];
-    let one = panel::row(&wide_labels, 48).plain();
+    let one = panel::row(&wide_labels, 44).plain();
     assert!(one.contains("Enter") && one.contains("Esc"), "{one}");
     assert!(!one.contains("move"), "{one}");
 }
@@ -118,14 +122,13 @@ fn narrow_key_rows_keep_their_primary_key_and_never_vanish() {
     let opening = [
         panel::key("/", "commands"),
         panel::key("Alt+V", "image"),
-        panel::key("Ctrl+O", "expand"),
         panel::key("Ctrl+Q", "quit"),
     ];
     for width in [8, 12, 20, 30] {
         let one = panel::row(&resume, width).plain();
         assert!(one.contains("/res"), "{width}: {one:?}");
         let first = panel::row(&opening, width).plain();
-        assert!(first.starts_with(" / "), "{width}: {first:?}");
+        assert!(first.starts_with("/ "), "{width}: {first:?}");
         assert!(!first.contains("Ctrl+Q"), "{width}: {first:?}");
     }
     let wide = panel::row(&opening, 40).plain();

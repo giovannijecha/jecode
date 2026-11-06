@@ -193,7 +193,7 @@ pub(super) fn background(path: &Path, scenario: &str) {
             composer: 1,
         };
         let mut renderer = crate::tui::render::Renderer::new();
-        renderer.set_light_background(true);
+        crate::tui::theme::set_light(true);
         write!(io::stdout(), "{}", renderer.paint(&frame, width, height)).unwrap();
         io::stdout().flush().unwrap();
         drop(terminal);

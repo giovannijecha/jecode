@@ -56,7 +56,7 @@ fn enter(app: &mut App) {
     .unwrap();
 }
 fn open_key(app: &mut App) {
-    app.input(Decoded::Text("6".into())).unwrap();
+    app.input(Decoded::Text("7".into())).unwrap();
     app.input(Decoded::Text("1".into())).unwrap();
     app.input(Decoded::Text("1".into())).unwrap();
 }
@@ -93,7 +93,7 @@ fn account_menu_keeps_sign_out_confirmation_and_escape_returns_to_account() {
     let home = app.config.store.path().parent().unwrap().to_path_buf();
     crate::auth::openai::Store::fixture_account(home, "fixture-token").unwrap();
     app.dispatch("/settings".into()).unwrap();
-    for number in ["6", "2", "1", "1", "3"] {
+    for number in ["7", "2", "1", "1", "3"] {
         app.input(Decoded::Text(number.into())).unwrap();
     }
     assert!(matches!(
@@ -244,13 +244,13 @@ fn a_missing_tool_finish_event_is_reconciled_from_retained_protocol_results() {
         .find(|block| {
             block
                 .iter()
-                .any(|line| line.plain().contains(" READ  missing"))
+                .any(|line| line.plain().contains("  READ   missing"))
         })
         .unwrap();
     // Reconciled as finished: the badge shows the failure, not a running shimmer.
     let title = tool
         .iter()
-        .find(|line| line.plain().starts_with(" READ  missing"))
+        .find(|line| line.plain().starts_with("  READ   missing"))
         .unwrap();
     assert_eq!(
         title.spans[0].background,
@@ -345,7 +345,7 @@ fn cancelling_settings_children_returns_to_settings_before_closing_the_manager()
         app.state.selector.as_ref().unwrap().purpose,
         selector::Purpose::Settings
     ));
-    assert_eq!(app.state.selector.as_ref().unwrap().selected, 5);
+    assert_eq!(app.state.selector.as_ref().unwrap().selected, 6);
     let displayed = view::frame(&app.state, "fixture/model", "fixture")
         .live
         .iter()

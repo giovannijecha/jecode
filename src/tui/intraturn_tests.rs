@@ -54,9 +54,10 @@ fn start(app: &mut App, prompt: &str) {
     });
 }
 
+/// One poll can drain a whole turn, so the worker may already be gone.
 fn worker_finished(app: &App) {
     let started = Instant::now();
-    while !app.worker.as_ref().unwrap().finished() {
+    while app.worker.as_ref().is_some_and(|worker| !worker.finished()) {
         assert!(started.elapsed() < Duration::from_secs(6));
         thread::sleep(Duration::from_millis(5));
     }

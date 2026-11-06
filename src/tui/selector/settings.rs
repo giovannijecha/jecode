@@ -1,9 +1,9 @@
 use super::{Badge, CONTEXT, Choice, OptionRow, Purpose, SETTINGS, Selector, Setting, row};
 use crate::{
     backend::{CacheRetention, Routing},
+    config::Theme,
     effort::Effort,
 };
-use std::path::Path;
 
 fn setting(name: &str, value: String, setting: Setting) -> OptionRow {
     row(name, value, Choice::Setting(setting))
@@ -18,7 +18,7 @@ impl Selector {
         cache_retention: CacheRetention,
         routing: &Routing,
         permissions: crate::permissions::Level,
-        _config_path: &Path,
+        theme: Theme,
     ) -> Self {
         let mut menu = Self::new(
             SETTINGS,
@@ -45,6 +45,7 @@ impl Selector {
                     format!("{auto_compact}% · {}", cache_retention.name()),
                     Setting::Context,
                 ),
+                setting("Theme", theme.name().into(), Setting::Theme),
                 setting("Providers", String::new(), Setting::Providers),
                 setting("MCP", String::new(), Setting::Mcp),
                 setting("LSP", String::new(), Setting::Lsp),
@@ -76,7 +77,7 @@ impl Selector {
         .under_settings(true)
     }
 
-    /// One row per lifetime, the ` current ` chip and the focus on `current`.
+    /// One row per lifetime, `current` and the focus on the saved one.
     pub fn prompt_cache(current: CacheRetention) -> Self {
         let options = CacheRetention::ALL
             .into_iter()
@@ -93,6 +94,23 @@ impl Selector {
         menu.selected = CacheRetention::ALL
             .iter()
             .position(|retention| *retention == current)
+            .unwrap_or(0);
+        menu
+    }
+
+    /// One row per theme, `current` and the focus on the saved one.
+    pub fn theme(current: Theme) -> Self {
+        let options = Theme::ALL
+            .into_iter()
+            .map(|theme| OptionRow {
+                badge: (theme == current).then_some(Badge::Current),
+                ..row(theme.name(), theme.fact(), Choice::Theme(theme))
+            })
+            .collect();
+        let mut menu = Self::new("Theme", Purpose::Theme, options).under_settings(true);
+        menu.selected = Theme::ALL
+            .iter()
+            .position(|theme| *theme == current)
             .unwrap_or(0);
         menu
     }

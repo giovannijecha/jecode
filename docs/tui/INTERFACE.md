@@ -14,35 +14,47 @@ From top to bottom:
   away with it.
 - **The status row.** What the agent is doing now, or how the last turn ended.
 - **The composer.** Your draft, between two horizontal borders. The lower border
-  carries the conversation's [permission level](../usage/PERMISSIONS.md).
+  carries the conversation's [permission level](../usage/PERMISSIONS.md) on the
+  right and, while a draft exists, `Ctrl+G commands` on the left.
 - **The footer.** Your working directory on the left; the model, its effort and
-  a context gauge on the right. Menus and panels open in its place.
+  a context gauge on the right. Menus and panels open in place of the composer
+  and the footer.
 
 ### Startup screen
 
 While the conversation is empty, Jecode shows a startup screen: the `>_ jecode`
-mark and version, a tip about `/permissions`, how many
-[personal skills](../usage/SKILLS.md) are available, whether the folder has an
-[`AGENTS.md`](../usage/PROJECT_INSTRUCTIONS.md), and a row of key shortcuts. If
-this folder has saved conversations, up to three recent ones are listed under
-**Recent in this folder**, with a `/resume` shortcut for all of them. On small
-terminals the screen drops the tip and shortcuts and falls back to a compact
-version. Your first message replaces it.
+mark, then the version, how many [personal skills](../usage/SKILLS.md) are
+available and whether the folder has an
+[`AGENTS.md`](../usage/PROJECT_INSTRUCTIONS.md). If this folder has saved
+conversations, up to three recent ones are listed under **Recent in this
+folder**, with a `/resume` shortcut for all of them. A configured model with no
+local conversations shows **No saved conversations in this folder**. With saved
+conversations and no model, the recent list stays visible alongside the **No model**
+warning. With neither a model nor saved conversations, **Start here** suggests
+`/model`, `/permissions` and `/help`.
+A row of keys follows:
+`/ commands`, `Alt+V image` (`Ctrl+V` on macOS) and `Ctrl+Q quit`. On small
+terminals the screen drops the keys, then shrinks the mark, then falls back to a
+one-line header with the same recent conversations or suggestions. Your first
+message replaces it.
 
 ## Send messages
 
 Type and press Enter. Ctrl+J inserts a newline; Shift+Enter and Alt+Enter also
 work when your terminal reports them separately. Pasted text keeps its line
-breaks. The composer grows to show up to a third of the screen and scrolls
-around the caret; an empty composer shows `Ask anything…`.
+breaks. The composer grows to show up to a third of the screen, five to ten
+rows, and scrolls around the caret; an empty composer shows `Ask anything…`.
 
 Ctrl+P and Ctrl+N browse your last 50 sent messages (commands are excluded),
 and Esc returns to the draft you were writing. To attach files or a clipboard
 image, see [Attachments](../usage/ATTACHMENTS.md).
 
 Type `/` to open the command list; your draft filters it. Up/Down select, Tab
-completes the name and Enter runs it. `/help` (or F1) lists commands and common
-shortcuts; [Commands and keys](COMMANDS.md) has the full reference.
+completes the name and Enter runs it. Press Ctrl+G instead to open the same
+commands in a **Commands** sheet with its own **Filter** field, leaving your
+draft untouched: it waits above the sheet as `draft kept`. Use `/` when the
+command takes arguments. `/help` (or F1) lists commands and common shortcuts;
+[Commands and keys](COMMANDS.md) has the full reference.
 
 ## While the agent works
 
@@ -63,7 +75,9 @@ generated. The counts appear while no tool progress is shown. The composer stays
   the next turn. `/copy`, `/terminal`, `/agents`, `/ask`, `/todo` and
   `/permissions` also run immediately. Commands that start work or replace the
   conversation, such as `/init`, `/new`, `/resume`, `/export`, `/tmp`,
-  `/checkpoints` and `/exit`, wait for the turn to end.
+  `/checkpoints` and `/exit`, wait for the turn to end. Ctrl+G lists them too,
+  in dim text marked `after this turn`; they cannot be selected there and are
+  never queued.
 
 When the turn ends, the status row keeps `Done`, `Stopped` or `Failed` with its
 duration and facts until you send again; a failed turn also leaves its error as
@@ -109,13 +123,25 @@ instead of the path, then drops the effort and the rest.
 
 ## Menus and panels
 
-Menus and panels open below the composer, using up to two thirds of the screen.
-Up/Down and Enter choose; menus with up to eight options also accept number
-keys, and longer ones filter as you type. The current value is marked
-separately from the highlighted row. Esc goes back one level and closes the
-menu; when you have marked something for deletion, Esc first cancels the mark.
-Text fields, such as an API key, appear in the composer area, and secrets show
-as dots.
+Menus and panels, called sheets, take the composer's place; the footer gives
+way too. From the top a sheet has the status row, a titled rule, an optional
+field, the options or text, and a row of keys. A third of the screen, between
+six and twelve rows, holds the options. Your draft is never touched: it waits
+above the sheet as `draft kept`, next to a queued message if there is one. Only
+`/` completion keeps the composer.
+
+Up/Down and Enter choose; menus with up to nine options also accept the number
+keys `1`–`9`, and longer ones filter as you type. The current value is marked
+with the word `current`, separately from the highlighted row. Esc goes back one
+level and closes the menu; when you have marked something for deletion, Esc
+first cancels the mark. A text field, such as an API key, sits on its own row
+under the title, with its label before the value, and secrets show as dots.
+
+From a sheet that Ctrl+G opened, a command that opens another sheet shows it
+over your draft; Esc returns to the **Commands** sheet one level at a time, and
+a choice returns you to the composer. `/new` and `/resume` carry your draft into
+the conversation they open; a resumed conversation's own saved draft joins below
+it.
 
 ## Background processes
 
@@ -178,9 +204,10 @@ conversation is never dumped into your terminal's scrollback; it stays in the
 - The TUI needs a VT-compatible terminal. If it cannot start, the error suggests
   `jecode --plain`.
 - Colors are 24-bit, or the 256-color palette on a Linux or macOS terminal that does
-  not declare 24-bit support; see [Theme](THEME.md). `NO_COLOR` is ignored. Jecode keeps dark terminal
-  backgrounds; on a terminal it detects as light, it paints its own dark
-  background without changing your terminal's palette.
+  not declare 24-bit support; see [Theme](THEME.md). `NO_COLOR` is ignored. Jecode never paints a
+  background: it keeps your terminal's own. The `appearance.theme` setting, or
+  `/settings` › **Theme**, chooses inks for dark or light terminals; `auto`
+  follows the terminal's reported background and assumes dark without a reply.
 - Bold, italics, underline, strikethrough, emoji and wide characters depend on
   your terminal and font.
 - Some shortcuts may be captured by your terminal or operating system first.

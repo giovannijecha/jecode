@@ -6,7 +6,7 @@ use crate::tui::{
     line::Line,
     state::State,
     text,
-    theme::{BADGE_IDLE, CURSOR, LIT, MUTED, Style},
+    theme::{BADGE_IDLE, CURSOR, DIM, LIT, Style},
 };
 
 pub(super) struct Input {
@@ -54,7 +54,7 @@ pub(super) fn input_editor(
     if columns < 7 {
         let (value, column) = editor.viewport(columns, false);
         let line = if editor.text.is_empty() {
-            caret(Line::new(&text::clip(placeholder, columns), MUTED), 0)
+            caret(Line::new(&text::clip(placeholder, columns), DIM), 0)
         } else {
             caret(Line::new(&value, foreground), column)
         };
@@ -82,7 +82,7 @@ pub(super) fn input_editor(
             Line::new("  ", marker)
         };
         if editor.text.is_empty() {
-            line.push(&text::ellipsize(placeholder, columns - 3), MUTED);
+            line.push(&text::ellipsize(placeholder, columns - 3), DIM);
         } else {
             let row = &layout.rows[index];
             let mut at = 0;

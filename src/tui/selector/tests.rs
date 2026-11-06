@@ -1,9 +1,7 @@
 use super::*;
-use std::path::Path;
 
 #[test]
 fn settings_restore_focus_from_their_actual_rows() {
-    let path = Path::new(r"C:\fixture\custom-home\config.json");
     let menu = Selector::settings(
         "fixture/model",
         Effort::Default,
@@ -11,7 +9,7 @@ fn settings_restore_focus_from_their_actual_rows() {
         Default::default(),
         &Routing::Auto,
         Default::default(),
-        path,
+        Default::default(),
     );
     let providers = menu.setting_index(Setting::Providers);
     assert_eq!(menu.options[providers].name, "Providers");
@@ -164,7 +162,7 @@ fn model_search_matches_friendly_names_and_keeps_selection_in_the_filtered_list(
 #[test]
 fn search_keeps_session_metadata_and_routing_prices_out_of_rows() {
     let now = crate::sessions::now();
-    let sessions: Vec<_> = (0..9)
+    let sessions: Vec<_> = (0..10)
         .map(|index| crate::sessions::Summary {
             id: format!("session-{index}"),
             title: format!("Request {index}"),
@@ -182,9 +180,9 @@ fn search_keeps_session_metadata_and_routing_prices_out_of_rows() {
     assert!(matches!(menu.chosen(), Some(Choice::Session(8))));
     menu.editor.replace("provider/model".into());
     menu.refresh();
-    assert_eq!(menu.filtered.len(), 9);
+    assert_eq!(menu.filtered.len(), 10);
 
-    let entries: Vec<_> = (0..9)
+    let entries: Vec<_> = (0..10)
         .map(|index| Entry {
             routing: Routing::Endpoint(format!("endpoint-{index}")),
             name: format!("endpoint-{index}"),

@@ -58,6 +58,10 @@ requests identify as `jecode/0.1` and send only the `oauth-2025-04-20` beta.
    path, state and that each parameter appears once. Invalid callbacks do not
    end the attempt. The attempt expires after five minutes and can be
    cancelled.
+   The browser of a valid callback waits until the tokens are saved; declined and
+   invalid callbacks are answered at once. Either way it gets the same black
+   `jecode authenticated` or `jecode not authenticated` page as the other
+   loopback sign-ins (`auth/landing.rs`).
 3. The code is exchanged at `https://platform.claude.com/v1/oauth/token` for the
    scopes `user:profile` and `user:inference`.
 4. `https://api.anthropic.com/api/oauth/profile` supplies the stable account

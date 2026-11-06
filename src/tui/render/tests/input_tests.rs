@@ -152,7 +152,7 @@ fn alt_end_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priori
     paint(&mut app, &mut screen);
     key(&mut app, 33, 0);
     paint(&mut app, &mut screen);
-    assert!(screen.visible().contains("Alt+End  back to bottom"));
+    assert!(screen.visible().contains("Alt+End back to bottom"));
     // Reading back leaves Esc to interrupt the turn.
     assert!(screen.visible().contains("Esc interrupt"));
     key(&mut app, 35, 1);
@@ -164,11 +164,11 @@ fn alt_end_returns_to_bottom_without_stopping_work_and_panels_keep_escape_priori
     paint(&mut app, &mut screen);
     app.open_settings();
     paint(&mut app, &mut screen);
-    assert!(screen.visible().contains("Alt+End  back to bottom"));
+    assert!(screen.visible().contains("Alt+End back to bottom"));
     key(&mut app, 27, 0);
     paint(&mut app, &mut screen);
     assert!(app.state.selector.is_none());
-    assert!(screen.visible().contains("Alt+End  back to bottom"));
+    assert!(screen.visible().contains("Alt+End back to bottom"));
     assert!(!app.state.activity.as_ref().unwrap().stopping);
     app.open_settings();
     key(&mut app, 35, 1);

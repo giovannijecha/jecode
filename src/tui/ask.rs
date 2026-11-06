@@ -94,7 +94,10 @@ impl App {
             }
             self.state.ask_panel = Some(panel);
         }
+        // Opened by hand, so Esc can still go back to the commands sheet.
+        let from_commands = self.from_commands;
         self.make_room_for_ask();
+        self.from_commands = from_commands;
     }
 
     /// Closes every panel and menu, each the way Esc would, so the question
@@ -113,6 +116,7 @@ impl App {
         self.state.processes = None;
         self.state.information = None;
         self.state.suggestions.dismiss();
+        self.from_commands = false;
         self.state.changed();
     }
 

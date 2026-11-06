@@ -4,16 +4,18 @@ use super::{
     permission, processes, status, todo,
 };
 mod editor;
+mod field;
 use crate::tui::{
     line::Line,
     state::State,
     text,
-    theme::{ACCENT, CURSOR, DIM, FAINT, MUTED, STRONG, Style, WARNING},
+    theme::{ACCENT, DIM, HAIRLINE, MUTED, STRONG, Style, WARNING},
 };
 use editor::input;
 
-/// The dock: the pending draft, the status row, then the composer with the
-/// footer, its key hints or an open panel below.
+/// The dock has one owner: the pending draft, the status row, then the composer with
+/// the footer or its key hints, or a sheet in the composer's place. A sheet never touches
+/// the draft, which waits above it as `draft kept`.
 pub(super) fn render(
     state: &State,
     model: &str,
@@ -30,7 +32,10 @@ pub(super) fn render(
         .filter(|_| state.quitting.is_none())
     {
         let status = status::row(state, columns, false);
-        return permission::block(pending, state.permission_level, status, columns, height);
+        let room = height.saturating_sub(kept_row(state, true));
+        let (rows, cursor) =
+            permission::block(pending, state.permission_level, status, columns, room);
+        return above(state, rows, cursor, true, columns, height);
     }
     // A question takes the composer's place unless a panel opened over it.
     let question = state
@@ -41,12 +46,15 @@ pub(super) fn render(
             state.quitting.is_none() && state.processes.is_none() && state.agents_panel.is_none()
         });
     let sheet = sheet(state, columns).filter(|_| question.is_none());
+    // Only completion keeps the composer in view.
+    let hidden = question.is_some() || sheet.as_ref().is_some_and(|sheet| !sheet.draft_caret);
+    let room = height.saturating_sub(kept_row(state, hidden));
     // Esc interrupts only where nothing else holds it.
     let escape = sheet.is_none() && question.is_none() && !contextual;
     let status = status::row(state, columns, escape);
     let (lines, cursor) = match (question, sheet) {
-        (Some((request, panel)), _) => ask::block(request, panel, status, columns, height),
-        (None, Some(sheet)) => docked(state, &sheet, status, columns, height),
+        (Some((request, panel)), _) => ask::block(request, panel, status, columns, room),
+        (None, Some(sheet)) => docked(state, &sheet, status, columns, room),
         (None, None) => {
             let (draft, cursor) = draft(state, model, directory, columns, height.saturating_sub(1));
             let mut lines = vec![status];
@@ -65,8 +73,30 @@ pub(super) fn render(
             (lines, cursor)
         }
     };
-    let mut lines = lines;
-    let mut rows = Vec::from_iter(pending(state, columns).filter(|_| lines.len() < height));
+    above(state, lines, cursor, hidden, columns, height)
+}
+
+/// The row a hidden draft holds back from the sheet. A short window lets it go first.
+fn kept_row(state: &State, hidden: bool) -> usize {
+    usize::from(hidden && state.height >= 12 && !state.editor.text.is_empty())
+}
+
+/// The rows waiting above the dock's owner, while they fit: the queued draft, and the
+/// one being written when a sheet hides the composer, which goes first.
+fn above(
+    state: &State,
+    mut lines: Vec<Line>,
+    cursor: Option<(usize, usize)>,
+    hidden: bool,
+    columns: usize,
+    height: usize,
+) -> (Vec<Line>, Option<(usize, usize)>) {
+    let mut room = height.saturating_sub(lines.len());
+    let kept = (hidden && !state.editor.text.is_empty() && room > 0)
+        .then(|| pending_row(&state.editor.display(), "draft kept", DIM, columns));
+    room -= usize::from(kept.is_some());
+    let queued = pending(state, columns).filter(|_| room > 0);
+    let mut rows: Vec<Line> = queued.into_iter().chain(kept).collect();
     let offset = rows.len();
     rows.append(&mut lines);
     (rows, cursor.map(|(row, col)| (row + offset, col)))
@@ -93,10 +123,9 @@ fn sheet(state: &State, columns: usize) -> Option<Sheet<'_>> {
     }
 }
 
-/// The status row and the composer above a panel: the field or the draft
-/// between the rules, the panel's title on the bottom rule.
+/// What a sheet starts with: the status row, the title rule and its field. Completion
+/// keeps the composer, with its title on the bottom rule, because the draft is the query.
 fn top(state: &State, sheet: &Sheet, status: Line, columns: usize) -> Rows {
-    let style = rule_style(state);
     let mut parts = vec![(
         status,
         if state.question.is_some() {
@@ -106,41 +135,37 @@ fn top(state: &State, sheet: &Sheet, status: Line, columns: usize) -> Rows {
         },
     )];
     let mut caret = None;
-    if let Some(field) = &sheet.field {
-        let label = [Line::new(&field.label, MUTED)];
-        parts.push((rule(columns, style, &label, &Line::default()), Part::Chrome));
-        // At extreme widths the field needs every cell, as the draft does.
-        let prefix = if columns < 7 { "" } else { "› " };
-        let mut line = Line::new(prefix, ACCENT.bold());
-        if field.value.is_empty() {
-            line.push(field.placeholder, MUTED);
-        } else {
-            line.push(&field.value, STRONG);
-        }
-        line.push(field.suffix, MUTED);
-        let column = (text::cells(prefix) + field.caret).min(columns.saturating_sub(1));
-        caret = Some((parts.len(), column));
-        parts.push((line.shortened(columns).caret(column, CURSOR), Part::Focus));
-    } else {
-        let input = input(
-            state,
-            columns,
-            ACCENT,
-            STRONG,
-            window(state),
-            sheet.draft_caret,
-        );
+    if sheet.draft_caret {
+        let input = input(state, columns, ACCENT, STRONG, window(state), true);
         let position = Line::new(&input.position, MUTED);
         parts.push((
-            rule(columns, style, &draft_label(state), &position),
+            rule(columns, HAIRLINE, &draft_label(state), &position),
             Part::Chrome,
         ));
-        if sheet.draft_caret {
-            caret = Some((parts.len() + input.cursor.0, input.cursor.1));
-        }
+        caret = Some((parts.len() + input.cursor.0, input.cursor.1));
         parts.extend(input.lines.into_iter().map(|line| (line, Part::Draft)));
+        parts.push((
+            rule(columns, HAIRLINE, &sheet.title, &sheet.aside),
+            Part::Keep,
+        ));
+        return Rows { parts, caret };
     }
-    parts.push((rule(columns, style, &sheet.title, &sheet.aside), Part::Keep));
+    parts.push((
+        rule(columns, HAIRLINE, &sheet.title, &sheet.aside),
+        Part::Keep,
+    ));
+    if let Some(field) = &sheet.field {
+        let (rows, cursor) = field::rows(field, columns, window(state));
+        caret = Some((parts.len() + cursor.0, cursor.1));
+        parts.extend(rows.into_iter().enumerate().map(|(index, line)| {
+            let part = if index == cursor.0 {
+                Part::Focus
+            } else {
+                Part::Draft
+            };
+            (line, part)
+        }));
+    }
     Rows { parts, caret }
 }
 
@@ -151,7 +176,8 @@ struct Rows {
 
 /// Rows the panel's body gets below `top` rows within `height`.
 fn room(state: &State, sheet: &Sheet, top: usize, height: usize) -> usize {
-    let fixed = top + sheet.head.len() + 1 + (sheet.tail)(true).len();
+    let gap = usize::from(!sheet.draft_caret && sheet.field.is_some());
+    let fixed = top + gap + sheet.head.len() + 1 + (sheet.tail)(true).len();
     panel::room(state.height, height, fixed)
 }
 
@@ -159,19 +185,21 @@ fn room(state: &State, sheet: &Sheet, top: usize, height: usize) -> usize {
 pub(super) fn panel_room(state: &State) -> usize {
     let columns = state.width.max(1);
     sheet(state, columns).map_or(0, |sheet| {
+        let height = super::chrome_height(state).min(state.height);
+        let kept = kept_row(state, !sheet.draft_caret);
         measured(
             state,
             &sheet,
             Line::default(),
             columns,
-            super::chrome_height(state).min(state.height),
+            height.saturating_sub(kept),
         )
         .1
     })
 }
 
-/// The dock with a panel: the composer, then the panel's head, body, one
-/// blank row and its keys, fitted to `height` by what matters most.
+/// The dock with a sheet: its top, then the panel's head, body, one blank row and its
+/// keys, fitted to `height` by what matters most.
 fn docked(
     state: &State,
     sheet: &Sheet,
@@ -219,7 +247,12 @@ fn dock_parts(
     let Rows { mut parts, caret } = top(state, sheet, status, columns);
     let body = (sheet.body)(capacity);
     let overflow = sheet.total.is_none_or(|total| total > capacity);
-    let spaced = !(sheet.head.is_empty() && body.is_empty());
+    let field = !sheet.draft_caret && sheet.field.is_some();
+    let filled = !(sheet.head.is_empty() && body.is_empty());
+    let spaced = field || filled;
+    if field && filled {
+        parts.push((Line::default(), Part::Space));
+    }
     parts.extend(sheet.head.iter().cloned().map(|line| (line, Part::Header)));
     let first = parts.len();
     parts.extend(body);
@@ -257,15 +290,6 @@ pub(super) fn panel_rows(sheet: &Sheet, columns: usize, height: usize) -> Vec<Li
     docked(&state, sheet, Line::default(), columns, height).0
 }
 
-/// The rules turn faint while a turn works or retries.
-fn rule_style(state: &State) -> Style {
-    if state.activity.is_some() {
-        FAINT
-    } else {
-        ACCENT
-    }
-}
-
 /// The top rule's label: the history, or the pending draft with its key
 /// while the composer is empty.
 fn draft_label(state: &State) -> Vec<Line> {
@@ -280,21 +304,23 @@ fn draft_label(state: &State) -> Vec<Line> {
     }
 }
 
-/// `› first line…` in `muted`, `queued` in `dim` or `paused` in `warning`
-/// ending two cells from the edge.
 fn pending(state: &State, columns: usize) -> Option<Line> {
     let (message, paused) = state.queue.pending()?;
-    let (label, style) = if paused {
-        ("paused", WARNING)
+    Some(if paused {
+        pending_row(&message, "paused", WARNING, columns)
     } else {
-        ("queued", DIM)
-    };
+        pending_row(&message, "queued", DIM, columns)
+    })
+}
+
+/// `› first line…` in `muted`, the state ending two cells from the edge.
+fn pending_row(message: &str, label: &str, style: Style, columns: usize) -> Line {
     let end = columns.saturating_sub(2);
     let first = message.lines().next().unwrap_or("");
     let more = if message.contains('\n') { "…" } else { "" };
     let preview = text::clean(&format!("› {first}{more}"));
     if text::cells(label) + text::cells(&preview).min(10) + 2 > end {
-        return Some(Line::new(&text::ellipsize(&preview, columns), MUTED));
+        return Line::new(&text::ellipsize(&preview, columns), MUTED);
     }
     let room = end - text::cells(label) - 2;
     let preview = text::ellipsize(&preview, room);
@@ -304,7 +330,7 @@ fn pending(state: &State, columns: usize) -> Option<Line> {
         MUTED,
     );
     row.push(label, style);
-    Some(row)
+    row
 }
 
 /// A full-width rule with an optional `─ label` and an aside before ` ─` on
@@ -380,15 +406,26 @@ fn draft(
     columns: usize,
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let style = rule_style(state);
+    let style = HAIRLINE;
     let limit = height.saturating_sub(2 + usize::from(columns >= 7));
     let input = input(state, columns, ACCENT, STRONG, limit, true);
     let position = Line::new(&input.position, MUTED);
     let mut lines = vec![rule(columns, style, &draft_label(state), &position)];
     lines.extend(input.lines);
-    // The level stays beside the draft as its chip (B12.3, B12.8).
+    // The level stays beside the draft as its chip. A draft also names the commands key,
+    // which leaves first when narrow, because the rule would drop the level first.
     let level = crate::tui::cards::level(state.permission_level);
-    lines.push(rule(columns, style, &[], &level));
+    let mut hint = Line::new("Ctrl+G", MUTED.bold());
+    hint.push(" commands", DIM);
+    let named = !state.editor.text.is_empty()
+        && !state.history.is_browsing()
+        && panel::cells(&hint) + panel::cells(&level) + 10 <= columns;
+    let label: &[Line] = if named {
+        std::slice::from_ref(&hint)
+    } else {
+        &[]
+    };
+    lines.push(rule(columns, style, label, &level));
     if columns >= 7 {
         lines.push(match hints(state) {
             Some(keys) => {

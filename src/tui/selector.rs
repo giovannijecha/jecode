@@ -5,6 +5,7 @@ use crate::{
     session::commands::match_text,
 };
 
+mod commands;
 mod lsp;
 mod mcp;
 mod permissions;
@@ -21,6 +22,7 @@ pub enum Setting {
     Context,
     AutoCompact,
     PromptCache,
+    Theme,
     Providers,
     Mcp,
     Lsp,
@@ -49,6 +51,9 @@ pub enum Choice {
     ApiKey(&'static str),
     Level(crate::permissions::Level),
     Retention(crate::backend::CacheRetention),
+    Theme(crate::config::Theme),
+    /// A command by its place in the catalogue.
+    Command(usize),
     Remembered,
     Grant(usize),
     Mcp(usize, Option<super::mcp::Health>),
@@ -114,6 +119,8 @@ pub enum Purpose {
     AutoCompact,
     /// How long Claude prompt caches last.
     PromptCache,
+    /// Which inks the interface draws with.
+    Theme,
     Loading,
     Sessions {
         current: Option<usize>,
@@ -134,6 +141,10 @@ pub enum Purpose {
     },
     Mcp(super::mcp::Panel),
     Lsp(super::lsp::Panel),
+    /// `Ctrl+G`: `later` marks the rows that wait for the running work.
+    Commands {
+        later: Vec<bool>,
+    },
 }
 
 pub struct Selector {
@@ -182,7 +193,8 @@ const CONTEXT: &str = "Context";
 
 impl Selector {
     pub(in crate::tui) fn new(title: &str, purpose: Purpose, options: Vec<OptionRow>) -> Self {
-        let searchable = options.len() > 8;
+        // Digits 1–9 pick up to nine options; above that, typing filters.
+        let searchable = options.len() > 9;
         let mut selector = Self {
             title: title.into(),
             context: String::new(),
@@ -419,19 +431,28 @@ impl Selector {
             .collect();
         filtered.sort_by_key(|(score, hit)| (*score, hit.index));
         self.filtered = filtered.into_iter().map(|(_, hit)| hit).collect();
-        self.selected = 0;
+        self.selected = self.first_selectable();
     }
     pub fn move_selection(&mut self, up: bool) {
         self.cancel_delete();
-        self.selected = if up {
-            self.selected.saturating_sub(1)
+        // A row that cannot be chosen is stepped over; at the end the focus stays.
+        let mut next = self.selected;
+        while let Some(after) = if up {
+            next.checked_sub(1)
         } else {
-            (self.selected + 1).min(self.filtered.len().saturating_sub(1))
-        };
+            (next + 1 < self.filtered.len()).then_some(next + 1)
+        } {
+            next = after;
+            if self.selectable(next) {
+                self.selected = next;
+                return;
+            }
+        }
     }
     pub fn chosen(&self) -> Option<Choice> {
         self.filtered
             .get(self.selected)
+            .filter(|_| self.selectable(self.selected))
             .map(|hit| self.options[hit.index].choice)
     }
     pub fn delete_target(&self) -> Option<usize> {

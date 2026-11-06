@@ -41,7 +41,7 @@ fn ctrl_q_asks_while_a_turn_runs_and_only_enter_or_ctrl_q_quits() {
     assert!(dock.iter().any(|row| row.starts_with("  Current turn  ")));
     assert!(
         dock.iter()
-            .any(|row| row.contains("Stop it and quit?") && row.contains(" Enter  quit"))
+            .any(|row| row.contains("Stop it and quit?") && row.contains(" Enter quit"))
     );
     // Typing and Ctrl+C leave the draft and the turn alone; reading back
     // keeps the question open.

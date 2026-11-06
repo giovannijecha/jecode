@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::state::Kind;
-use crate::tui::theme::{ACCENT, BODY, DIM, LIT, SELECTED_SURFACE};
+use crate::tui::theme::{ACCENT, BODY, DIM, LIT, STRONG};
 use crate::{events::Event, json::Value};
 
 fn work_read(state: &mut State, id: &str, work: &str, content: &str) {
@@ -63,10 +63,10 @@ fn the_reading_row_counts_the_rows_below_and_ends_its_key_two_cells_from_the_edg
     let plain = line.plain();
     assert_eq!(super::super::text::cells(&plain), 48);
     assert!(plain.starts_with("↓ 16 rows below "));
-    assert!(plain.ends_with(" Alt+End  back to bottom"), "{plain}");
+    assert!(plain.ends_with(" Alt+End back to bottom"), "{plain}");
     assert_eq!(line.spans[0].style, DIM.bold());
     assert!(line.spans.iter().any(|span| {
-        span.text.contains("Alt+End") && span.background == Some(SELECTED_SURFACE)
+        span.text == "Alt+End" && span.style == STRONG.bold() && span.background.is_none()
     }));
     assert!(
         view::reading_row(50, 1, false)
@@ -77,7 +77,7 @@ fn the_reading_row_counts_the_rows_below_and_ends_its_key_two_cells_from_the_edg
     let fresh = view::reading_row(60, 3, true);
     assert_eq!(fresh.spans[0].style, ACCENT.bold());
     assert!(fresh.plain().starts_with("↓ 3 rows below · new output "));
-    assert!(fresh.plain().ends_with(" Alt+End  back to bottom"));
+    assert!(fresh.plain().ends_with(" Alt+End back to bottom"));
     assert!(
         fresh
             .spans
@@ -112,14 +112,14 @@ fn agents_panel_during_readback_offers_one_escape_action_and_alt_end() {
     ready(&mut display, &state);
     display.scroll(Scroll::Page(true));
     let reading = display.update(&state, "fixture/model", "fixture", Instant::now());
-    assert!(reading.contains(" Alt+End "), "{reading}");
+    assert!(reading.contains("Alt+End"), "{reading}");
     let panel = view::composer_frame(&state, "fixture/model", "fixture")
         .live
         .iter()
         .map(Line::plain)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(panel.contains("Esc  close"), "{panel}");
+    assert!(panel.contains("Esc close"), "{panel}");
     assert!(!panel.contains("Esc interrupt"), "{panel}");
     assert_eq!(panel.matches("Esc").count(), 1, "{panel}");
 }
@@ -154,7 +154,7 @@ fn badge_appears_above_the_composer_only_while_reading() {
     assert!(!initial.contains("back to bottom"));
     display.scroll(Scroll::Page(true));
     let reading = display.update(&state, "fixture/model", "fixture directory", now);
-    assert!(reading.contains(" Alt+End ") && reading.contains(" back to bottom"));
+    assert!(reading.contains("Alt+End") && reading.contains(" back to bottom"));
     assert!(display.back_to_bottom());
     let following = display.update(&state, "fixture/model", "fixture directory", now);
     assert!(!following.contains("back to bottom"));
