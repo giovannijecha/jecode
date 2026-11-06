@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::line::Span;
 use crate::tui::motion;
 use crate::tui::theme::{
     BAD, BADGE_BAD, BADGE_COORD, BADGE_EDIT, BADGE_IDLE, BADGE_READ, BADGE_SHELL, BADGE_TEXT,
@@ -58,9 +59,9 @@ fn read(path: &str, lines: usize) -> (Value, Value) {
 fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
     let shown = presentation(0, false);
     for (name, arguments, label, family) in [
-        ("read", object([("path", "a.rs")]), " READ ", BADGE_READ),
+        ("read", object([("path", "a.rs")]), "  READ  ", BADGE_READ),
         ("write", object([("path", "a.rs")]), " WRITE ", BADGE_EDIT),
-        ("bash", object([("command", "ls")]), " BASH ", BADGE_SHELL),
+        ("bash", object([("command", "ls")]), "  BASH  ", BADGE_SHELL),
     ] {
         let result = Value::object([("exit_code", Value::number(0))]);
         let rows = card(tool(name, &arguments, &result, &shown), 80, false).rows;
@@ -88,6 +89,14 @@ fn coordination_badges_are_distinct_from_read_badges() {
     );
 }
 
+/// The badge block as plain text: the word centred in eight cells, then the gap.
+fn centred(label: &str) -> String {
+    let cells = label.chars().count();
+    let side = if cells > 8 { 1 } else { (8 - cells) / 2 };
+    let tail = if cells > 8 { 1 } else { 8 - cells - side };
+    format!("{}{label}{} ", " ".repeat(side), " ".repeat(tail))
+}
+
 #[test]
 fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
     let arguments = object([("path", "fixture.rs"), ("command", "cargo build")]);
@@ -97,7 +106,7 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
         ("edit", "UPDATE"),
         ("bash", "BASH"),
         ("process", "PROCESS"),
-        ("checkpoint", "CHECKPOINT"),
+        ("checkpoint", "SAVE"),
         ("web", "WEB"),
         ("browser", "BROWSER"),
         ("future_tool", "FUTURE_TOOL"),
@@ -129,17 +138,16 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
                 .iter()
                 .take_while(|span| span.background == Some(BADGE_IDLE))
                 .count();
-            assert_eq!(spans[0].text, " ");
-            assert_eq!(spans[width - 1].text, " ");
-            let shimmer: Vec<_> = spans[1..width - 1]
-                .iter()
-                .map(|span| (span.text.clone(), span.style))
-                .collect();
-            let expected: Vec<_> = motion::shimmer(label, frame, true)
-                .spans
-                .into_iter()
-                .map(|span| (span.text, span.style))
-                .collect();
+            // Adjacent cells of one style share a span, so compare cell by cell.
+            let cells = |spans: &[Span]| -> Vec<(char, Style)> {
+                spans
+                    .iter()
+                    .flat_map(|span| span.text.chars().map(|glyph| (glyph, span.style)))
+                    .filter(|(glyph, _)| *glyph != ' ')
+                    .collect()
+            };
+            let shimmer = cells(&spans[..width]);
+            let expected = cells(&motion::shimmer_on_badge(label, frame).spans);
             assert_eq!(shimmer, expected, "{name}, frame {frame}");
             assert!(
                 spans[width..].iter().all(|span| span.background.is_none()),
@@ -153,7 +161,10 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
                 assert_eq!(rows.len(), 1, "{name}");
                 assert_eq!(
                     rows[0].plain(),
-                    format!(" {label}  fixture.rs  {expected} · checkpoint rc-fixture"),
+                    format!(
+                        "{}fixture.rs  {expected} · checkpoint rc-fixture",
+                        centred(label)
+                    ),
                     "{name}"
                 );
             } else {
@@ -195,7 +206,7 @@ fn returned_tools_keep_their_static_outcome_marker() {
             motion::set_frame(frame);
             let shown = presentation(elapsed, false);
             let rows = card(tool("bash", &arguments, &result, &shown), 80, false).rows;
-            assert_eq!(rows[0].spans[0].text, " BASH ");
+            assert_eq!(rows[0].spans[0].text, "  BASH  ");
             assert_eq!(badge(&rows), expected);
         }
     }
@@ -212,7 +223,7 @@ fn compact_routine_titles_use_one_clipped_row() {
     let shown = presentation(0, false);
     let rows = plain(&card(tool("bash", &arguments, &result, &shown), 60, false).rows);
     assert_eq!(rows.len(), 2);
-    assert!(rows[0].starts_with(" BASH  cargo build --locked --release"));
+    assert!(rows[0].starts_with("  BASH   cargo build --locked --release"));
     assert!(rows[0].ends_with('…'));
     assert_eq!(rows[1], "  └ Done");
     let long = object([("command", &"word ".repeat(60))]);
@@ -252,12 +263,12 @@ fn commands_name_their_result_line_and_count_the_rest_with_a_keycap() {
     let rows = plain(&card.rows);
     assert!(card.hidden);
     assert!(rows[1].starts_with("  └ test result: ok. 3 passed · 6.8s  +2 lines"));
-    assert!(rows.iter().any(|row| row.ends_with("Ctrl+O  expand")));
+    assert!(rows.iter().any(|row| row.ends_with("Ctrl+O expand")));
     assert!(rows.iter().all(|row| crate::tui::text::cells(row) <= 60));
     let quick = presentation(400, false);
     let empty = Value::object([("exit_code", Value::number(0))]);
     let rows = plain(&super::card(tool("bash", &arguments, &empty, &quick), 60, true).rows);
-    assert_eq!(rows, [" BASH  cargo test", "  └ Done"]);
+    assert_eq!(rows, ["  BASH   cargo test", "  └ Done"]);
 }
 
 #[test]
@@ -292,7 +303,7 @@ fn failures_lead_with_the_exit_and_first_error_in_the_failure_colour() {
     )]);
     let path = object([("path", "a.rs")]);
     let rows = card(tool("read", &path, &missing, &shown), 80, false).rows;
-    assert_eq!(plain(&rows), [" READ  a.rs  Not found"]);
+    assert_eq!(plain(&rows), ["  READ   a.rs  Not found"]);
 }
 
 #[test]
@@ -304,7 +315,7 @@ fn only_missing_file_paths_receive_the_short_not_found_summary() {
         Value::string("Could not resolve path \"a.rs\": No such file (os error 2)"),
     )]);
     let rows = card(tool("read", &path, &missing, &shown), 80, false).rows;
-    assert_eq!(plain(&rows), [" READ  a.rs  Not found"]);
+    assert_eq!(plain(&rows), ["  READ   a.rs  Not found"]);
 
     let command = object([("command", "pwd")]);
     let failed = Value::object([(
@@ -325,7 +336,7 @@ fn only_missing_file_paths_receive_the_short_not_found_summary() {
         let rows = card(tool("read", &path, &unix_error, &shown), 80, false).rows;
         assert_eq!(
             plain(&rows),
-            [" READ  a.rs  Could not resolve path \"a.rs\": No such process (os error 3)"]
+            ["  READ   a.rs  Could not resolve path \"a.rs\": No such process (os error 3)"]
         );
     }
     let windows_error = Value::object([(
@@ -334,7 +345,7 @@ fn only_missing_file_paths_receive_the_short_not_found_summary() {
     )]);
     if cfg!(windows) {
         let rows = card(tool("read", &path, &windows_error, &shown), 80, false).rows;
-        assert_eq!(plain(&rows), [" READ  a.rs  Not found"]);
+        assert_eq!(plain(&rows), ["  READ   a.rs  Not found"]);
     }
 }
 
@@ -369,7 +380,7 @@ fn pages_and_captures_summarise_what_came_back() {
         ),
     ]);
     let rows = plain(&card(tool("browser", &capture, &image, &shown), 80, false).rows);
-    assert_eq!(rows[0], " BROWSER  screenshot");
+    assert_eq!(rows[0], "BROWSER  screenshot");
     assert_eq!(rows[1], "  │ tab-1");
     assert_eq!(
         rows[2],
@@ -393,9 +404,9 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
     let chapter = chapter_header(&tools, 80, true);
     let rows = plain(&chapter.rows);
     assert!(chapter.hidden);
-    assert!(rows[0].starts_with(" WORK  Activity  3 calls"));
+    assert!(rows[0].starts_with("  WORK   Activity  3 calls"));
     assert!(rows.join("\n").contains("│ 3 files read"));
-    assert!(rows[0].ends_with("Ctrl+O  expand"));
+    assert!(rows[0].ends_with("Ctrl+O expand"));
     let expanded = presentation(0, true);
     let cards: Vec<_> = calls
         .iter()
@@ -407,7 +418,7 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
         ("src/limiter.rs", 88),
     ]) {
         let rows = plain(&card.rows);
-        assert!(rows[0].starts_with(&format!(" READ  {path}")), "{rows:?}");
+        assert!(rows[0].starts_with(&format!("  READ   {path}")), "{rows:?}");
         assert!(rows.join("\n").contains(&format!("{lines} lines")));
         assert!(
             rows.iter().any(|row| row
@@ -431,7 +442,7 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
         .collect();
     assert_eq!(page_cards.len(), 2);
     for page in &page_cards {
-        assert!(plain(&page.rows)[0].starts_with(" READ  big.rs"));
+        assert!(plain(&page.rows)[0].starts_with("  READ   big.rs"));
         assert!(plain(&page.rows).join("\n").contains("40 lines"));
     }
     let failed = Value::object([("error", Value::string("denied"))]);

@@ -79,6 +79,9 @@ endpoint, issuer and client. Query options such as
 [Supabase's `project_ref`](https://supabase.com/docs/guides/ai-tools/mcp) remain
 part of the connection identity even when the OAuth resource URI omits the
 query. Reconnect from Settings when sign-in has expired or access was revoked.
+After the token exchange succeeds the browser shows a black `jecode authenticated`
+page; the connection itself is saved later, after its own check, and reports in
+Jecode. A failed sign-in shows `jecode not authenticated`.
 The authorization server must advertise S256 support in its metadata; otherwise
 browser sign-in is unavailable. A bearer token remains an alternative.
 

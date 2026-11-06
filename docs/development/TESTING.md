@@ -99,14 +99,14 @@ The first two need Windows 10 or later with ConPTY; the Linux fixture needs the
 util-linux `script` tool; the macOS fixture needs the system `script` and `tty`
 utilities. Do not run the private `native_pty_fixture` child directly. Other
 Windows fixtures cover permission requests
-(`native_tests::native_permissions::native_windows_permissions`) and light
-terminal backgrounds (`native_tests::native_background::`). The fullscreen
+(`native_tests::native_permissions::native_windows_permissions`) and the inks chosen
+on light terminals, with no background painted (`native_tests::native_background::`). The fullscreen
 fixture also paints tool cards through the console, including multi-file edits
 and the steps of one `steps` call.
 
 Linux and macOS run the same conversations, from `tui::terminal::fixtures`, through
 one filter: permissions, direct terminal input, startup with and without a provider,
-the startup screen, a light background answered through OSC 11, and a terminal that
+the startup screen, light inks chosen through OSC 11, and a terminal that
 only declares the 256-colour palette while speaking the keyboard protocol:
 
 ```text

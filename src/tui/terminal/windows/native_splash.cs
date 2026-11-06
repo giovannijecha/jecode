@@ -3,17 +3,17 @@ public sealed partial class JecodeTestPty {
         WaitFast("Ask anything");
         int full = Mark();
         Resize(100, 32);
-        WaitFast("Tip  /permissions sets what Jecode may change here", full);
+        WaitFast("/ commands   Alt+V image   Ctrl+Q quit", full);
         WaitFast("✓ 1 skill   ✓ AGENTS.md", full);
         WaitFast("Recent in this folder", full);
         WaitFast("Fix the session expiry check in auth", full);
-        WaitFast("/resume  all conversations", full);
+        WaitFast("/resume all", full);
         EnsureVt("JECODE_SPLASH_ACCENT", "splash accent");
         EnsureVt("JECODE_SPLASH_LIT", "splash caret");
         CaptureSplash("full");
 
         int medium = Mark();
-        Resize(64, 20);
+        Resize(64, 16);
         WaitFast("▄", medium);
         WaitFast("Recent in this folder", medium);
         CaptureSplash("compact");
@@ -26,7 +26,22 @@ public sealed partial class JecodeTestPty {
 
         int restored = Mark();
         Resize(100, 32);
-        WaitFast("Tip  /permissions", restored);
+        WaitFast("/ commands", restored);
+
+        // The commands key arrives as a key, also in the same write as typed text.
+        int commands = Mark();
+        Send("burst draft\x07");
+        WaitFast("draft kept", commands);
+        WaitFast("21 commands", commands);
+        int filtered = Mark();
+        Send("mod");
+        WaitFast("1 of 21 commands", filtered);
+        int returned = Mark();
+        Send("\x1b");
+        WaitFast("Ctrl+G commands", returned);
+        WaitFast("burst draft", returned);
+        Send("\x15");
+        Thread.Sleep(150);
 
         int prompted = Mark();
         Send("first prompt");

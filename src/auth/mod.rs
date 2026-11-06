@@ -7,6 +7,7 @@ use std::process::Command;
 
 mod accounts;
 pub mod anthropic;
+pub(crate) mod landing;
 pub mod openai;
 pub use accounts::{Account, AccountSession, AccountStore, SignInUpdate, account_backend};
 pub(crate) use openai::open_browser;

@@ -2,6 +2,9 @@ use super::{App, Feedback, Kind, Worker, activity::Activity, jobs::CatalogPurpos
 use crate::{attachments::Prompt, effort::Effort, session::commands};
 
 mod catalog;
+mod palette;
+#[cfg(test)]
+pub(super) use palette::busy_waits;
 
 impl App {
     pub(super) fn help(&mut self) {

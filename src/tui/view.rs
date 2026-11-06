@@ -217,9 +217,9 @@ pub(super) fn process_log_rows(state: &State) -> (usize, usize) {
 
 /// The gap row while reading back: `↓` at column 0, in ACCENT once output
 /// arrived after scrolling away, the rows below, and the way back as a
-/// keycap ending two cells from the edge; the keycap drops first.
+/// key ending two cells from the edge; the key drops first.
 pub(super) fn reading_row(columns: usize, below: usize, fresh: bool) -> Line {
-    use super::theme::{ACCENT, DIM, LIT, MUTED};
+    use super::theme::{ACCENT, DIM, LIT};
     let mut line = Line::new("↓ ", if fresh { ACCENT } else { DIM }.bold());
     line.push(
         &format!("{below} row{} below", if below == 1 { "" } else { "s" }),
@@ -230,7 +230,7 @@ pub(super) fn reading_row(columns: usize, below: usize, fresh: bool) -> Line {
         line.push("new output", LIT);
     }
     let mut key = panel::keycap("Alt+End");
-    key.push(" back to bottom", MUTED);
+    key.push(" back to bottom", DIM);
     let end = columns.saturating_sub(2);
     let (left, right) = (
         super::text::cells(&line.plain()),

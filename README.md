@@ -13,7 +13,7 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
 ## What it looks like
 
-![Jecode 0.1.0 startup screen in Windows Terminal](docs/images/jecode-startup.png)
+![Jecode startup rendered in a native Windows terminal](docs/images/jecode-startup.png)
 
 Start `jecode` in a project directory and type a request, such as *"The tests in
 `src/parser` fail since the last change. Find out why and fix it."* The agent

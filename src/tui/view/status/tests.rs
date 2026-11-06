@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     activity::Activity,
-    theme::{LIT, S_BASE, S2, SELECTED_SURFACE},
+    theme::{LIT, S_BASE, S2},
 };
 
 fn shown(state: &State, columns: usize) -> Line {
@@ -14,26 +14,23 @@ fn idle_is_an_empty_row() {
 }
 
 #[test]
-fn a_result_is_a_pill_with_a_good_check_and_dim_facts() {
+fn a_result_is_text_with_a_good_check_and_dim_facts() {
     let mut state = State::default();
     state.notify(Feedback::result(
         Kind::Notice,
         "Copied · 1.2 KiB · response",
     ));
     let line = shown(&state, 80);
-    assert_eq!(line.plain(), " ✓  Copied   1.2 KiB · response");
+    assert_eq!(line.plain(), "✓  Copied  1.2 KiB · response");
     assert_eq!(style_of(&line, "✓"), Some(GOOD.bold()));
     assert_eq!(style_of(&line, "Copied"), Some(STRONG));
     assert_eq!(style_of(&line, "1.2 KiB"), Some(DIM));
-    let pill: Vec<_> = line
+    let lead: Vec<_> = line
         .spans
         .iter()
         .take_while(|span| span.style != DIM)
         .collect();
-    assert!(
-        pill.iter()
-            .all(|span| span.background == Some(PILL_SURFACE) || span.text == "  ")
-    );
+    assert!(lead.iter().all(|span| span.background.is_none()));
 }
 
 #[test]
@@ -49,7 +46,7 @@ fn a_change_reads_old_to_new_with_the_new_value_strong() {
     let line = shown(&state, 80);
     assert_eq!(
         line.plain(),
-        " ✓  Auto-compact   80% → 55% · this and new conversations"
+        "✓  Auto-compact  80% → 55% · this and new conversations"
     );
     assert_eq!(style_of(&line, "80% →"), Some(DIM));
     assert_eq!(style_of(&line, "55%"), Some(STRONG));
@@ -59,7 +56,7 @@ fn a_change_reads_old_to_new_with_the_new_value_strong() {
         "Previous session: Move A → B",
     ));
     let line = shown(&state, 80);
-    assert_eq!(line.plain(), " ✓  Previous session   Move A → B");
+    assert_eq!(line.plain(), "✓  Previous session  Move A → B");
     assert_eq!(style_of(&line, "Move A → B"), Some(DIM));
 }
 
@@ -71,38 +68,28 @@ fn warnings_and_errors_keep_their_keycap_two_cells_from_the_edge() {
             .action("/model", "choose"),
     );
     let line = shown(&state, 60);
-    assert!(
-        line.plain()
-            .starts_with(" ▲  No model   choose one to start")
-    );
-    assert!(
-        line.plain().ends_with(" /model  choose"),
-        "{}",
-        line.plain()
-    );
+    assert!(line.plain().starts_with("▲  No model  choose one to start"));
+    assert!(line.plain().ends_with(" /model choose"), "{}", line.plain());
     assert_eq!(text::cells(&line.plain()), 58);
     assert_eq!(style_of(&line, "▲"), Some(WARNING.bold()));
     let key = line
         .spans
         .iter()
-        .find(|span| span.text == " /model ")
+        .find(|span| span.text == "/model")
         .unwrap();
-    assert_eq!(
-        (key.style, key.background),
-        (STRONG, Some(SELECTED_SURFACE))
-    );
+    assert_eq!((key.style, key.background), (STRONG.bold(), None));
     // Narrow rows drop the facts first, then the keycap.
     assert_eq!(
         shown(&state, 34).plain(),
-        " ▲  No model      /model  choose"
+        "▲  No model        /model choose"
     );
-    assert_eq!(shown(&state, 20).plain(), " ▲  No model ");
+    assert_eq!(shown(&state, 20).plain(), "▲  No model");
     state.notify(Feedback::result(
         Kind::Error,
         "Autosave failed: permission denied",
     ));
     let line = shown(&state, 80);
-    assert_eq!(line.plain(), " ✕  Autosave failed   permission denied");
+    assert_eq!(line.plain(), "✕  Autosave failed  permission denied");
     assert_eq!(style_of(&line, "✕"), Some(BAD.bold()));
 }
 
@@ -115,7 +102,7 @@ fn a_lone_long_fact_shortens_instead_of_dropping() {
     ));
     let line = shown(&state, 40);
     assert_eq!(text::cells(&line.plain()), 38);
-    assert!(line.plain().starts_with(" ✕  Copy failed   the clipboard"));
+    assert!(line.plain().starts_with("✕  Copy failed  the clipboard"));
     assert!(line.plain().ends_with('…'));
 }
 
@@ -128,15 +115,15 @@ fn a_long_label_yields_room_so_the_cause_stays_readable() {
     ));
     let line = shown(&state, 80);
     assert!(text::cells(&line.plain()) <= 78);
-    assert!(line.plain().starts_with(" ✕  Could not save C:"));
-    assert!(line.plain().ends_with("   Configuration is read-only"));
+    assert!(line.plain().starts_with("✕  Could not save C:"));
+    assert!(line.plain().ends_with("  Configuration is read-only"));
     // A short label keeps its words; the fact shortens instead.
     state.notify(Feedback::result(
         Kind::Error,
         "OpenRouter HTTP 401: Rejected the key. Check your key with jecode setup.",
     ));
     let rejected = shown(&state, 60).plain();
-    assert!(rejected.starts_with(" ✕  OpenRouter HTTP 401   Rejected"));
+    assert!(rejected.starts_with("✕  OpenRouter HTTP 401  Rejected"));
     assert!(rejected.ends_with('…'));
     // Neither side shrinks below half the row, so the label names the action.
     state.notify(Feedback::result(
@@ -144,7 +131,7 @@ fn a_long_label_yields_room_so_the_cause_stays_readable() {
         "Could not save C:\\Users\\someone\\.jecode\\config.json: Configuration is read-only",
     ));
     let narrow = shown(&state, 30).plain();
-    assert!(narrow.starts_with(" ✕  Could not sa"));
+    assert!(narrow.starts_with("✕  Could not sa"));
     assert!(text::cells(&narrow) <= 28);
     // A cut too small to let the fact fit keeps the label whole.
     state.notify(Feedback::result(
@@ -152,7 +139,7 @@ fn a_long_label_yields_room_so_the_cause_stays_readable() {
         "Default provider unavailable · OpenAI has no active ChatGPT account",
     ));
     let close = shown(&state, 57).plain();
-    assert!(close.starts_with(" ✕  Default provider unavailable   OpenAI"));
+    assert!(close.starts_with("✕  Default provider unavailable  OpenAI"));
     assert!(close.ends_with('…') && text::cells(&close) <= 55);
 }
 
@@ -161,7 +148,7 @@ fn turn_endings_stay_until_the_next_send_and_notices_cover_them() {
     let mut state = State::default();
     state.notify(Feedback::ending(Ending::Done, "1m 04s · 4 tools · ↓ 3.2k"));
     let line = shown(&state, 80);
-    assert_eq!(line.plain(), " >_ Done   1m 04s · 4 tools · ↓ 3.2k");
+    assert_eq!(line.plain(), ">_ Done  1m 04s · 4 tools · ↓ 3.2k");
     assert_eq!(style_of(&line, ">_"), Some(GOOD.bold()));
     assert!(
         !state.expire_feedback(std::time::Instant::now() + std::time::Duration::from_secs(600))
@@ -170,7 +157,7 @@ fn turn_endings_stay_until_the_next_send_and_notices_cover_them() {
     assert!(state.ending.is_some());
     // A result covers the ending while it lasts.
     state.notify(Feedback::result(Kind::Notice, "Copied"));
-    assert_eq!(shown(&state, 80).plain(), " ✓  Copied ");
+    assert_eq!(shown(&state, 80).plain(), "✓  Copied");
     state.notice = None;
     assert!(shown(&state, 80).plain().contains("Done"));
     state.sent();
@@ -184,7 +171,7 @@ fn turn_endings_stay_until_the_next_send_and_notices_cover_them() {
     let line = shown(&state, 80);
     assert_eq!(
         line.plain(),
-        " ■  Stopped   6.0s · your next message continues from here"
+        "■  Stopped  6.0s · your next message continues from here"
     );
     assert_eq!(style_of(&line, "■"), Some(WARNING));
     state.notify(
@@ -194,9 +181,9 @@ fn turn_endings_stay_until_the_next_send_and_notices_cover_them() {
     let line = shown(&state, 80);
     assert!(
         line.plain()
-            .starts_with(" ✕  Failed   2.1s · prompt restored")
+            .starts_with("✕  Failed  2.1s · prompt restored")
     );
-    assert!(line.plain().ends_with(" /settings  update key"));
+    assert!(line.plain().ends_with(" /settings update key"));
 }
 
 #[test]
@@ -222,16 +209,12 @@ fn the_working_label_shimmers_and_the_caret_blinks_with_the_shared_frame() {
     motion::set_frame(4);
     let line = shown(&state, 80);
     // Frame 4 puts the band's centre on the label's first cell and turns the caret off.
-    assert!(
-        line.plain().starts_with(" >  Thinking "),
-        "{}",
-        line.plain()
-    );
+    assert!(line.plain().starts_with(">  Thinking"), "{}", line.plain());
     assert_eq!(style_of(&line, "T"), Some(S2));
     assert_eq!(style_of(&line, "king"), Some(S_BASE));
     motion::set_frame(0);
     let line = shown(&state, 80);
-    assert!(line.plain().starts_with(" >_ Thinking "));
+    assert!(line.plain().starts_with(">_ Thinking"));
     assert_eq!(style_of(&line, "_"), Some(LIT.bold()));
 }
 
@@ -244,7 +227,7 @@ fn progress_outside_a_turn_uses_the_caret_and_its_subject() {
     ));
     assert_eq!(
         shown(&state, 80).plain(),
-        " >_ Compacting conversation   42 messages"
+        ">_ Compacting conversation  42 messages"
     );
 }
 
@@ -389,11 +372,11 @@ fn multiple_live_tools_show_a_count_until_only_one_remains() {
 }
 
 #[test]
-fn waiting_uses_the_status_pill_geometry_without_a_warning() {
+fn waiting_uses_the_status_row_geometry_without_a_warning() {
     for label in ["Waiting for you", "Waiting for permission"] {
         for width in [40, 80, 120] {
             let row = waiting(label, width, None);
-            assert!(row.plain().starts_with(&format!(" ?  {label} ")));
+            assert!(row.plain().starts_with(&format!("?  {label}")));
             assert_eq!(style_of(&row, "?"), Some(crate::tui::theme::ACCENT.bold()));
             assert!(text::cells(&row.plain()) <= width);
         }

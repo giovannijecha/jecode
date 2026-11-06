@@ -1,7 +1,6 @@
-//! A permission request takes the composer's place (B12.4): below the
-//! `? Waiting for permission` pill, between two `accent` rules, the call as
-//! it will run, its access and three choices, then the keys. The title and
-//! the level chip (B12.8) ride the top rule.
+//! A permission request is a sheet: below `? Waiting for permission`, the title and the
+//! level chip on its rule, then the call as it will run, its access, three choices, one
+//! blank row and the keys.
 
 use super::{
     composer, footer,
@@ -14,7 +13,7 @@ use crate::{
         line::Line,
         permission::Pending,
         text,
-        theme::{ACCENT, MUTED, SELECTED_SURFACE, STRONG},
+        theme::{HAIRLINE, MUTED, SELECTED_SURFACE, STRONG},
     },
 };
 
@@ -27,7 +26,7 @@ pub(super) fn block(
     columns: usize,
     height: usize,
 ) -> (Vec<Line>, Option<(usize, usize)>) {
-    let rule = |label: &[Line], aside: &Line| composer::rule(columns, ACCENT, label, aside);
+    let rule = |label: &[Line], aside: &Line| composer::rule(columns, HAIRLINE, label, aside);
     let layout = Layout::new(pending, columns, height);
     let mut parts = vec![
         (status, Part::Chrome),
@@ -40,7 +39,7 @@ pub(super) fn block(
     for (row, on) in layout.choices {
         parts.push((row, if on { Part::Focus } else { Part::Keep }));
     }
-    parts.push((rule(&[], &Line::default()), Part::Chrome));
+    parts.push((Line::default(), Part::Space));
     for row in layout.keys {
         parts.push((row.indent("  ", MUTED), Part::Keep));
     }

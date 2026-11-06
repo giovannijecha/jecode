@@ -3,7 +3,7 @@
 use super::{
     line::Line,
     text,
-    theme::{ACCENT, LIT, S_BASE, S0, S1, S2, Style},
+    theme::{ACCENT, DIM, LIT, S_BASE, S0, S1, S2, Style},
 };
 use std::time::Duration;
 
@@ -74,18 +74,34 @@ pub fn caret(frame: usize, tone: Option<Style>) -> Line {
 /// `label` with a five-cell band `S0 S1 S2 S1 S0` over `S_BASE`, one cell
 /// per frame; the band enters and leaves past both ends.
 pub fn shimmer(label: &str, frame: usize, bold: bool) -> Line {
+    band(
+        label,
+        frame,
+        if bold { S_BASE.bold() } else { S_BASE },
+        bold,
+    )
+}
+
+/// The same band across a running badge's name. It rests on `DIM`, because `S_BASE` is
+/// drawn for the terminal's background and would fall to about 2:1 on that surface.
+pub fn shimmer_on_badge(label: &str, frame: usize) -> Line {
+    band(label, frame, DIM.bold(), true)
+}
+
+fn band(label: &str, frame: usize, base: Style, bold: bool) -> Line {
     let cells = text::cells(label);
     let centre = (frame % (cells + 8)) as isize - 4;
     let mut line = Line::default();
     let mut at = 0isize;
     for glyph in text::glyphs(label) {
+        let lit = |style: Style| if bold { style.bold() } else { style };
         let style = match (at - centre).unsigned_abs() {
-            0 => S2,
-            1 => S1,
-            2 => S0,
-            _ => S_BASE,
+            0 => lit(S2),
+            1 => lit(S1),
+            2 => lit(S0),
+            _ => base,
         };
-        line.push(glyph.text, if bold { style.bold() } else { style });
+        line.push(glyph.text, style);
         at += glyph.cells as isize;
     }
     line

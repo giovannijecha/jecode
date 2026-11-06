@@ -310,11 +310,18 @@ fn a_request_holds_the_keys_and_a_remembered_grant_can_be_revoked() {
         "Only this read",
         "Reads of this file, this conversation",
         "Nothing runs; the agent is told",
-        "1–3  choose",
+        "1–3 choose",
     ] {
         assert!(shown.contains(expected), "{expected} in\n{shown}");
     }
-    assert!(!shown.contains("kept draft"), "the draft waits, hidden");
+    // The draft waits on one row above the request, never in a composer.
+    assert_eq!(shown.matches("kept draft").count(), 1, "{shown}");
+    assert!(
+        shown
+            .lines()
+            .any(|row| row.starts_with("› kept draft") && row.ends_with("draft kept")),
+        "{shown}"
+    );
     // Letters and Enter alone decide nothing; ↓ then Enter does.
     text(&mut app, "y");
     key(&mut app, 13, 0);
@@ -322,7 +329,7 @@ fn a_request_holds_the_keys_and_a_remembered_grant_can_be_revoked() {
     assert_eq!(app.state.editor.text, "kept draft");
     key(&mut app, 40, 0);
     key(&mut app, 40, 0);
-    assert!(screen(&app).contains("Enter  choose"));
+    assert!(screen(&app).contains("Enter choose"));
     key(&mut app, 13, 0);
     assert_eq!(app.permission_observer.grants(), vec![read.grant()]);
     assert!(notice(&app).contains("Permission: Reads of this file · remembered"));

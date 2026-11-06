@@ -9,7 +9,7 @@ use crate::{
         ask::Entry,
         line::Line,
         text,
-        theme::{ACCENT, BADGE_IDLE, CURSOR, LIT, MUTED, SELECTED_SURFACE, STRONG, Style},
+        theme::{ACCENT, CURSOR, MUTED, SELECTED_SURFACE, STRONG, Style},
     },
 };
 use std::ops::Range;
@@ -17,7 +17,7 @@ use std::ops::Range;
 const OTHER: &str = "Other";
 const OTHER_FACT: &str = "Type your own answer";
 const PLACEHOLDER: &str = "Type your answer";
-const CHIP: &str = " recommended ";
+const CHIP: &str = "recommended";
 
 pub(super) struct Body {
     pub rows: Vec<Line>,
@@ -190,7 +190,7 @@ fn options(question: &Question, entry: &Entry, columns: usize) -> Answers {
                     &" ".repeat(end.saturating_sub(used + chip_cells - 2)),
                     MUTED,
                 );
-                line.push_on(CHIP, LIT, BADGE_IDLE);
+                line.push(CHIP, ACCENT);
             }
             let mut line = finish(line, columns, cursor);
             if cursor && own {

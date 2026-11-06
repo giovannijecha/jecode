@@ -213,6 +213,13 @@ impl Store {
             "prompt_cache".into(),
             Value::string(settings.cache_retention.id()),
         );
+        let appearance = root
+            .entry("appearance".into())
+            .or_insert_with(|| Value::object([]));
+        let Value::Object(appearance) = appearance else {
+            return Err(self.invalid("appearance must be an object"));
+        };
+        appearance.insert("theme".into(), Value::string(settings.theme.id()));
         let permissions = root
             .entry("permissions".into())
             .or_insert_with(|| Value::object([]));

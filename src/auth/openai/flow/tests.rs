@@ -15,13 +15,19 @@ fn send_callback(port: u16, target: &[u8]) -> String {
     response
 }
 
+/// What a sign-in does with a good callback once its tokens are saved.
+fn received(listener: TcpListener) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let (values, landing) = await_callback(&listener, "expected", &Cancellation::default())?;
+    landing.authenticated();
+    Ok(values)
+}
+
 #[test]
 fn callback_accepts_fragmented_headers() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let port = listener.local_addr().unwrap().port();
-    let receiver =
-        std::thread::spawn(move || await_callback(&listener, "expected", &Cancellation::default()));
+    let receiver = std::thread::spawn(move || received(listener));
     let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
     client
         .write_all(b"GET /auth/callback?code=secret&state=expected HTTP/1.1\r\nHo")
@@ -45,9 +51,7 @@ fn invalid_callbacks_leave_listener_ready_for_valid_callback() {
     ] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let receiver = std::thread::spawn(move || {
-            await_callback(&listener, "expected", &Cancellation::default())
-        });
+        let receiver = std::thread::spawn(move || received(listener));
         let response = send_callback(port, invalid);
         assert!(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
         let success = send_callback(port, b"/auth/callback?code=valid&state=expected");
@@ -60,8 +64,7 @@ fn invalid_callbacks_leave_listener_ready_for_valid_callback() {
 fn matching_provider_error_ends_sign_in() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let receiver =
-        std::thread::spawn(move || await_callback(&listener, "expected", &Cancellation::default()));
+    let receiver = std::thread::spawn(move || received(listener));
     let response = send_callback(port, b"/auth/callback?error=access_denied&state=expected");
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert_eq!(

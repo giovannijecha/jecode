@@ -4,9 +4,9 @@
 use super::{Card, Status, Tool, agents, badge, content, failure, field, heading, rhythm, summary};
 use crate::tui::{
     activity as timer,
-    line::{Line, Span},
+    line::Line,
     text,
-    theme::{BAD, BODY, DIM, MUTED, SELECTED_SURFACE, STRONG, WARNING},
+    theme::{BAD, BODY, DIM, MUTED, STRONG, WARNING},
 };
 mod facts;
 use facts::{Outcomes, facts};
@@ -91,19 +91,15 @@ pub fn header(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
 }
 
 fn title_with_keycap(title: Line, columns: usize, action: &str) -> Line {
-    let mut cap = Line::default();
-    cap.spans.push(Span {
-        text: " Ctrl+O ".into(),
-        style: STRONG,
-        background: Some(SELECTED_SURFACE),
-    });
+    let mut cap = Line::new("Ctrl+O", STRONG.bold());
     if columns >= 19 {
         cap.push(&format!(" {action}"), DIM);
     }
     let cap_width = text::cells(&cap.plain());
-    let left_width = columns.saturating_sub(cap_width + 1);
+    let end = columns.saturating_sub(2);
+    let left_width = end.saturating_sub(cap_width + 1);
     let mut line = title.shortened(left_width);
-    let gap = columns.saturating_sub(text::cells(&line.plain()) + cap_width);
+    let gap = end.saturating_sub(text::cells(&line.plain()) + cap_width);
     line.push(&" ".repeat(gap), MUTED);
     line.append(cap).shortened(columns)
 }

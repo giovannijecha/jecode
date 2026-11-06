@@ -18,7 +18,6 @@ use crate::{
 };
 use std::{
     io::{self, Write},
-    path::Path,
     time::{Duration, Instant},
 };
 
@@ -60,7 +59,7 @@ pub(super) fn console() {
             Default::default(),
             &Routing::Auto,
             Default::default(),
-            Path::new("C:/fixture/config.json"),
+            Default::default(),
         );
         paint(columns, settings_state(columns, settings), "MCP");
         paint(columns, settings_state(columns, menus::add()), "Vercel");

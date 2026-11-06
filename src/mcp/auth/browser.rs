@@ -1,8 +1,14 @@
 use super::super::types::{Connection, Error, ErrorKind};
 use super::{TokenContext, Update, client, discovery, scopes, token_record, wire};
-use crate::{auth::openai, cancel::Cancellation};
+use crate::{
+    auth::{
+        landing::{self, Landing},
+        openai,
+    },
+    cancel::Cancellation,
+};
 use std::{
-    io::{Read, Write},
+    io::Read,
     net::{TcpListener, TcpStream},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -65,7 +71,7 @@ pub(super) fn sign_in(
     #[cfg(not(test))]
     let _ = openai::open_browser(&url);
     emit(Update::Waiting).map_err(|_| wire::failure("OAuth sign-in was cancelled"))?;
-    let code = wait(
+    let (code, landing) = wait(
         &listener,
         port,
         &state,
@@ -115,6 +121,9 @@ pub(super) fn sign_in(
     connection.method = super::super::types::AuthMethod::Browser;
     connection.token.clear();
     super::super::config::validate(&connection)?;
+    // The connection saves later, after its own check, which reports in Jecode: what the
+    // browser asked for has already succeeded.
+    landing.authenticated();
     Ok(connection)
 }
 
@@ -125,22 +134,20 @@ fn wait(
     issuer: &str,
     iss_required: bool,
     cancel: &Cancellation,
-) -> Result<String, Error> {
+) -> Result<(String, Landing), Error> {
     let deadline = Instant::now() + Duration::from_secs(300);
     while Instant::now() < deadline {
         if cancel.requested() {
             return Err(Error::new(ErrorKind::Cancelled, "Operation cancelled"));
         }
         match listener.accept() {
-            Ok((mut stream, peer)) if peer.ip().is_loopback() => {
+            Ok((stream, peer)) if peer.ip().is_loopback() => {
                 // Windows sockets inherit non-blocking mode, which would void the read timeout.
                 if stream.set_nonblocking(false).is_err() {
                     continue;
                 }
-                if let Some(code) =
-                    callback(&mut stream, port, state, issuer, iss_required, cancel)?
-                {
-                    return Ok(code);
+                if let Some(found) = callback(stream, port, state, issuer, iss_required, cancel)? {
+                    return Ok(found);
                 }
             }
             Ok(_) => {}
@@ -155,13 +162,13 @@ fn wait(
     Err(wire::failure("OAuth sign-in timed out"))
 }
 fn callback(
-    stream: &mut TcpStream,
+    mut stream: TcpStream,
     port: u16,
     state: &str,
     issuer: &str,
     iss_required: bool,
     cancel: &Cancellation,
-) -> Result<Option<String>, Error> {
+) -> Result<Option<(String, Landing)>, Error> {
     stream
         .set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|_| wire::failure("OAuth callback failed"))?;
@@ -175,13 +182,13 @@ fn callback(
             return Err(Error::new(ErrorKind::Cancelled, "Operation cancelled"));
         }
         if bytes.len() >= 8192 || Instant::now() > deadline {
-            respond(stream, false);
+            landing::answer(&mut stream, "400 Bad Request", false);
             return Ok(None);
         }
         let mut chunk = [0; 1024];
         match stream.read(&mut chunk) {
             Ok(0) => {
-                respond(stream, false);
+                landing::answer(&mut stream, "400 Bad Request", false);
                 return Ok(None);
             }
             Ok(n) => bytes.extend_from_slice(&chunk[..n]),
@@ -191,75 +198,62 @@ fn callback(
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) => {}
             Err(_) => {
-                respond(stream, false);
+                landing::answer(&mut stream, "400 Bad Request", false);
                 return Ok(None);
             }
         }
     }
     let Ok(text) = std::str::from_utf8(&bytes) else {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     let Some((line, headers)) = text.split_once("\r\n") else {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     let Some(query) = line
         .strip_prefix("GET /callback?")
         .and_then(|s| s.strip_suffix(" HTTP/1.1"))
     else {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     if !headers
         .split("\r\n")
         .any(|h| h.eq_ignore_ascii_case(&format!("Host: 127.0.0.1:{port}")))
     {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     }
     // Any local process can reach the listener: only a request carrying this
     // sign-in's state may end it.
     let Ok(values) = wire::query(query) else {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     if values.get("state").map(String::as_str) != Some(state) {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     }
     if values.get("iss").is_some_and(|iss| iss != issuer)
         || (iss_required && !values.contains_key("iss"))
     {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Err(wire::failure("OAuth authorization issuer did not match"));
     }
     if values.contains_key("error") {
-        respond(stream, true);
+        landing::answer(&mut stream, "200 OK", false);
         return Err(wire::failure("OAuth authorization was declined"));
     }
     let Some(code) = values
         .get("code")
         .filter(|code| !code.is_empty() && code.len() <= 4096)
     else {
-        respond(stream, false);
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
-    respond(stream, true);
-    Ok(Some(code.clone()))
-}
-fn respond(stream: &mut TcpStream, ok: bool) {
-    let body = if ok {
-        "Return to Jecode. This tab can be closed."
-    } else {
-        "Invalid sign-in callback."
-    };
-    let status = if ok { "200 OK" } else { "400 Bad Request" };
-    let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = stream.write_all(response.as_bytes());
+    let code = code.clone();
+    Ok(Some((code, Landing::new(stream))))
 }
 
 /// Step-up scopes first, then scopes already granted by the same
@@ -355,6 +349,7 @@ mod tests {
     }
 
     fn send(port: u16, target: &str) -> String {
+        use std::io::Write;
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
         let (head, tail) = request.split_at(12);
@@ -389,15 +384,17 @@ mod tests {
             assert!(send(port, good).starts_with("HTTP/1.1 200"));
         });
         let cancel = Cancellation::default();
-        let code = wait(
+        let (code, landing) = wait(
             &listener,
             port,
             "right",
             "https://issuer.test",
             true,
             &cancel,
-        );
-        assert_eq!(code.unwrap(), "good");
+        )
+        .unwrap();
+        assert_eq!(code, "good");
+        landing.authenticated();
         client.join().unwrap();
     }
 

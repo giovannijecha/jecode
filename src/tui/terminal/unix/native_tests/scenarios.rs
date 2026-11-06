@@ -271,7 +271,7 @@ fn native_unix_direct_input() {
     t.wait("i  input");
     let started = t.mark();
     t.send(b"i");
-    t.wait_after("Ctrl+]  back", started);
+    t.wait_after("Ctrl+] back", started);
     t.wait("NATIVE_PASSWORD_READY");
     t.send("NATIVE_SECRET_42🙂\r".as_bytes());
     t.wait_after("NATIVE_PTY_DONE", started);
@@ -282,14 +282,14 @@ fn native_unix_direct_input() {
     // Match the new input-mode frame, not an earlier queued repaint.
     let reattached = t.mark();
     t.send(b"i");
-    t.wait_after("Ctrl+]  back", reattached);
+    t.wait_after("Ctrl+] back", reattached);
     // The keyboard protocol reports the same key differently, and it must still leave.
     let reported = t.mark();
     t.send(b"\x1b[93;5u");
     t.wait_after("i  input", reported);
     let again = t.mark();
     t.send(b"i");
-    t.wait_after("Ctrl+]  back", again);
+    t.wait_after("Ctrl+] back", again);
     t.wait("NATIVE_SECOND_READY");
     t.send(b"finish\r");
     t.wait_after("NATIVE_PTY_END", detached);
@@ -304,19 +304,26 @@ fn native_unix_direct_input() {
     t.quit_with(b"\x11", "NATIVE_DIRECT_INPUT_RESTORED");
 }
 
-const DARK_SURFACE: &[u8] = b"48;2;12;12;12m";
+/// What the light palette draws, as the bytes a terminal receives.
+fn light_escape(style: crate::tui::theme::Style) -> Vec<u8> {
+    crate::tui::theme::set_light(true);
+    let escape = escape_for(style);
+    crate::tui::theme::set_light(false);
+    escape
+}
 
 #[test]
 #[ignore = "requires the system script tool for a native Unix PTY"]
 fn native_unix_light_background() {
     let mut t = Pty::new("background-light");
-    t.wait_raw(DARK_SURFACE, 0);
+    t.wait_raw(&light_escape(crate::tui::theme::BODY), 0);
     t.wait("NATIVE_LIGHT_FRAME");
-    assert!(!contains(t.raw(), b"\x1b[49m"));
+    assert!(!contains(t.raw(), b"48;2;"));
     t.finish("NATIVE_BACKGROUND_RESTORED");
 
-    // The terminal's own answer decides: a light one brings the dark surface.
-    for (reply, surface) in [
+    // The terminal's own answer decides: a light one brings the light inks, on nothing.
+    let placeholder = light_escape(crate::tui::theme::DIM);
+    for (reply, light) in [
         (&b"\x1b]11;rgb:ffff/ffff/ffff\x07"[..], true),
         (&b"\x1b]11;rgb:0000/0000/0000\x1b\\"[..], false),
     ] {
@@ -326,11 +333,12 @@ fn native_unix_light_background() {
         t.wait("Ask anything");
         pause(300);
         t.wait_for_output(0);
-        if surface {
-            t.wait_raw(DARK_SURFACE, 0);
+        if light {
+            t.wait_raw(&placeholder, 0);
         } else {
-            assert!(!contains(t.raw(), DARK_SURFACE));
+            assert!(!contains(t.raw(), &placeholder));
         }
+        assert!(!contains(t.raw(), b"48;2;"));
         t.send(b"\x11");
         t.finish("NATIVE_BACKGROUND_DETECTED_RESTORED");
     }
@@ -378,7 +386,6 @@ fn startup_warnings(t: &mut Pty, scenario: &str) {
         "No configured provider"
     });
     t.wait_raw(&escape_for(crate::tui::theme::WARNING), 0);
-    t.wait_raw(&escape_for(crate::tui::theme::PILL_SURFACE), 0);
     if scenario == "startup-unconfigured-prompt" {
         let typed = t.mark();
         t.send(b"Keep my task");

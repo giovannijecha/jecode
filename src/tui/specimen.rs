@@ -43,7 +43,6 @@ const FOREGROUNDS: &[(&str, &[(&str, Style)])] = &[
 const BACKGROUNDS: &[(&str, Surface)] = &[
     ("BASE", BASE),
     ("USER_SURFACE", USER_SURFACE),
-    ("PILL_SURFACE", PILL_SURFACE),
     ("SELECTED_SURFACE", SELECTED_SURFACE),
     ("CODE_SURFACE", CODE_SURFACE),
     ("DIFF_ADDED_SURFACE", DIFF_ADDED_SURFACE),
@@ -291,6 +290,7 @@ mod notices;
 mod panels;
 mod permissions;
 mod rhythm;
+mod sheet;
 mod tinted;
 mod tools;
 mod work_chapters;

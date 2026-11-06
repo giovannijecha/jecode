@@ -2,11 +2,15 @@ use super::{
     SignInUpdate,
     storage::{self, Record},
 };
-use crate::auth::{openai, openai::native};
+use crate::auth::{
+    landing::{self, Landing},
+    openai,
+    openai::native,
+};
 use crate::cancel::Cancellation;
 use crate::json::{self, Value};
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
@@ -19,7 +23,7 @@ const SCOPES: &str = "user:profile user:inference";
 pub(super) fn sign_in(
     cancel: &Cancellation,
     emit: &mut dyn FnMut(SignInUpdate) -> Result<(), String>,
-) -> Result<Record, String> {
+) -> Result<(Record, Landing), String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|_| "Could not start Claude sign-in callback listener")?;
     listener
@@ -47,7 +51,7 @@ pub(super) fn sign_in(
     emit(SignInUpdate::Browser(url.clone()))?;
     let _ = openai::open_browser(&url);
     emit(SignInUpdate::Waiting)?;
-    let code = await_callback(&listener, port, &state, cancel)?;
+    let (code, landing) = await_callback(&listener, port, &state, cancel)?;
     let body = Value::object([
         ("grant_type", Value::string("authorization_code")),
         ("client_id", Value::string(CLIENT_ID)),
@@ -61,7 +65,7 @@ pub(super) fn sign_in(
     let (id, label) = profile(&record.access_token, cancel)?;
     record.id = id;
     record.label = label;
-    Ok(record)
+    Ok((record, landing))
 }
 
 pub(super) fn refresh(record: &Record, cancel: &Cancellation) -> Result<Record, String> {
@@ -240,16 +244,16 @@ fn await_callback(
     port: u16,
     state: &str,
     cancel: &Cancellation,
-) -> Result<String, String> {
+) -> Result<(String, Landing), String> {
     let deadline = Instant::now() + Duration::from_secs(300);
     while Instant::now() < deadline {
         if cancel.requested() {
             return Err("Operation cancelled".into());
         }
         match listener.accept() {
-            Ok((mut stream, peer)) if peer.ip().is_loopback() => {
-                if let Some(code) = handle_callback(&mut stream, port, state, cancel)? {
-                    return Ok(code);
+            Ok((stream, peer)) if peer.ip().is_loopback() => {
+                if let Some(callback) = handle_callback(stream, port, state, cancel)? {
+                    return Ok(callback);
                 }
             }
             Ok(_) => {}
@@ -263,11 +267,11 @@ fn await_callback(
 }
 
 fn handle_callback(
-    stream: &mut TcpStream,
+    mut stream: TcpStream,
     port: u16,
     state: &str,
     cancel: &Cancellation,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, Landing)>, String> {
     stream
         .set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|_| "Could not configure callback connection")?;
@@ -281,13 +285,13 @@ fn handle_callback(
             return Err("Operation cancelled".into());
         }
         if Instant::now() >= deadline || bytes.len() >= 8192 {
-            respond(stream, "400 Bad Request", "Invalid callback");
+            landing::answer(&mut stream, "400 Bad Request", false);
             return Ok(None);
         }
         let mut part = [0u8; 1024];
         match stream.read(&mut part) {
             Ok(0) => {
-                respond(stream, "400 Bad Request", "Invalid callback");
+                landing::answer(&mut stream, "400 Bad Request", false);
                 return Ok(None);
             }
             Ok(size) => bytes.extend_from_slice(&part[..size]),
@@ -297,52 +301,41 @@ fn handle_callback(
                     std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
                 ) => {}
             Err(_) => {
-                respond(stream, "400 Bad Request", "Invalid callback");
+                landing::answer(&mut stream, "400 Bad Request", false);
                 return Ok(None);
             }
         }
     }
     let Ok(request) = std::str::from_utf8(&bytes) else {
-        respond(stream, "400 Bad Request", "Invalid callback encoding");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     let Some((head, _)) = request.split_once("\r\n") else {
-        respond(stream, "400 Bad Request", "Invalid callback");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     let Some(target) = head
         .strip_prefix("GET ")
         .and_then(|s| s.strip_suffix(" HTTP/1.1"))
     else {
-        respond(stream, "405 Method Not Allowed", "Invalid callback");
+        landing::answer(&mut stream, "405 Method Not Allowed", false);
         return Ok(None);
     };
     if !request
         .split("\r\n")
         .any(|line| line.eq_ignore_ascii_case(&format!("Host: localhost:{port}")))
     {
-        respond(stream, "400 Bad Request", "Invalid callback host");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     }
     match callback(target, state) {
-        Ok(code) => {
-            respond(
-                stream,
-                "200 OK",
-                "Return to Jecode. This tab can be closed.",
-            );
-            Ok(Some(code))
-        }
+        Ok(code) => Ok(Some((code, Landing::new(stream)))),
         Err(error) if error == "Claude authorization was declined" => {
-            respond(
-                stream,
-                "200 OK",
-                "Sign-in was not completed. Return to Jecode.",
-            );
+            landing::answer(&mut stream, "200 OK", false);
             Err(error)
         }
         Err(_) => {
-            respond(stream, "400 Bad Request", "Invalid callback");
+            landing::answer(&mut stream, "400 Bad Request", false);
             Ok(None)
         }
     }
@@ -429,14 +422,6 @@ fn base64url(bytes: &[u8]) -> String {
         .trim_end_matches('=')
         .replace('+', "-")
         .replace('/', "_")
-}
-
-fn respond(stream: &mut TcpStream, status: &str, body: &str) {
-    let reply = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\n\r\n{body}",
-        body.len()
-    );
-    let _ = stream.write_all(reply.as_bytes());
 }
 
 #[cfg(test)]

@@ -23,6 +23,7 @@ Most settings have two scopes:
 | **Default routing** | OpenRouter endpoint choice for the default model. |
 | **Default permissions** | The [permission level](PERMISSIONS.md) new conversations start at. |
 | **Context** | **Auto-compact at** and **Prompt cache**; both apply immediately, including to the current conversation. |
+| **Theme** | Which inks the interface uses: **Auto**, **Dark** or **Light**. Applies at once, to the current conversation and to new ones; see [Theme](#theme). |
 | **Providers** | API keys and account sign-in; see [Providers](PROVIDERS.md). |
 | **MCP** | Global remote connections; see [MCP](MCP.md). |
 | **LSP** | Global, explicitly enabled local language servers; see [Language servers](LSP.md). |
@@ -87,6 +88,22 @@ Anthropic, the Claude plan and OpenRouter. Other models keep their provider's
 automatic caching. Jecode's own instructions and tools, shared by every
 conversation, are always cached for one hour on Anthropic and the Claude plan.
 
+## Theme
+
+Jecode never paints a background; the terminal keeps its own. `/settings` → **Theme**
+chooses the inks the text and surfaces use:
+
+| Choice | Inks |
+| --- | --- |
+| **Auto** | Follows the terminal's reported background: light inks on a light terminal, dark inks otherwise and when the terminal does not answer. This is the default. |
+| **Dark** | Inks for a dark terminal, whatever the terminal says. |
+| **Light** | Inks for a light terminal, whatever the terminal says. |
+
+A choice that does not match the terminal reads badly, because no background is
+drawn to make up for it. The change applies at once, to the current conversation
+and to new ones. See [TUI theme](../tui/THEME.md) for how the terminal is
+queried.
+
 ## OpenRouter endpoint routing
 
 A model on OpenRouter is often served by several endpoints. `/routing` chooses
@@ -140,6 +157,7 @@ the default:
     "routing": { "provider/model-id": { "mode": "auto" } }
   },
   "context": { "auto_compact_percent": 80, "prompt_cache": "1h" },
+  "appearance": { "theme": "auto" },
   "permissions": { "default": "workspace" }
 }
 ```
@@ -153,6 +171,7 @@ the default:
 | `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
 | `context.prompt_cache` | How long Claude prompt caches last: `1h` or `5m`. Default `1h`. |
+| `appearance.theme` | `auto`, `dark` or `light`. Default `auto`. |
 | `permissions.default` | `read`, `workspace` or `full`. Default `workspace`. |
 
 To pin an endpoint by hand, set the model's routing entry, in the `openrouter`

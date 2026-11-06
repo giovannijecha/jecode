@@ -9,7 +9,7 @@ use crate::{
         feedback::{Ending, Feedback},
         selector::Selector,
         state::{Kind, State},
-        theme::{BASE, STRONG, Surface},
+        theme::{self, STRONG},
         view,
     },
 };
@@ -79,18 +79,19 @@ fn alignment() {
         "The terminal keeps its own palette after exit.",
     );
     let scenes = [
-        ("Ask over a draft", ask(80), BASE),
-        ("Ask over a draft, narrow", ask(40), BASE),
-        ("Model, primary action and exit", models(), BASE),
-        ("Permissions, recursive workspace", permissions, BASE),
-        ("Completion statistics", done, BASE),
-        ("Light terminal fallback", light, Surface::rgb(12, 12, 12)),
+        ("Ask over a draft", ask(80), false),
+        ("Ask over a draft, narrow", ask(40), false),
+        ("Model, primary action and exit", models(), false),
+        ("Permissions, recursive workspace", permissions, false),
+        ("Completion statistics", done, false),
+        ("Light inks", light, true),
     ];
-    for (title, state, base) in scenes {
+    for (title, state, inks) in scenes {
         println!("AUDIT SCENE: {title}");
+        theme::set_light(inks);
         let frame = view::frame(&state, "fixture/sonnet", r"C:\Projects\example");
         for line in frame.live {
-            println!("{}", line.paint_on(state.width, base));
+            println!("{}", line.paint(state.width));
         }
         println!("{}", crate::tui::line::Line::new(" ", STRONG).paint(1));
     }

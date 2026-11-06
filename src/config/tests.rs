@@ -459,3 +459,33 @@ fn prompt_cache_defaults_to_one_hour_persists_and_rejects_unknown_values() {
         assert!(!error.contains("isolated-fixture-key"));
     }
 }
+
+#[test]
+fn theme_defaults_to_auto_persists_and_rejects_unknown_values() {
+    let directory = Directory::new();
+    let store = Store::new(directory.path().to_path_buf());
+    let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#;
+    fs::write(store.path(), legacy).unwrap();
+    let mut saved = store.load().unwrap().unwrap();
+    assert_eq!(saved.theme, Theme::Auto);
+    saved.theme = Theme::Light;
+    store.save(&saved).unwrap();
+    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    assert_eq!(
+        document.get("appearance").unwrap().get("theme"),
+        Some(&Value::string("light"))
+    );
+    assert_eq!(store.load().unwrap().unwrap().theme, Theme::Light);
+    for value in ["\"sepia\"", "\"\"", "1", "null"] {
+        let text = format!(
+            r#"{{"openrouter":{{"api_key":"isolated-fixture-key","model":"fixture/model"}},"appearance":{{"theme":{value}}}}}"#
+        );
+        fs::write(store.path(), &text).unwrap();
+        let error = store.load().err().unwrap();
+        assert!(error.contains("appearance.theme"), "{error}");
+        assert!(!error.contains("isolated-fixture-key"));
+    }
+    let text = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"},"appearance":[]}"#;
+    fs::write(store.path(), text).unwrap();
+    assert!(store.load().err().unwrap().contains("appearance"));
+}

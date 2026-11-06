@@ -8,6 +8,7 @@ use crate::{backend, effort::Effort};
 
 mod auto_compact;
 mod prompt_cache;
+mod theme;
 
 impl App {
     pub(super) fn choose(&mut self, choice: Choice) -> Result<(), String> {
@@ -125,6 +126,9 @@ impl App {
                         self.state.selector =
                             Some(Selector::prompt_cache(self.config.settings.cache_retention))
                     }
+                    Setting::Theme => {
+                        self.state.selector = Some(Selector::theme(self.config.settings.theme))
+                    }
                     Setting::Providers => {
                         self.state.selector = Some(Selector::providers_settings())
                     }
@@ -135,6 +139,7 @@ impl App {
             (Choice::Retention(retention), Purpose::PromptCache) => {
                 self.save_prompt_cache(retention)
             }
+            (Choice::Theme(theme), Purpose::Theme) => self.save_theme(theme),
             (Choice::Mcp(index, _), Purpose::Mcp(panel)) => self.choose_mcp(*panel, index),
             (Choice::Lsp(index), Purpose::Lsp(panel)) => self.choose_lsp(*panel, index),
             (

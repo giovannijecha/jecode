@@ -27,7 +27,6 @@ pub(super) struct Display {
     output_revision: Option<u64>,
     below: usize,
     fresh: bool,
-    light_background: bool,
     /// The active console screen, opened on the first frame.
     #[cfg(windows)]
     console: Option<std::fs::File>,
@@ -47,7 +46,6 @@ impl Display {
             output_revision: None,
             below: 0,
             fresh: false,
-            light_background: false,
             #[cfg(windows)]
             console: None,
         }
@@ -57,13 +55,10 @@ impl Display {
         self.resize.observe(size, now);
     }
     pub fn reset(&mut self, size: (usize, usize)) {
-        let light = self.light_background;
         *self = Self::new(size);
-        self.set_light_background(light);
     }
-    pub fn set_light_background(&mut self, light: bool) {
-        self.light_background = light;
-        self.renderer.set_light_background(light);
+    pub fn repaint(&mut self) {
+        self.renderer.repaint();
     }
     pub fn scroll(&mut self, request: Scroll) {
         self.viewport.scroll(request);

@@ -105,7 +105,7 @@ fn map_cards() {
                     true,
                 );
                 if label == "empty" && !expanded {
-                    assert_eq!(card.rows[0].plain(), " MAP  src");
+                    assert_eq!(card.rows[0].plain(), "  MAP    src");
                 }
                 if label == "empty" && expanded {
                     assert_eq!(card.rows[1].plain(), "  └ No map entries");

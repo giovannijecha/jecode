@@ -155,7 +155,7 @@ fn routing_focuses_the_current_choice_and_applies_from_the_next_request() {
             "missing {expected}:\n{displayed}"
         );
     }
-    // The composer above the panel keeps showing the draft.
+    // The panel replaces the composer; the draft stays as a one-line row above it.
     assert!(displayed.contains("› kept draft"), "{displayed}");
     let row = |displayed: &str, name: &str| {
         displayed
@@ -165,13 +165,16 @@ fn routing_focuses_the_current_choice_and_applies_from_the_next_request() {
             .unwrap_or_default()
     };
     let current = row(&displayed, "two/fp8");
-    assert!(current.starts_with("› ") && current.ends_with(" current   "));
+    assert!(
+        current.starts_with("› ") && current.ends_with(" current  "),
+        "{current:?}"
+    );
     // Moving focus keeps the current marker on the choice in effect.
     app.state.selector.as_mut().unwrap().selected = 0;
     let displayed = shown(&app);
     assert!(row(&displayed, "Auto — Best balance").starts_with("› "));
     let current = row(&displayed, "two/fp8");
-    assert!(current.starts_with("  ") && current.ends_with(" current   "));
+    assert!(current.starts_with("  ") && current.ends_with(" current  "));
     assert_eq!(
         app.state.selector.as_ref().unwrap().options[2].badge,
         Some(selector::Badge::Current)
@@ -396,7 +399,7 @@ fn routing_menus_fit_narrow_and_short_terminals_and_keep_the_draft() {
     for height in [3, 4, 6, 8, 12, 24] {
         app.state.height = height;
         let displayed = shown(&app);
-        for expected in ["› two/fp8", "─ Routing · fixture/model", "Esc  close"] {
+        for expected in ["› two/fp8", "─ Routing · fixture/model", "Esc close"] {
             assert!(displayed.contains(expected), "{height}: {displayed}");
         }
     }

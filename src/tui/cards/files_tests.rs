@@ -132,7 +132,7 @@ fn new_file_preview_uses_retained_source_not_mutated_arguments_and_expands_all_l
             let rendered = card(call, columns, false);
             let rows = plain(&rendered.rows);
             // The fact joins the one-row title; the preview hangs below.
-            assert_eq!(rows[0], " WRITE  src/new.rs  New file · 16 lines");
+            assert_eq!(rows[0], " WRITE   src/new.rs  New file · 16 lines");
             assert!(rows[1].starts_with("  │ "), "{rows:#?}");
             assert!(rows[1].ends_with("1   let captured_1 = 1;"), "{rows:#?}");
             assert!(rows.iter().any(|row| row.contains("captured_6")));
@@ -164,7 +164,7 @@ fn file_paths_use_body_and_read_facts_do_not_repeat_the_verb() {
     let shown = Presentation::default();
     let rows = card(tool("read", &args, &result, &shown), 80, false).rows;
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].plain(), " READ  src/a.rs  9 lines · from line 33");
+    assert_eq!(rows[0].plain(), "  READ   src/a.rs  9 lines · from line 33");
     assert!(
         rows[0]
             .spans
@@ -183,7 +183,7 @@ fn file_paths_use_body_and_read_facts_do_not_repeat_the_verb() {
     );
     assert_eq!(
         skill.rows[0].plain(),
-        " SKILL  rust  Loaded skill · 9 lines · from line 33"
+        " SKILL   rust  Loaded skill · 9 lines · from line 33"
     );
 }
 
@@ -256,7 +256,10 @@ fn write_badge_describes_the_captured_file_change() {
         ("content", "let notice = true;\n"),
     ]);
     let result = object([]);
-    for (before, label) in [(None, "WRITE"), (Some("let notice = false;\n"), "UPDATE")] {
+    for (before, label, gap) in [
+        (None, "WRITE", "   "),
+        (Some("let notice = false;\n"), "UPDATE", "  "),
+    ] {
         let change = Change::between(before, "let notice = true;\n").unwrap();
         for columns in [40, 80] {
             for expanded in [false, true] {
@@ -268,7 +271,7 @@ fn write_badge_describes_the_captured_file_change() {
                 call.change = Some(&change);
                 let rows = plain(&card(call, columns, false).rows);
                 assert!(
-                    rows[0].starts_with(&format!(" {label}  src/notice.rs")),
+                    rows[0].starts_with(&format!(" {label}{gap}src/notice.rs")),
                     "{rows:#?}"
                 );
                 assert_eq!(

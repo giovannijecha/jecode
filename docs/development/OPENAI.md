@@ -62,6 +62,10 @@ depends on the Codex CLI.
    OIDC nonce and a PKCE S256 verifier, and expires after five minutes.
    Unrelated or invalid callbacks receive HTTP 400 without ending the attempt;
    a matching provider error ends it.
+   The browser is answered only after the tokens are saved: a black page reading
+   `jecode authenticated` and `close this tab`, or `jecode not authenticated` and
+   `close this tab and try again`. The page comes from `auth/landing.rs` and
+   `auth/landing.html`, shared with the other loopback sign-ins.
 3. Jecode verifies the ID token's signature against OpenAI's JWKS, along with
    the issuer, the issued-client audience, expiry and nonce. The verified
    subject becomes the account identity, and signing in again must match the

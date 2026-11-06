@@ -27,6 +27,8 @@ pub enum Kind {
 pub struct Opening {
     /// Up to three other conversations in this folder, newest first.
     pub recent: Vec<Recent>,
+    /// The launch has no selected model yet, independently of saved conversations.
+    pub needs_model: bool,
     /// Available personal skills at launch.
     pub skills: usize,
     /// Whether the working directory has a root AGENTS.md.

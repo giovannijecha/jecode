@@ -1,7 +1,7 @@
 use super::{
-    line::{Line, Span},
+    line::Line,
     text,
-    theme::{DIM, MUTED, SELECTED_SURFACE, STRONG, Style},
+    theme::{DIM, MUTED, STRONG, Style},
 };
 use crate::{file_change::Change, json::Value};
 
@@ -318,7 +318,7 @@ fn title_name(tool: &str) -> &str {
         "bash" => "Bash",
         "exec" => "Exec",
         "process" => "Process",
-        "checkpoint" => "Checkpoint",
+        "checkpoint" => "Save",
         "web" => "Web",
         "browser" => "Browser",
         "agent" => "Agents",
@@ -334,20 +334,15 @@ pub(in crate::tui) fn tool_title(tool: &str) -> Line {
     Line::new(&name.to_uppercase(), badge::ink(name).bold())
 }
 
-/// `row` with a right-aligned Ctrl+O keycap, or the keycap on its own row.
+/// `row` with Ctrl+O ending two cells from the edge, or the key on its own row.
 fn hint(row: Line, label: &str, columns: usize) -> Vec<Line> {
-    let mut cap = Line::default();
-    cap.spans.push(Span {
-        text: " Ctrl+O ".into(),
-        style: STRONG,
-        background: Some(SELECTED_SURFACE),
-    });
+    let mut cap = Line::new("Ctrl+O", STRONG.bold());
     cap.push(&format!(" {label}"), DIM);
     let used = text::cells(&row.plain());
     let room = text::cells(&cap.plain());
-    if used + 2 + room <= columns {
+    if used + 4 + room <= columns {
         let mut row = row;
-        row.push(&" ".repeat(columns - used - room), MUTED);
+        row.push(&" ".repeat(columns - 2 - used - room), MUTED);
         vec![row.append(cap)]
     } else {
         let origin = row.origin;

@@ -35,16 +35,18 @@ fn information_scrolls_by_visual_rows_and_reaches_every_entry_after_resize() {
     };
     state.editor.replace("unsent draft".into());
     assert!(plain(&state).contains("/command-0"));
-    assert!(plain(&state).contains("› unsent draft"));
-    // A page is the three body rows left below the composer and its title,
-    // above the blank row and the keys.
+    // At nine rows the sheet takes the whole dock; the draft row yields first.
+    assert!(!plain(&state).contains("unsent draft"));
+    // A page is the body rows left below the title, above the blank row and the keys.
     scroll_information(&mut state, 34);
-    assert_eq!(state.information.as_ref().unwrap().offset, 3);
+    assert_eq!(state.information.as_ref().unwrap().offset, 5);
     scroll_information(&mut state, 35);
     assert!(plain(&state).contains("Description 29"));
     state.width = 80;
     state.height = 12;
     assert!(plain(&state).contains("Description 29"));
+    // From twelve rows the draft waits on its own row above the sheet.
+    assert!(plain(&state).contains("› unsent draft"));
     scroll_information(&mut state, 38);
     assert!(plain(&state).contains("Description 28"));
     scroll_information(&mut state, 36);
@@ -114,10 +116,7 @@ fn notices_take_the_status_row_without_moving_the_draft() {
         state.editor.insert("kept draft");
         state.notice = Some(Feedback::result(kind, "A brief result"));
         let rendered = frame(&state, "fixture", "fixture");
-        assert_eq!(
-            rendered.live[0].plain(),
-            format!(" {glyph}  A brief result ")
-        );
+        assert_eq!(rendered.live[0].plain(), format!("{glyph}  A brief result"));
         assert_eq!(rendered.live.len(), before.live.len());
         assert_eq!(rendered.cursor, before.cursor);
         assert_eq!(rendered.live[1..], before.live[1..]);
@@ -138,7 +137,7 @@ fn long_errors_shorten_within_the_status_row() {
     state.editor.cursor = 2;
     let rendered = frame(&state, "fixture", "fixture");
     let status = rendered.live[0].plain();
-    assert_eq!(status, " ✕  Could not write   read-only");
+    assert_eq!(status, "✕  Could not write  read-only");
     assert!(rendered.live[1].plain().starts_with('─'));
     assert!(
         rendered.live[rendered.cursor.unwrap().0]

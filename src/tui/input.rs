@@ -1,7 +1,18 @@
-use super::{App, Decoded, Feedback, Kind, selector::Purpose, terminal::Key};
+use super::{
+    App, Decoded, Feedback, Kind,
+    selector::{Choice, Purpose},
+    terminal::Key,
+};
 
 impl App {
     pub(super) fn input(&mut self, decoded: Decoded) -> Result<bool, String> {
+        let escaped = matches!(&decoded, Decoded::Key(key) if key.code == 27);
+        let exit = self.route(decoded)?;
+        self.follow_commands(escaped);
+        Ok(exit)
+    }
+
+    fn route(&mut self, decoded: Decoded) -> Result<bool, String> {
         // The quit question holds every key but reading the conversation.
         if self.state.quitting.is_some() {
             match &decoded {
@@ -214,6 +225,12 @@ impl App {
         if self.state.selector.is_some() {
             return self.selector_key(key);
         }
+        // Reached only while the composer holds the keys: everything that owns them, such
+        // as a request or Ask, took them above.
+        if key.code == 71 && key.ctrl() && !key.alt() && !key.shift() {
+            self.open_commands();
+            return Ok(false);
+        }
         if !key.ctrl() && !key.alt() && matches!(key.code, 33 | 34) {
             self.renderer
                 .scroll(super::viewport::Scroll::Page(key.code == 33));
@@ -358,6 +375,8 @@ impl App {
                     self.save_key();
                 } else if matches!(menu.purpose, Purpose::AutoCompact) {
                     self.save_auto_compact();
+                } else if let Some(Choice::Command(index)) = menu.chosen() {
+                    return self.run_command(index);
                 } else if let Some(choice) = menu.chosen() {
                     self.choose(choice)?;
                 } else {
@@ -412,6 +431,15 @@ impl App {
         }
     }
     pub(super) fn close_selector(&mut self) {
+        if self
+            .state
+            .selector
+            .as_ref()
+            .is_some_and(|menu| matches!(menu.purpose, Purpose::Commands { .. }))
+        {
+            self.state.selector = None;
+            return;
+        }
         if self.close_lsp_panel() {
             return;
         }

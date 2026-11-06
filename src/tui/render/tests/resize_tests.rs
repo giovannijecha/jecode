@@ -247,9 +247,9 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
         Default::default(),
         &crate::backend::openrouter::Routing::Auto,
         Default::default(),
-        std::path::Path::new("fixture/config.json"),
+        Default::default(),
     ));
-    state.selector.as_mut().unwrap().selected = 5;
+    state.selector.as_mut().unwrap().selected = 6;
     let mut screen = Screen::new(state.width, state.height);
     let mut display = Display::new((state.width, state.height));
     step(&mut display, &mut screen, &state, now);
@@ -262,7 +262,7 @@ fn selectors_preserve_query_selection_and_the_separate_draft_in_very_short_windo
             now + Duration::from_millis(75),
         );
         assert!(screen.visible().contains("Providers"));
-        assert_eq!(state.selector.as_ref().unwrap().selected, 5);
+        assert_eq!(state.selector.as_ref().unwrap().selected, 6);
         assert_eq!(state.editor, draft);
     }
     let models: Vec<_> = (0..12)

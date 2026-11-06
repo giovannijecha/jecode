@@ -63,7 +63,7 @@ fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
             &Presentation::default(),
             columns,
         );
-        assert_eq!(card.rows[0].plain(), " BASH  Inspect the renderer");
+        assert_eq!(card.rows[0].plain(), "  BASH   Inspect the renderer");
         assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_SHELL)));
         assert!(
             card.rows[1]
@@ -101,7 +101,7 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
     for description in ["", "  \n "] {
         let args = object([("command", "cargo test"), ("description", description)]);
         let card = draw("bash", &args, Some(&result), &Presentation::default(), 80);
-        assert_eq!(plain(&card), " BASH  cargo test\n  └ Done");
+        assert_eq!(plain(&card), "  BASH   cargo test\n  └ Done");
         assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_SHELL)));
         assert_eq!(card.rows[0].spans.last().unwrap().style, BODY);
     }
@@ -123,7 +123,7 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
         80,
     );
     // The background call ends its title target in a bold `&`.
-    assert_eq!(card.rows[0].plain(), " PROCESS  Serve preview &");
+    assert_eq!(card.rows[0].plain(), "PROCESS  Serve preview &");
     assert_eq!(card.rows[0].spans.last().unwrap().text, " &");
     assert_eq!(card.rows[0].spans.last().unwrap().style, LIT.bold());
     assert_eq!(badge(&card), (LIT.bold(), Some(BADGE_IDLE)));
@@ -155,7 +155,7 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
     )]);
     let shown = Presentation::default();
     let card = draw("browser", &args, Some(&result), &shown, 80);
-    assert_eq!(card.rows[0].plain(), " BROWSER  evaluate");
+    assert_eq!(card.rows[0].plain(), "BROWSER  evaluate");
     assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
     assert!(
         card.rows[1]
@@ -293,7 +293,7 @@ fn exec_cards_keep_structured_target_and_command_status_across_states() {
     assert!(
         pending.rows[0]
             .plain()
-            .starts_with(" EXEC  cargo [\"test\",\"a b\"]")
+            .starts_with("  EXEC   cargo [\"test\",\"a b\"]")
     );
     let success = Value::object([
         ("exit_code", Value::number(0)),
@@ -324,7 +324,7 @@ fn exec_cards_keep_structured_target_and_command_status_across_states() {
         ("description", Value::string("Run checks")),
     ]);
     let card = draw("exec", &described, Some(&success), &collapsed, 80);
-    assert_eq!(card.rows[0].plain(), " EXEC  Run checks");
+    assert_eq!(card.rows[0].plain(), "  EXEC   Run checks");
     assert!(card.rows[1].plain().contains("> cargo [\"test\"]"));
 }
 
@@ -343,7 +343,7 @@ fn browser_actions_without_a_payload_open_their_result_on_the_first_tree_row() {
                 ..Presentation::default()
             };
             let card = draw("browser", &args, Some(&result), &shown, 80);
-            assert_eq!(card.rows[0].plain(), format!(" BROWSER  {action}"));
+            assert_eq!(card.rows[0].plain(), format!("BROWSER  {action}"));
             // No empty command row opens the tree; this result has no blank line.
             let empty = |row: &Line| row.plain().trim_start_matches([' ', '│', '└']).is_empty();
             assert!(!card.rows[1..].iter().any(empty), "{}", plain(&card));

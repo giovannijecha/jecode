@@ -62,17 +62,17 @@ fn add(state: &mut State, block: Block, label: &str) {
 }
 
 #[test]
-fn block_transitions_have_one_neutral_separator_plus_their_own_panel_padding() {
+fn block_transitions_have_one_neutral_separator_and_no_padding_rows() {
     use Block::*;
     let cases = [
-        (User, Assistant, 2),
-        (Assistant, User, 2),
-        (User, Tool, 2),
-        (Tool, User, 2),
+        (User, Assistant, 1),
+        (Assistant, User, 1),
+        (User, Tool, 1),
+        (Tool, User, 1),
         (Assistant, Tool, 1),
         (Tool, Assistant, 1),
         (Assistant, Assistant, 1),
-        (User, User, 3),
+        (User, User, 1),
         (Tool, Tool, 1), // Every tool block has one external separator.
     ];
     for width in [12, 40, 80] {
@@ -108,21 +108,20 @@ fn block_transitions_have_one_neutral_separator_plus_their_own_panel_padding() {
 }
 
 #[test]
-fn requests_keep_their_padding_and_hang_their_text_after_the_request_marker() {
+fn requests_are_one_band_and_hang_their_text_after_the_request_marker() {
     let mut state = State::default();
     state.message(Kind::User, "one\ntwo\nthree");
     state.message(Kind::Assistant, "answer");
     let blocks = state.rows();
-    assert_eq!(blocks[0].len(), 5);
+    assert_eq!(blocks[0].len(), 3);
     assert!(
         blocks[0]
             .iter()
             .all(|row| row.background == Some(USER_SURFACE))
     );
-    assert_eq!(blocks[0][0].plain(), "");
-    assert_eq!(blocks[0][4].plain(), "");
-    assert_eq!(blocks[0][1].plain(), "› one");
-    assert_eq!(blocks[0][2].plain(), "  two");
+    assert_eq!(blocks[0][0].plain(), "› one");
+    assert_eq!(blocks[0][1].plain(), "  two");
+    assert_eq!(blocks[0][2].plain(), "  three");
     assert_eq!(blocks[1][0], Line::default());
     assert_eq!(blocks[1][1].plain(), "● answer");
     assert_eq!(blocks[1][1].spans[0].style, super::theme::ACCENT);
@@ -152,11 +151,11 @@ fn empty_assistant_updates_leave_tool_blocks_unchanged_and_add_no_rows() {
     state.finish_tool_turn();
     let rows = state.rows();
     assert!(rows[1].is_empty());
-    assert!(rows[0][0].plain().starts_with(" BASH  first"));
+    assert!(rows[0][0].plain().starts_with("  BASH   first"));
     assert!(rows[0][1].plain().contains("five"));
     assert!(!rows[0].iter().any(|row| row.plain() == "  │ one"));
     assert_eq!(rows[2][0], Line::default());
-    assert!(rows[2][1].plain().starts_with(" BASH  second"));
+    assert!(rows[2][1].plain().starts_with("  BASH   second"));
     assert!(
         rows[2]
             .iter()
@@ -204,7 +203,7 @@ fn tool_output_keeps_actual_trailing_empty_rows_only_when_expanded() {
         state.close_tools();
         state.finish_tool_turn();
         let rows = state.rows();
-        assert!(rows[0][0].plain().starts_with(" BASH  fixture"));
+        assert!(rows[0][0].plain().starts_with("  BASH   fixture"));
         assert!(rows[0][1].plain().contains("line"));
         assert!((2..=3).contains(&rows[0].len()));
         assert!(!rows[0].iter().any(|row| row.plain() == "  │ "));

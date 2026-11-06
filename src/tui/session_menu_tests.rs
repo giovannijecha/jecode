@@ -93,7 +93,11 @@ fn escape_from_empty_resume_after_deleting_current_returns_to_composer() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(visible.contains("kept draft"));
-    assert!(!visible.contains("No saved conversations"));
+    assert!(
+        !visible
+            .lines()
+            .any(|line| line.trim() == "No saved conversations")
+    );
 }
 
 #[test]
@@ -187,5 +191,5 @@ fn current_and_last_saved_deletions_keep_resume_open_without_an_empty_replacemen
         .collect::<Vec<_>>()
         .join("\n");
     assert!(visible.contains("No saved conversations"));
-    assert!(visible.contains(" Esc  close"));
+    assert!(visible.contains(" Esc close"));
 }

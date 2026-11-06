@@ -91,6 +91,10 @@ struct App {
     catalog: Vec<Model>,
     catalog_services: Option<crate::backend::Services>,
     provider_parent: Option<(bool, selector::ProviderGroup)>,
+    /// What the terminal last reported, which only the Auto theme follows.
+    light_terminal: bool,
+    /// The open panel came from the commands sheet, so Esc goes back to it.
+    from_commands: bool,
     auth_accounts: Vec<crate::auth::Account>,
     auth_provider: &'static str,
     auth_account_index: Option<usize>,
@@ -162,6 +166,7 @@ impl App {
             .err();
         let skills = agent.skills().map_or(0, |skills| skills.len());
         let agents = agent.archive().directory.join("AGENTS.md").is_file();
+        let needs_model = !config.settings.has_model() || !agent.has_model();
         let state = State {
             width: terminal.as_ref().map_or(80, |terminal| terminal.size.0),
             height: terminal.as_ref().map_or(24, |terminal| terminal.size.1),
@@ -170,6 +175,7 @@ impl App {
             opening: state::Opening {
                 skills,
                 agents,
+                needs_model,
                 ..state::Opening::default()
             },
             ..State::default()
@@ -203,6 +209,8 @@ impl App {
             catalog: vec![],
             catalog_services: None,
             provider_parent: None,
+            light_terminal: false,
+            from_commands: false,
             auth_accounts: vec![],
             auth_provider: "openai",
             auth_account_index: None,
@@ -252,6 +260,8 @@ impl App {
     fn refresh_context(&mut self) {
         if let Some(agent) = &self.agent {
             self.state.context = Some(agent.context_status());
+            self.state.opening.needs_model =
+                !self.config.settings.has_model() || !agent.has_model();
         }
     }
 
@@ -291,6 +301,7 @@ pub(crate) fn launch(
     )?;
     let terminal = Terminal::open()?;
     let mut app = App::new(agent, config, Some(terminal));
+    app.apply_theme();
     let mut background = background::Probe::start()?;
     if !draft.is_empty() {
         app.state.editor.set(draft);
@@ -318,7 +329,7 @@ pub(crate) fn launch(
         }
         let (replayed, fallback) = background.expire();
         if let Some(light) = fallback {
-            app.renderer.set_light_background(light);
+            app.terminal_background(light);
             dirty = true;
         }
         for event in replayed {
@@ -349,7 +360,7 @@ pub(crate) fn launch(
             }
             let (forwarded, light) = background.feed(event);
             if let Some(light) = light {
-                app.renderer.set_light_background(light);
+                app.terminal_background(light);
             }
             for event in forwarded {
                 if app.terminal_event(event, &mut decoder)? {

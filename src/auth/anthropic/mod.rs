@@ -95,13 +95,14 @@ impl Store {
         if let Some(id) = existing {
             self.files().record(id)?;
         }
-        let record = flow::sign_in(&cancel, emit)?;
+        let (record, landing) = flow::sign_in(&cancel, emit)?;
         if existing.is_some_and(|id| id != record.id) {
             return Err("Returning Claude account identity mismatch".into());
         }
         let files = self.files();
         let _lock = files.lock(&cancel)?;
         files.save_record(&record)?;
+        landing.authenticated();
         Ok(self.make_session(&record))
     }
 

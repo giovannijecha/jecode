@@ -65,10 +65,10 @@ fn list_is_a_standard_menu_with_status_command_id_and_empty_message() {
     assert!(active.contains("1 running"), "{active}");
     assert!(active.contains("› running  printf catalog"), "{active}");
     assert!(active.contains("process-1"), "{active}");
-    assert!(active.contains(" Ctrl+D  stop"), "{active}");
+    assert!(active.contains(" Ctrl+D stop"), "{active}");
     let empty = plain(&Panel::new(vec![]), 80, 8);
     assert!(empty.contains("Nothing running"));
-    assert!(empty.contains(" Esc  close"));
+    assert!(empty.contains(" Esc close"));
 }
 
 #[test]
@@ -78,8 +78,8 @@ fn stop_confirmation_replaces_the_key_row_and_marks_the_target() {
     let rows = render(&panel, 80, 10);
     let text = plain(&panel, 80, 10);
     assert!(text.contains("Stop this process?"), "{text}");
-    assert!(text.contains(" Enter  stop"));
-    assert!(text.contains(" Esc  cancel"));
+    assert!(text.contains(" Enter stop"));
+    assert!(text.contains(" Esc cancel"));
     assert!(!text.contains("Ctrl+D"));
     let target = rows
         .iter()
@@ -96,7 +96,7 @@ fn stop_confirmation_replaces_the_key_row_and_marks_the_target() {
     panel.confirm_stop = Some(process("exited"));
     let finished = plain(&panel, 80, 10);
     assert!(finished.contains("Already finished"));
-    assert!(finished.contains(" Enter  back"));
+    assert!(finished.contains(" Enter back"));
 }
 
 #[test]
@@ -109,8 +109,8 @@ fn output_has_breadcrumb_status_stream_tabs_and_follow_mode() {
     assert!(view.contains("Output   Errors"), "{view}");
     assert!(view.contains("following"));
     assert!(view.contains("No output yet"));
-    assert!(view.contains(" Tab  Output"));
-    assert!(view.contains(" Esc  back"));
+    assert!(view.contains("Tab Output"));
+    assert!(view.contains(" Esc back"));
     let rows = render(&panel, 80, 12);
     let underline = rows.iter().find(|row| row.plain().contains('━')).unwrap();
     // The active section's underline sits under "Errors".
@@ -130,13 +130,13 @@ fn interactive_output_shows_input_entry_and_explicit_exit_keys() {
     log.interactive = true;
     panel.logs = Some(log);
     let browsing = plain(&panel, 80, 14);
-    assert!(browsing.contains(" i  input"), "{browsing}");
+    assert!(browsing.contains("i input"), "{browsing}");
 
     panel.logs.as_mut().unwrap().input_mode = true;
     let typing = plain(&panel, 80, 14);
-    assert!(typing.contains("Ctrl+]  back"), "{typing}");
-    assert!(typing.contains("Ctrl+C  interrupt"), "{typing}");
-    assert!(!typing.contains("Tab  Errors"), "{typing}");
+    assert!(typing.contains("Ctrl+] back"), "{typing}");
+    assert!(typing.contains("Ctrl+C interrupt"), "{typing}");
+    assert!(!typing.contains("Tab Errors"), "{typing}");
 }
 
 #[test]

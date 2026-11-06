@@ -72,8 +72,8 @@ fn chapter_expansion_keeps_distinct_windows_read_targets() {
     assert_eq!(
         titles,
         [
-            r" READ  C:\shared\mod.rs  1 line",
-            r" READ  D:\shared\mod.rs  1 line"
+            r"  READ   C:\shared\mod.rs  1 line",
+            r"  READ   D:\shared\mod.rs  1 line"
         ]
     );
 }
@@ -100,7 +100,7 @@ fn read_expansion_preserves_numbered_source_and_syntax() {
     assert_eq!(compact.len(), 1);
     assert_eq!(
         plain(&compact),
-        " READ  src/auth.rs  2 lines · from line 41"
+        "  READ   src/auth.rs  2 lines · from line 41"
     );
     let rows = draw(
         "read",

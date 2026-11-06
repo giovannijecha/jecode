@@ -1,4 +1,5 @@
 use super::{
+    commands,
     panel::{self, Field, Key, Part, Sheet, key},
     routing,
 };
@@ -9,11 +10,11 @@ use crate::tui::{
     motion,
     selector::{Badge, Choice, Hit, Purpose, Selector},
     text,
-    theme::{ACCENT, BAD, BADGE_IDLE, BODY, LIT, MUTED, STRONG, Style},
+    theme::{ACCENT, BAD, BODY, LIT, MUTED, STRONG, Style},
 };
 
-/// The ` current ` chip and the gap before it.
-const CHIP: usize = 11;
+/// The word `current` and the gap before it.
+const CHIP: usize = 9;
 
 pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
     let width = panel::text_width(columns);
@@ -102,12 +103,13 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
                 })
                 .collect()
         }),
+        Purpose::Commands { .. } => Box::new(move |room| commands::palette(menu, columns, room)),
         _ => Box::new(move |room| list(menu, columns, room)),
     };
     Sheet {
         title: panel::title(menu.parent, title, &menu.context),
         aside: aside(menu),
-        field: field(menu, columns),
+        field: field(menu),
         draft_caret: false,
         head,
         body,
@@ -123,9 +125,9 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
     }
 }
 
-/// The value typed for this menu, shown in the composer. The rule names the
-/// field and the title the panel, so a placeholder only adds what neither says.
-fn field(menu: &Selector, columns: usize) -> Option<Field> {
+/// The value typed for this menu. The label names the field and the title the panel, so
+/// a placeholder only adds what neither says.
+fn field(menu: &Selector) -> Option<Field> {
     let (label, placeholder, suffix) = match &menu.purpose {
         Purpose::Key(_) => ("Paste your key".to_string(), "", ""),
         Purpose::AutoCompact => ("Threshold".into(), "1–99", "% of the context window"),
@@ -164,16 +166,13 @@ fn field(menu: &Selector, columns: usize) -> Option<Field> {
             LspField::Initialization | LspField::Settings => ("JSON value".into(), "{}", ""),
             LspField::Timeout => ("Per request".into(), "100–120000", " ms"),
         },
+        Purpose::Commands { .. } => ("Filter".into(), "", ""),
         _ if menu.searchable => (format!("Filter {}", noun(menu)), "", ""),
         _ => return None,
     };
-    let room = if columns < 7 {
-        columns.max(1)
-    } else {
-        columns.saturating_sub(3 + text::cells(suffix)).max(1)
-    };
+    // The whole value: the sheet wraps it and keeps the caret in view.
     let (value, caret) = menu.editor.viewport(
-        room,
+        usize::MAX,
         matches!(
             menu.purpose,
             Purpose::Key(_)
@@ -211,6 +210,7 @@ fn aside(menu: &Selector) -> Line {
         }
     };
     let text = match &menu.purpose {
+        Purpose::Commands { .. } => count("command"),
         Purpose::Models { .. } => count("model"),
         Purpose::Providers { .. } => count("provider"),
         Purpose::ProviderGroups { .. } => count("group"),
@@ -236,6 +236,7 @@ fn aside(menu: &Selector) -> Line {
         Purpose::Key(_) => "~/.jecode/config.json".into(),
         Purpose::AutoCompact | Purpose::Context => "this and new conversations".into(),
         Purpose::PromptCache => "Claude models".into(),
+        Purpose::Theme => "this and new conversations".into(),
         Purpose::Mcp(McpPanel::List) => menu.message.clone(),
         Purpose::Mcp(McpPanel::Tools) => count("tool"),
         Purpose::Lsp(LspPanel::List) => menu.message.clone(),
@@ -319,6 +320,10 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
             key("Enter", "change"),
             close[0],
         ],
+        Purpose::Commands { .. } if menu.chosen().is_some() => {
+            vec![key("↑↓", "move").optional(), key("Enter", "run"), close[0]]
+        }
+        Purpose::Commands { .. } => close.to_vec(),
         Purpose::Copy => vec![key("↑↓", "move").optional(), key("Enter", "copy"), close[0]],
         _ => vec![
             key("↑↓", "move").optional(),
@@ -329,7 +334,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
     panel::keys(&keys, width, true)
 }
 
-/// The routing table's width beside the marker and the ` current ` chip.
+/// The routing table's width beside the marker and the word `current`.
 fn table_width(menu: &Selector, columns: usize) -> usize {
     let chip = if menu.options.iter().any(|option| option.badge.is_some()) {
         CHIP
@@ -515,7 +520,7 @@ fn grant_fact(grant: &crate::permissions::Grant, room: usize) -> String {
 pub(super) fn badge(badge: Option<&Badge>) -> Line {
     let mut line = Line::default();
     match badge {
-        Some(Badge::Current) => line.push_on(" current ", LIT, BADGE_IDLE),
+        Some(Badge::Current) => line.push("current", ACCENT),
         Some(Badge::Default) => line.push("default", MUTED),
         Some(Badge::Note(note)) => line.push(note, MUTED),
         None => {}

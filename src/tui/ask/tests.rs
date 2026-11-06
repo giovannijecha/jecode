@@ -6,7 +6,7 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{BADGE_IDLE, SELECTED_SURFACE},
+        theme::{ACCENT, SELECTED_SURFACE},
         view,
     },
 };
@@ -121,22 +121,22 @@ fn the_question_takes_the_composer_place_with_marks_facts_and_chip() {
     let panel = Panel::new(&request, None);
     let rows = dock(&request, &panel, 60, 30);
     let chip = format!(
-        "› ○ Visible rows  Keep filters{} recommended",
-        " ".repeat(15)
+        "› ○ Visible rows  Keep filters{}recommended",
+        " ".repeat(17)
     );
     assert_eq!(
         plain(&rows),
         [
-            " ?  Waiting for you",
-            &"─".repeat(60),
+            "?  Waiting for you",
+            &format!("─ Question {}", "─".repeat(49)),
             "  Which rows should the CSV include?",
             "  The report currently has active filters.",
             "",
             &chip,
             "  ○ All rows      Ignore filters",
             "  ○ Other         Type your own answer",
-            &"─".repeat(60),
-            "   Enter  choose    Esc  back to chat    Ctrl+D  dismiss",
+            "",
+            "  Enter choose   Esc back to chat   Ctrl+D dismiss",
         ]
     );
     assert_eq!(
@@ -144,14 +144,12 @@ fn the_question_takes_the_composer_place_with_marks_facts_and_chip() {
         60,
         "the chip ends at edge − 2"
     );
+    // The chip is an accent word on the selected row: no surface or padding of its own.
     for span in &rows[5].spans {
-        let expected = if span.text == " recommended " {
-            BADGE_IDLE
-        } else {
-            SELECTED_SURFACE
-        };
-        assert_eq!(span.background, Some(expected), "{:?}", span.text);
+        assert_eq!(span.background, Some(SELECTED_SURFACE), "{:?}", span.text);
     }
+    let chip = rows[5].spans.iter().find(|span| span.text == "recommended");
+    assert_eq!(chip.map(|span| span.style), Some(ACCENT));
     assert!(
         rows[6]
             .spans
@@ -189,7 +187,7 @@ fn own_words_wrap_under_the_fact_column_with_the_caret_at_the_end() {
         rows.iter()
             .rev()
             .take(2)
-            .any(|row| row.contains("Enter  send"))
+            .any(|row| row.contains("Enter send"))
     );
 }
 
@@ -207,7 +205,7 @@ fn several_questions_show_a_step_row_and_free_text_input() {
     assert_eq!(rows[5], "› Type your answer");
     assert_eq!(
         rows.last().unwrap(),
-        "   Enter  send    Esc  back to chat    Ctrl+D  dismiss",
+        "  Enter send   Esc back to chat   Ctrl+D dismiss",
         "the movement hints leave first"
     );
 }
@@ -225,13 +223,13 @@ fn leaving_keys_always_show_and_wrap_when_narrow() {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            keys.contains("Esc  back to chat") && keys.contains("Ctrl+D  dismiss"),
+            keys.contains("Esc back to chat") && keys.contains("Ctrl+D dismiss"),
             "{width}: {rows:#?}"
         );
         assert!(rows.iter().all(|row| text::cells(row) <= width));
     }
     let wide = plain(&dock(&request, &panel, 100, 30));
-    assert!(wide.last().unwrap().contains("←→  questions"));
+    assert!(wide.last().unwrap().contains("←→ questions"));
 }
 
 #[test]
@@ -287,16 +285,16 @@ fn switching_questions_with_different_key_rows_keeps_the_dock_height() {
             for rows in [&choices, &words] {
                 let keys = rows.join("\n");
                 assert!(
-                    keys.contains("Esc  back to chat"),
+                    keys.contains("Esc back to chat"),
                     "{width}x{height}: {rows:#?}"
                 );
                 assert!(
-                    keys.contains("Ctrl+D  dismiss"),
+                    keys.contains("Ctrl+D dismiss"),
                     "{width}x{height}: {rows:#?}"
                 );
             }
-            assert!(choices.join("\n").contains("Space  toggle"));
-            assert!(!words.join("\n").contains("Space  toggle"));
+            assert!(choices.join("\n").contains("Space toggle"));
+            assert!(!words.join("\n").contains("Space toggle"));
         }
     }
 }

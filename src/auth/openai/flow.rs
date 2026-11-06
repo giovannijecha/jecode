@@ -3,6 +3,7 @@ use super::{
     storage::{self, Record},
     wire,
 };
+use crate::auth::landing::{self, Landing};
 use crate::cancel::Cancellation;
 use crate::json::Value;
 use std::io::Read;
@@ -10,15 +11,15 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-mod page;
-use page::respond;
+/// A callback's parameters and the browser that waits for the outcome.
+type Callback = (std::collections::BTreeMap<String, String>, Landing);
 
 pub(super) fn sign_in(
     host_id: &str,
     existing: Option<&Record>,
     cancel: &Cancellation,
     emit: &mut dyn FnMut(SignInUpdate) -> Result<(), String>,
-) -> Result<Record, String> {
+) -> Result<(Record, Landing), String> {
     let mut registered = existing.map(|record| record.client_id.clone());
     for attempt in 0..2 {
         if cancel.requested() {
@@ -75,7 +76,7 @@ pub(super) fn sign_in(
         // when a desktop opener is unavailable (headless and minimal systems).
         let _ = open_browser(&url);
         emit(SignInUpdate::Waiting)?;
-        let callback = await_callback(&listener, &state, cancel)?;
+        let (callback, landing) = await_callback(&listener, &state, cancel)?;
         let issued = match &registered {
             Some(client_id) => {
                 if callback.get("client_id").is_some_and(|id| id != client_id) {
@@ -147,7 +148,7 @@ pub(super) fn sign_in(
         let expires_in = seconds(&response, "expires_in")?;
         let now = storage::now()?;
         let earliest_refresh_at = earliest_refresh(&response, now)?;
-        return Ok(Record {
+        let record = Record {
             client_id: issued,
             subject: claims.subject,
             email: claims.email,
@@ -159,7 +160,8 @@ pub(super) fn sign_in(
             scopes,
             expires_at: now.saturating_add(expires_in),
             earliest_refresh_at,
-        });
+        };
+        return Ok((record, landing));
     }
     Err("OpenAI authorization code could not be exchanged; start sign-in again".into())
 }
@@ -277,19 +279,19 @@ fn await_callback(
     listener: &TcpListener,
     state: &str,
     cancel: &Cancellation,
-) -> Result<std::collections::BTreeMap<String, String>, String> {
+) -> Result<Callback, String> {
     let deadline = Instant::now() + Duration::from_secs(300);
     while Instant::now() < deadline {
         if cancel.requested() {
             return Err("Operation cancelled".into());
         }
         match listener.accept() {
-            Ok((mut stream, address)) => {
+            Ok((stream, address)) => {
                 if !address.ip().is_loopback() {
                     continue;
                 }
                 if let Some(callback) = handle_callback(
-                    &mut stream,
+                    stream,
                     listener
                         .local_addr()
                         .map_err(|_| "Could not read callback address")?
@@ -310,11 +312,11 @@ fn await_callback(
 }
 
 fn handle_callback(
-    stream: &mut TcpStream,
+    mut stream: TcpStream,
     port: u16,
     state: &str,
     cancel: &Cancellation,
-) -> Result<Option<std::collections::BTreeMap<String, String>>, String> {
+) -> Result<Option<Callback>, String> {
     stream
         .set_nonblocking(false)
         .map_err(|_| "Could not configure callback connection")?;
@@ -331,13 +333,13 @@ fn handle_callback(
             return Err("Operation cancelled".into());
         }
         if Instant::now() >= deadline || input.len() >= 8192 {
-            respond(stream, "400 Bad Request", "Invalid callback");
+            landing::answer(&mut stream, "400 Bad Request", false);
             return Ok(None);
         }
         let mut chunk = [0u8; 1024];
         match stream.read(&mut chunk) {
             Ok(0) => {
-                respond(stream, "400 Bad Request", "Invalid callback");
+                landing::answer(&mut stream, "400 Bad Request", false);
                 return Ok(None);
             }
             Ok(size) => input.extend_from_slice(&chunk[..size]),
@@ -348,28 +350,28 @@ fn handle_callback(
                 continue;
             }
             Err(_) => {
-                respond(stream, "400 Bad Request", "Invalid callback");
+                landing::answer(&mut stream, "400 Bad Request", false);
                 return Ok(None);
             }
         }
     }
     let Ok(request) = std::str::from_utf8(&input) else {
-        respond(stream, "400 Bad Request", "Invalid callback encoding");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     let Some((head, _)) = request.split_once("\r\n") else {
-        respond(stream, "400 Bad Request", "Invalid callback");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     let Some(target) = head
         .strip_prefix("GET ")
         .and_then(|rest| rest.strip_suffix(" HTTP/1.1"))
     else {
-        respond(stream, "405 Method Not Allowed", "Invalid callback");
+        landing::answer(&mut stream, "405 Method Not Allowed", false);
         return Ok(None);
     };
     let Some(query) = target.strip_prefix("/auth/callback?") else {
-        respond(stream, "404 Not Found", "Unknown path");
+        landing::answer(&mut stream, "404 Not Found", false);
         return Ok(None);
     };
     let host = format!("Host: 127.0.0.1:{port}");
@@ -377,27 +379,23 @@ fn handle_callback(
         .split("\r\n")
         .any(|line| line.eq_ignore_ascii_case(&host))
     {
-        respond(stream, "400 Bad Request", "Invalid callback host");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     }
     let Ok(values) = wire::query(query) else {
-        respond(stream, "400 Bad Request", "Invalid callback query");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     };
     if values.get("state").map(String::as_str) != Some(state) {
-        respond(stream, "400 Bad Request", "Sign-in state mismatch");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     }
     if let Some(error) = values.get("error") {
         if error.is_empty() {
-            respond(stream, "400 Bad Request", "Invalid callback error");
+            landing::answer(&mut stream, "400 Bad Request", false);
             return Ok(None);
         }
-        respond(
-            stream,
-            "200 OK",
-            "Sign-in was not completed. Return to Jecode.",
-        );
+        landing::answer(&mut stream, "200 OK", false);
         return Err(format!(
             "OpenAI authorization was declined: {}",
             if error
@@ -411,15 +409,10 @@ fn handle_callback(
         ));
     }
     if values.get("code").is_none_or(String::is_empty) {
-        respond(stream, "400 Bad Request", "Missing authorization code");
+        landing::answer(&mut stream, "400 Bad Request", false);
         return Ok(None);
     }
-    respond(
-        stream,
-        "200 OK",
-        "Return to Jecode. This tab can be closed.",
-    );
-    Ok(Some(values))
+    Ok(Some((values, Landing::new(stream))))
 }
 
 pub(crate) fn open_browser(url: &str) -> Result<(), String> {

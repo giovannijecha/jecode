@@ -1,6 +1,5 @@
-//! Ask user takes the composer's place: below the static `? Waiting for you`
-//! pill, between two `accent` rules, an optional step row and the question
-//! in front, then its keys where the footer was. A block taller than its
+//! Ask user is a sheet: below the static `? Waiting for you`, a rule titled `Question`, an
+//! optional step row and the question, one blank row and its keys. A block taller than its
 //! room scrolls with the cursor.
 
 use super::panel::{self, Key, Part, key};
@@ -11,7 +10,7 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{ACCENT, DIM, MUTED},
+        theme::{ACCENT, DIM, HAIRLINE, MUTED},
     },
 };
 
@@ -93,8 +92,9 @@ pub(super) fn block(
         room,
         overflow,
     } = layout(request, panel, columns, height);
-    let rule = Line::new(&"─".repeat(columns), ACCENT);
-    let mut parts = vec![(status, Part::Chrome), (rule.clone(), Part::Chrome)];
+    let title = [Line::new("Question", MUTED)];
+    let rule = super::composer::rule(columns, HAIRLINE, &title, &Line::default());
+    let mut parts = vec![(status, Part::Chrome), (rule, Part::Chrome)];
     if request.questions.len() > 1 {
         parts.push((steps(request, panel, columns), Part::Header));
     }
@@ -136,7 +136,7 @@ pub(super) fn block(
         .caret
         .filter(|(row, _)| (start..end).contains(row))
         .map(|(row, column)| (first + row - start, column));
-    parts.push((rule, Part::Chrome));
+    parts.push((Line::default(), Part::Space));
     for row in keys {
         parts.push((row, Part::Keep));
     }

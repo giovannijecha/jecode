@@ -291,7 +291,7 @@ fn deletion_of_a_filtered_row_keeps_search_and_supports_repeated_deletion() {
     let home = Directory::new();
     let directory = Directory::new();
     let mut ids = vec![];
-    for index in 0..9 {
+    for index in 0..10 {
         let mut saved = app(&home, &directory);
         seed(&mut saved, &format!("Saved request {index}"));
         ids.push(saved.persistence.as_ref().unwrap().id());
@@ -340,7 +340,7 @@ fn deletion_of_a_filtered_row_keeps_search_and_supports_repeated_deletion() {
         .store()
         .list()
         .unwrap();
-    assert_eq!(saved.sessions.len(), 7);
+    assert_eq!(saved.sessions.len(), 8);
     assert!(
         saved
             .sessions

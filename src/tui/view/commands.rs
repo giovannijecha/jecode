@@ -1,5 +1,6 @@
-//! The commands menu: the draft is its filter. A bare slash lists every
-//! command under its group; typing filters the list and drops the groups.
+//! The commands, in their two forms. `/` completion: the draft is the filter, and the
+//! composer stays. `Ctrl+G`: a sheet with its own filter, and the draft waits above it.
+//! A bare list shows every command under its group; typing filters and drops the groups.
 
 use super::{
     menus::highlighted,
@@ -9,6 +10,7 @@ use crate::{
     session::commands::COMMANDS,
     tui::{
         line::Line,
+        selector::{Choice, Selector},
         state::State,
         text,
         theme::{DIM, MUTED, STRONG},
@@ -110,25 +112,75 @@ fn body(state: &State, columns: usize, room: usize) -> Vec<(Line, Part)> {
         }
         items.push(Item::Command(position));
     }
-    let total = items.len();
-    let start = panel::start(selected, total, room);
-    let names = COMMANDS
+    let names = names(columns, |command| command.tui_usage);
+    listed(&items, Some(selected), room, columns, |position, on| {
+        row(state, position, on, names, columns)
+    })
+}
+
+/// The sheet's rows. What waits for the running work stays listed in `dim`, and says so.
+pub(super) fn palette(menu: &Selector, columns: usize, room: usize) -> Vec<(Line, Part)> {
+    if menu.filtered.is_empty() {
+        let line = Line::new("No matching command", MUTED);
+        return vec![(panel::indent(line, columns), Part::Keep)];
+    }
+    let grouped = menu.editor.text.is_empty();
+    let mut items = Vec::new();
+    let mut selected = 0;
+    let mut previous = None;
+    for (position, hit) in menu.filtered.iter().enumerate() {
+        if let Choice::Command(index) = menu.options[hit.index].choice {
+            let group = COMMANDS[index].group();
+            if grouped && previous != Some(group) {
+                items.push(Item::Group(group));
+            }
+            previous = Some(group);
+        }
+        if position == menu.selected {
+            selected = items.len();
+        }
+        items.push(Item::Command(position));
+    }
+    let names = names(columns, |command| command.name);
+    let selected = menu.selectable(menu.selected).then_some(selected);
+    listed(&items, selected, room, columns, |position, on| {
+        palette_row(menu, position, on, names, columns)
+    })
+}
+
+/// The fact column: the widest name plus two, at most 3/5 of the text width.
+fn names(columns: usize, name: fn(&crate::session::commands::Command) -> &'static str) -> usize {
+    let widest = COMMANDS
         .iter()
-        .map(|command| text::cells(command.tui_usage))
+        .map(|command| text::cells(name(command)))
         .max()
-        .unwrap_or(0)
-        + 2;
-    let names = names.min(panel::text_width(columns) * 3 / 5);
+        .unwrap_or(0);
+    (widest + 2).min(panel::text_width(columns) * 3 / 5)
+}
+
+/// The rows in view around the focus. Overflowing, the window never ends on a heading
+/// with nothing under it.
+fn listed(
+    items: &[Item],
+    selected: Option<usize>,
+    room: usize,
+    columns: usize,
+    row: impl Fn(usize, bool) -> Line,
+) -> Vec<(Line, Part)> {
+    let total = items.len();
+    let focus = selected.unwrap_or(0);
+    let start = panel::start(focus, total, room);
     let shown = items
         .iter()
         .enumerate()
         .skip(start)
         .take(room)
         .map(|(index, item)| {
-            let on = index == selected;
+            let on = selected == Some(index);
             let content = match item {
+                Item::Group(_) if index + 1 == start + room && total > room => Line::default(),
                 Item::Group(group) => Line::new(&format!("  {group}"), DIM),
-                Item::Command(position) => row(state, *position, on, names, columns),
+                Item::Command(position) => row(*position, on),
             };
             panel::choice(content, on, columns)
         })
@@ -138,10 +190,10 @@ fn body(state: &State, columns: usize, room: usize) -> Vec<(Line, Part)> {
         .enumerate()
         .map(|(offset, line)| {
             let index = start + offset;
-            let part = if index == selected {
+            let part = if selected == Some(index) || selected.is_none() && index == focus {
                 Part::Keep
             } else {
-                Part::Row(index.abs_diff(selected))
+                Part::Row(index.abs_diff(focus))
             };
             (line, part)
         })
@@ -164,6 +216,34 @@ fn row(state: &State, position: usize, on: bool, names: usize, columns: usize) -
             &text::ellipsize(command.description(true), end - 2 - names),
             MUTED,
         );
+    }
+    panel::spread(line, Line::default(), end, None)
+}
+
+fn palette_row(menu: &Selector, position: usize, on: bool, names: usize, columns: usize) -> Line {
+    let hit = &menu.filtered[position];
+    let Choice::Command(index) = menu.options[hit.index].choice else {
+        return Line::default();
+    };
+    let command = &COMMANDS[index];
+    let later = !menu.selectable(position);
+    let end = columns.saturating_sub(2);
+    let mut line = panel::marker(on, false);
+    let matched = if later { &[][..] } else { &hit.name };
+    highlighted(
+        &mut line,
+        command.name,
+        matched,
+        if later { DIM } else { STRONG },
+    );
+    let (fact, style) = if later {
+        ("after this turn", DIM)
+    } else {
+        (command.description(true), MUTED)
+    };
+    if end >= 2 + names + 6 {
+        line = panel::fit(line, 2 + names, None);
+        line.push(&text::ellipsize(fact, end - 2 - names), style);
     }
     panel::spread(line, Line::default(), end, None)
 }

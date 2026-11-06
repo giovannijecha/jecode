@@ -311,7 +311,6 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Wait("Ask anything");
                 pty.Wait(scenario.StartsWith("startup-fallback") ? "Default provider unavailable" : "No configured provider");
                 pty.EnsureVt("JECODE_WARNING_FOREGROUND", "warning foreground");
-                pty.EnsureVt("JECODE_WARNING_SURFACE", "warning surface");
                 if (scenario == "startup-unconfigured-prompt") {
                     int typed = pty.Mark(); pty.Send("Keep my task");
                     pty.Wait("Keep my task", typed);
@@ -348,19 +347,19 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Send("/terminal"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("1 running");
                 pty.Send("\r");
-                pty.Wait("i  input");
+                pty.Wait("i input");
                 int started = pty.Mark(); pty.Send("i");
-                pty.Wait("Ctrl+]  back", started);
+                pty.Wait("Ctrl+] back", started);
                 pty.Wait("NATIVE_PASSWORD_READY");
                 pty.Send("NATIVE_SECRET_42\uD83D\uDE42\r");
                 pty.Wait("NATIVE_PTY_DONE", started);
                 pty.EnsureNoText("NATIVE_SECRET_42", started);
                 pty.EnsureNoText("[ESC]", started);
                 int detached = pty.Mark(); pty.Send("\x1d");
-                pty.Wait("i  input", detached);
+                pty.Wait("i input", detached);
                 // Match the new input-mode frame, not an earlier queued repaint.
                 int reattached = pty.Mark(); pty.Send("i");
-                pty.Wait("Ctrl+]  back", reattached);
+                pty.Wait("Ctrl+] back", reattached);
                 pty.Wait("NATIVE_SECOND_READY");
                 pty.Send("finish\r");
                 pty.Wait("NATIVE_PTY_END", detached);
@@ -372,15 +371,15 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Wait("NATIVE_DIRECT_INPUT_RESTORED");
                 pty.Finish(true);
             } else if (scenario == "background-light") {
-                pty.WaitRaw("48;2;12;12;12m");
+                pty.WaitRaw("JECODE_LIGHT_BODY");
                 pty.Wait("NATIVE_LIGHT_FRAME");
-                pty.EnsureNoRaw("\x1b[49m", 0);
+                pty.EnsureNoRaw("48;2;", 0);
                 pty.Wait("NATIVE_BACKGROUND_RESTORED");
                 pty.Finish(true);
             } else if (scenario == "background-native") {
                 pty.WaitFast("Ask anything");
                 int reported = pty.Mark();
-                pty.WaitRaw("48;2;12;12;12m", reported);
+                pty.WaitRaw("JECODE_LIGHT_PLACEHOLDER", reported);
                 pty.Send("\x11");
                 pty.Wait("NATIVE_BACKGROUND_DETECTED_RESTORED");
                 pty.Finish(true);
@@ -417,7 +416,7 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Wait("Native row 099");
                 pty.Wait("Done");
                 int chapter = pty.Mark(); pty.Send("\x1b[1;3H");
-                pty.Wait("READ  drop me.txt", chapter);
+                pty.Wait("  READ   drop me.txt", chapter);
                 pty.Wait("1 line", chapter);
                 pty.Send("\x1b[1;3F");
                 int expanded = pty.Mark(); pty.Send("\x0f");
@@ -449,7 +448,7 @@ public sealed partial class JecodeTestPty : IDisposable {
                 // Windows Terminal delivers a file drop as a paste of its quoted path.
                 pty.Send("\x1b[200~\"" + System.IO.Path.Combine(directory, "drop me.txt") + "\"\x1b[201~");
                 pty.Wait("Attached 1 item");
-                pty.Send("\x1b[<64;10;5M"); pty.Wait("Alt+End  back to bottom");
+                pty.Send("\x1b[<64;10;5M"); pty.Wait("Alt+End back to bottom");
                 pty.Send("\x1b[1;3F"); Thread.Sleep(150);
                 pty.Send("\x10"); pty.Wait("Prompt history");
                 pty.Send("\x0e"); Thread.Sleep(150);

@@ -6,7 +6,7 @@ use crate::tui::{
     render::Renderer,
     state::{Kind, Opening, Recent},
     text,
-    theme::{ACCENT, GOOD, LIT, MUTED, SELECTED_SURFACE, STRONG},
+    theme::{ACCENT, DIM, GOOD, LIT, MUTED, STRONG},
     transcript::Layout,
 };
 
@@ -25,6 +25,7 @@ fn state(recent: &[(&str, &str)], columns: usize, height: usize) -> State {
                     age: (*age).into(),
                 })
                 .collect(),
+            needs_model: recent.is_empty(),
             skills: 7,
             agents: !recent.is_empty(),
         },
@@ -44,22 +45,34 @@ fn the_full_splash_centres_its_rows_above_the_unchanged_dock() {
     let rows: Vec<_> = frame.live.iter().map(Line::plain).collect();
     assert_eq!(frame.live.len(), 32);
     let mark = rows.iter().position(|row| row.contains('▀')).unwrap();
-    assert_eq!(mark, 3, "{rows:#?}");
+    assert_eq!(mark, 6, "{rows:#?}");
     assert!(
         rows[mark..mark + 5]
             .iter()
             .all(|row| text::cells(row) <= 100)
     );
-    assert_eq!(rows[mark + 5], "");
-    assert_eq!(rows[mark + 6].trim(), VERSION);
-    assert_eq!(rows[mark + 7], "");
-    assert!(rows[mark + 8].contains("Tip  /permissions sets what Jecode may change here"));
-    assert_eq!(rows[mark + 9].trim(), "✓ 7 skills   ✓ AGENTS.md");
-    assert!(rows[mark + 11].contains("/  commands"));
-    assert_eq!(rows[mark + 13].trim(), "Recent in this folder");
-    assert!(rows[mark + 14].contains("Fix the session expiry check in auth"));
-    assert!(rows[mark + 14].ends_with("2h"));
-    assert!(rows[mark + 18].contains("/resume  all conversations"));
+    assert!(rows[mark + 5].trim().is_empty());
+    // The version at the mark's left edge, the facts at its right, one block of 49 cells.
+    let facts = rows[mark + 6].trim();
+    assert!(
+        facts.starts_with(VERSION) && facts.ends_with("✓ 7 skills   ✓ AGENTS.md"),
+        "{rows:#?}"
+    );
+    assert!(rows[mark + 7].trim().is_empty());
+    assert!(rows[mark + 8].trim().starts_with("Recent in this folder"));
+    assert!(rows[mark + 8].trim().ends_with("/resume all"));
+    assert!(rows[mark + 9].contains("Fix the session expiry check in auth"));
+    assert!(rows[mark + 9].ends_with("2h"));
+    assert!(rows[mark + 11].contains("Migrate the config loader"));
+    assert!(rows[mark + 12].trim().is_empty());
+    assert_eq!(
+        rows[mark + 13].trim(),
+        "/ commands   Alt+V image   Ctrl+Q quit"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| !row.contains("Tip") && !row.contains("Ctrl+O"))
+    );
     assert!(rows[frame.composer - 1].is_empty());
     assert!(
         rows[frame.composer..]
@@ -117,13 +130,22 @@ fn first_run_uses_real_facts_and_keeps_the_key_row() {
             .iter()
             .any(|row| row.contains("✓ 7 skills   – no AGENTS.md"))
     );
-    assert!(plain.iter().any(|row| row.contains("Ctrl+Q  quit")));
+    assert!(plain.iter().any(|row| row.contains("Ctrl+Q quit")));
+    // Keys are bold text without a surface; a first run has no Ctrl+O and no tip.
     assert!(rows.iter().any(|row| {
         row.spans
             .iter()
-            .any(|span| span.text == " Ctrl+Q " && span.background == Some(SELECTED_SURFACE))
+            .any(|span| span.text == "Ctrl+Q" && span.style == STRONG.bold())
     }));
-    assert!(rows.iter().all(|row| !row.plain().contains("Recent")));
+    assert!(
+        rows.iter()
+            .flat_map(|row| &row.spans)
+            .all(|span| span.background.is_none())
+    );
+    assert!(
+        rows.iter()
+            .all(|row| !row.plain().contains("Recent") && !row.plain().contains("Ctrl+O"))
+    );
     let facts = rows
         .iter()
         .find(|row| row.plain().contains("7 skills"))
@@ -134,21 +156,117 @@ fn first_run_uses_real_facts_and_keeps_the_key_row() {
             .iter()
             .any(|span| span.text == "✓ " && span.style == GOOD)
     );
-    let tip = rows
+    // Start here: three commands in STRONG, each with a MUTED fact.
+    let start = rows
         .iter()
-        .find(|row| row.plain().contains("Tip "))
+        .position(|row| row.plain().contains("Start here"))
         .unwrap();
     assert!(
-        tip.spans
+        rows[start]
+            .spans
             .iter()
-            .any(|span| span.text == "Tip " && span.style == ACCENT.bold())
+            .any(|span| span.text == "Start here" && span.style == DIM)
     );
-    assert!(
-        tip.spans
-            .iter()
-            .any(|span| span.text == " /permissions" && span.style == STRONG)
+    for (offset, command) in ["/model", "/permissions", "/help"].into_iter().enumerate() {
+        let row = &rows[start + 1 + offset];
+        assert!(
+            row.plain().trim_start().starts_with(command),
+            "{}",
+            row.plain()
+        );
+        assert!(
+            row.spans
+                .iter()
+                .any(|span| span.text.trim() == command && span.style == STRONG)
+        );
+        assert!(row.spans.iter().any(|span| span.style == MUTED));
+    }
+    assert!(rows.iter().all(|row| !row.plain().contains("Tip ")));
+}
+
+#[test]
+fn a_selected_model_without_local_conversations_does_not_show_setup_advice() {
+    use crate::{
+        agent::Agent,
+        backend::unconfigured,
+        config::{Settings, Store},
+        effort::Effort,
+        session::SessionConfig,
+        test_support::{Directory, HttpFixture},
+        tools::Tools,
+        tui::App,
+    };
+
+    for model in [None, Some("saved-model")] {
+        let directory = Directory::new();
+        let settings = model.map_or_else(Settings::unconfigured, |model| {
+            Settings::selected("openai", String::new(), model.into()).unwrap()
+        });
+        let agent = Agent::with_backend(
+            unconfigured::client(
+                &settings.backend_id,
+                model.map(str::to_owned),
+                None,
+                "No configured provider".into(),
+            ),
+            Tools::new(directory.path()).unwrap(),
+        );
+        let app = App::new(
+            agent,
+            SessionConfig {
+                store: Store::new(directory.path().join("config")),
+                settings,
+            },
+            None,
+        );
+        assert!(app.state.opening.recent.is_empty());
+        let rows = opening::rows(&app.state, 100);
+        let text: Vec<_> = rows.iter().map(Line::plain).collect();
+        assert_eq!(app.state.opening.needs_model, model.is_none());
+        assert_eq!(
+            text.iter().any(|row| row.contains("Start here")),
+            model.is_none()
+        );
+        assert_eq!(
+            text.iter()
+                .any(|row| row.contains("No saved conversations in this folder")),
+            model.is_some()
+        );
+    }
+
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let services = crate::backend::Services::fixture(&fixture.endpoint);
+    let agent = Agent::with_backend(
+        unconfigured::client(
+            "openrouter",
+            None,
+            Some(services.clone()),
+            "Choose a model".into(),
+        ),
+        Tools::new(directory.path()).unwrap(),
     );
-    assert!(tip.spans.iter().any(|span| span.style == MUTED));
+    let mut app = App::new(
+        agent,
+        SessionConfig {
+            store: Store::new(directory.path().join("config")),
+            settings: Settings::unconfigured(),
+        },
+        None,
+    );
+    assert!(app.state.opening.needs_model);
+    app.catalog_services = Some(services);
+    app.apply_selection("fixture/model".into(), Effort::Default, false);
+    assert!(app.config.settings.has_model());
+    assert!(app.agent.as_ref().unwrap().has_model());
+    assert!(!app.state.opening.needs_model);
+    let rows = opening::rows(&app.state, 100);
+    assert!(rows.iter().any(|row| {
+        row.plain()
+            .contains("No saved conversations in this folder")
+    }));
+    assert!(rows.iter().all(|row| !row.plain().contains("Start here")));
+    assert!(fixture.finish().is_empty());
 }
 
 #[test]
@@ -188,22 +306,29 @@ fn viewport_matrix_keeps_every_row_inside_the_screen_and_follows_fallback_order(
                             .any(|row| row.plain().contains("Recent in this folder"))
                     );
                 } else {
-                    assert!(body.iter().any(|row| row.plain().contains("/  commands")));
+                    assert!(body.iter().any(|row| row.plain().contains("Start here")));
                 }
             }
         }
     }
     let at = |height| opening::rows(&state(&recent, 80, height), 80);
+    // With room the keys close the block; short windows drop them, then compact the mark.
+    let keys = |rows: &[Line]| rows.iter().any(|row| row.plain().contains("/ commands"));
     let full = at(40);
-    assert!(full.iter().any(|row| row.plain().contains("Tip ")));
-    assert!(full.iter().any(|row| row.plain().contains("Ctrl+O")));
+    assert!(keys(&full));
+    assert!(full.iter().all(|row| !row.plain().contains("Tip ")));
+    assert!(full.iter().all(|row| !row.plain().contains("Ctrl+O")));
     let shorter = at(24);
-    assert!(!shorter.iter().any(|row| row.plain().contains("Tip ")));
+    assert!(keys(&shorter));
     assert!(shorter.iter().any(|row| row.plain().contains("Recent")));
-    let compact = at(20);
+    let no_keys = at(18);
+    assert!(!keys(&no_keys));
+    assert!(no_keys.iter().any(|row| row.plain().contains("Recent")));
+    assert!(no_keys.iter().any(|row| row.plain().contains('▀')));
+    let compact = at(16);
     assert!(compact.iter().any(|row| row.plain().contains('▄')));
-    assert!(!compact.iter().any(|row| row.plain().contains("Ctrl+O")));
-    let slim = at(16);
+    assert!(!keys(&compact));
+    let slim = at(14);
     assert!(slim[0].plain().starts_with(">_ jecode"));
 }
 
@@ -230,7 +355,7 @@ fn the_first_prompt_restores_the_slim_header_and_no_startup_facts() {
 
 #[test]
 fn panels_and_a_tall_draft_reduce_the_actual_splash_room() {
-    let mut state = state(&[("Earlier work", "3d")], 80, 24);
+    let mut state = state(&[("Earlier work", "3d")], 80, 18);
     assert!(opening::animated(&state));
     state.editor.insert(&"draft line\n".repeat(15));
     assert!(!opening::animated(&state));

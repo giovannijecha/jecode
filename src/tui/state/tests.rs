@@ -44,13 +44,13 @@ fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_resul
     state.begin_tool_turn();
     start(&mut state, "future");
     let running = visible(&state);
-    assert!(running.contains(" WORK  Activity  2 calls"));
-    assert!(running.contains(" BASH  fixture-command"));
+    assert!(running.contains("  WORK   Activity  2 calls"));
+    assert!(running.contains("  BASH   fixture-command"));
     assert!(running.contains("  │ ") && running.contains("  └ "));
     assert!(!running.contains(['▰', '▱']));
     finish(&mut state, "future", "one\ntwo\nthree\nfour\nfuture detail");
     let text = visible(&state);
-    assert!(text.contains("2 commands") && text.contains(" BASH  fixture-command"));
+    assert!(text.contains("2 commands") && text.contains("  BASH   fixture-command"));
     assert!(!text.contains("omitted"));
     assert!(!text.contains("retained detail"));
     assert!(text.contains("future detail")); // The singleton keeps its normal result preview.
@@ -137,16 +137,14 @@ fn requests_open_with_an_accent_marker_and_draw_attachment_labels_as_chips() {
     assert_eq!(
         plain,
         [
-            "",
             "› see  1 Image  and",
             "   2 wake.log  near",
-            "  [docs] [3# ]",
-            ""
+            "  [docs] [3# ]"
         ]
     );
     assert!(rows.iter().all(|row| row.background == Some(USER_SURFACE)));
-    assert_eq!(rows[1].spans[0].text, "› ");
-    assert_eq!(rows[1].spans[0].style, ACCENT.bold());
+    assert_eq!(rows[0].spans[0].text, "› ");
+    assert_eq!(rows[0].spans[0].style, ACCENT.bold());
     let chips: Vec<_> = rows
         .iter()
         .flat_map(|row| &row.spans)
@@ -235,7 +233,7 @@ fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     assert!(
         current[0][0]
             .plain()
-            .starts_with(" WORK  Activity  3 calls")
+            .starts_with("  WORK   Activity  3 calls")
     );
     assert!(
         current[0]
@@ -303,12 +301,12 @@ fn captured_file_diff_stays_visible_when_the_next_tool_starts() {
     assert!(
         state.rows()[1][1]
             .plain()
-            .starts_with(" BASH  fixture-command")
+            .starts_with("  BASH   fixture-command")
     );
     assert!(
         state.rows()[1]
             .iter()
-            .any(|row| row.plain().contains(" BASH  fixture-command"))
+            .any(|row| row.plain().contains("  BASH   fixture-command"))
     );
 }
 

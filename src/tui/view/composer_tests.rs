@@ -8,8 +8,8 @@ use crate::{
         activity::Activity,
         selector::Selector,
         theme::{
-            ACCENT, BADGE_EDIT, BADGE_READ, BADGE_SHELL, BADGE_TEXT, CURSOR, DIM, FAINT, MUTED,
-            PILL_SURFACE, SELECTED_SURFACE, STRONG, USER_SURFACE, WARNING,
+            ACCENT, BADGE_EDIT, BADGE_READ, BADGE_SHELL, BADGE_TEXT, CURSOR, DIM, HAIRLINE, MUTED,
+            SELECTED_SURFACE, STRONG, USER_SURFACE, WARNING,
         },
     },
 };
@@ -59,7 +59,7 @@ fn turn_phases_label_the_status_row() {
     ] {
         state.event(event);
         let status = frame(&state, "model", "dir").live[0].plain();
-        assert!(status.starts_with(&format!(" >_ {label} ")), "{status}");
+        assert!(status.starts_with(&format!(">_ {label}")), "{status}");
         assert!(status.contains("Esc interrupt · 0."), "{status}");
     }
     state.activity.as_mut().unwrap().stopping = true;
@@ -77,14 +77,14 @@ fn turn_phases_label_the_status_row() {
 }
 
 #[test]
-fn the_idle_dock_has_an_empty_status_row_accent_rules_and_a_dim_path() {
+fn the_idle_dock_has_an_empty_status_row_hairline_rules_and_a_dim_path() {
     let state = State::default();
     let frame = frame(&state, "provider/model", r"C:\project");
     assert_eq!(frame.live.len(), 5);
     assert_eq!(frame.live[0].plain(), "");
     assert_eq!(frame.live[1].plain(), "─".repeat(state.width));
-    assert_eq!(frame.live[1].spans[0].style, ACCENT);
-    assert_eq!(frame.live[3].spans[0].style, ACCENT);
+    assert_eq!(frame.live[1].spans[0].style, HAIRLINE);
+    assert_eq!(frame.live[3].spans[0].style, HAIRLINE);
     let input = &frame.live[2];
     assert_eq!(input.spans[0].text, "› ");
     assert_eq!(input.spans[0].style, ACCENT.bold());
@@ -101,10 +101,10 @@ fn the_idle_dock_has_an_empty_status_row_accent_rules_and_a_dim_path() {
     let footer = &frame.live[4];
     assert!(footer.plain().starts_with(r"C:\project"));
     // The footer alone names the model, with its provider while it fits.
-    assert!(footer.plain().ends_with(" provider/model · default "));
+    assert!(footer.plain().ends_with("provider/model · default"));
     assert_eq!(footer.spans[0].style, DIM);
     let chip = footer.spans.last().unwrap();
-    assert_eq!((chip.style, chip.background), (MUTED, Some(PILL_SURFACE)));
+    assert_eq!((chip.style, chip.background), (MUTED, None));
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn long_drafts_show_a_third_of_the_screen_centred_on_the_caret() {
 }
 
 #[test]
-fn working_rules_turn_faint_and_the_pending_draft_precedes_the_status_row() {
+fn working_rules_stay_hairline_and_the_pending_draft_precedes_the_status_row() {
     let mut state = State {
         activity: Some(Activity::new()),
         ..State::default()
@@ -199,7 +199,7 @@ fn working_rules_turn_faint_and_the_pending_draft_precedes_the_status_row() {
     // Labels end two cells from the edge.
     assert_eq!(text::cells(&queued.plain()), state.width - 2);
     assert_eq!(queued.spans.last().unwrap().style, WARNING);
-    assert!(frame.live[1].plain().starts_with(" ▲  queue notice "));
+    assert!(frame.live[1].plain().starts_with("▲  queue notice"));
     assert!(frame.live[2].plain().starts_with("─ Draft · ↑ ─"));
     let borders: Vec<_> = frame
         .live
@@ -207,7 +207,7 @@ fn working_rules_turn_faint_and_the_pending_draft_precedes_the_status_row() {
         .filter(|line| line.plain().starts_with('─'))
         .collect();
     assert_eq!(borders.len(), 2);
-    assert!(borders.iter().all(|line| line.spans[0].style == FAINT));
+    assert!(borders.iter().all(|line| line.spans[0].style == HAIRLINE));
     assert!(
         frame.live[frame.cursor.unwrap().0]
             .spans
@@ -328,7 +328,7 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
         Default::default(),
         &crate::backend::openrouter::Routing::Auto,
         Default::default(),
-        std::path::Path::new("fixture/config.json"),
+        Default::default(),
     ));
     let selection = frame(&state, "model", "directory");
     assert!(
@@ -337,18 +337,20 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
             .iter()
             .any(|row| row.plain().starts_with("─ Settings · saved defaults"))
     );
-    // The composer shows the draft, without a caret, above the panel.
+    // The draft waits above the sheet on one row, without a caret.
     let draft: Vec<_> = selection
         .live
         .iter()
         .filter(|row| row.plain().contains("private draft"))
         .collect();
     assert_eq!(draft.len(), 1);
-    assert_eq!(draft[0].plain().trim_end(), "› private draft");
+    assert!(draft[0].plain().starts_with("› private draft"));
+    assert!(draft[0].plain().ends_with("draft kept"));
+    assert_eq!(text::cells(&draft[0].plain()), state.width - 2);
     assert!(!draft[0].spans.iter().any(|span| span.style == CURSOR));
     assert_eq!(selection.cursor, None);
     state.selector = Some(Selector::key("openrouter"));
-    // The rule names the empty field once; the field holds only the caret.
+    // The empty field names itself once, on its own row, and holds the only caret.
     let empty = frame(&state, "model", "directory");
     let named = empty
         .live
@@ -357,7 +359,7 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
         .count();
     assert_eq!(named, 1);
     let (row, _) = empty.cursor.unwrap();
-    assert_eq!(empty.live[row].plain().trim_end(), "›");
+    assert_eq!(empty.live[row].plain().trim_end(), "  Paste your key");
     state
         .selector
         .as_mut()
@@ -370,20 +372,23 @@ fn selectors_keep_the_draft_without_its_caret_and_mask_keys() {
             .iter()
             .any(|row| row.plain().contains("isolated-fixture-key"))
     );
-    // The key replaces the draft in the composer, one bullet per character,
-    // with the caret after it.
+    // The key sits in the field, one bullet per character, with the caret after it.
     let (row, column) = key.cursor.unwrap();
     assert_eq!(
         key.live[row].plain().trim_end(),
-        format!("› {}", "•".repeat(20))
+        format!("  Paste your key  {}", "•".repeat(20))
     );
-    assert_eq!(column, 22);
-    assert!(key.live[row - 1].plain().starts_with("─ Paste your key ─"));
-    assert!(
-        !key.live
-            .iter()
-            .any(|row| row.plain().contains("private draft"))
-    );
+    assert_eq!(column, 38);
+    assert!(key.live[row - 1].plain().starts_with("─ Providers"));
+    // The draft stays on its own row, apart from the field.
+    let draft: Vec<_> = key
+        .live
+        .iter()
+        .filter(|row| row.plain().contains("private draft"))
+        .collect();
+    assert_eq!(draft.len(), 1);
+    assert!(draft[0].plain().ends_with("draft kept"));
+    assert!(!draft[0].plain().contains('•'));
     assert_eq!(state.editor.text, "private draft");
 }
 
@@ -400,7 +405,7 @@ fn prompt_history_replaces_the_footer_with_key_hints() {
         .map(Line::plain)
         .collect();
     assert!(rows[1].starts_with("─ Prompt history ─"));
-    assert!(rows[4].contains(" Enter  send") && rows[4].contains(" Esc  back"));
+    assert!(rows[4].contains(" Enter send") && rows[4].contains(" Esc back"));
 }
 
 #[test]
@@ -422,7 +427,7 @@ fn a_retry_counts_down_in_warning_with_its_attempt_and_cause() {
     assert!(
         status
             .plain()
-            .starts_with(" >_ Retrying in 4s   Esc interrupt · 0."),
+            .starts_with(">_ Retrying in 4s  Esc interrupt · 0."),
         "{}",
         status.plain()
     );
@@ -435,7 +440,7 @@ fn a_retry_counts_down_in_warning_with_its_attempt_and_cause() {
     );
     assert_eq!(status::style_of(status, "Retrying"), Some(WARNING));
     assert_eq!(status::style_of(status, ">"), Some(WARNING.bold()));
-    assert_eq!(frame.live[1].spans[0].style, FAINT);
+    assert_eq!(frame.live[1].spans[0].style, HAIRLINE);
 }
 
 #[test]
@@ -455,14 +460,14 @@ fn the_status_row_drops_facts_from_the_right_before_the_pill() {
     };
     assert_eq!(
         status(&mut state, 80),
-        " >_ Thinking   Esc interrupt · 1h 10m · ↓ 1.2k"
+        ">_ Thinking  Esc interrupt · 1h 10m · ↓ 1.2k"
     );
     assert_eq!(
         status(&mut state, 40),
-        " >_ Thinking   Esc interrupt · 1h 10m"
+        ">_ Thinking  Esc interrupt · 1h 10m"
     );
-    assert_eq!(status(&mut state, 30), " >_ Thinking   Esc interrupt");
-    assert_eq!(status(&mut state, 16), " >_ Thinking ");
+    assert_eq!(status(&mut state, 30), ">_ Thinking  Esc interrupt");
+    assert_eq!(status(&mut state, 16), ">_ Thinking");
     state.activity.as_mut().unwrap().stopping = true;
-    assert_eq!(status(&mut state, 80), " >_ Stopping   1h 10m");
+    assert_eq!(status(&mut state, 80), ">_ Stopping  1h 10m");
 }

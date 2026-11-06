@@ -28,6 +28,10 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
                 "Send · while working, joins the turn before its next model request",
             ),
             ("Ctrl+J", "New line · Shift/Alt+Enter when supported"),
+            (
+                "Ctrl+G",
+                "Commands · run one and keep writing, the draft stays as it is",
+            ),
             ("Ctrl+P/N", "Sent prompt history · commands are excluded"),
             ("↑", "Edit the pending draft from an empty composer"),
         ],

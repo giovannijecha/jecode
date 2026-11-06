@@ -5,8 +5,8 @@ use crate::{
         state::State,
         text,
         theme::{
-            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, DIM, LIT, METER_FILL, METER_TRACK, MUTED,
-            PILL_SURFACE, STRONG, Style, WARNING,
+            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, DIM, LIT, METER_FILL, METER_TRACK, MUTED, STRONG,
+            Style, WARNING,
         },
     },
 };
@@ -19,7 +19,7 @@ const NEAR: usize = 3;
 static USER_HOME: OnceLock<Option<String>> = OnceLock::new();
 
 /// The footer: the home-relative path in `dim` on the left; on the right the
-/// model id and effort on a chip, two cells, then the context gauge. Narrow
+/// model id and effort as text, two cells, then the context gauge. Narrow
 /// rows drop the provider, fall back to the project name, then drop effort,
 /// the path and the chip.
 pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) -> Line {
@@ -39,7 +39,7 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
     let right = |chip: Option<&str>| {
         let mut line = Line::default();
         if let Some(chip) = chip {
-            line.push_on(&format!(" {chip} "), MUTED, PILL_SURFACE);
+            line.push(chip, MUTED);
         }
         match &gauge {
             Some(gauge) if chip.is_some() => {
@@ -170,7 +170,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
             let mut left = summary(short_counts);
             let mut right = Line::default();
             if let Some(chip) = &model_chip {
-                right.push_on(&format!(" {chip} "), MUTED, PILL_SURFACE);
+                right.push(chip, MUTED);
             }
             if let Some(meter) = &meter {
                 if model_chip.is_some() {
@@ -208,7 +208,8 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
 }
 
 /// `▰▰▰▰▱▱▱▱ 52%`: eight cells filling toward the auto-compact threshold,
-/// `warning` within three points of it; `~52%` while it shows the next
+/// `warning` within three points of it, the percent bold because with the level it
+/// is the loud fact of the dock; `~52%` while it shows the next
 /// request's estimate. Unknown usage or capacity leaves the track empty with `?`.
 fn gauge(status: &Status) -> Line {
     let threshold = usize::from(status.auto_compact).max(1);
@@ -237,7 +238,7 @@ fn gauge(status: &Status) -> Line {
     let estimate = if status.pending.is_some() { "~" } else { "" };
     line.push(
         &format!(" {estimate}{share}"),
-        if near { WARNING } else { MUTED },
+        if near { WARNING } else { STRONG }.bold(),
     );
     line
 }

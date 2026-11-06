@@ -161,7 +161,7 @@ pub(super) fn console() {
             .last()
             .unwrap()
             .plain()
-            .contains("Esc  back to agents")
+            .contains("Esc back to agents")
     );
     assert!(!shown.contains("fixture/model") && !shown.contains("34%"));
     assert_eq!(inside.live.len(), height);

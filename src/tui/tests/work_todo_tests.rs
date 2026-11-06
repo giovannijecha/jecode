@@ -115,14 +115,14 @@ fn only_the_call_creating_a_plan_has_a_conversation_row() {
     assert_eq!(
         todo_rows(&state),
         [
-            " TODO  CSV export  3 tasks",
-            " TODO  Release notes  2 tasks"
+            "  TODO   CSV export  3 tasks",
+            "  TODO   Release notes  2 tasks"
         ]
     );
     assert_eq!(plan.unwrap().revision, 5);
     // A row stays as written while the plan moves on, at any width.
     state.width = 24;
-    assert_eq!(todo_rows(&state)[0], " TODO  CSV exp…  3 tasks");
+    assert_eq!(todo_rows(&state)[0], "  TODO   CSV e…  3 tasks");
 }
 
 #[test]
@@ -143,9 +143,9 @@ fn a_failed_creating_call_keeps_its_row_and_the_next_set_creates_again() {
     );
     let rows = todo_rows(&state);
     assert_eq!(rows.len(), 2);
-    assert!(rows[0].starts_with(" TODO  Export  1 task\n  └ "));
+    assert!(rows[0].starts_with("  TODO   Export  1 task\n  └ "));
     assert!(rows[0].contains("Invalid task status"));
-    assert_eq!(rows[1], " TODO  Export  1 task");
+    assert_eq!(rows[1], "  TODO   Export  1 task");
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn hidden_calls_neither_split_chapters_nor_offer_ctrl_o() {
     state.finish_tool_turn();
     assert_eq!(state.items.len(), 3);
     let chapter = state.rows()[1..].concat();
-    assert_eq!(chapter[1].plain(), " WORK  Map the flow  2 calls");
+    assert_eq!(chapter[1].plain(), "  WORK   Map the flow  2 calls");
 
     state.begin_tool_turn();
     call(&mut state, &mut plan, "done", set("Map", &[("t1", "done")]));
@@ -221,7 +221,7 @@ fn creating_rows_and_the_latest_plan_survive_resume() {
     let mut app = App::new(agent, config(&directory), None);
     submit(&mut app, "Add CSV export");
     finish(&mut app);
-    assert_eq!(todo_rows(&app.state), [" TODO  CSV export  2 tasks"]);
+    assert_eq!(todo_rows(&app.state), ["  TODO   CSV export  2 tasks"]);
     assert_eq!(app.state.todo_plan.as_ref().unwrap().revision, 2);
     let id = app.persistence.as_ref().unwrap().id();
     drop(app);
@@ -235,7 +235,7 @@ fn creating_rows_and_the_latest_plan_survive_resume() {
     agent.enable_sessions(home.path()).unwrap();
     let mut resumed = App::new(agent, config(&directory), None);
     resumed.resume_session(&id);
-    assert_eq!(todo_rows(&resumed.state), [" TODO  CSV export  2 tasks"]);
+    assert_eq!(todo_rows(&resumed.state), ["  TODO   CSV export  2 tasks"]);
     let plan = resumed.state.todo_plan.as_ref().unwrap();
     assert_eq!((plan.revision, plan.tasks[0].status.as_str()), (2, "done"));
     // A later set on the open plan adds no row after resume either.
@@ -329,7 +329,7 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
             "  ☑ Inspect the report             done",
             "  ☐ Write the exporter             in progress",
             "  ☐ Cover edge cases     AGENT 1   review",
-            "  ☐ Benchmark large f…   AGENT 2   failed",
+            "  ☐ Benchmark large fi…  AGENT 2   failed",
             "  ☐ Ask about encoding             waiting",
             "  ☐ Support XML                    cancelled",
             "  ☐ Update the docs",

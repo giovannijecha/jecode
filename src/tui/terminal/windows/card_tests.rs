@@ -118,7 +118,7 @@ pub(super) fn console() {
     );
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("WEB  fetch https://example.org/"))
+            .any(|row| row.plain().contains("  WEB    fetch https://example.org/"))
     );
     assert!(
         rows.iter()
@@ -266,7 +266,7 @@ fn concurrent_cards(terminal: &Terminal) {
             let rows: Vec<_> = state.rows().into_iter().flatten().collect();
             let plain: Vec<_> = rows.iter().map(crate::tui::line::Line::plain).collect();
             let all = plain.join("\n");
-            assert!(all.contains(" WORK  Inspect sources  2 calls"), "{all}");
+            assert!(all.contains("  WORK   Inspect sources  2 calls"), "{all}");
             if phase == 0 {
                 assert!(
                     all.contains("first.rs") && all.contains("second.rs"),

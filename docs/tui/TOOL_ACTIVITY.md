@@ -8,9 +8,11 @@ what the cards show. The tools themselves are described in
 ## Tool cards
 
 A card starts with a badge naming the tool (READ, UPDATE, WRITE, BASH, EXEC,
-PROCESS, LIST, SEARCH, MAP, CHECKPOINT, WEB, BROWSER, MCP, SKILL or AGENTS), then
-its target, such as a file path or a command. The badge color shows the state:
-the tool family's color when finished, a moving shimmer while running, red when
+PROCESS, LIST, SEARCH, MAP, SAVE, WEB, BROWSER, MCP, LSP, SKILL or AGENTS), then
+its target, such as a file path or a command. Every badge takes eight cells with
+its name centred, so the targets of short names line up from column 9. The badge color shows the
+state: the tool family's color when finished (SAVE, MCP, LSP and tools without a
+family use a quiet grey), a moving shimmer while running, red when
 the call failed and amber when it was stopped or timed out. A result line hangs
 below the title:
 
@@ -27,7 +29,7 @@ below the title:
 | Background command | `p3 running` and the latest output line; a `&` follows the title while it runs. |
 | Web | The page title, size and host. |
 | Browser | Where it navigated or what it saved, such as `Screenshot 1280×720`. |
-| Checkpoint | A short result; Ctrl+O shows the rest. |
+| Save | A short result; Ctrl+O shows the rest. |
 | Any error | The error message, such as `Not found`. |
 
 MCP cards use the quiet badge surface and identify the connection and remote
@@ -64,7 +66,7 @@ grouped into a **Work chapter**. The agent chooses the label; calls without one
 are grouped as **Activity**. Assistant text, a different label, a skill read or
 any other tool ends the chapter, and a single call keeps its own card.
 
-A chapter's title shows a `WORK` badge, the label, the number of calls and any
+A chapter's title shows a WORK badge, the label, the number of calls and any
 failures. Below it:
 
 - one row counts what was done: files read, searches, commands, web calls and so
@@ -105,7 +107,8 @@ were expanded.
 
 Ctrl+O applies only to the latest finished turn and does nothing if that turn
 had no tool calls. The last card with hidden content shows a `Ctrl+O expand`
-key. Sending a new message collapses the expanded turn, and resumed
+key, as text two cells from the edge of its row. Sending a new message
+collapses the expanded turn, and resumed
 conversations start collapsed.
 
 ## Collaborators

@@ -44,8 +44,13 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
         state.editor.replace(command.into());
         state.suggestions.refresh(command);
         let opened = update(&mut renderer, &mut screen, &mut state);
-        // The panel paints its keycaps (and any focused row) when it opens.
-        assert!(opened.contains(&crate::tui::theme::SELECTED_SURFACE.to_string()));
+        // The focused row of a list paints its surface when the panel opens; a command
+        // that already carries arguments lists nothing and keeps only its description.
+        assert_eq!(
+            opened.contains(&crate::tui::theme::SELECTED_SURFACE.to_string()),
+            command != "/tmp clean",
+            "{command}"
+        );
         assert!(screen.visible().contains("─ Commands"));
         state.selector = Some(Selector::settings(
             "fixture/model",
@@ -54,7 +59,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
             Default::default(),
             &crate::backend::openrouter::Routing::Auto,
             Default::default(),
-            std::path::Path::new("fixture/config.json"),
+            Default::default(),
         ));
         update(&mut renderer, &mut screen, &mut state);
         assert!(screen.visible().contains("Settings · saved defaults"));
@@ -63,7 +68,7 @@ fn command_and_menu_panels_are_erased_on_close_and_never_enter_native_history() 
         state.suggestions.dismiss();
         update(&mut renderer, &mut screen, &mut state);
         assert!(!screen.visible().contains("Settings · saved defaults"));
-        assert!(!screen.visible().contains("Tab  complete"));
+        assert!(!screen.visible().contains("Tab complete"));
         assert!(!screen.visible().contains("─ Commands"));
         assert!(screen.visible().contains(command));
     }
@@ -131,7 +136,7 @@ fn streamed_growth_animations_queued_rows_and_selectors_never_pollute_native_his
         Default::default(),
         &crate::backend::openrouter::Routing::Auto,
         Default::default(),
-        std::path::Path::new("fixture/config.json"),
+        Default::default(),
     ));
     update(&mut renderer, &mut screen, &mut state);
     assert!(screen.visible().contains("Settings · saved defaults"));

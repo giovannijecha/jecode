@@ -92,7 +92,7 @@ fn ask_arriving_over_a_draft_requires_an_explicit_choice() {
         app.state.ask_panel.as_ref().unwrap().entry().row,
         usize::MAX
     );
-    assert!(dock(&app.state).contains("1–3  choose"));
+    assert!(dock(&app.state).contains("1–3 choose"));
     app.input(Decoded::Key(key(13, 0))).unwrap();
     assert!(app.state.question.is_some());
     assert_eq!(app.state.editor, draft);
@@ -208,7 +208,7 @@ fn ask_waits_for_explicit_input_and_keeps_chat_draft_through_escape() {
     );
     let receipt = conversation(&app.state);
     assert!(
-        receipt.contains(" ASK USER  Export scope\n  └ Visible rows"),
+        receipt.contains("ASK USER Export scope\n  └ Visible rows"),
         "{receipt}"
     );
     let id = app.persistence.as_ref().unwrap().id();
@@ -265,7 +265,7 @@ fn several_questions_are_answered_one_at_a_time_and_sent_together() {
     );
     assert!(block.contains("2 of 3"), "{block}");
     assert!(
-        block.contains(" Space  toggle    Enter  next    ←→  questions    Esc  back to chat"),
+        block.contains("Space toggle   Enter next   ←→ questions   Esc back to chat"),
         "{block}"
     );
     app.input(Decoded::Text(" ".into())).unwrap();
@@ -279,7 +279,7 @@ fn several_questions_are_answered_one_at_a_time_and_sent_together() {
     assert_eq!(app.state.ask_panel.as_ref().unwrap().step, 2);
     let block = dock(&app.state);
     assert!(
-        block.contains("› Type your answer") && block.contains("Enter  send    Ctrl+J  new line"),
+        block.contains("› Type your answer") && block.contains("Enter send   Ctrl+J new line"),
         "{block}"
     );
     app.input(Decoded::Key(key(13, 0))).unwrap();
@@ -298,7 +298,7 @@ fn several_questions_are_answered_one_at_a_time_and_sent_together() {
     let receipt = conversation(&app.state);
     assert!(
         receipt.contains(
-            " ASK USER  3 questions\n  │ Export scope  Visible rows\n  │ Formats  CSV, JSON\n  └ Delivery  Email the team lead"
+            "ASK USER 3 questions\n  │ Export scope  Visible rows\n  │ Formats  CSV, JSON\n  └ Delivery  Email the team lead"
         ),
         "{receipt}"
     );
@@ -320,7 +320,7 @@ fn ask_dismissal_is_distinct_from_escape_and_answer() {
     app.open_ask();
     let lines = dock(&app.state);
     assert!(
-        lines.contains("Ctrl+D  dismiss") && lines.contains("Esc  back to chat"),
+        lines.contains("Ctrl+D dismiss") && lines.contains("Esc back to chat"),
         "{lines}"
     );
     assert!(lines.contains("Waiting for you") && !lines.contains("/ask answer"));
@@ -395,7 +395,7 @@ fn cancelled_question_card_says_no_answer_was_supplied() {
         result: Value::object([("outcome", Value::string("cancelled"))]),
     });
     let text = conversation(&state);
-    assert!(text.contains(" ASK USER  Export scope"), "{text}");
+    assert!(text.contains("ASK USER Export scope"), "{text}");
     assert!(text.contains("Question cancelled") && text.contains("no answer supplied"));
 }
 
