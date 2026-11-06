@@ -229,11 +229,13 @@ select-all/delete/undo/redo, reverse Tab, Unicode contenteditable input, a
 single `type` sequence that follows Enter/Tab focus changes between grid cells,
 1,000 keys within the default timeout, widgets that manage their own focus,
 keys on buttons, checkboxes, modal dialogs and selections, and a `confirm` opened
-by a key and then answered.
-They inspect trusted DOM events and the resulting values and focus. CI runs
-these keyboard checks on all four targets using installed Chrome or Edge.
-The Linux CI wrapper uses the runner's outer sandbox because nested Chrome
-sandbox namespaces are disabled there; ordinary browser launches are unchanged.
+by a key and then answered or closed from another controller. A key-up dialog
+also verifies that partial-input diagnostics describe the current key's effects.
+They inspect trusted DOM events and the resulting values and focus. CI and
+release preparation run these checks on all four targets using installed Chrome
+or Edge. The shared `tools/ci-chrome.sh` wrapper uses the runner's outer sandbox
+because nested Chrome sandbox namespaces are disabled there; ordinary browser
+launches are unchanged.
 
 `http::tests::trusted_https_uses_os_tls_policy` accepts `https://example.com/`
 and rejects `https://self-signed.badssl.com/` without account credentials. macOS
