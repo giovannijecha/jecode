@@ -17,21 +17,22 @@ pub(super) fn retarget(project: &Path, name: &str, target: &Path) -> PathBuf {
         if leaves_project_before_a_name(0, &suffix) {
             return None;
         }
-        let mut relative = PathBuf::new();
-        for _ in parent {
-            relative.push("..");
-        }
-        relative.push(suffix);
-        if relative.as_os_str().is_empty() {
-            relative.push(".");
-        }
-        Some(relative)
+        Some(relative_from_root(parent.len(), &suffix))
     };
     let resolved = match resolve_target(&path) {
         Resolution::Full(resolved) => resolved,
         Resolution::Partial(prefix, suffix) => {
             if target.is_absolute() {
-                return unresolved_absolute().unwrap_or_else(|| target.to_path_buf());
+                return unresolved_absolute()
+                    .or_else(|| {
+                        // A project alias can have a different depth from its
+                        // canonical root. Keep the unresolved suffix verbatim,
+                        // but anchor it at the existing prefix inside the copy.
+                        let inside = raw_suffix(&plain(project), &plain(&prefix))?.join(&suffix);
+                        (!leaves_project_before_a_name(0, &inside))
+                            .then(|| relative_from_root(parent.len(), &inside))
+                    })
+                    .unwrap_or_else(|| target.to_path_buf());
             }
             // A prefix outside the project anchors a relative target at its
             // original location. Keep the unresolved suffix verbatim: it may
@@ -83,6 +84,18 @@ pub(super) fn retarget(project: &Path, name: &str, target: &Path) -> PathBuf {
     for part in &inside[common..] {
         relative.push(part);
     }
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    relative
+}
+
+fn relative_from_root(depth: usize, suffix: &Path) -> PathBuf {
+    let mut relative = PathBuf::new();
+    for _ in 0..depth {
+        relative.push("..");
+    }
+    relative.push(suffix);
     if relative.as_os_str().is_empty() {
         relative.push(".");
     }
@@ -281,6 +294,35 @@ mod tests {
             ),
             Path::new("..").join("dangling/../store/pkg")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_target_through_a_deeper_project_alias_stays_in_the_copy() {
+        let temp = Directory::new();
+        let project = temp.path().join("project");
+        let aliases = temp.path().join("aliases/deep");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir_all(&aliases).unwrap();
+        let project = fs::canonicalize(project).unwrap();
+        let alias = aliases.join("project");
+        std::os::unix::fs::symlink(&project, &alias).unwrap();
+        std::os::unix::fs::symlink("missing", project.join("dangling")).unwrap();
+        let target = alias.join("dangling/../goal");
+        let rewritten = retarget(&project, "node_modules/link", &target);
+        assert_eq!(rewritten, Path::new("../dangling/../goal"));
+
+        let copy = temp.path().join("copy");
+        fs::create_dir_all(copy.join("node_modules")).unwrap();
+        fs::create_dir(copy.join("missing")).unwrap();
+        fs::write(copy.join("goal"), "copy").unwrap();
+        std::os::unix::fs::symlink("missing", copy.join("dangling")).unwrap();
+        std::os::unix::fs::symlink(rewritten, copy.join("node_modules/link")).unwrap();
+        assert_eq!(
+            fs::read_to_string(copy.join("node_modules/link")).unwrap(),
+            "copy"
+        );
+        assert!(!target.exists(), "the source target must remain dangling");
     }
 
     #[cfg(unix)]
