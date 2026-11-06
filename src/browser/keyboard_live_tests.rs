@@ -369,3 +369,45 @@ fn live_chromium_keys_operate_controls_and_selection() {
     session.press("Backspace", 0);
     assert_eq!(session.value("field.value"), Value::string("wor"));
 }
+
+#[test]
+#[ignore = "requires installed Chromium"]
+fn live_chromium_dialog_opened_by_a_key_is_reported_and_can_be_answered() {
+    let session = Session::new();
+    session.value(
+        r#"window.answer = 'none'; editor.onkeydown = e => {
+        if (e.key === 'q') { e.preventDefault(); answer = confirm('Discard draft?'); }
+      }; true"#,
+    );
+    let started = std::time::Instant::now();
+    let error = session
+        .attempt(
+            "type",
+            &[
+                ("selector", Value::string("#editor")),
+                ("text", Value::string("abqcd")),
+            ],
+        )
+        .unwrap_err();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "{error}"
+    );
+    assert!(error.starts_with("2 of 5 keys completed: "), "{error}");
+    assert!(error.contains("confirm") && error.contains("Discard draft?"));
+    // The session survives: other actions explain the block without waiting.
+    let refused = session
+        .attempt("evaluate", &[("expression", Value::string("1"))])
+        .unwrap_err();
+    assert!(refused.contains("Page.handleJavaScriptDialog"), "{refused}");
+    session.run(
+        "cdp",
+        &[
+            ("method", Value::string("Page.handleJavaScriptDialog")),
+            ("params", Value::object([("accept", Value::Bool(true))])),
+        ],
+    );
+    assert_eq!(session.value("answer"), Value::Bool(true));
+    session.run("type", &[("text", Value::string("cd"))]);
+    assert_eq!(session.value("editor.value"), Value::string("abcd"));
+}

@@ -56,10 +56,14 @@ pub(super) fn http_get(port: u16, path: &str) -> Result<Value, String> {
     json::parse(&String::from_utf8(body).map_err(|e| e.to_string())?)
 }
 
+const ANSWER_DIALOG: &str = "Page.handleJavaScriptDialog";
+
 pub(super) struct Cdp {
     stream: TcpStream,
     next_id: u64,
     usable: bool,
+    /// Describes an open JavaScript dialog, which blocks the page until answered.
+    dialog: Option<String>,
     pub events: super::logs::EventLog,
 }
 
@@ -149,6 +153,7 @@ impl Cdp {
             stream,
             next_id: 0,
             usable: true,
+            dialog: None,
             events: super::logs::EventLog::default(),
         })
     }
@@ -170,6 +175,13 @@ impl Cdp {
     ) -> Result<Value, String> {
         if !self.usable {
             return Err("DevTools connection is no longer usable".into());
+        }
+        // A blocked call would time out and force a reconnection that the open
+        // dialog also blocks, so report it and keep this connection to answer it.
+        if method != ANSWER_DIALOG
+            && let Some(dialog) = &self.dialog
+        {
+            return Err(dialog.clone());
         }
         self.next_id += 1;
         let id = self.next_id;
@@ -220,11 +232,42 @@ impl Cdp {
                 if let Some(error) = value.get("error") {
                     return Err(format!("DevTools {method}: {}", error.encode()));
                 }
+                if method == ANSWER_DIALOG {
+                    self.dialog = None;
+                }
                 return Ok(value.get("result").cloned().unwrap_or(Value::Null));
             }
             if value.get("method").is_some() {
+                self.track_dialog(&value);
                 self.events.push(value);
+                if method != ANSWER_DIALOG
+                    && let Some(dialog) = &self.dialog
+                {
+                    return Err(dialog.clone());
+                }
             }
+        }
+    }
+
+    fn track_dialog(&mut self, event: &Value) {
+        match event.get("method").and_then(Value::as_str) {
+            Some("Page.javascriptDialogOpening") => {
+                let field = |name| {
+                    event
+                        .get("params")
+                        .and_then(|params| params.get(name))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                };
+                let message: String = field("message").chars().take(200).collect();
+                self.dialog = Some(format!(
+                    "The page opened a JavaScript {} dialog and stays blocked until it is answered: {}. Use the cdp action with method {ANSWER_DIALOG} and params {{\"accept\":true}} or {{\"accept\":false}}",
+                    field("type"),
+                    Value::string(message).encode()
+                ));
+            }
+            Some("Page.javascriptDialogClosed") => self.dialog = None,
+            _ => {}
         }
     }
 

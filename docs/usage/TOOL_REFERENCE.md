@@ -343,6 +343,10 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`, `type
   keyboard navigation. For example, after clicking cell A1,
   `{"action":"type","text":"first\nsecond\tthird"}` types `first`, presses
   Enter, types `second`, presses Tab, then types `third` wherever focus moved.
+- A JavaScript dialog (`alert`, `confirm`, `prompt`, `beforeunload`) blocks its page.
+  The action that meets one fails at once with its type and text, and later actions
+  on that tab fail the same way until `cdp` calls `Page.handleJavaScriptDialog` with
+  `params` such as `{"accept":true}`.
 - `wait` waits for `text` in the page or the selected element, up to
   `timeout_ms` (default 15,000). On timeout it reports the elapsed time, tab,
   URL and whether the selector or the text was missing.
