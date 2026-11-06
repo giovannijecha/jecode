@@ -61,8 +61,9 @@ Built-ins support only the options they implement; for example, `tr` supports
 only `-d`. A few behaviors to know:
 
 - `wc` accepts one of `-l` (newline count) or `-c` (byte count), files or standard
-  input, and a total for multiple files. `-` reads standard input; `--` separates
-  options from filenames. It counts in chunks without loading whole files.
+  input, and a total for multiple files. `-` reads standard input; `--` ends the
+  options, which may otherwise follow filenames. It counts in chunks without
+  loading whole files.
 - `bash PATH [ARGS]` and `sh PATH [ARGS]` run a script with this same
   interpreter, in a fresh state with its own positional arguments.
 - `cp -r` refuses to copy a directory into itself.

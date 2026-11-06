@@ -3,7 +3,7 @@
 
 use crate::{
     collaboration::Observer,
-    file_change::{Change, Kind},
+    file_change::{Change, Entry, Kind},
     json::Value,
 };
 use std::fmt::Write;
@@ -34,31 +34,40 @@ pub(super) fn shared(
     let Value::Object(fields) = &mut result else {
         unreachable!()
     };
+    let files = record
+        .get("files")
+        .cloned()
+        .unwrap_or(Value::Array(Vec::new()));
     let Some(path) = path else {
-        fields.insert(
-            "files".into(),
-            record
-                .get("files")
-                .cloned()
-                .unwrap_or(Value::Array(Vec::new())),
-        );
+        fields.insert("files".into(), files);
         return Ok(result);
     };
+    if !files
+        .as_array()
+        .is_some_and(|files| files.contains(&Value::string(path)))
+    {
+        return Err("Path has no recorded edit from this collaborator".into());
+    }
     let tools = record.get("tools").and_then(Value::as_array).unwrap_or(&[]);
     let mut text = String::new();
     for (call, change) in observer.changes(id) {
-        if change.files.is_empty() {
-            let changed_path = tools
-                .iter()
-                .find(|tool| tool.get("id").and_then(Value::as_str) == Some(&call))
-                .and_then(|tool| tool.get("arguments"))
-                .and_then(|arguments| arguments.get("path"))
-                .and_then(Value::as_str);
-            if changed_path == Some(path) {
-                append(&mut text, &call, path, &change);
+        if !change.files.is_empty() {
+            if let Some(change) = change.file(path) {
+                append(&mut text, &call, path, change);
             }
-        } else if let Some(change) = change.file(path) {
-            append(&mut text, &call, path, change);
+            continue;
+        }
+        let named = named_paths(tools, &call);
+        if !named.contains(&path) {
+            continue;
+        }
+        if named.iter().all(|named| *named == path) {
+            append(&mut text, &call, path, &change);
+        } else {
+            let _ = writeln!(
+                text,
+                "{call}: {path}: edit omitted because this call ID was reused for other files; read the current file."
+            );
         }
     }
     let start = text.ceil_char_boundary(offset.min(text.len()));
@@ -86,6 +95,29 @@ pub(super) fn shared(
     Ok(result)
 }
 
+/// The paths named by the changed calls with this ID. Providers may reuse an
+/// ID, which then cannot say which of several paths a saved change belongs to.
+fn named_paths<'a>(tools: &'a [Value], call: &str) -> Vec<&'a str> {
+    tools
+        .iter()
+        .filter(|tool| {
+            tool.get("change").is_some() && tool.get("id").and_then(Value::as_str) == Some(call)
+        })
+        .filter_map(|tool| tool.get("arguments")?.get("path")?.as_str())
+        .collect()
+}
+
+/// A unified diff range: the hunk's first line and how many lines it holds.
+fn range(hunk: &[Entry], line: impl Fn(&Entry) -> Option<usize>) -> String {
+    let mut lines = hunk.iter().filter_map(line);
+    let first = lines.next();
+    format!(
+        "{},{}",
+        first.unwrap_or(0),
+        usize::from(first.is_some()) + lines.count()
+    )
+}
+
 fn append(text: &mut String, call: &str, path: &str, change: &Change) {
     let _ = writeln!(
         text,
@@ -93,7 +125,12 @@ fn append(text: &mut String, call: &str, path: &str, change: &Change) {
         change.added, change.removed
     );
     for hunk in &change.hunks {
-        text.push_str("@@\n");
+        let _ = writeln!(
+            text,
+            "@@ -{} +{} @@",
+            range(hunk, |entry| entry.old_line),
+            range(hunk, |entry| entry.new_line)
+        );
         for entry in hunk {
             text.push(match entry.kind {
                 Kind::Context => ' ',
@@ -116,8 +153,5 @@ fn append(text: &mut String, call: &str, path: &str, change: &Change) {
             "Final newline: {}",
             if present { "added" } else { "removed" }
         );
-    }
-    if change.hunks.is_empty() {
-        text.push_str("Hunks not recorded; read the current file.\n");
     }
 }

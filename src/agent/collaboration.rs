@@ -317,6 +317,8 @@ mod attachment_tests;
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]
+mod diff_tests;
+#[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
 mod lifecycle_tests;

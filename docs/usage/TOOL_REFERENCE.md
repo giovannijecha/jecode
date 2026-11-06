@@ -143,10 +143,11 @@ Successful edits report `changed`: `true` when a replacement was installed,
 
 An ambiguous edit returns two bounded literal `match_context` excerpts with
 match byte offsets and `excerpt_byte_offset`. `match_context_source` says
-`original` for the first replacement or `staged` after preceding replacements.
-Use these excerpts to make the next exact match unique. `current_content`
-still previews the unchanged original file; no replacement was saved. For a
-missing match, read the required section before retrying.
+`original` for the first replacement or `staged` after preceding replacements;
+only `original` offsets apply to `read` with `byte_offset`, because staged text
+is not on disk. Use these excerpts to make the next exact match unique.
+`current_content` still previews the unchanged original file; no replacement
+was saved. For a missing match, read the required section before retrying.
 
 `edit` requires UTF-8 text without NUL bytes. `write` can replace an existing
 binary file with the supplied content. Both refuse read-only files and paths

@@ -94,8 +94,10 @@ additions, edits and deletions. Check the combined project afterwards.
 For shared work, `diff` lists recorded changed files. With `path`, it pages the
 collaborator's recorded edit hunks in call order, including multi-file edits.
 This is edit history, not a separate baseline or a complete project diff:
-command changes and later writes may be absent. Read the current files when
-reviewing. Shared work needs no integration.
+command changes and later writes may be absent, and an edit is omitted when a
+provider reused its call ID for other files. Read the current files when
+reviewing. A path with no recorded edit is refused. Shared work needs no
+integration.
 
 ### Agent actions
 

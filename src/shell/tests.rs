@@ -87,6 +87,38 @@ fn wc_counts_lines_in_files_and_standard_input() {
         fs::read_to_string(directory.path().join("bytes")).unwrap(),
         "12 first.rs\n"
     );
+    assert_eq!(shell.run("wc -l < second.rs > redirected"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("redirected")).unwrap(),
+        "1\n"
+    );
+}
+
+#[test]
+fn wc_takes_its_option_after_a_file_until_a_separator() {
+    let (directory, mut shell) = shell();
+    fs::write(directory.path().join("first"), b"one\ntwo\n").unwrap();
+    fs::write(directory.path().join("-l"), b"three\n").unwrap();
+    assert_eq!(shell.run("wc first -l > after"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("after")).unwrap(),
+        "2 first\n"
+    );
+    assert_eq!(shell.run("wc -l -- -l > literal"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("literal")).unwrap(),
+        "1 -l\n"
+    );
+}
+
+#[test]
+fn wc_consumes_standard_input_once_across_named_operands() {
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("printf 'one\\ntwo\\n' | wc -l - - > counts"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("counts")).unwrap(),
+        "2 -\n0 -\n2 total\n"
+    );
 }
 
 #[test]
@@ -202,14 +234,4 @@ fn profile_flags_in_script_arguments_are_preserved() {
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stdout, b"--norc");
-}
-
-#[test]
-fn wc_consumes_standard_input_once_across_named_operands() {
-    let (directory, mut shell) = shell();
-    assert_eq!(shell.run("printf 'one\\ntwo\\n' | wc -l - - > counts"), 0);
-    assert_eq!(
-        fs::read_to_string(directory.path().join("counts")).unwrap(),
-        "2 -\n0 -\n2 total\n"
-    );
 }

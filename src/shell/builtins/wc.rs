@@ -27,10 +27,7 @@ pub(super) fn wc(shell: &Shell, args: &[String], io: &Io) -> Outcome {
             value if !positional && value.starts_with('-') && value != "-" => {
                 return Err(format!("wc: unsupported option: {value}"));
             }
-            _ => {
-                positional = true;
-                files.push(arg.as_str());
-            }
+            _ => files.push(arg.as_str()),
         }
     }
     let kind = kind.ok_or("wc: expected -l or -c")?;
