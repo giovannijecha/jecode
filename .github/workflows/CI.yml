@@ -85,6 +85,13 @@ jobs:
         run: cargo +${{ matrix.toolchain }} clippy --locked --offline --all-targets -- -D warnings
       - name: Run tests
         run: cargo +${{ matrix.toolchain }} test --locked --offline --quiet -- --test-threads=4
+      - name: Configure the confined Linux browser
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          printf 'JECODE_BROWSER=%s/tools/ci-chrome.sh\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Verify browser keyboard input
+        run: cargo +${{ matrix.toolchain }} test --locked --offline browser::keyboard_live_tests -- --ignored --nocapture --test-threads=1
       - name: Verify native macOS TLS
         if: runner.os == 'macOS'
         run: cargo +${{ matrix.toolchain }} test --locked --offline http::tests::trusted_https_uses_os_tls_policy -- --exact --ignored --nocapture --test-threads=1

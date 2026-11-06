@@ -34,7 +34,7 @@ pub(super) fn payload(tool: &Tool<'_>) -> String {
         "browser" => match field(args, "action") {
             "evaluate" => field(args, "expression"),
             "open" | "navigate" => field(args, "url"),
-            "click" | "fill" | "wait" => field(args, "selector"),
+            "click" | "fill" | "type" | "wait" => field(args, "selector"),
             "press" => field(args, "key"),
             "cdp" => field(args, "method"),
             _ => field(args, "tab_id"),

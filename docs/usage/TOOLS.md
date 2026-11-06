@@ -154,6 +154,11 @@ Screenshots are shown to the model automatically. The browser starts headless
 by default; the model can open a visible window, for example for a sign-in you
 complete yourself.
 
+For keyboard behavior, `type` sends a sequence of key events, including Enter
+for newlines and Tab for tabs. `press` supports individual keys and shortcuts
+such as `Ctrl+z`, `Meta+z` and `Shift+Tab`, with an optional modifier bitmask.
+`fill` replaces an input value without exercising per-character key handlers.
+
 - **Which browser.** Jecode looks for Google Chrome and Microsoft Edge in their
   standard locations and on `PATH` (on Linux: `google-chrome`, `chromium`,
   `chromium-browser` or `microsoft-edge` on `PATH`). Set `JECODE_BROWSER` to the

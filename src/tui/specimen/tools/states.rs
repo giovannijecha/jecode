@@ -128,6 +128,19 @@ pub(super) fn states() -> Vec<(&'static str, Call)> {
                 300,
             ),
         ),
+        (
+            "Browser type target",
+            finished(
+                "browser",
+                Value::object([
+                    ("action", text("type")),
+                    ("selector", text("#editor")),
+                    ("text", text("private entry")),
+                ]),
+                Value::object([("typed", Value::Bool(true)), ("tab_id", text("tab-1"))]),
+                300,
+            ),
+        ),
         ("Long command", long()),
         ("Edit preview", sequence().remove(1)),
         ("Expanded read", selected),

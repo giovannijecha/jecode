@@ -7,6 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(super) use crate::attachments::base64::encode as base64;
 
 #[cfg(test)]
+mod dialog_tests;
+#[cfg(test)]
 mod tests;
 
 /// Whether a `Cdp::call` error came from its deadline rather than the page.
@@ -56,10 +58,15 @@ pub(super) fn http_get(port: u16, path: &str) -> Result<Value, String> {
     json::parse(&String::from_utf8(body).map_err(|e| e.to_string())?)
 }
 
+const ANSWER_DIALOG: &str = "Page.handleJavaScriptDialog";
+const DIALOG_STATUS: &str = "Browser.getVersion";
+
 pub(super) struct Cdp {
     stream: TcpStream,
     next_id: u64,
     usable: bool,
+    /// Describes an open JavaScript dialog, which blocks the page until answered.
+    dialog: Option<String>,
     pub events: super::logs::EventLog,
 }
 
@@ -85,6 +92,9 @@ impl Cdp {
             .ok_or("No loopback address")?;
         let mut stream =
             TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|e| e.to_string())?;
+        // Every call waits for its reply, so Nagle would hold a frame's payload
+        // for the delayed acknowledgement of its header: 40 ms a call on Linux.
+        stream.set_nodelay(true).map_err(|e| e.to_string())?;
         stream
             .set_write_timeout(Some(Duration::from_secs(2)))
             .map_err(|e| e.to_string())?;
@@ -146,6 +156,7 @@ impl Cdp {
             stream,
             next_id: 0,
             usable: true,
+            dialog: None,
             events: super::logs::EventLog::default(),
         })
     }
@@ -159,6 +170,30 @@ impl Cdp {
     }
 
     pub fn call(
+        &mut self,
+        method: &str,
+        params: Value,
+        cancellation: &Cancellation,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let started = Instant::now();
+        if self.dialog.is_some() && !matches!(method, ANSWER_DIALOG | DIALOG_STATUS) {
+            // This browser-side round trip stays responsive during a dialog and
+            // receives any close event queued by a person or another controller.
+            self.exchange(DIALOG_STATUS, Value::object([]), cancellation, timeout)?;
+            if let Some(dialog) = &self.dialog {
+                return Err(dialog.clone());
+            }
+        }
+        self.exchange(
+            method,
+            params,
+            cancellation,
+            timeout.saturating_sub(started.elapsed()),
+        )
+    }
+
+    fn exchange(
         &mut self,
         method: &str,
         params: Value,
@@ -220,8 +255,36 @@ impl Cdp {
                 return Ok(value.get("result").cloned().unwrap_or(Value::Null));
             }
             if value.get("method").is_some() {
+                self.track_dialog(&value);
                 self.events.push(value);
+                if !matches!(method, ANSWER_DIALOG | DIALOG_STATUS)
+                    && let Some(dialog) = &self.dialog
+                {
+                    return Err(dialog.clone());
+                }
             }
+        }
+    }
+
+    fn track_dialog(&mut self, event: &Value) {
+        match event.get("method").and_then(Value::as_str) {
+            Some("Page.javascriptDialogOpening") => {
+                let field = |name| {
+                    event
+                        .get("params")
+                        .and_then(|params| params.get(name))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                };
+                let message: String = field("message").chars().take(200).collect();
+                self.dialog = Some(format!(
+                    "The page opened a JavaScript {} dialog and stays blocked until it is answered: {}. Use the cdp action with method {ANSWER_DIALOG} and params {{\"accept\":true}} or {{\"accept\":false}}",
+                    field("type"),
+                    Value::string(message).encode()
+                ));
+            }
+            Some("Page.javascriptDialogClosed") => self.dialog = None,
+            _ => {}
         }
     }
 

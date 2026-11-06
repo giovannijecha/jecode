@@ -88,6 +88,14 @@ fn local_web_and_browser_cards_show_actions_and_artifacts() {
         ("tab_id", Value::string("tab-1")),
     ]);
     assert_eq!(description("browser", &screenshot), "screenshot tab-1");
+    // Typed text can be a password: like fill, type names only its target.
+    let typed = Value::object([
+        ("action", Value::string("type")),
+        ("selector", Value::string("#editor")),
+        ("text", Value::string("secret")),
+        ("tab_id", Value::string("tab-1")),
+    ]);
+    assert_eq!(description("browser", &typed), "type #editor");
     let captured = Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]);
     assert_eq!(
         tool_summary("browser", &captured),

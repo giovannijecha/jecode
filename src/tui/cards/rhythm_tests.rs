@@ -359,6 +359,21 @@ fn browser_actions_without_a_payload_open_their_result_on_the_first_tree_row() {
         80,
     );
     assert!(card.rows[1].plain().contains("https://example.com/"));
+    // Typed text can be a password: like fill, type shows only its target.
+    let args = object([
+        ("action", "type"),
+        ("selector", "#editor"),
+        ("text", "secret"),
+    ]);
+    let card = draw(
+        "browser",
+        &args,
+        Some(&result),
+        &Presentation::default(),
+        80,
+    );
+    assert!(card.rows[1].plain().contains("#editor"));
+    assert!(!plain(&card).contains("secret"));
 }
 
 #[test]
