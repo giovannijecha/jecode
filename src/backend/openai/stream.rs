@@ -14,7 +14,7 @@ pub(super) struct Stream {
     has_text: bool,
     text_item: Option<usize>,
     message_boundary: bool,
-    #[cfg_attr(not(windows), allow(dead_code))]
+    answering: bool,
     connection_expired: bool,
 }
 
@@ -59,6 +59,7 @@ impl Stream {
             .get("type")
             .and_then(Value::as_str)
             .ok_or("OpenAI stream event has no type")?;
+        self.answering |= kind != "responsesapi.websocket_timing";
         if let Some(usage) = event
             .get("response")
             .and_then(|response| response.get("usage"))
@@ -177,6 +178,12 @@ impl Stream {
 
     pub fn ended(&self) -> bool {
         self.terminal.is_some()
+    }
+
+    /// Whether this request has produced anything of its own. The provider's timing
+    /// event trails the previous response and can arrive after this request went out.
+    pub fn answering(&self) -> bool {
+        self.answering
     }
 
     pub fn connection_expired(&self) -> bool {

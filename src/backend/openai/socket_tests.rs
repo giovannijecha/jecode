@@ -350,6 +350,33 @@ fn a_connection_lost_before_answering_is_replaced_and_the_request_sent_again() {
     assert_eq!(lost, resent);
 }
 
+/// The previous response's timing can reach the adapter after the next request went
+/// out, so it says nothing about whether that request was answered.
+#[test]
+fn a_late_timing_event_does_not_stop_a_lost_request_being_sent_again() {
+    let server = Server::start(|listener, stop| {
+        let mut first = Peer::new(server::accept(&listener, &stop).unwrap());
+        first.upgrade();
+        first.message().unwrap();
+        for event in reply("One") {
+            first.send(&event);
+        }
+        let lost = first.message().unwrap();
+        first.send(r#"{"type":"responsesapi.websocket_timing","timing_metrics":{}}"#);
+        drop(first);
+        let mut second = Peer::new(server::accept(&listener, &stop).unwrap());
+        second.upgrade();
+        let resent = second.message().unwrap();
+        second.answer("Two");
+        (lost, resent)
+    });
+    let backend = backend(&server.endpoint);
+    assert_eq!(sample(&backend, "first").unwrap().text, "One");
+    assert_eq!(sample(&backend, "second").unwrap().text, "Two");
+    let (lost, resent) = server.finish();
+    assert_eq!(lost, resent);
+}
+
 #[test]
 fn a_connection_closed_while_idle_is_replaced_before_sending() {
     let server = Server::start(|listener, stop| {

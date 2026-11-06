@@ -223,7 +223,6 @@ impl Connection {
         };
         let mut delivery = Some(delivery);
         let mut last_activity = Instant::now();
-        let mut answered = false;
         loop {
             if cancellation.requested() {
                 return Round::Failed(Failure::from("Operation cancelled"));
@@ -234,7 +233,6 @@ impl Connection {
             match self.adapter.frames.recv_timeout(POLL) {
                 Ok(Frame::Data(bytes)) => {
                     last_activity = Instant::now();
-                    answered = true;
                     let Ok(text) = std::str::from_utf8(&bytes) else {
                         return Round::Failed(Failure::temporary("OpenAI returned invalid UTF-8"));
                     };
@@ -255,7 +253,7 @@ impl Connection {
                 }
                 Ok(Frame::End(_) | Frame::RetryableEnd(_))
                 | Err(RecvTimeoutError::Disconnected) => {
-                    return if answered {
+                    return if stream.answering() {
                         Round::Failed(Failure::temporary(
                             "OpenAI connection closed during the response",
                         ))
