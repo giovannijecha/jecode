@@ -275,7 +275,6 @@ fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<us
                 records[..end]
                     .iter_mut()
                     .rev()
-                    .take(crate::agent::steps::MAX_STEPS)
                     .find(|record| matches!(record, Record::Tool { id: candidate, .. } if candidate == id))
             });
             if let Some(Record::Tool { change, .. }) = target {

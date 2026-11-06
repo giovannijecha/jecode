@@ -35,6 +35,19 @@ fn main() {
             std::fs::remove_file(file).unwrap();
             std::fs::remove_dir(nested).unwrap();
         }
+        "rename" => {
+            let root = PathBuf::from(env::var_os(ALLOWED).unwrap());
+            let first = root.join("rename-first.txt");
+            let second = root.join("rename-second.txt");
+            std::fs::write(&first, "before").unwrap();
+            std::fs::rename(&first, &second).unwrap();
+            assert_eq!(std::fs::read_to_string(&second).unwrap(), "before");
+            std::fs::write(&first, "after").unwrap();
+            std::fs::rename(&first, &second).unwrap();
+            assert_eq!(std::fs::read_to_string(&second).unwrap(), "after");
+            std::fs::remove_file(second).unwrap();
+            println!("RENAMED:after");
+        }
         "parent" => {
             let output = Command::new(env::current_exe().unwrap())
                 .env(ROLE, "child")

@@ -24,20 +24,24 @@ pub fn definitions_for(delegation: bool) -> &'static Value {
         definitions()
     } else {
         WORKING.get_or_init(|| {
-            Value::Array(
-                definitions()
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .filter(|tool| {
-                        !matches!(
-                            tool.get("name").and_then(Value::as_str),
-                            Some("agent" | "ask_user")
-                        )
-                    })
-                    .cloned()
-                    .collect(),
-            )
+            let mut tools: Vec<_> = definitions()
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|tool| {
+                    !matches!(
+                        tool.get("name").and_then(Value::as_str),
+                        Some("agent" | "ask_user")
+                    )
+                })
+                .cloned()
+                .collect();
+            let index = tools
+                .iter()
+                .position(|tool| tool.get("name").and_then(Value::as_str) == Some("steps"))
+                .unwrap();
+            tools[index] = work::steps(&tools);
+            Value::Array(tools)
         })
     }
 }
@@ -106,9 +110,11 @@ fn build_definitions() -> Value {
     tools.push(mcp::definition());
     tools.push(lsp::definition());
     tools.push(collaboration::definition());
-    tools.push(work::steps());
+    let steps_index = tools.len();
     tools.push(work::todo());
     tools.push(work::ask_user());
+    let steps = work::steps(&tools);
+    tools.insert(steps_index, steps);
     Value::Array(tools)
 }
 
@@ -251,7 +257,7 @@ fn base_definitions() -> Vec<Value> {
         ),
         routine(
             "bash",
-            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection including 2>&1 and &>, here-documents, * ? [...] patterns, the built-ins cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc, and literal argv for installed programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Run related commands together in one command line instead of one call each. Omit wait_ms for commands that finish, such as tests and builds; without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success.",
+            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection including 2>&1 and &>, here-documents, * ? [...] patterns, the built-ins cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc -l/-c, and literal argv for installed programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Run related commands together in one command line instead of one call each. Omit wait_ms for commands that finish, such as tests and builds; without wait_ms, returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. With wait_ms, returns a persistent process_id and its next output window; poll/stop via process. wait_ms does not end execution; timeout_seconds does. Checkpoint receipts describe prelaunch coverage, not success.",
             Value::object([
                 ("command", string()),
                 (

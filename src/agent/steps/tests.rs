@@ -97,6 +97,45 @@ fn steps_run_in_order_and_answer_the_one_call() {
 }
 
 #[test]
+fn a_long_prepared_sequence_keeps_every_write_and_saved_change() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let fixture = fixture(
+        (0..17)
+            .map(|index| write(&format!("file-{index}.txt"), "prepared\n"))
+            .collect(),
+    );
+    let mut agent = agent(&project, &fixture);
+    agent.enable_sessions(home.path()).unwrap();
+    agent
+        .run_turn("Create the prepared files", &mut |_| Ok(()))
+        .unwrap();
+    let results = results(&agent);
+    assert!(results[0].1.get("error").is_none(), "{:?}", results[0]);
+    assert_eq!(entries(&results[0].1).len(), 17);
+    for index in 0..17 {
+        assert_eq!(
+            fs::read_to_string(project.path().join(format!("file-{index}.txt"))).unwrap(),
+            "prepared\n"
+        );
+    }
+    let saved = agent.sessions().unwrap().snapshot().records();
+    let changes = saved
+        .iter()
+        .filter(|record| {
+            matches!(
+                record,
+                crate::sessions::Record::Tool {
+                    change: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(changes, 17, "early changes must survive a long sequence");
+}
+
+#[test]
 fn a_media_read_in_steps_asks_to_be_read_alone() {
     let call = ToolCall {
         id: "chain_s1".into(),
@@ -421,7 +460,7 @@ fn steps_that_cannot_run_are_refused_without_running_any() {
             vec![write("a.txt", "no"), step("nonsense", Value::object([]))],
             "Unknown tool: nonsense",
         ),
-        (Vec::new(), "steps must contain 1-12 entries"),
+        (Vec::new(), "steps must contain at least one entry"),
     ] {
         let project = Directory::new();
         let fixture = fixture(steps);

@@ -68,6 +68,77 @@ fn large_pipeline_streams_between_owned_stages() {
 }
 
 #[test]
+fn wc_counts_lines_in_files_and_standard_input() {
+    let (directory, mut shell) = shell();
+    fs::write(directory.path().join("first.rs"), b"one\ntwo\nlast").unwrap();
+    fs::write(directory.path().join("second.rs"), b"three\n").unwrap();
+    assert_eq!(shell.run("wc -l *.rs > lines"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("lines")).unwrap(),
+        "2 first.rs\n1 second.rs\n3 total\n"
+    );
+    assert_eq!(shell.run("printf 'a\\nb\\n' | wc -l > piped"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("piped")).unwrap(),
+        "2\n"
+    );
+    assert_eq!(shell.run("wc -c first.rs > bytes"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("bytes")).unwrap(),
+        "12 first.rs\n"
+    );
+    assert_eq!(shell.run("wc -l < second.rs > redirected"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("redirected")).unwrap(),
+        "1\n"
+    );
+}
+
+#[test]
+fn wc_takes_its_option_after_a_file_until_a_separator() {
+    let (directory, mut shell) = shell();
+    fs::write(directory.path().join("first"), b"one\ntwo\n").unwrap();
+    fs::write(directory.path().join("-l"), b"three\n").unwrap();
+    assert_eq!(shell.run("wc first -l > after"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("after")).unwrap(),
+        "2 first\n"
+    );
+    assert_eq!(shell.run("wc -l -- -l > literal"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("literal")).unwrap(),
+        "1 -l\n"
+    );
+}
+
+#[test]
+fn wc_consumes_standard_input_once_across_named_operands() {
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("printf 'one\\ntwo\\n' | wc -l - - > counts"), 0);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("counts")).unwrap(),
+        "2 -\n0 -\n2 total\n"
+    );
+}
+
+#[test]
+fn wc_reports_missing_files_and_counts_remaining_files() {
+    let (directory, mut shell) = shell();
+    fs::write(directory.path().join("first"), b"one\n").unwrap();
+    fs::write(directory.path().join("last"), b"two\n").unwrap();
+    assert_eq!(shell.run("wc -l first missing last > counts 2> errors"), 1);
+    assert_eq!(
+        fs::read_to_string(directory.path().join("counts")).unwrap(),
+        "1 first\n1 last\n2 total\n"
+    );
+    assert!(
+        fs::read_to_string(directory.path().join("errors"))
+            .unwrap()
+            .contains("wc: missing:")
+    );
+}
+
+#[test]
 fn text_pipeline_deletes_newlines_without_an_installed_utility() {
     let (directory, mut shell) = shell();
     assert_eq!(shell.run("seq 0 3 | tr -d '\\n' > joined"), 0);

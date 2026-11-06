@@ -8,7 +8,7 @@ use crate::{
     sessions::Stage,
     tools::{Begun, Execution},
 };
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 
 mod declared;
 mod scheduling;
@@ -39,11 +39,16 @@ impl Agent {
             let end = if selected == Mode::Serial {
                 index + 1
             } else {
+                let mut ids = HashSet::new();
                 index
                     + calls[index..]
                         .iter()
                         .take(MAX_PARALLEL_CALLS)
-                        .take_while(|call| mode(call) == selected && !self.gated(call))
+                        .take_while(|call| {
+                            mode(call) == selected
+                                && !self.gated(call)
+                                && ids.insert(call.id.as_str())
+                        })
                         .count()
             };
             if end - index >= 2 {

@@ -54,12 +54,16 @@ reads `Path`.
 
 `pwd`, `cd`, `echo`, `printf`, `cat`, `ls`, `mkdir`, `cp`, `mv`, `rm`, `touch`,
 `test` and `[`, `sleep`, `env`, `printenv`, `export`, `set -e` and `set +e`,
-`wc -c`, `seq`, `tr -d`, `head`, `tail`, `grep`, `mktemp`, `wait`, `true`, `false`,
+`wc -l`, `wc -c`, `seq`, `tr -d`, `head`, `tail`, `grep`, `mktemp`, `wait`, `true`, `false`,
 `:` and `exit`.
 
-Built-ins support only the options they implement; for example, `wc` supports
-only `-c` on standard input and `tr` only `-d`. A few behaviors to know:
+Built-ins support only the options they implement; for example, `tr` supports
+only `-d`. A few behaviors to know:
 
+- `wc` accepts one of `-l` (newline count) or `-c` (byte count), files or standard
+  input, and a total for multiple files. `-` reads standard input; `--` ends the
+  options, which may otherwise follow filenames. It counts in chunks without
+  loading whole files.
 - `bash PATH [ARGS]` and `sh PATH [ARGS]` run a script with this same
   interpreter, in a fresh state with its own positional arguments.
 - `cp -r` refuses to copy a directory into itself.

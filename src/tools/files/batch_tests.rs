@@ -2,6 +2,8 @@ use super::*;
 use crate::checkpoints::session::Session;
 use crate::test_support::Directory;
 
+mod ambiguity;
+
 fn batch(steps: &[(&str, &str)]) -> Value {
     Value::object([
         ("path", Value::string("source.txt")),
@@ -140,6 +142,24 @@ fn later_streaming_mismatches_explain_staged_matching_and_original_context() {
                 .unwrap()
                 .starts_with("alpha beta\n")
         );
+        if reason == "more than once" {
+            assert_eq!(
+                rejected.get("match_context_source").and_then(Value::as_str),
+                Some("staged")
+            );
+            let windows = rejected
+                .get("match_context")
+                .and_then(Value::as_array)
+                .unwrap();
+            assert_eq!(windows.len(), 2);
+            assert!(
+                windows[0]
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap()
+                    .contains("gamma gamma beta")
+            );
+        }
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
     }

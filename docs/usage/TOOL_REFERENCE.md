@@ -37,11 +37,12 @@ Neither changes what the call does.
 
 ## Steps
 
-`steps` runs up to 12 tools in order with one call, so the model does not pay a
+`steps` runs prepared tools in order with one call, so the model does not pay a
 request between calls that do not need each other's results. Each entry has
 `tool` and `arguments`, the same arguments as that tool alone, and keeps its own
-permission check, checkpoint and card. A call naming an unknown tool, `ask_user` or
-`steps`, or with more than 12 entries, is refused whole and runs nothing.
+permission check, checkpoint and card. There is no fixed entry-count limit.
+The schema lists the tools available as steps. `ask_user` needs its own call;
+nested `steps`, unknown tools and empty arrays are refused before anything runs.
 
 The call has one result, a `steps` array in the same order. Each entry names its
 `tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
@@ -139,6 +140,16 @@ in order with its own outcome or error. The call needs one permission decision.
 Successful edits report `changed`: `true` when a replacement was installed,
 `false` when none was needed. Emptying a file still reports `true` even though
 `bytes_written` is zero.
+
+An ambiguous edit returns two bounded literal `match_context` excerpts with
+match byte offsets and `excerpt_byte_offset`. `match_context_source` says
+`original` for the first replacement or `staged` after preceding replacements;
+only `original` offsets apply to `read` with `byte_offset`, because staged text
+is not on disk. Long matches also provide a bounded `after_text` excerpt at
+`after_byte_offset`, so the text after the match remains available without
+repeating the whole match. Use these excerpts to make the next exact match unique.
+`current_content` still previews the unchanged original file; no replacement
+was saved. For a missing match, read the required section before retrying.
 
 `edit` requires UTF-8 text without NUL bytes. `write` can replace an existing
 binary file with the supplied content. Both refuse read-only files and paths

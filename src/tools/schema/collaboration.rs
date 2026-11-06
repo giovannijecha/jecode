@@ -53,7 +53,7 @@ pub(super) fn definition() -> Value {
     ]);
     super::tool(
         "agent",
-        "Coordinate collaborators with the same working tools and separate contexts. A collaborator starts without your context, rereads what you already read, and returns work you then review, so it usually costs more than doing the work yourself and rarely finishes sooner. Delegate only when the user asks, or when the work is large enough to split into independent parts that together would take you many calls. Do ordinary features, fixes, renames and tests yourself, however many files they touch. Each create, inspect, update, wait, stop and close costs a request of your own unless sent together in one steps call; prefer one wait over repeated inspect. Only the main agent can delegate and review. After checking a returned or failed report through its diff rather than rereading whole files, record the main agent's assessment with review (id, report_version, note); inspection or a text summary does not mark it reviewed. After any follow-up or integration, close the collaborator to release its resources and remove it from the active list. Returns arrive asynchronously; sent and received instructions are distinct. Calls are serialized with other tools.",
+        "Coordinate collaborators with the same working tools and separate contexts. A collaborator starts without your context, rereads what you already read, and returns work you then review, so it usually costs more than doing the work yourself and rarely finishes sooner. Delegate only when the user asks, or when the work is large enough to split into independent parts that together would take you many calls. Do ordinary features, fixes, renames and tests yourself, however many files they touch. Each create, inspect, update, wait, stop and close costs a request of your own unless sent together in one steps call; prefer one wait over repeated inspect. Only the main agent can delegate and review. Use diff to review isolated baselines or shared recorded edits; shared history may omit command changes and later writes, so verify current files. After checking a returned or failed report, record the main agent's assessment with review (id, report_version, note); inspection or a text summary does not mark it reviewed. After any follow-up or integration, close the collaborator to release its resources and remove it from the active list. Returns arrive asynchronously; sent and received instructions are distinct. Calls are serialized with other tools.",
         Value::object([
             (
                 "action",
@@ -168,7 +168,7 @@ pub(super) fn definition() -> Value {
             (
                 "path",
                 string(
-                    "For diff: one relative changed file to inspect baseline and current child content in pages.",
+                    "For diff: a file path from its files list. Isolated work pages baseline/current child content; shared work pages recorded edit history.",
                 ),
             ),
             (
