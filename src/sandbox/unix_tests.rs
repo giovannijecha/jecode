@@ -410,6 +410,27 @@ fn a_terminal_is_refused_rather_than_left_unconfined() {
 }
 
 #[test]
+fn a_workspace_command_can_reopen_its_anonymous_standard_input() {
+    if !available() {
+        return;
+    }
+    let root = Directory::new();
+    let tools = fixture(root.path());
+    let result = run(
+        &tools,
+        "exec",
+        Value::object([
+            ("executable", Value::string("/bin/cat")),
+            ("args", Value::Array(vec![Value::string("/dev/stdin")])),
+            ("stdin", Value::string("canary\n")),
+            ("timeout_seconds", Value::number(2)),
+        ]),
+    );
+    assert_exit(&result, 0);
+    assert_eq!(text(&result, "stdout"), "canary\n");
+}
+
+#[test]
 fn unix_programs_keep_their_identity_and_get_redirected_caches() {
     let project = Directory::new();
     let scratch = project.path().join("scratch");

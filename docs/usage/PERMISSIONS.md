@@ -156,8 +156,6 @@ owned shell executable.
 - **Terminal devices on Linux and macOS.** A confined command can still open your
   other terminal windows by device path and read or write them, though it cannot type
   into them as if you had.
-- **Reopening standard input on Linux.** With `stdin` in an `exec` call, a program that
-  reopens `/dev/stdin` instead of reading its standard input gets a permission error.
 - **macOS services.** Commands cannot send Apple Events or reach most system
   services, which `open`, `osascript`, `launchctl` and Xcode's `xcodebuild` need.
   Choose Full for those.

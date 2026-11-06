@@ -77,6 +77,29 @@ static char *resolve(const char *program) {
     return NULL;
 }
 
+/* The named FIFO belongs to the owner, but reopening it as /dev/stdin can
+   block after its writer closes. Forward it into an anonymous pipe instead. */
+static void relay_input(int source, int output) {
+    close(STDIN_FILENO);  /* Do not keep the owner's control channel open. */
+    close(STDOUT_FILENO); /* Do not keep the target's capture pipes open. */
+    close(STDERR_FILENO);
+    char bytes[8192];
+    for (;;) {
+        ssize_t count = read(source, bytes, sizeof bytes);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        for (ssize_t sent = 0; sent < count;) {
+            ssize_t part = write(output, bytes + sent, (size_t)(count - sent));
+            if (part < 0 && errno == EINTR) continue;
+            if (part <= 0) _exit(0);
+            sent += part;
+        }
+    }
+    close(source);
+    close(output);
+    _exit(0);
+}
+
 static int guard(const char *input, char **argv) {
     char *program = resolve(argv[0]);
     struct stat metadata;
@@ -106,7 +129,18 @@ static int guard(const char *input, char **argv) {
         _exit(0);
     }
     int source = open(input, O_RDONLY);
-    if (source < 0 || dup2(source, STDIN_FILENO) < 0) { free(program); return 125; }
+    if (source < 0) { free(program); return 125; }
+    if (strcmp(input, "/dev/null")) {
+        int data[2];
+        if (pipe(data) < 0) { close(source); free(program); return 125; }
+        pid_t relay = fork();
+        if (relay < 0) { close(data[0]); close(data[1]); close(source); free(program); return 125; }
+        if (relay == 0) { close(data[0]); relay_input(source, data[1]); }
+        close(source);
+        close(data[1]);
+        source = data[0];
+    }
+    if (dup2(source, STDIN_FILENO) < 0) { close(source); free(program); return 125; }
     if (source > STDERR_FILENO) close(source);
     /* The guardian above stays outside: it must still clean up and signal the group. */
     char *policy = getenv(CONFINE_MARKER);
