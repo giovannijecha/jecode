@@ -16,7 +16,7 @@ pub(super) fn run(
 ) -> Result<(), String> {
     // Validate the whole request before focusing or sending any input.
     let keys = if action == "press" {
-        let modifiers = match arguments.get("modifiers") {
+        let modifiers = match optional(arguments, "modifiers") {
             None => 0,
             Some(value) => value
                 .as_usize()
@@ -34,12 +34,14 @@ pub(super) fn run(
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or("Browser keyboard timeout is too large")?;
-    if let Some(selector) = arguments.get("selector") {
+    if let Some(selector) = optional(arguments, "selector") {
         let selector = selector
             .as_str()
             .ok_or("browser selector must be a string")?;
+        // A widget may hold focus inside itself or move it on focus; only an
+        // element that leaves focus elsewhere and unchanged cannot take input.
         let expression = format!(
-            "(()=>{{const e={};if(!e)return false;e.focus();return document.activeElement===e}})()",
+            "(()=>{{const e={};if(!e)return false;const b=document.activeElement;e.focus();const a=document.activeElement;return a!==b||e.contains(a)}})()",
             actions::element_expr(selector)
         );
         if actions::evaluate(
@@ -52,14 +54,26 @@ pub(super) fn run(
             return Err("Browser element is missing or cannot receive focus".into());
         }
     }
-    for key in keys {
+    let total = keys.len();
+    for (completed, key) in keys.iter().enumerate() {
         for kind in ["keyDown", "keyUp"] {
-            connection.call(
-                "Input.dispatchKeyEvent",
-                key.event(kind),
-                cancellation,
-                remaining(deadline, cancellation)?,
-            )?;
+            remaining(deadline, cancellation)
+                .and_then(|timeout| {
+                    connection.call(
+                        "Input.dispatchKeyEvent",
+                        key.event(kind),
+                        cancellation,
+                        timeout,
+                    )
+                })
+                // Delivered keys stay applied, so a retry needs to know them.
+                .map_err(|error| {
+                    if completed == 0 || cancellation.requested() {
+                        error
+                    } else {
+                        format!("{completed} of {total} keys completed: {error}")
+                    }
+                })?;
         }
     }
     Ok(())
@@ -82,6 +96,12 @@ fn required<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("browser {name} is required"))
 }
 
+fn optional<'a>(arguments: &'a Value, name: &str) -> Option<&'a Value> {
+    arguments
+        .get(name)
+        .filter(|value| !matches!(value, Value::Null))
+}
+
 struct Key {
     key: String,
     code: String,
@@ -93,56 +113,58 @@ struct Key {
 impl Key {
     fn parse(input: &str, mut modifiers: usize) -> Result<Self, String> {
         let mut key = input;
+        // A literal plus is also a key, including in Ctrl++.
         while key != "+"
             && let Some((modifier, rest)) = key.split_once('+')
         {
-            modifiers |= match modifier {
-                "Alt" => 1,
-                "Control" | "Ctrl" => 2,
-                "Meta" | "Command" | "Cmd" => 4,
-                "Shift" => SHIFT,
-                _ => return Err(format!("Unknown browser key modifier: {modifier}")),
+            modifiers |= match modifier.to_ascii_lowercase().as_str() {
+                "alt" | "option" => 1,
+                "control" | "ctrl" => 2,
+                "meta" | "command" | "cmd" => 4,
+                "shift" => SHIFT,
+                _ => {
+                    return Err(format!(
+                        "Unknown browser key modifier: {modifier}; use Alt, Ctrl, Meta or Shift"
+                    ));
+                }
             };
             key = rest;
-            // A literal plus is also a key, including in Ctrl++.
-            if key == "+" {
-                break;
-            }
         }
         if key.chars().count() == 1 {
             return Self::character(key.chars().next().unwrap(), modifiers);
         }
-        let (name, code, virtual_code) = match key {
-            "Enter" | "Return" => ("Enter", "Enter", 13),
-            "Tab" => ("Tab", "Tab", 9),
-            "Escape" | "Esc" => ("Escape", "Escape", 27),
-            "Backspace" => ("Backspace", "Backspace", 8),
-            "Delete" => ("Delete", "Delete", 46),
-            "Insert" => ("Insert", "Insert", 45),
-            "Home" => ("Home", "Home", 36),
-            "End" => ("End", "End", 35),
-            "PageUp" => ("PageUp", "PageUp", 33),
-            "PageDown" => ("PageDown", "PageDown", 34),
-            "ArrowLeft" => ("ArrowLeft", "ArrowLeft", 37),
-            "ArrowUp" => ("ArrowUp", "ArrowUp", 38),
-            "ArrowRight" => ("ArrowRight", "ArrowRight", 39),
-            "ArrowDown" => ("ArrowDown", "ArrowDown", 40),
-            "Space" => return Self::character(' ', modifiers),
-            _ => {
-                if let Some(number) = key.strip_prefix('F').and_then(|s| s.parse::<u16>().ok())
+        // Names ignore case and accept the short arrow names of the process tool.
+        let (name, virtual_code) = match key.to_ascii_lowercase().as_str() {
+            "enter" | "return" => ("Enter", 13),
+            "tab" => ("Tab", 9),
+            "escape" | "esc" => ("Escape", 27),
+            "backspace" => ("Backspace", 8),
+            "delete" | "del" => ("Delete", 46),
+            "insert" => ("Insert", 45),
+            "home" => ("Home", 36),
+            "end" => ("End", 35),
+            "pageup" => ("PageUp", 33),
+            "pagedown" => ("PageDown", 34),
+            "arrowleft" | "left" => ("ArrowLeft", 37),
+            "arrowup" | "up" => ("ArrowUp", 38),
+            "arrowright" | "right" => ("ArrowRight", 39),
+            "arrowdown" | "down" => ("ArrowDown", 40),
+            "space" | "spacebar" => return Self::character(' ', modifiers),
+            lower => {
+                if let Some(number) = lower.strip_prefix('f').and_then(|s| s.parse::<u16>().ok())
                     && (1..=24).contains(&number)
                 {
                     let name = format!("F{number}");
                     return Ok(Self::new(&name, &name, 111 + number, modifiers, None));
                 }
                 return Err(format!(
-                    "Unknown browser key: {key}; use a character, key name or chord such as Ctrl+z"
+                    "Unknown browser key: {key}; use a character, a chord such as Ctrl+z, or one of Enter, Tab, Escape, Backspace, Delete, Insert, Home, End, PageUp, PageDown, ArrowLeft, ArrowUp, ArrowRight, ArrowDown, Space, F1-F24"
                 ));
             }
         };
         Ok(Self::new(
             name,
-            code,
+            name,
             virtual_code,
             modifiers,
             (name == "Enter").then_some("\r"),

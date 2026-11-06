@@ -324,16 +324,20 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`, `type
   `Enter` or `ArrowLeft`, or a chord such as `Ctrl+z`, `Meta+z` or `Shift+Tab`.
   `modifiers` is an optional CDP bitmask: Alt = 1, Ctrl = 2, Meta/Command = 4,
   Shift = 8; combine flags by adding them. Chord flags and the mask combine.
-  Printable keys insert text; shortcuts do not insert their letter. ASCII
-  physical codes use the US keyboard layout; Unicode characters preserve their
-  text without inventing a physical code.
+  Key and modifier names ignore case; `Left`, `Up`, `Right`, `Down`, `Esc`, `Del`
+  and `Option` are aliases. Printable keys insert text; shortcuts do not insert
+  their letter. ASCII physical codes use the US keyboard layout; Unicode characters
+  preserve their text without inventing a physical code.
   On macOS, Command+A/C/X/V/Z and Command+Shift+Z include the corresponding
   native editing command; page key handlers can still cancel its default action.
 - `type` sends `text` as successive key-down/key-up pairs. Newlines press
   `Enter` (CRLF counts once), and tabs press `Tab`. For `press` and `type`, an
   optional `selector` focuses the element once; subsequent input follows page
-  focus, including navigation performed by the app. The whole keyboard action
-  shares `timeout_ms` (default 15,000).
+  focus, including navigation performed by the app. An element that neither takes
+  focus nor contains it is an error. The whole keyboard action shares `timeout_ms`
+  (default 15,000). Keys already delivered stay applied, so an error after a partial
+  sequence says how many completed. A key that navigates replaces the page later keys
+  would reach: send those in a new call after `wait`.
 - `fill` replaces an input's value using text insertion, without per-character
   keyboard events. Use `type` and `press` when verifying an editor, shortcuts or
   keyboard navigation. For example, after clicking cell A1,

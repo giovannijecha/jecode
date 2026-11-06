@@ -67,6 +67,99 @@ fn press_chords_and_masks_deliver_shortcuts_without_inserting_text() {
 }
 
 #[test]
+fn press_names_ignore_case_and_accept_common_aliases() {
+    let (mut connection, calls, server) = recording();
+    for arguments in [
+        r#"{"key":"enter"}"#,
+        r#"{"key":"ctrl+a"}"#,
+        r#"{"key":"CTRL+SHIFT+TAB"}"#,
+        r#"{"key":"Option+Left"}"#,
+        r#"{"key":"esc"}"#,
+        r#"{"key":"DEL"}"#,
+        r#"{"key":"f5"}"#,
+        r#"{"key":"Cmd+spacebar"}"#,
+        // Absent optional fields may arrive as explicit nulls.
+        r#"{"key":"up","modifiers":null,"selector":null}"#,
+    ] {
+        keyboard::run(
+            &mut connection,
+            "press",
+            &json::parse(arguments).unwrap(),
+            &Cancellation::default(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+    }
+    drop(connection);
+    server.join().unwrap();
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 18);
+    for (pair, (key, code, vk, modifiers)) in calls.chunks_exact(2).zip([
+        ("Enter", "Enter", 13, 0),
+        ("a", "KeyA", 65, 2),
+        ("Tab", "Tab", 9, 10),
+        ("ArrowLeft", "ArrowLeft", 37, 1),
+        ("Escape", "Escape", 27, 0),
+        ("Delete", "Delete", 46, 0),
+        ("F5", "F5", 116, 0),
+        (" ", "Space", 32, 4),
+        ("ArrowUp", "ArrowUp", 38, 0),
+    ]) {
+        let event = &pair[0].1;
+        assert_eq!(event.get("key"), Some(&Value::string(key)));
+        assert_eq!(event.get("code"), Some(&Value::string(code)));
+        assert_eq!(event.get("windowsVirtualKeyCode"), Some(&Value::number(vk)));
+        assert_eq!(event.get("modifiers"), Some(&Value::number(modifiers)));
+    }
+}
+
+#[test]
+fn unknown_names_list_what_the_model_can_use() {
+    let (mut connection, _, server) = recording();
+    let press = |connection: &mut Cdp, key: &str| {
+        keyboard::run(
+            connection,
+            "press",
+            &Value::object([("key", Value::string(key))]),
+            &Cancellation::default(),
+            Duration::from_secs(2),
+        )
+        .unwrap_err()
+    };
+    let error = press(&mut connection, "Hyper+a");
+    assert!(error.contains("Hyper") && error.contains("Alt, Ctrl, Meta or Shift"));
+    let error = press(&mut connection, "NumLock");
+    assert!(error.contains("NumLock") && error.contains("ArrowLeft") && error.contains("F1-F24"));
+    drop(connection);
+    server.join().unwrap();
+}
+
+#[test]
+fn a_stopped_sequence_reports_the_keys_that_completed() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let requests = AtomicUsize::new(0);
+    let (url, server) = fake_page(move |_, _| {
+        let reply = requests.fetch_add(1, Ordering::Relaxed) < 4;
+        (vec![], reply.then(|| Value::object([])))
+    });
+    let mut connection = Cdp::connect(&url).unwrap();
+    let error = keyboard::run(
+        &mut connection,
+        "type",
+        &Value::object([("text", Value::string("abc"))]),
+        &Cancellation::default(),
+        Duration::from_millis(300),
+    )
+    .unwrap_err();
+    assert!(
+        error.starts_with("2 of 3 keys completed: ") && error.contains("timed out"),
+        "{error}"
+    );
+    drop(connection);
+    server.join().unwrap();
+}
+
+#[test]
 fn type_preserves_unicode_normalizes_crlf_and_focuses_only_once() {
     let (mut connection, calls, server) = recording();
     keyboard::run(

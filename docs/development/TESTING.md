@@ -225,8 +225,10 @@ cargo test --locked --offline browser::live_tests::live_chromium_visible_viewpor
 ```
 
 The keyboard fixtures exercise printable keys and Enter in a textarea and form,
-select-all/delete/undo/redo, reverse Tab, Unicode contenteditable input, and a
-single `type` sequence that follows Enter/Tab focus changes between grid cells.
+select-all/delete/undo/redo, reverse Tab, Unicode contenteditable input, a
+single `type` sequence that follows Enter/Tab focus changes between grid cells,
+1,000 keys within the default timeout, widgets that manage their own focus, and
+keys on buttons, checkboxes, modal dialogs and selections.
 They inspect trusted DOM events and the resulting values and focus. CI runs
 these keyboard checks on all four targets using installed Chrome or Edge.
 The Linux CI wrapper uses the runner's outer sandbox because nested Chrome

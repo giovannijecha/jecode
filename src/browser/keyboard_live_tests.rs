@@ -46,7 +46,7 @@ impl Session {
         session
     }
 
-    fn run(&self, action: &str, fields: &[(&str, Value)]) -> Value {
+    fn attempt(&self, action: &str, fields: &[(&str, Value)]) -> Result<Value, String> {
         let mut arguments = Value::object([("action", Value::string(action))]);
         if let Value::Object(entries) = &mut arguments {
             for (key, value) in fields {
@@ -55,6 +55,10 @@ impl Session {
         }
         self.registry
             .execute(&self.area, None, &arguments, &Cancellation::default())
+    }
+
+    fn run(&self, action: &str, fields: &[(&str, Value)]) -> Value {
+        self.attempt(action, fields)
             .unwrap_or_else(|error| panic!("{action}: {error}"))
     }
 
@@ -267,4 +271,101 @@ fn live_chromium_app_can_cancel_keyboard_default_actions() {
     assert_eq!(session.value("editor.value"), Value::string("keep"));
     session.press("b", 0);
     assert_eq!(session.value("editor.value"), Value::string("keepb"));
+}
+
+#[test]
+#[ignore = "requires installed Chromium"]
+fn live_chromium_type_finishes_long_text_within_the_default_timeout() {
+    let session = Session::new();
+    let text = "0123456789".repeat(100);
+    session.run(
+        "type",
+        &[
+            ("selector", Value::string("#editor")),
+            ("text", Value::string(&text)),
+        ],
+    );
+    assert_eq!(session.value("editor.value"), Value::string(&text));
+}
+
+#[test]
+#[ignore = "requires installed Chromium"]
+fn live_chromium_selector_accepts_widgets_that_manage_their_focus() {
+    let session = Session::new();
+    session.value(
+        r#"document.body.innerHTML = `<input id="first">
+<div id="redirect" tabindex="0"><input id="inner"></div>
+<div id="plain"><input id="nested"></div><div id="text">text</div>
+<input id="off" disabled>`;
+      redirect.onfocus = () => inner.focus(); true"#,
+    );
+    // A page that already has focus runs the widget's handler inside focus().
+    let typed = |selector: &str, text: &str| {
+        session.attempt(
+            "type",
+            &[
+                ("selector", Value::string(selector)),
+                ("text", Value::string(text)),
+            ],
+        )
+    };
+    typed("#first", "1").unwrap();
+    assert_eq!(session.value("document.hasFocus()"), Value::Bool(true));
+    typed("#redirect", "2").unwrap();
+    assert_eq!(session.value("inner.value"), Value::string("2"));
+    session.click("#nested");
+    typed("#plain", "3").unwrap();
+    assert_eq!(session.value("nested.value"), Value::string("3"));
+    // An element that cannot take focus leaves it, and the input, elsewhere.
+    for selector in ["#text", "#off", "#missing"] {
+        let error = typed(selector, "4").unwrap_err();
+        assert!(error.contains("cannot receive focus"), "{error}");
+    }
+    assert_eq!(session.value("nested.value"), Value::string("3"));
+    assert_eq!(
+        session.value("document.activeElement.id"),
+        Value::string("nested")
+    );
+}
+
+#[test]
+#[ignore = "requires installed Chromium"]
+fn live_chromium_keys_operate_controls_and_selection() {
+    let session = Session::new();
+    session.value(
+        r#"document.body.innerHTML = `<button id="button">Go</button>
+<input id="check" type="checkbox"><dialog id="modal"><input></dialog>
+<textarea id="editor"></textarea><input id="field" value="word">`;
+      window.clicks = 0; button.onclick = () => clicks++; true"#,
+    );
+    let press = |selector: &str, key: &str| {
+        session.run(
+            "press",
+            &[
+                ("selector", Value::string(selector)),
+                ("key", Value::string(key)),
+            ],
+        );
+    };
+    press("#button", "Space");
+    press("#button", "Enter");
+    assert_eq!(session.value("clicks"), Value::number(2));
+    press("#check", "Space");
+    assert_eq!(session.value("check.checked"), Value::Bool(true));
+    session.value("modal.showModal(); true");
+    session.press("Escape", 0);
+    assert_eq!(session.value("modal.open"), Value::Bool(false));
+    press("#editor", "a");
+    session.press("Enter", 8);
+    assert_eq!(session.value("editor.value"), Value::string("a\n"));
+    session.press("Enter", 2);
+    assert_eq!(session.value("editor.value"), Value::string("a\n"));
+    session.value("field.focus(); field.setSelectionRange(4, 4); true");
+    session.press("ArrowLeft", 8);
+    assert_eq!(
+        session.value("[field.selectionStart,field.selectionEnd]"),
+        crate::json::parse("[3,4]").unwrap()
+    );
+    session.press("Backspace", 0);
+    assert_eq!(session.value("field.value"), Value::string("wor"));
 }
