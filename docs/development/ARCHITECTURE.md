@@ -318,6 +318,11 @@ They call OS APIs directly; the Rust code uses no `unsafe` and no FFI.
 | Clipboard and images | Windows PowerShell, macOS system commands, or the Linux X11/Wayland and GdkPixbuf adapter; see [Attachments](../usage/ATTACHMENTS.md#platform-requirements). |
 | Disk space | `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix. |
 
+For macOS Workspace commands, `sandbox/apple.rs` resolves the selected Xcode or
+Command Line Tools SDK through the filesystem and supplies `SDKROOT` if unset.
+This keeps Rust builds from invoking `xcrun` to discover the SDK after Seatbelt
+has been applied. Explicit and inherited `SDKROOT` values remain authoritative.
+
 Guardians stop owned descendants on cancellation, timeout or owner loss. Unix
 children that create their own process group or session leave that cleanup
 boundary. Losing the Unix owner and guardian at the same time can prevent

@@ -10,6 +10,8 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(any(target_os = "macos", test))]
+mod apple;
 mod runtime;
 #[cfg(any(unix, test))]
 mod unix;
@@ -404,6 +406,8 @@ fn confined_environment(
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    apple::configure(command, explicit.iter().any(|(key, _)| key == "SDKROOT"));
 }
 
 fn user_home() -> Option<PathBuf> {
