@@ -68,7 +68,7 @@ The model has one `lsp` tool with these actions:
 | `status` | Optional stable `server` ID; configuration and observed state, without starting a server. |
 | `definition` | `path`, one-based `line` and Unicode-scalar `column`; normalized locations and ranges. |
 | `references` | The same position, plus optional `include_declaration`; normalized locations. |
-| `diagnostics` | `path`; errors and warnings for that document, with freshness and coverage. |
+| `diagnostics` | `path`; every diagnostic the server reports for that document, with its severity, plus freshness and coverage. |
 
 An optional `server` ID resolves multiple matching enabled entries. Large
 responses have an inline preview and `result_file`; the model can read the
@@ -96,9 +96,10 @@ a current compiler diagnostic delivered by push.
 A document deleted or made unreadable during a query leaves the collected
 result marked stale while the healthy server remains available.
 
-Diagnostics can be current, pending, stale, unverified or unavailable. An
-empty current report means no reported errors or warnings for its stated
-document only. A versionless push report after an edit does not establish
+Diagnostics can be current, pending, stale, unverified, `sync_gap` or unavailable.
+`sync_gap` means synchronization could not be confirmed, for example after a scan
+budget gap or with a server that advertises no document sync. An empty current report
+means the server reported nothing for its stated document only. A versionless push report after an edit does not establish
 freshness. Initialization can advertise pull diagnostics; absence of that
 advertisement does not rule out later push reports. Errors found are successful
 analysis results, never an automatic completion gate.

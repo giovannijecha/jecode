@@ -141,7 +141,7 @@ percent in bold `STRONG`. Within three points of the compaction threshold the
 fill and the percent turn `WARNING`.
 
 With active collaborators or pending review, the same footer row replaces the
-folder with a quiet `AGENTS` badge (`LIT` on `BADGE_IDLE`, `STRONG` on
+folder with a quiet `AGENTS` badge (`LIT` on `BADGE_IDLE`, `BADGE_TEXT` on
 `BADGE_BAD` when work failed) and readable state counts. Failed work uses the
 existing error roles; uncertain outcomes use `WARNING`. An accent `/agents` hint
 appears when space permits. The context gauge remains and model details yield
@@ -184,8 +184,8 @@ its label in `DIM`.
 | Working | blinking `>_` | activity, shimmering | `Esc interrupt · turn time · ↑ input tokens · ↓ generated tokens` |
 | Retry | blinking `>_` in `WARNING` | `Retrying in 4s` in `WARNING` | `Esc interrupt · turn time · attempt N · reason` |
 | Done | static `>_` in `GOOD` | `Done` | `turn time · N tools · ↑ input tokens · ↓ generated tokens`, then the serving provider when reported |
-| Stopped | `■` in `WARNING` | `Stopped` | `time · your next message continues from here` |
-| Failed | `✕` in `BAD` | `Failed` | `time · prompt restored` and a fixing key |
+| Stopped | `■` in `WARNING` | `Stopped` | `time`, then `prompt restored` if the message came back, otherwise `your next message continues from here`; an autosave error if restoring could not be saved; `draft paused` if a draft was parked |
+| Failed | `✕` in `BAD` | `Failed` | `time`, then `prompt restored` if the message came back; an autosave error if restoring could not be saved; `draft paused` if a draft was parked; `/settings update key` after a rejected key |
 | Result | `✓` in `GOOD` | subject, such as `Copied` | detail; a setting reads `old → new` with the new value `STRONG` |
 | Warning | `▲` in `WARNING` | subject | detail and a fixing key |
 | Error | `✕` in `BAD` | subject | detail and a fixing key |
@@ -234,7 +234,8 @@ running one shimmers on `BADGE_IDLE`, a background one shows a `LIT` name on
 Finished badges with a family colour use `BADGE_TEXT`; the quiet ones (SAVE, MCP,
 LSP, WORK and tools without a family) use `STRONG`. The names are READ, SKILL (a
 `read` of a skill's `SKILL.md`), UPDATE, WRITE, BASH, EXEC, PROCESS, SAVE (the
-checkpoint tool), WEB, BROWSER, LIST, SEARCH, MAP and AGENTS. List, Search and
+checkpoint tool), WEB, BROWSER, LIST, SEARCH, MAP and AGENTS, plus STEPS on a
+refused `steps` call. List, Search and
 Map use the read-family surface; an optional description keeps the concrete
 target on the following tree row. A permission request names the main agent as
 `MAIN AGENT`, on the coordination surface.

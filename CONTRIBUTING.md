@@ -54,7 +54,9 @@ resulting behavior, the checks you ran and any limitations. State which
 platforms you tested and which native or manual checks are still needed.
 
 CI runs the checks on Windows, Linux and macOS; see
-[CI](docs/development/TESTING.md#ci). The maintainer reviews and merges changes
-after the required checks pass.
+[CI](docs/development/TESTING.md#ci). Windows and Linux run on maintainer-hosted
+runners that reject fork code before any step runs, so on a fork's pull request
+those checks do not verify your change. Run the normal checks locally and report
+the results; the maintainer decides how to verify the change before merging.
 
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).

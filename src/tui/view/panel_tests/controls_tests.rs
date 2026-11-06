@@ -12,6 +12,9 @@ fn active_command_controls_describe_execution_queueing_and_closing() {
         ("/COPY latest", "run"),
         ("/terminal", "run"),
         ("/TODO", "run"),
+        ("/settings", "run"),
+        ("/MODEL", "run"),
+        ("/help", "run"),
         ("/tmp clean", "queue"),
     ] {
         state.editor.replace(command.into());

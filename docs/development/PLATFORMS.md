@@ -33,10 +33,11 @@ the npm launcher cannot start below these on Linux or macOS.
 | Windows x64 | Windows 10 1809, build 17763 (and Server 2019) | ConPTY, for `exec` with `tty: true`. | The release stage rejects a system library outside a reviewed list, and a test rejects a new P/Invoke until it has been reviewed. | **Static only.** Imports and P/Invokes were read from the build and compared with Microsoft's documented minimums; a Windows build older than the CI host's has not run Jecode. |
 | macOS, ARM64 and Intel | macOS 11.0 | Rust's own minimum on ARM, and Node.js 22's on both. Node.js 24 needs macOS 13.5. | CI and releases set `MACOSX_DEPLOYMENT_TARGET=11.0`, and the release stage rejects a higher deployment target in the executable or a helper. Adapters using an API newer than the target fail to compile. | **Not executed below the CI runner's macOS 26.** The floor comes from the recorded deployment target; no older Mac has run Jecode. |
 
-Two Windows features depend on newer builds and turn off rather than fail. HTTP/2
-needs Windows 10 1607, which is below the floor. Workspace command confinement
-needs Process Security Environment support, which only recent Windows releases
-have; elsewhere commands require the Full level, as on Linux kernels below 5.13.
+One Windows feature depends on newer builds and turns off rather than fails:
+Workspace command confinement needs Process Security Environment support, which only
+recent Windows releases have; elsewhere commands require the Full level, as on Linux
+kernels below 5.13. HTTP/2 needs Windows 10 1607, below the floor, so every supported
+system has it.
 See [Permissions](../usage/PERMISSIONS.md#platform-limits).
 
 ## Platform limitations
@@ -102,9 +103,11 @@ interactive job-control groups through `/proc`; macOS uses `/bin/ps`.
 
 ## Native fixtures
 
-The terminal, confinement, browser and live-provider fixtures are listed in
-[Development and testing](TESTING.md#native-terminal-fixtures). Each uses
-loopback HTTP, synthetic credentials and isolated files.
+The terminal, confinement and browser fixtures and the opt-in live checks are listed
+in [Development and testing](TESTING.md#native-terminal-fixtures). The fixtures use
+isolated files, with loopback HTTP and synthetic credentials where they need them.
+Live provider and MCP checks contact real services with real accounts, and the native
+TLS check contacts public hosts without credentials.
 
 ## Check a terminal host
 

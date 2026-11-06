@@ -21,7 +21,7 @@ prints the command to resume what you were working on:
 
 ```text
 >_ jecode closed · 3 prompts · 12 tools · 4m 12s
-   jecode resume 7f3a9c2e
+   jecode resume 1793721600123-4812-0
 ```
 
 Resume restores the history, tool results, provider, model, effort, routing,

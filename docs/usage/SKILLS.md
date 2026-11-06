@@ -36,8 +36,12 @@ The frontmatter needs two fields:
 
 Values can be plain or wrapped in matching single or double quotes. This is a
 small frontmatter format, not YAML: multi-line values and escape sequences are
-not supported. An invalid skill is skipped with a warning shown in `/skills` and
-to the model; the other skills still work.
+not supported. A directory whose name breaks the `name` rule, such as one containing
+a space or a dot, and plain files directly under `skills/` are ignored without a
+warning. Any other invalid skill is skipped with a warning shown in `/skills` and to
+the model; the other skills still work. Jecode inspects the first 128 entries in name
+order and stops adding skills once catalog metadata reaches 48 KiB, with a warning in
+both cases. The frontmatter must close within the first 8 KiB of `SKILL.md`.
 
 Keep longer reference material in separate files inside the skill directory and
 link to them from `SKILL.md`. Copying the whole directory keeps those links

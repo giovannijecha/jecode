@@ -6,6 +6,11 @@ them and records results that still describe the current design. Results were
 measured on Windows unless stated; CI on other platforms does not establish
 their performance.
 
+For comparisons with other coding agents, see the
+[Jecode vs Codex and Claude Code benchmark](AGENT_BENCHMARK.md). It records
+coding work with Jecode's account routes; the probes below measure separate parts of
+Jecode and do not establish a lead over another harness.
+
 ## Measurement rules
 
 - Build before timing and use release builds (`--release`) unless a probe says
@@ -136,8 +141,9 @@ The loader now obtains directory metadata from its existing `DirEntry` rather
 than looking up the path again. On Windows, that metadata is already available
 from directory enumeration; on Unix, it retains the same metadata lookup. See
 the [standard-library contract](https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata).
-The search still includes `target` and other generated directories, and still
-skips directory links and junctions. No instruction selection rule changed.
+The search still includes `target` and other build output outside its skip list
+(`.git`, `.tmp`, `node_modules`, `.venv` and `vendor`), and still skips directory
+links and junctions. No instruction selection rule changed.
 
 ### Subscription context reuse
 

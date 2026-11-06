@@ -10,8 +10,9 @@ When the agent asks, the questions replace the composer under a
 `Waiting for you` marker, and an open menu or panel closes so they show at once.
 One request holds up to four questions, answered one at a time and sent
 together. A question can offer up to six options, single or multiple choice,
-and always ends with **Other**, where you type your own answer. Nothing is
-preselected; an option marked as recommended is only a suggestion.
+and then ends with **Other**, where you type your own answer; a question without
+options takes typed text only. Nothing is preselected; an option marked as
+recommended is only a suggestion.
 
 | Key | Action |
 | --- | --- |

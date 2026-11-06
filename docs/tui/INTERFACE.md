@@ -72,20 +72,25 @@ generated. The counts appear while no tool progress is shown. The composer stays
   continues from there.
 - **Use menus.** `/settings`, `/model`, `/effort`, `/routing`, `/skills` and
   `/help` open immediately; what they change for this conversation applies from
-  the next turn. `/copy`, `/terminal`, `/agents`, `/ask`, `/todo` and
-  `/permissions` also run immediately. Commands that start work or replace the
+  the next turn. `/copy`, `/terminal`, `/agents`, `/ask`, `/todo`, `/permissions`,
+  `/mcp` and `/lsp` also run immediately. Commands that start work or replace the
   conversation, such as `/init`, `/new`, `/resume`, `/export`, `/tmp`,
-  `/checkpoints` and `/exit`, wait for the turn to end. Ctrl+G lists them too,
-  in dim text marked `after this turn`; they cannot be selected there and are
-  never queued.
+  `/checkpoints` and `/exit`, wait until the turn completes and any open menu
+  closes; if the turn stops or fails, they return as a draft and do not run.
+  With slash completion open, Enter accepts the selected full command before
+  queueing it. Commands with arguments keep their typed text. Ctrl+G lists
+  waiting commands too, in dim text marked `after this turn`; they
+  cannot be selected there and are never queued.
 
 When the turn ends, the status row keeps `Done`, `Stopped` or `Failed` with its
 duration and facts until you send again; a failed turn also leaves its error as
 the last conversation row. If a turn stops or fails before producing any answer
-or tool card, your message returns to the composer with its attachments and is
-removed from the conversation. A queued message that had not joined the turn
-returns to the composer too; one that had joined stays as a `paused` draft that
-is never sent automatically.
+or tool card, your message and any queued message that had joined the turn return
+to the composer as one draft, with their attachments, and leave the conversation.
+Once the turn has output, a message that joined it stays in the conversation. A
+queued message that had not joined returns to the composer when the composer is
+free; otherwise it waits above the status row as a `paused` draft, which is never
+sent automatically. Up in an empty composer takes it back.
 
 Permission requests and questions from the agent take over the composer area
 until you answer; see [Permissions](../usage/PERMISSIONS.md#approval-requests)
@@ -145,7 +150,7 @@ it.
 
 ## Background processes
 
-`/terminal` lists the conversation's background processes. Select one and press
+`/terminal` lists the conversation's running background processes. Select one and press
 Enter to view its output; Tab switches between the **Output** and **Errors**
 tabs, the arrows, page keys and mouse wheel scroll, Home jumps to the start and
 End follows new output. Ctrl+D asks to stop the selected process; Enter confirms.
@@ -153,9 +158,9 @@ For an interactive process, press `i` to type into it directly; Ctrl+] leaves
 direct input, and Ctrl+C there sends an interrupt. Nothing you do in `/terminal`
 enters the conversation or affects what the model sees.
 
-`/terminal ID` opens one process directly, and `/terminal stop ID` stops it.
-Tool cards show a process's state when the call returned; `/terminal` shows its
-current state.
+`/terminal ID` opens one process directly, including the saved output of one that
+has ended, and `/terminal stop ID` stops it. Tool cards show a process's state when
+the call returned; `/terminal` shows the ones still running.
 
 ## Reading and scrolling
 
@@ -184,14 +189,15 @@ Below two rows or columns, drawing pauses until the terminal grows again.
 Ctrl+Q quits at once when nothing is running. While a turn, a background process
 or a collaborator is running, it asks first, under **Quit · work is running**,
 listing what will be stopped. Enter or a second Ctrl+Q stops the work and quits;
-Esc or Ctrl+C cancels. `/exit` quits after the current turn. Ctrl+C never quits.
+Esc or Ctrl+C cancels. `/exit` quits once the current turn completes; if the turn
+stops or fails, it returns as a draft instead. Ctrl+C never quits.
 
 On exit, Jecode restores your terminal's screen, cursor and modes, and prints a
 summary with the command to resume:
 
 ```text
 >_ jecode closed · 3 prompts · 12 tools · 4m 12s
-   jecode resume 7f3a9c2e
+   jecode resume 1793721600123-4812-0
 ```
 
 The resume line appears only after a successful save of a conversation with at

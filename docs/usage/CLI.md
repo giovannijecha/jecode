@@ -108,6 +108,7 @@ commands:
 | `/settings` | Run guided setup. |
 | `/init` | Create or update the project's `AGENTS.md`. |
 | `/skills` | List personal skills. |
+| `/mcp` | Inspect configured MCP connections and their tools. |
 | `/lsp` | Inspect configured language servers and observed conversation instances, without starting a server. |
 | `/copy` | Copy part of the latest answer through a numbered menu. |
 | `/export` | Save the conversation as JSON. |

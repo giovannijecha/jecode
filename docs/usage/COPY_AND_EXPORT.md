@@ -59,7 +59,8 @@ The file is JSON with `"format": "jecode.conversation"` and
   architecture, `debug` or `release`, and an FNV-1a fingerprint of its bytes,
   the same one `jecode --version` prints; the fingerprint is diagnostic, not an
   authenticity check);
-- the export time, provider, model, effort and working directory;
+- the export time (`exported_at_unix_ms`), `backend`, `model`, `effort` and
+  working directory;
 - `messages`: the system prompt, your messages, completed answers, tool calls
   and results, with provider-specific data kept under `jecode_origin`;
 - `events`: local command results, compaction summaries, recovery records, turn
@@ -70,11 +71,11 @@ contain a tool call whose result has not arrived yet.
 
 ### Timing records
 
-`request_timing` events describe each model request attempt: provider, model,
-operation (`completion`, `context_compaction` or `session_title`), effort,
-attempt number, start time, request size, `transport` (`socket` or `http` for
-OpenAI routes, otherwise `null`), outcome (`complete`, `failed` or `cancelled`)
-and the token counts the provider reported (`input_tokens`,
+`request_timing` events describe each model request attempt: `operation`
+(`completion`, `context_compaction` or `session_title`), `backend`, `model`,
+`effort`, `attempt`, `started_at_unix_ms`, `request_bytes`, `transport` (`socket`
+or `http` for OpenAI routes, otherwise `null`), `status` (`complete`, `failed` or
+`cancelled`) and the token counts the provider reported (`input_tokens`,
 `output_tokens`, `total_tokens`, `cached_tokens`, `cache_write_tokens`,
 `reasoning_tokens`; missing counters are `null`). Cached tokens are already
 included in input and reasoning tokens in output, so do not add them again.

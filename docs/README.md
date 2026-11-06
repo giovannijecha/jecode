@@ -10,7 +10,7 @@ repository root.
 | Guide | Covers |
 | --- | --- |
 | [Installation](usage/INSTALLATION.md) | Requirements, building, installing, updating and uninstalling. |
-| [Providers](usage/PROVIDERS.md) | Connecting OpenRouter, a ChatGPT account or a Claude account. |
+| [Providers](usage/PROVIDERS.md) | OpenRouter, OpenAI and Anthropic API keys; ChatGPT sign-in and the Claude account compatibility route. |
 | [Terminal interface](tui/INTERFACE.md) | Working in the fullscreen interface: sending, queueing, stopping, reading and quitting. |
 | [Command line](usage/CLI.md) | Single prompts, pipes, plain chat, options and exit codes. |
 
@@ -44,6 +44,15 @@ repository root.
 | [Tool reference](usage/TOOL_REFERENCE.md) | Exact tool arguments, defaults and limits. |
 | [Command language](usage/SHELL.md) | Syntax and built-ins of the `bash` tool. |
 
+## Project
+
+| Page | Contents |
+| --- | --- |
+| [Release notes](../CHANGELOG.md) | What changed in each version, with upgrade notes. |
+| [Agent benchmark](development/AGENT_BENCHMARK.md) | Measured efficiency against Codex and Claude Code, with per-run results and limits. |
+| [Security](../SECURITY.md) | Stored data, credentials and reporting a vulnerability. |
+| [Contributing](../CONTRIBUTING.md) | How to propose a change. |
+
 ## Development
 
 | Reference | Contents |
@@ -57,4 +66,4 @@ repository root.
 | [GitHub MCP App](development/GITHUB_MCP_APP.md) | App registration and public client ID for device sign-in. |
 | [Vercel MCP client](development/VERCEL_MCP_CLIENT.md) | Public OAuth metadata, hosting and Jecode client setup. |
 | [TUI theme](tui/THEME.md) | Colour tokens, grid and drawing rules. |
-| [Performance measurement](development/PERFORMANCE.md) | Probes, method and recorded results. |
+| [Performance measurement](development/PERFORMANCE.md) | Local probes, transport latency, context reuse and recorded results. |

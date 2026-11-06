@@ -35,7 +35,7 @@ document before shipping a changed identity.
 
 On 2026-11-03, an explicit live Windows check completed the native loopback
 authorization flow, discovered 241 tools, refreshed the token and discovered
-tools again. Jecode requests `offline_access` when the authorization server
-advertises it; Vercel requires that scope to issue refresh tokens. Although its
+tools again. Jecode adds `offline_access` when the authorization server advertises
+it and the sign-in request names other scopes; Vercel requires that scope to issue refresh tokens. Although its
 metadata lists `web_message.opener`, the native query callback was verified.
 The check performs no deployment or project mutation.

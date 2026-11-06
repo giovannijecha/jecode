@@ -45,6 +45,9 @@ content; Jecode does not inspect or redact secrets inside them.
   authenticate requests; refresh tokens are sent only to the issuing provider
   to renew them, and for ChatGPT to revoke them at sign-out. The verified
   ChatGPT ID token stays in the local record.
+- **MCP tokens and client secrets** are stored in plain JSON in `~/.jecode/mcp.json`,
+  and **language-server environment values** in `~/.jecode/lsp.json`. Both are
+  readable only by your user, as above.
 - Commands the agent runs do not inherit Jecode's registered provider credential
   environment variables. Credentials supplied to Jecode's HTTP adapter travel
   on stdin, not in process arguments.
@@ -62,13 +65,18 @@ Jecode keeps local data under `~/.jecode/`, including sensitive copies of:
 
 ## Boundaries
 
-[Permission levels](docs/usage/PERMISSIONS.md) govern what the agent's tools may
-do. On supported hosts, Workspace commands and their descendants run under an
+[Permission levels](docs/usage/PERMISSIONS.md) govern the agent's local file and
+command tools, web requests that can change something, and browser control. On
+supported hosts, Workspace commands and their descendants run under an
 OS-enforced filesystem policy (Process Security Environment on Windows, Landlock
 on Linux, Seatbelt on macOS); elsewhere commands require Full and run unconfined.
 Full commands run with your normal user permissions.
-Permissions do not isolate the whole Jecode process, remote services or
-everything a browser does.
+
+MCP and LSP calls are not governed by levels: an enabled connection or language
+server works at every level, including Read. Enabled language servers run
+unconfined as your user and receive the text of files opened for them.
+Permissions do not isolate the whole Jecode process, language servers, remote
+services or everything a browser does.
 
 The `web` tool uses Jecode's native HTTP support with operating-system TLS and
 certificate verification. The `browser` tool controls an installed browser

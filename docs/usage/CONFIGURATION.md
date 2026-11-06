@@ -35,15 +35,17 @@ In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 | Action | Effect |
 | --- | --- |
 | `/model` | Choose API keys or Credentials and a configured provider (when several are available), then a model and effort, for this conversation. |
-| `/model ID` | Switch this conversation to model `ID` on the current provider, without a catalog lookup. |
+| `/model ID` | Switch this conversation to model `ID` on the current provider. The TUI opens the effort selector when the catalog lists `ID`. An unlisted ID, a failed catalog load or `--plain` applies it at `default` effort. |
 | `/effort` or `/effort NAME` | Change this conversation's reasoning effort. |
 | `jecode --model ID "task"` | Use model `ID` for one launch without changing defaults. A different model starts at `default` effort. |
 
 The effort selector uses the model's catalog or documented API capabilities.
 For known OpenAI API models, Jecode supplies the levels documented by OpenAI
 because its API catalog omits them. Unknown model IDs retain `default`, which
-leaves the choice to the provider. `/effort NAME` can request a level the
-selector does not list; the provider may reject it.
+leaves the choice to the provider. On the OpenAI API and ChatGPT routes,
+`/effort NAME` can request a level the selector does not list; the provider may
+reject it. On OpenRouter and Anthropic, Jecode refuses a level the model's catalog
+does not list, or a model the catalog does not contain.
 
 Switching model or provider keeps the conversation, its history, attachments,
 processes and browser. Provider-specific data, such as encrypted reasoning, is
@@ -236,3 +238,7 @@ HTTP proxy settings follow the platform:
 
 `HTTP_PROXY` and `HTTPS_PROXY` have no effect on Windows and macOS. Loopback
 addresses never use a proxy.
+
+OpenAI conversations first try a WebSocket to the same host, using the same proxy
+route. If the connection is refused, does not open within 15 seconds or keeps
+closing, the request goes over HTTP and that conversation stays on HTTP for 5 minutes.

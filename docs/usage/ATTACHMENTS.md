@@ -50,8 +50,8 @@ content is built from the stored copy just before the request:
 | Other files | Kept locally; the manifest gives the path so the model can use a suitable tool. |
 
 When an OpenRouter model's catalog says it cannot take images, it receives a
-note instead. The ChatGPT and Claude routes send supported images without that
-check, and the provider may reject them. OpenRouter's PDF parsing results are
+note instead. The OpenAI and Anthropic routes, with a plan or an API key, send
+supported images without that check, and the provider may reject them. OpenRouter's PDF parsing results are
 saved and reused, so a PDF is not parsed twice.
 
 Images and PDFs you attach stay in the conversation's active context. Images a

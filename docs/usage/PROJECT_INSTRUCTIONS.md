@@ -68,8 +68,10 @@ UTF-8 text (a byte-order mark is accepted) of at most 64 KiB each, and all of
 them together at most 64 KiB. A linked `AGENTS.md` must point inside the launch
 directory.
 
-An unreadable file, invalid UTF-8, an instruction path that is not a file, a
-link pointing outside the launch directory or an exceeded size limit stops the
-request before anything is sent. Fix or remove the cause and send the request
-again. Instructions are never silently truncated. Known credentials are masked
+An unreadable file, a directory that cannot be listed or inspected, invalid UTF-8,
+an instruction path that is not a file, a link pointing outside the launch directory
+or an exceeded size limit stops the request before anything is sent. The scan covers
+every subdirectory except the skipped names above, so one directory Jecode may not
+read stops every request from that launch folder. Fix or remove the cause, or start
+Jecode in a narrower folder, and send the request again. Instructions are never silently truncated. Known credentials are masked
 before instructions reach the model.

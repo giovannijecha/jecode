@@ -11,10 +11,14 @@ const STOP: &str =
     "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
 
 fn gated(release: mpsc::Receiver<()>) -> Response {
+    gated_answer("Active.", release)
+}
+
+fn gated_answer(text: &str, release: mpsc::Receiver<()>) -> Response {
     Response::GatedStream {
-        head:
-            "data: {\"choices\":[{\"delta\":{\"content\":\"Active.\"},\"finish_reason\":null}]}\n\n"
-                .into(),
+        head: format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{text}\"}},\"finish_reason\":null}}]}}\n\n"
+        ),
         tail: STOP.into(),
         release,
     }
@@ -64,14 +68,36 @@ fn worker_finished(app: &App) {
 }
 
 #[test]
+fn a_selected_command_is_completed_before_it_waits_for_the_active_turn() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let (release, gate) = mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![gated(gate)]);
+    let mut app = app(&home, &directory, &fixture);
+    start(&mut app, "active");
+    app.input(Decoded::Text("/ne".into())).unwrap();
+    assert_eq!(app.state.suggestions.chosen(), Some("/new"));
+    key(&mut app, 13, 0);
+    assert_eq!(app.state.queue.messages(), ["/new"]);
+    assert!(app.worker.is_some());
+    release.send(()).unwrap();
+    wait_until(&mut app, |app| {
+        app.worker.is_none() && app.state.queue.is_empty()
+    });
+    assert!(rows(&app).is_empty());
+    assert!(app.state.editor.text.is_empty());
+    assert_eq!(fixture.finish().len(), 1);
+}
+
+#[test]
 fn an_open_panel_does_not_defer_delivery_and_no_completion_shows_between_responses() {
     let home = Directory::new();
     let directory = Directory::new();
     let (release, gate) = mpsc::channel();
-    let fixture = HttpFixture::streaming(vec![
-        gated(gate),
-        Response::Json(200, completion("Done.", vec![])),
-    ]);
+    // One poll can drain a whole turn, so the second response stays held until
+    // the assertions below have seen the turn still working.
+    let (finish, last) = mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![gated(gate), gated_answer("Done.", last)]);
     let mut app = app(&home, &directory, &fixture);
     start(&mut app, "active");
     submit(&mut app, "joined");
@@ -87,6 +113,7 @@ fn an_open_panel_does_not_defer_delivery_and_no_completion_shows_between_respons
     assert_ne!(app.state.status, "Ready");
     assert!(app.state.queue.is_empty());
     assert!(app.state.information.is_some());
+    finish.send(()).unwrap();
     wait_until(&mut app, |app| app.worker.is_none());
     assert_eq!(
         rows(&app),

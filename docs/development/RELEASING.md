@@ -52,10 +52,13 @@ Its required job names are `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)`, and
    and `npm view @giovannijecha/jecode time --json`. Removed
    versions may be absent from `versions` but remain in `time`; npm permanently
    reserves them. Choose a version that has never been published.
-2. Merge the intended revision to `main` after its four CI jobs pass. Set the
-   release version in `Cargo.toml` and review the corresponding lockfile and
-   user documentation in that revision.
-3. Run the **Prepare npm release** workflow manually for that revision. Its
+2. On a release branch, set the version in `Cargo.toml` and review its lockfile,
+   [release notes](../../CHANGELOG.md) and user documentation together. Open a
+   pull request, wait for all four CI jobs on its final revision to pass, then
+   merge it to `main`. The version change must be part of that verified revision.
+3. Wait for all four CI jobs on the resulting `main` commit. Run the **Prepare npm
+   release** workflow on `main` while that commit is its head; the workflow has no
+   revision input and builds whatever the selected branch points to. Its
    Windows and Linux jobs use this project's local runners; its macOS jobs use
    GitHub's standard hosted `macos-26` ARM64 and `macos-26-intel` x64 runners. Each
    job builds and tests the native executable, checks a local npm
@@ -67,15 +70,13 @@ Its required job names are `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)`, and
    lifecycle fixture, and previews `npm publish <tarball> --dry-run` against
    those exact bytes. Download its `jecode-npm-tarball` artifact, including
    `manifest.json`, within seven days and inspect the digest, package inventory,
-   and version before any publication decision.
+   and version before any publication decision. Confirm that `revision` in
+   `manifest.json` is that commit; otherwise discard the artifacts and rerun.
 
 The workflow does **not** publish to npm, create a Git tag or GitHub release,
 or use an npm credential or OIDC write permission. The local lifecycle fixture
 uses a private registry on loopback; it never contacts a provider. It checks
 the native binary and npm's global install, update, and uninstall behavior.
-Once two public versions exist, also verify
-`npm update -g @giovannijecha/jecode` against the real registry from the earlier
-version.
 
 To check one platform from a local checkout, build its release executable with
 `cargo build --release --locked --offline` (on Linux, against the sysroot; on macOS,
@@ -97,16 +98,16 @@ Checkouts used for release artifacts must share the same commit.
 
 ## Publication after authorization
 
-Publish `@giovannijecha/jecode` under the maintainer's npm user scope. The first
-publication requires the maintainer's authenticated npm account and 2FA, or a
-staged publication followed by 2FA approval. Review and publish the exact
+Publish `@giovannijecha/jecode` under the maintainer's npm user scope. Until trusted
+publishing is configured, publication requires the maintainer's authenticated npm
+account and 2FA, or a staged publication followed by 2FA approval. Review and publish
+the exact
 complete tarball produced by the preparation workflow with
 `npm publish <tarball> --access public`; scoped packages need explicit public
 access. Never publish a local single-platform fixture.
 
-After the first package exists, trusted publishing can be configured in its npm
-settings for `giovannijecha/jecode` and the exact future publication workflow
-filename. A trusted publishing job must run on a GitHub-hosted runner, with
+Trusted publishing can be configured in the package's npm settings for
+`giovannijecha/jecode` and the exact future publication workflow filename. A trusted publishing job must run on a GitHub-hosted runner, with
 `id-token: write`, Node 22.14.0 or newer, and npm 11.5.1 or newer. The
 publisher configuration must explicitly allow direct `npm publish`; its first
 successful use must happen within two days. Keep Windows and Linux build and
@@ -124,6 +125,23 @@ References: [npm package binaries](https://docs.npmjs.com/cli/v11/configuring-np
 [npm version reservation](https://docs.npmjs.com/policies/unpublish/),
 [trusted publishing](https://docs.npmjs.com/trusted-publishers/), and
 [GitHub runner architectures](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job).
+
+## After publication
+
+The preparation workflow does none of this. For each published version:
+
+1. Run `npm view @giovannijecha/jecode@<version> dist.integrity` and compare it with
+   `integrity` in the reviewed `manifest.json`.
+2. From the previous public version, verify `npm update -g @giovannijecha/jecode`
+   against the real registry, then run `jecode --version`. Use a disposable
+   environment: version managers such as Volta intercept global npm commands and
+   ignore `npm_config_prefix`.
+3. Create the annotated tag `v<version>` with the message `Jecode <version>` on the
+   `revision` recorded in `manifest.json`, and push it. That revision may be older
+   than `main`.
+4. Create the GitHub release `Jecode <version>` from that tag, with the user-facing
+   changes as its notes, and attach `giovannijecha-jecode-<version>.tgz` and
+   `manifest.json`.
 
 ## User lifecycle
 

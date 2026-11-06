@@ -11,8 +11,10 @@ Type `/` to see the commands grouped as below, or press Ctrl+G for the same
 catalogue, groups and order in a **Commands** sheet (see [Keys](#keys)).
 **During a turn** says what happens if you run a command while the agent is
 working: *now* runs it immediately, *opens* shows the menu at once and applies
-conversation changes from the next turn, *waits* queues it until the turn ends.
-The Ctrl+G sheet never queues: commands that wait stay listed in dim text marked
+conversation changes from the next turn, *waits* queues it until the turn
+completes and any open menu or information panel closes. If the turn stops or
+fails, a waiting command returns to the composer as a draft, or stays `paused`,
+and does not run. The Ctrl+G sheet never queues: commands that wait stay listed in dim text marked
 `after this turn` and cannot be selected.
 
 ### Conversation
@@ -77,7 +79,7 @@ a real one.
 | Ctrl+U | Delete to the start of the line. |
 | Ctrl+P, Ctrl+N | Browse your last 50 sent messages; Esc returns to the draft. |
 | Alt+V, or Ctrl+V on Linux and macOS | Attach an image from the clipboard. On Windows, Ctrl+V stays your terminal's text paste. |
-| `/` | Open the command list; Up/Down select, Tab completes, Enter runs. Use it to type arguments. |
+| `/` | Open the command list; Up/Down select, Tab completes, Enter accepts the selected full command and runs or queues it. Use it to type arguments; commands with arguments keep their typed text. |
 | Ctrl+G | Open the **Commands** sheet whenever the composer holds the keys, also during a turn, but not over a question or a permission request. A **Filter** field narrows the list; Enter runs the selected command. Your draft is untouched and waits above the sheet as `draft kept`. A command that opens a menu shows it over the draft, Esc goes back one level, and a choice returns to the composer. `/new` and `/resume` carry the draft into the conversation they open; a resumed conversation's own saved draft joins below it. |
 
 ### Conversation and work
@@ -107,7 +109,7 @@ end with the wheel or sending a message also returns to the latest output.
 | Typing | Filter longer lists. |
 | Left, Right | Switch tabs, such as **Commands** and **Keys** in `/help`. |
 | Esc | Go back or close; first cancels a pending deletion mark. |
-| Ctrl+D | Mark the selected conversation for deletion in `/resume`, ask to stop a process in `/terminal`, or revoke an approval in `/permissions` → **Remembered**. Enter confirms. |
+| Ctrl+D | In `/resume`, mark the selected conversation for deletion; in `/terminal`, ask to stop the selected process. Enter confirms both. In `/permissions` → **Remembered**, revoke the selected approval at once, with no confirmation. |
 
 ### Background process output
 

@@ -44,7 +44,8 @@ Paths are relative to `src/`.
    interface. An interactive terminal on stdin and stdout selects the TUI; a
    prompt argument, piped stdin or `--plain` selects the line-based CLI.
 2. Before recording a new request, the agent snapshots every `AGENTS.md` in the
-   launch directory and its real subdirectories. Each file keeps its directory
+   launch directory and its real subdirectories, skipping `.git`, `.tmp`,
+   `node_modules`, `.venv` and `vendor`. Each file keeps its directory
    scope, and the snapshot stays fixed for the whole turn, including after
    compaction. Parent directories are never read.
 3. The context layer projects the active conversation. The selected `Backend`
@@ -64,16 +65,16 @@ repeated-command refusals or validation of model output.
 ### Tool scheduling
 
 Up to four adjacent eligible reads run together automatically: `list`,
-`search`, `read` (except `history:` and `skill:` references), `map overview`,
-`checkpoint list` and `inspect`, `process list`, and `web fetch` or `download`
-using GET or HEAD without a body.
+`search`, a single-path `read` (except `history:` and `skill:` references),
+`map overview`, `checkpoint list` and `inspect`, `process list`, `mcp list` and
+`tools`, and `web fetch` or `download` using GET or HEAD without a body.
 
 A model can declare adjacent calls independent with `parallel: true`, including
 writes and commands. Declared groups run in waves of at most four. `parallel:
 false` forces serial execution, and omitted modifying calls stay serial.
 Declared and automatic groups never merge, and the agent never infers
-independence from paths. `agent`, `ask_user` and `todo_list` calls are always
-serial boundaries.
+independence from paths. `agent`, `ask_user`, `todo_list` and `steps` calls and
+multi-path `read` calls are always serial boundaries.
 
 `agent/steps.rs` runs one `steps` call as several tools in order. The transcript
 keeps the model's call with one combined result, because `openai_items` and
