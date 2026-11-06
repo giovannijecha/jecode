@@ -220,7 +220,7 @@ fn the_level_menu_applies_at_once_and_the_composer_names_the_level() {
     ));
     assert_eq!(menu.selected, 1, "the focus opens on the current level");
     let shown = screen(&app);
-    assert!(shown.contains("Edit and run here and in subfolders; network on"));
+    assert!(shown.contains("Edit and run in this folder; network on"));
     assert!(shown.contains("Remembered") && shown.contains("none"));
     assert!(shown.contains("new conversations use Workspace"));
     // The current level closes with no notice and no change.

@@ -10,7 +10,7 @@ use crate::{
         line::Line,
         state::State,
         text,
-        theme::{ACCENT, DIM, HAIRLINE, MUTED},
+        theme::{ACCENT, DIM, HAIRLINE, MUTED, STRONG},
     },
 };
 
@@ -92,7 +92,7 @@ pub(super) fn block(
         room,
         overflow,
     } = layout(request, panel, columns, height);
-    let title = [Line::new("Question", MUTED)];
+    let title = [Line::new("Question", STRONG.bold())];
     let rule = super::composer::rule(columns, HAIRLINE, &title, &Line::default());
     let mut parts = vec![(status, Part::Chrome), (rule, Part::Chrome)];
     if request.questions.len() > 1 {

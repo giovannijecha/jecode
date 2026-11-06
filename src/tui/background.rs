@@ -168,8 +168,18 @@ impl Probe {
                     self.watching = false;
                 }
                 _ => {
+                    // The Escape that broke a match may open the reply itself, whose
+                    // closing BEL would otherwise reach the composer as Ctrl+G.
+                    let opener = (byte == 27 && self.bytes.len() > 1)
+                        .then(|| self.pending.pop())
+                        .flatten();
                     for event in self.flush() {
                         push(&mut ready, event);
+                    }
+                    if let Some(opener) = opener {
+                        self.bytes.push(byte);
+                        self.pending.push(opener);
+                        self.last_at = Some(Instant::now());
                     }
                 }
             }
@@ -374,6 +384,15 @@ mod tests {
 
     fn paste(text: &str) -> Input {
         Input::Paste(text.encode_utf16().collect())
+    }
+
+    #[test]
+    fn an_escape_just_before_the_reply_stays_a_key_and_the_reply_stays_out() {
+        let mut probe = Probe::for_test();
+        assert!(probe.feed(paste("\x1b")).0.is_empty());
+        let (events, light) = probe.feed(paste("\x1b]11;rgb:ffff/ffff/ffff\x07"));
+        assert_eq!(light, Some(true));
+        assert!(matches!(&events[..], [Input::Paste(units)] if units == &[27]));
     }
 
     #[test]

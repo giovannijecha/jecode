@@ -85,7 +85,7 @@ fn controls_and_terminal_lifetime() {
     terminal.send(b"\x03/help\r");
     let help = terminal.wait("Help");
     terminal.wait_after("Commands", help);
-    terminal.send(b"/settings\r");
+    terminal.send(b"\x03/settings\r");
     let settings = terminal.wait("Settings · saved defaults");
     terminal.wait_after("Providers", settings);
     terminal.send(b"7");

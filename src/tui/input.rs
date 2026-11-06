@@ -62,15 +62,21 @@ impl App {
                 self.ask_text(&text, true);
                 return Ok(false);
             }
-            // The Todo menu has nothing to type into.
-            Decoded::Text(_) | Decoded::Paste(_) if self.state.todo_panel.is_some() => {
+            // A read-only sheet has nothing to type into and leaves the hidden draft alone.
+            Decoded::Text(_) | Decoded::Paste(_)
+                if self.state.todo_panel.is_some() || self.state.information.is_some() =>
+            {
                 return Ok(false);
             }
             Decoded::Error if self.state.agents_panel.is_some() => {
                 self.warn("Input exceeds 1 MiB · agent filter unchanged");
                 return Ok(false);
             }
-            Decoded::Error if self.state.ask_panel.is_some() || self.state.todo_panel.is_some() => {
+            Decoded::Error
+                if self.state.ask_panel.is_some()
+                    || self.state.todo_panel.is_some()
+                    || self.state.information.is_some() =>
+            {
                 self.warn("Input exceeds 1 MiB · panel input unchanged");
                 return Ok(false);
             }
@@ -80,7 +86,6 @@ impl App {
                     && let Some(paths) = crate::attachments::paths::dropped(&text)
                 {
                     self.state.feedback_input(true);
-                    self.state.information = None;
                     self.attach(super::attach::Source::Paths(paths));
                     return Ok(false);
                 }
@@ -103,7 +108,6 @@ impl App {
                     return Ok(false);
                 }
                 self.state.feedback_input(true);
-                self.state.information = None;
                 if let Some(selector) = &mut self.state.selector {
                     if selector.cancel_delete() && !selector.searchable {
                         return Ok(false);
@@ -192,9 +196,8 @@ impl App {
             }
             if !key.ctrl() && !key.alt() && matches!(key.code, 33..=40) {
                 super::view::scroll_information(&mut self.state, key.code);
-                return Ok(false);
             }
-            self.state.information = None;
+            return Ok(false);
         }
         if key.ctrl() && key.code == 67 {
             if self.state.selector.is_some() {

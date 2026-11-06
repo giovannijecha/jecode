@@ -61,7 +61,8 @@ a background process, use `/terminal`.
 ## Work chapters
 
 Two or more consecutive routine calls (Read, List, Search, Map overview, Bash,
-Exec, Process, Web, Browser, MCP and LSP) with the same `work` label in the same turn are
+Exec, Process, Web, Browser, MCP, LSP, collaboration events and agent list,
+inspect, wait and diff) with the same `work` label in the same turn are
 grouped into a **Work chapter**. The agent chooses the label; calls without one
 are grouped as **Activity**. Assistant text, a different label, a skill read or
 any other tool ends the chapter, and a single call keeps its own card.

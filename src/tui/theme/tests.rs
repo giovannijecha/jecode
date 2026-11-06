@@ -191,9 +191,9 @@ fn the_palette_keeps_text_legible_on_every_surface() {
         (BADGE_TEXT, BADGE_WARN),
     ] {
         // The palette cannot hold the 24-bit floors exactly: 4 for text, and 3
-        // for the gutter numbers, the only muted text on an added row.
-        let gutter = foreground == MUTED && surface == DIFF_ADDED_SURFACE;
-        let floor = if gutter { 3.0 } else { 4.0 };
+        // for muted text on an added row.
+        let added = foreground == MUTED && surface == DIFF_ADDED_SURFACE;
+        let floor = if added { 3.0 } else { 4.0 };
         let ratio = contrast_after(foreground, surface);
         assert!(ratio >= floor, "{foreground:?} on {surface:?}: {ratio:.2}");
     }

@@ -13,7 +13,6 @@ fn waits(name: &str, busy: bool, turn: bool) -> bool {
 impl App {
     pub(in crate::tui) fn open_commands(&mut self) {
         self.state.clear_notice();
-        self.state.information = None;
         let (busy, turn) = (self.busy(), self.held.is_some());
         self.state.selector = Some(Selector::commands(|name| waits(name, busy, turn)));
     }
@@ -25,8 +24,10 @@ impl App {
         self.dispatch(Prompt::plain(COMMANDS[index].name))
     }
 
-    /// Keeps the rows honest as work starts and ends under an open sheet.
+    /// Keeps the rows honest as work starts and ends under an open sheet. Work may also
+    /// have closed what the sheet opened, which leaves nothing for Esc to go back from.
     pub(in crate::tui) fn sync_commands(&mut self) -> bool {
+        self.follow_commands(false);
         let (busy, turn) = (self.busy(), self.held.is_some());
         self.state
             .selector

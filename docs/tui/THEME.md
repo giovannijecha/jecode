@@ -26,9 +26,9 @@ valid reply arrives within 800 ms on Windows, the native console adapter uses
 entry, captured before entering the alternate screen. Without any answer the
 terminal counts as dark. The answer only picks inks; it never adds a background.
 
-`Settings › Theme`, the sixth of the nine Settings rows, saves the choice. It
-applies at once, to the current conversation and to new ones, and repaints the
-screen.
+`Settings › Theme`, the sixth of the nine Settings rows, saves the choice once a
+default model exists; before that it lasts for the session. It applies at once,
+to the current conversation and to new ones, and repaints the screen.
 
 Colour is 24-bit on Windows and on Unix terminals that declare it through
 `COLORTERM`, `TERM`, `TERM_PROGRAM` or their own variable. Other terminals, such as
@@ -38,7 +38,8 @@ colours a theme can change. The dark tints that carry meaning would all turn gre
 there, so diffs use palette greens and reds (22, 52) and the shell, coordination and
 failure badges keep a hue (25, 23, 88). Setting `COLORTERM=truecolor` asks for 24-bit
 colour on a terminal Jecode does not recognize. Tests hold text on every surface in the
-palette at 4 or more, and 3 for the gutter numbers on an added row.
+palette at 4 or more, and 3 for `MUTED` on an added row; `DIM` line numbers reach about
+2.3 there.
 
 ## Tokens
 
@@ -68,7 +69,7 @@ sets one: `#0C0C0C`, `#17161F` and `#1E1E1E` for the dark inks, `#FFFFFF`,
 floors on each: `STRONG` 13, `BODY` 11, `ACCENT` 8.5, `MUTED` 6.5, `DIM` 5,
 `GOOD`, `BAD` and `WARNING` 4.5, and `FAINT` 3. `HAIRLINE` has no floor.
 Terminals with a lighter dark background, such as One Half Dark (`#282C34`),
-bring `DIM` and `FAINT` below those floors.
+bring every role but `GOOD`, `BAD` and `WARNING` below those floors.
 
 The activity shimmer uses `S0`, `S1` and `S2` over `S_BASE`:
 
@@ -116,7 +117,8 @@ badge's shimmer rests on `DIM`, which holds 3 on `BADGE_IDLE`.
 From the top: the header, the conversation, one gap row, then the dock. The
 header is the start of the conversation and scrolls away with it; the dock is
 anchored to the bottom. Markers (`›`, `●`, `✕`) sit at column 0, text starts at
-column 2, and right-hand facts end two cells before the edge. One blank row
+column 2, and right-hand facts end two cells before the edge, except the footer,
+which runs from edge to edge. One blank row
 separates conversation blocks. Tool badges take eight cells (see
 [Tool rows](#tool-rows)); attachment chips and the level chip have one cell of
 padding.
@@ -199,8 +201,8 @@ they run.
 
 One motion frame is 100 ms. The caret keeps `>` in `ACCENT` and blinks `_` in
 `LIT`, 400 ms on and 400 ms off. One shimmer band, `S0 S1 S2 S1 S0` moving one
-cell per frame over `S_BASE`, runs through the status label, running badges
-and running Work chapters.
+cell per frame, runs over `S_BASE` through the status label and over `DIM`
+through running badges and running Work chapters.
 
 ## Conversation
 
@@ -223,7 +225,7 @@ eight; an odd name fills seven and leaves one unfilled cell after the badge,
 because a word only centres on the cell grid when its gap is even. A name wider
 than eight keeps its natural width with one cell on each side. So the target of
 every call with a name of eight cells or fewer starts on column 9, where diff
-code starts.
+code starts when line numbers have two digits.
 
 There is no separate status dot: a finished call keeps its family colour, a
 running one shimmers on `BADGE_IDLE`, a background one shows a `LIT` name on
@@ -281,7 +283,7 @@ and `DIM` while running:
 | Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines · no checkpoint` follows in `DIM`. |
 | Failed command | `Exit N · diagnostic` in `BAD` on at most two rows, a muted position, up to two more `BAD` stderr rows. Recognized Node uncaught-exception headers give way to the actual error. |
 | Stopped command | `Cancelled after 6.0s` or `Timed out after …`, `· partial output` when some was captured, and the hidden line count. |
-| Background | `p3 running · latest line`; Process reports `stopping`, `stopped` or `status unknown`. A process list shows one count. |
+| Background | `p3 running · latest line`; Process reports `stopping`, `stopped` or `status unknown`. A process list shows the total and the running count. |
 | Web | The page title, size and host. |
 | Browser | Where it landed or what it saved, such as `Screenshot 1280×720 · path`. |
 | Error | The decoded message in `BAD`; a missing path reads `Not found`. |
@@ -310,7 +312,8 @@ turn carries it. Tool cards keep the result reported when the call returned;
 
 ### Work chapters
 
-Two or more adjacent Read, List, Search, Map overview, Bash, Exec, Process, Web and Browser calls share a
+Two or more adjacent Read, List, Search, Map overview, Bash, Exec, Process, Web, Browser, MCP and LSP
+calls, collaboration events and agent list, inspect, wait and diff calls share a
 Work chapter when their normalized `work` labels and execution turn match.
 Skill reads, Map remember/forget, assistant text and other tools break the chapter; a single call
 keeps its normal card. A missing label displays as **Activity**; the label is
@@ -396,9 +399,9 @@ empty field shows its placeholder in `DIM`.
 
 Option rows put `›` in `ACCENT` at column 0 on the selected row, which takes
 `SELECTED_SURFACE` across the whole row; `DIM` text there reads `MUTED`. Names
-are `STRONG` at column 2 with matched characters in bold `ACCENT`; a `MUTED`
-fact column follows at the widest name plus two, at most three fifths of the
-width. Badges and ages end on the right; the current item carries the word
+are `STRONG` at column 2 with matched characters in bold `ACCENT`; a fact column
+follows at the widest name plus two, at most three fifths of the width: `MUTED`
+by default, saved values in `BODY`, MCP and LSP health in state colours. Badges and ages end on the right; the current item carries the word
 `current` in `ACCENT`, and a recommended answer the word `recommended`. Group
 headings are `DIM`. A `┃` thumb in `MUTED` on a `│` track in `FAINT` takes the
 last column when the list overflows. Digits `1`–`9` choose among up to nine

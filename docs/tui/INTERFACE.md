@@ -40,8 +40,8 @@ message replaces it.
 
 Type and press Enter. Ctrl+J inserts a newline; Shift+Enter and Alt+Enter also
 work when your terminal reports them separately. Pasted text keeps its line
-breaks. The composer grows to show up to a third of the screen and scrolls
-around the caret; an empty composer shows `Ask anything…`.
+breaks. The composer grows to show up to a third of the screen, five to ten
+rows, and scrolls around the caret; an empty composer shows `Ask anything…`.
 
 Ctrl+P and Ctrl+N browse your last 50 sent messages (commands are excluded),
 and Esc returns to the draft you were writing. To attach files or a clipboard

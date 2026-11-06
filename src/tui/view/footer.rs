@@ -5,8 +5,8 @@ use crate::{
         state::State,
         text,
         theme::{
-            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, DIM, LIT, METER_FILL, METER_TRACK, MUTED, STRONG,
-            Style, WARNING,
+            ACCENT, BAD, BADGE_BAD, BADGE_IDLE, BADGE_TEXT, DIM, LIT, METER_FILL, METER_TRACK,
+            MUTED, STRONG, Style, WARNING,
         },
     },
 };
@@ -155,7 +155,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
         let mut line = Line::default();
         line.push_on(
             " AGENTS ",
-            if failed > 0 { STRONG } else { LIT },
+            if failed > 0 { BADGE_TEXT } else { LIT },
             if failed > 0 { BADGE_BAD } else { BADGE_IDLE },
         );
         line.push(&format!(" {}", facts(short)), style);

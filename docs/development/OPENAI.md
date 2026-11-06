@@ -60,9 +60,10 @@ depends on the Codex CLI.
    system browser opens. The redirect URI is
    `http://127.0.0.1:<port>/auth/callback`. Each attempt has fresh state, an
    OIDC nonce and a PKCE S256 verifier, and expires after five minutes.
-   Unrelated or invalid callbacks receive HTTP 400 without ending the attempt;
-   a matching provider error ends it.
-   The browser is answered only after the tokens are saved: a black page reading
+   Unrelated or invalid callbacks receive HTTP 400, 404 or 405 without ending the
+   attempt; a matching provider error ends it.
+   The browser of a valid callback waits until the tokens are saved; declined and
+   invalid callbacks are answered at once. Either way it gets a black page reading
    `jecode authenticated` and `close this tab`, or `jecode not authenticated` and
    `close this tab and try again`. The page comes from `auth/landing.rs` and
    `auth/landing.html`, shared with the other loopback sign-ins.

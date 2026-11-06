@@ -55,8 +55,8 @@ impl Level {
     pub fn fact(self) -> &'static str {
         match self {
             Self::Read => "Read and analyze; no project changes",
-            Self::Workspace => "Edit and run here and in subfolders; network on",
-            Self::Full => "Read, write and run anywhere, as your user",
+            Self::Workspace => "Edit and run in this folder; network on",
+            Self::Full => "Also outside this folder, as your user",
         }
     }
 }

@@ -310,11 +310,16 @@ fn help_and_temporary_info_close_without_sending_or_losing_a_preserved_draft() {
         assert!(app.state.information.is_none());
         assert_eq!(app.state.editor.text, "first\nsecond");
     }
+    // The sheet holds the keys: nothing reaches the draft it hides.
     app.help();
     app.input(Decoded::Text("α🙂\n".into())).unwrap();
-    assert!(app.state.information.is_none());
-    assert_eq!(app.state.editor.text, "fiα🙂\nrst\nsecond");
-    assert_eq!(app.state.editor.cursor, "fiα🙂\n".len());
+    app.input(Decoded::Paste("pasted".into())).unwrap();
+    key(&mut app, 8, 0);
+    key(&mut app, 71, 4);
+    assert!(app.state.information.is_some());
+    assert!(app.state.selector.is_none());
+    assert_eq!(app.state.editor.text, "first\nsecond");
+    assert_eq!(app.state.editor.cursor, 2);
     assert!(app.worker.is_none());
 }
 

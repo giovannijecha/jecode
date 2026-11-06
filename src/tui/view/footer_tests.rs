@@ -29,6 +29,28 @@ fn footer(state: &State) -> String {
 }
 
 #[test]
+fn a_failed_agent_keeps_the_chip_readable_on_both_terminals() {
+    let state = State {
+        width: 80,
+        height: 24,
+        collaboration: vec![crate::json::Value::object([(
+            "state",
+            crate::json::Value::string("failed"),
+        )])],
+        ..State::default()
+    };
+    let frame = frame(&state, "provider/model", r"C:\project");
+    let footer = frame.live.last().unwrap();
+    assert!(
+        footer.spans.iter().any(|span| span.text == " AGENTS "
+            && span.style == crate::tui::theme::BADGE_TEXT
+            && span.background == Some(crate::tui::theme::BADGE_BAD)),
+        "{:?}",
+        footer.spans
+    );
+}
+
+#[test]
 fn the_footer_shows_the_latest_provider_usage() {
     let mut state = with_status(61_000, Some(100_000));
     let idle = frame(&state, "provider/model", r"C:\project");

@@ -61,7 +61,7 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | Agent loop, context and backends | `agent::backend_tests` drives two synthetic protocols through tools, compaction, save and resume. `backend::openrouter`, `backend::openai` and `backend::anthropic` use loopback servers for their adapters. |
 | Accounts | `auth::openai`, `auth::anthropic`, `auth::accounts`. |
 | MCP | `mcp::` covers protocol, storage and OAuth with isolated loopback servers; `agent::mcp_tests` checks model-to-server dispatch, session reuse and redaction; `tui::mcp::` covers native panels and async configuration. |
-| LSP | `lsp::` uses an original child-process server for framing, synchronization, capabilities and lifecycle. `agent::lsp_tests` covers model dispatch at all local permission levels; `process::duplex` covers persistent I/O and descendant cleanup. `tui::lsp` and card tests cover B15. |
+| LSP | `lsp::` uses an original child-process server for framing, synchronization, capabilities and lifecycle. `agent::lsp_tests` covers model dispatch at all local permission levels; `process::duplex` covers persistent I/O and descendant cleanup. `tui::lsp` and card tests cover the LSP panels and cards. |
 | Routing | `agent::routing_tests`, `backend::openrouter`. |
 | Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
 | Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
@@ -95,7 +95,7 @@ cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tu
 cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 ```
 
-The first two need Windows 10 or later with ConPTY; the Linux fixture needs the
+The first three need Windows 10 or later with ConPTY; the Linux fixture needs the
 util-linux `script` tool; the macOS fixture needs the system `script` and `tty`
 utilities. Do not run the private `native_pty_fixture` child directly. Other
 Windows fixtures cover permission requests

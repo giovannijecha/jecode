@@ -28,11 +28,11 @@ fn family(name: &str) -> Surface {
 
 /// The family colour as text, for tool names inside a Work chapter.
 pub(super) fn ink(name: &str) -> Style {
-    match name {
-        "Update" | "Write" => KEYWORD,
-        "Bash" | "Exec" | "Process" => LIT,
-        "MCP" | "LSP" | "Save" => MUTED,
-        _ => ACCENT,
+    match family(name) {
+        BADGE_READ => ACCENT,
+        BADGE_EDIT => KEYWORD,
+        BADGE_SHELL => LIT,
+        _ => MUTED,
     }
 }
 
@@ -194,6 +194,21 @@ mod tests {
         assert_eq!(read.spans[0].background, Some(BADGE_READ));
         assert_eq!(read.spans[0].style, BADGE_TEXT.bold());
         assert_eq!(read.spans.len(), 1);
+    }
+
+    #[test]
+    fn chapter_names_take_the_ink_of_their_family() {
+        for (name, style) in [
+            ("Read", ACCENT),
+            ("Update", KEYWORD),
+            ("Bash", LIT),
+            ("Agents", MUTED),
+            ("AGENT 1", MUTED),
+            ("Save", MUTED),
+            ("MCP", MUTED),
+        ] {
+            assert_eq!(ink(name), style, "{name}");
+        }
     }
 
     #[test]

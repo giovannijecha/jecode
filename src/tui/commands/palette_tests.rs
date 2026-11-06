@@ -440,10 +440,42 @@ fn a_filter_with_only_waiting_commands_has_no_selected_row_or_run_key() {
 }
 
 #[test]
-fn the_key_opens_nothing_while_ask_holds_the_keys() {
+fn the_kept_draft_names_its_attachments() {
+    let (home, project) = (Directory::new(), Directory::new());
+    let mut app = app(&home, &project);
+    app.state.width = 80;
+    app.state.height = 32;
+    app.state.editor.set(Prompt::new(
+        format!("see {}", crate::attachments::MARKER),
+        vec![crate::attachments::tests::attachment(
+            "att-1-1-1",
+            "shot.png",
+            "image/png",
+        )],
+    ));
+    key(&mut app, CTRL_G, CTRL);
+    let rows = live(&app.state);
+    let kept = rows.iter().find(|row| row.contains("draft kept")).unwrap();
+    assert!(kept.starts_with("› see [1# Image]"), "{kept}");
+}
+
+#[test]
+fn work_closing_what_the_sheet_opened_leaves_esc_to_the_composer() {
     let (home, project) = (Directory::new(), Directory::new());
     let mut app = drafted(&home, &project);
-    let request = Request::parse(
+    key(&mut app, CTRL_G, CTRL);
+    text(&mut app, "help");
+    key(&mut app, ENTER, 0);
+    assert!(app.state.information.is_some() && app.from_commands);
+    // A panel also closes without a key: a question the turn withdrew, a failed load.
+    app.state.information = None;
+    app.poll().unwrap();
+    key(&mut app, ESC, 0);
+    assert!(app.state.selector.is_none());
+}
+
+fn question() -> Request {
+    Request::parse(
         "ask",
         &json::parse(
             r#"{"questions":[{"id":"format","title":"Format","question":"Which format?",
@@ -451,7 +483,44 @@ fn the_key_opens_nothing_while_ask_holds_the_keys() {
         )
         .unwrap(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn a_question_arriving_over_what_the_sheet_opened_ends_the_way_back() {
+    let (home, project) = (Directory::new(), Directory::new());
+    let mut app = drafted(&home, &project);
+    key(&mut app, CTRL_G, CTRL);
+    text(&mut app, "settings");
+    key(&mut app, ENTER, 0);
+    assert!(app.state.selector.is_some() && app.from_commands);
+    let request = question();
+    app.make_room_for_ask();
+    app.state.ask_panel = Some(Panel::new(&request, None));
+    app.state.question = Some(request);
+    key(&mut app, ESC, 0);
+    assert!(app.state.ask_panel.is_none() && app.state.question.is_some());
+    assert!(app.state.selector.is_none());
+}
+
+#[test]
+fn a_waiting_question_opened_from_the_sheet_goes_back_to_it() {
+    let (home, project) = (Directory::new(), Directory::new());
+    let mut app = drafted(&home, &project);
+    app.state.question = Some(question());
+    key(&mut app, CTRL_G, CTRL);
+    text(&mut app, "/ask");
+    key(&mut app, ENTER, 0);
+    assert!(app.state.ask_panel.is_some() && app.from_commands);
+    key(&mut app, ESC, 0);
+    assert!(commands_open(&app));
+}
+
+#[test]
+fn the_key_opens_nothing_while_ask_holds_the_keys() {
+    let (home, project) = (Directory::new(), Directory::new());
+    let mut app = drafted(&home, &project);
+    let request = question();
     app.state.ask_panel = Some(Panel::new(&request, None));
     app.state.question = Some(request);
     key(&mut app, CTRL_G, CTRL);

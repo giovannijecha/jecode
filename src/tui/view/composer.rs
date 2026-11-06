@@ -93,7 +93,7 @@ fn above(
 ) -> (Vec<Line>, Option<(usize, usize)>) {
     let mut room = height.saturating_sub(lines.len());
     let kept = (hidden && !state.editor.text.is_empty() && room > 0)
-        .then(|| pending_row(&state.editor.text, "draft kept", DIM, columns));
+        .then(|| pending_row(&state.editor.display(), "draft kept", DIM, columns));
     room -= usize::from(kept.is_some());
     let queued = pending(state, columns).filter(|_| room > 0);
     let mut rows: Vec<Line> = queued.into_iter().chain(kept).collect();

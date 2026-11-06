@@ -125,7 +125,7 @@ fn options(question: &Question, entry: &Entry, columns: usize) -> Answers {
         .map(|label| text::cells(label))
         .max()
         .unwrap_or(0);
-    let fact_at = (widest + 6).min((end / 2).max(12));
+    let fact_at = (widest + 6).min((end * 3 / 5).max(12));
     let chips = end >= text::cells(CHIP) + 14;
     let mut answers = Answers {
         rows: Vec::new(),

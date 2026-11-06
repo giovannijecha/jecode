@@ -426,13 +426,11 @@ fn note_row(note: &str, columns: usize) -> (Line, Part) {
     )
 }
 
-/// The fact column: the widest name with a fact, plus two, at most 3/5 of
-/// the text width.
+/// The fact column: the widest name, plus two, at most 3/5 of the text width.
 fn name_width(menu: &Selector, width: usize) -> usize {
     let widest = menu
         .options
         .iter()
-        .filter(|option| !option.fact.is_empty())
         .map(|option| text::cells(&text::clean(&option.name)))
         .max();
     widest.map_or(0, |widest| (widest + 2).min(width * 3 / 5))

@@ -22,7 +22,7 @@ const FACT_MIN: usize = 6;
 /// The narrowest a label is shortened to so its first fact fits.
 const LABEL_MIN: usize = 12;
 /// What precedes the label: the two-cell glyph and its gap.
-const PILL_CHROME: usize = 3;
+const GLYPH_CHROME: usize = 3;
 
 /// `escape` says whether Esc interrupts the turn from here: not while a
 /// panel or a draft edit holds it.
@@ -163,7 +163,7 @@ fn notice_row(notice: &Feedback, columns: usize) -> Line {
 }
 
 /// `glyph label`; the glyph column is two cells, so labels line up across states.
-fn pill(glyph: Line, label: Line) -> Line {
+fn headed(glyph: Line, label: Line) -> Line {
     let mut line = glyph;
     line.push(" ", BODY);
     line.append(label)
@@ -204,7 +204,7 @@ fn fitted(glyph: Line, label: Line, facts: Vec<Line>, key: Option<Line>, columns
         let room = columns.saturating_sub(2 + reserved);
         let label_cells = panel::cells(&label);
         let wanted = facts.first().map_or(0, |first| {
-            PILL_CHROME + label_cells + 2 + panel::cells(first)
+            GLYPH_CHROME + label_cells + 2 + panel::cells(first)
         });
         let cut = wanted.saturating_sub(room);
         let kept = label_cells.saturating_sub(cut).max(LABEL_MIN.max(room / 2));
@@ -212,17 +212,16 @@ fn fitted(glyph: Line, label: Line, facts: Vec<Line>, key: Option<Line>, columns
         // only costs the label its last letters.
         let worth = kept + cut <= label_cells
             || label_cells.saturating_sub(kept) >= FACT_MIN
-            || PILL_CHROME + label_cells > room;
-        let pill = if cut > 0 && worth {
-            pill(glyph.clone(), label.shortened(kept))
+            || GLYPH_CHROME + label_cells > room;
+        let mut row = if cut > 0 && worth {
+            headed(glyph.clone(), label.shortened(kept))
         } else {
-            pill(glyph.clone(), label.clone())
+            headed(glyph.clone(), label.clone())
         };
-        let used = panel::cells(&pill);
+        let used = panel::cells(&row);
         if key.is_some() && used > room {
             continue;
         }
-        let mut row = pill.clone();
         let space = room.saturating_sub(used + 2);
         let kept = (0..=facts.len())
             .rev()
@@ -242,7 +241,7 @@ fn fitted(glyph: Line, label: Line, facts: Vec<Line>, key: Option<Line>, columns
         }
         return row.shortened(columns);
     }
-    pill(glyph, label).shortened(columns)
+    headed(glyph, label).shortened(columns)
 }
 
 /// `Subject · fact · fact`, or `Subject: fact`: the label and its facts.

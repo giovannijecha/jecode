@@ -209,7 +209,7 @@ impl App {
             }
             "/effort" if !self.facts().has_model => self.local_finish(
                 Kind::Warning,
-                "No model selected · Choose a model with /model before setting effort",
+                "No model · Choose a model with /model before setting effort",
                 vec![],
             ),
             "/effort" => match if arguments.is_empty() {
