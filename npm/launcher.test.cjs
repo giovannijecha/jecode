@@ -15,7 +15,7 @@ function runtimeFor(platform = process.platform, arch = process.arch) {
   const errors = [];
   runtime.platform = platform;
   runtime.arch = arch;
-  runtime.report = { getReport: () => ({ header: { glibcVersionRuntime: '2.39' } }) };
+  runtime.report = { getReport: () => ({ header: { glibcVersionRuntime: '2.28' } }) };
   runtime.argv = ['node', 'jecode.cjs', '--plain', 'two words'];
   runtime.stderr = { write: (message) => errors.push(message) };
   runtime.exitCode = undefined;
@@ -32,26 +32,29 @@ function fakeChild() {
   return { child, signals };
 }
 
-test('target map matches exactly the three release artifact identities', () => {
-  assert.deepEqual(Object.keys(targets), ['win32-x64', 'linux-x64', 'darwin-arm64']);
-  assert.equal(targets['linux-x64'].glibcMinimum, '2.39');
+test('target map matches exactly the four release artifact identities and OS floors', () => {
+  assert.deepEqual(Object.keys(targets), ['win32-x64', 'linux-x64', 'darwin-arm64', 'darwin-x64']);
+  assert.equal(targets['win32-x64'].windowsBuildMinimum, 17763);
+  assert.equal(targets['linux-x64'].glibcMinimum, '2.28');
+  assert.equal(targets['darwin-arm64'].macosMinimum, '11.0');
+  assert.equal(targets['darwin-x64'].macosMinimum, '11.0');
   for (const [key, target] of Object.entries(targets)) {
     assert.deepEqual(targetFor(target.platform, target.arch), { key, ...target });
   }
-  assert.equal(targetFor('darwin', 'x64'), null);
   assert.equal(targetFor('linux', 'arm64'), null);
+  assert.equal(targetFor('win32', 'arm64'), null);
   assert.equal(targetFor('freebsd', 'x64'), null);
 });
 
 test('unsupported pair fails clearly without spawning', () => {
-  const { runtime, errors } = runtimeFor('darwin', 'x64');
+  const { runtime, errors } = runtimeFor('linux', 'arm64');
   const result = launch({
     runtime,
     spawnChild: () => assert.fail('must not spawn'),
   });
   assert.equal(result, null);
   assert.equal(runtime.exitCode, 1);
-  assert.match(errors.join(''), /unsupported platform darwin-x64/);
+  assert.match(errors.join(''), /unsupported platform linux-arm64\. Supported: win32-x64, linux-x64, darwin-arm64, darwin-x64\./);
 });
 
 test('missing packaged binary fails clearly without spawning', () => {
@@ -77,11 +80,11 @@ test('Linux without glibc fails before checking the binary or spawning', () => {
   });
   assert.equal(result, null);
   assert.equal(runtime.exitCode, 1);
-  assert.match(errors.join(''), /unsupported Linux libc; requires glibc 2\.39 or newer/);
+  assert.match(errors.join(''), /unsupported Linux libc; requires glibc 2\.28 or newer/);
 });
 
-test('Linux rejects glibc 2.38 and accepts 2.39 and 3.0', () => {
-  for (const [version, accepted] of [['2.38', false], ['2.39', true], ['3.0', true]]) {
+test('Linux rejects glibc 2.27 and accepts 2.28 and 3.0', () => {
+  for (const [version, accepted] of [['2.27', false], ['2.28', true], ['2.40.9000', true], ['3.0', true]]) {
     const { runtime, errors } = runtimeFor('linux', 'x64');
     runtime.report.getReport = () => ({ header: { glibcVersionRuntime: version } });
     const { child } = fakeChild();
@@ -103,13 +106,13 @@ test('Linux rejects glibc 2.38 and accepts 2.39 and 3.0', () => {
     } else {
       assert.equal(result, null);
       assert.equal(runtime.exitCode, 1);
-      assert.match(errors.join(''), /glibc 2\.38.*requires glibc 2\.39 or newer/);
+      assert.match(errors.join(''), /glibc 2\.27.*requires glibc 2\.28 or newer/);
     }
   }
 });
 
 test('libc report is read only on supported Linux', () => {
-  for (const [platform, arch] of [['win32', 'x64'], ['darwin', 'arm64']]) {
+  for (const [platform, arch] of [['win32', 'x64'], ['darwin', 'arm64'], ['darwin', 'x64']]) {
     const { runtime } = runtimeFor(platform, arch);
     runtime.report.getReport = () => assert.fail('must not read a report');
     const { child } = fakeChild();

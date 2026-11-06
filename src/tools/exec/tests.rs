@@ -101,20 +101,14 @@ fn user_exec_env_cannot_replace_the_trusted_sandbox_policy() {
     )
     .unwrap()
     .unwrap();
-    let result = crate::sandbox::apply(&mut command, Some(&policy));
-    if cfg!(windows) {
-        result.unwrap();
-        let marker = command
-            .get_envs()
-            .find(|(key, _)| *key == crate::sandbox::MARKER)
-            .unwrap()
-            .1
-            .unwrap();
-        assert!(marker.to_string_lossy().contains("\"network\":true"));
-        assert_ne!(marker.to_string_lossy(), "forged user policy");
-    } else {
-        assert!(result.is_err());
-    }
+    crate::sandbox::apply(&mut command, Some(&policy)).unwrap();
+    let marker = command
+        .get_envs()
+        .find(|(key, _)| *key == crate::sandbox::MARKER)
+        .unwrap()
+        .1
+        .unwrap();
+    assert_ne!(marker.to_string_lossy(), "forged user policy");
     crate::sandbox::apply(&mut command, None).unwrap();
     assert!(
         command

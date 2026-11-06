@@ -50,6 +50,8 @@ mod syntax;
 mod temporary_tests;
 mod terminal;
 mod terminal_output;
+#[cfg(test)]
+pub(crate) mod test_screen;
 mod text;
 mod theme;
 mod todo;
@@ -314,6 +316,25 @@ pub(crate) fn launch(
         if app.exit_requested {
             return Ok(());
         }
+        let (replayed, fallback) = background.expire();
+        if let Some(light) = fallback {
+            app.renderer.set_light_background(light);
+            dirty = true;
+        }
+        for event in replayed {
+            if app.terminal_event(event, &mut decoder)? {
+                return Ok(());
+            }
+            dirty = true;
+        }
+        // Resolve an expired Escape before later queued keys, even if worker
+        // or resize events kept the input queue busy.
+        if let Some(decoded) = decoder.idle() {
+            if app.input(decoded)? {
+                return Ok(());
+            }
+            dirty = true;
+        }
         // Consume complete geometry snapshots before painting. Bound this pass
         // so key bursts cannot starve worker events or the display.
         let events: Vec<_> = pending
@@ -334,17 +355,6 @@ pub(crate) fn launch(
                 if app.terminal_event(event, &mut decoder)? {
                     return Ok(());
                 }
-            }
-            dirty = true;
-        }
-        let (replayed, fallback) = background.expire();
-        if let Some(light) = fallback {
-            app.renderer.set_light_background(light);
-            dirty = true;
-        }
-        for event in replayed {
-            if app.terminal_event(event, &mut decoder)? {
-                return Ok(());
             }
             dirty = true;
         }
@@ -381,6 +391,7 @@ pub(crate) fn launch(
                 delay
             };
             let delay = delay.min(background.wait().unwrap_or(Duration::MAX));
+            let delay = delay.min(decoder.wait().unwrap_or(Duration::MAX));
             if app.copy_job.is_some() || !app.imports.is_empty() {
                 delay.min(Duration::from_millis(20))
             } else if motion::loading(&app.state) || view::opening::animated(&app.state) {
@@ -396,12 +407,6 @@ pub(crate) fn launch(
                 return Err("Terminal input closed. Use jecode --plain.".into());
             }
             Err(RecvTimeoutError::Timeout) => {
-                if let Some(decoded) = decoder.idle() {
-                    if app.input(decoded)? {
-                        return Ok(());
-                    }
-                    dirty = true;
-                }
                 // Animation draws once per motion frame or clock second.
                 dirty |= (app.state.activity.is_some()
                     || motion::loading(&app.state)

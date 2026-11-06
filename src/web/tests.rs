@@ -179,19 +179,23 @@ fn cancellation_preserves_crawl_queue() {
 
 #[test]
 fn a_failed_connection_reports_its_reason() {
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = closed.local_addr().unwrap().port();
-    drop(closed);
+    // Keep the port reserved: dropping a listener before the request lets a
+    // concurrent fixture acquire it and turn the expected failure into success.
+    let server = crate::test_support::server::Server::start(|listener, stop| {
+        let stream = crate::test_support::server::accept(&listener, &stop).unwrap();
+        stream.shutdown(std::net::Shutdown::Both).unwrap();
+    });
     let (_home, _project, area) = area();
     let arguments = Value::object([
         ("action", Value::string("fetch")),
-        ("url", Value::string(format!("http://127.0.0.1:{port}/"))),
+        ("url", Value::string(&server.endpoint)),
     ]);
     let error = execute(&area, &arguments, &Cancellation::default()).unwrap_err();
     let reason = error
         .strip_prefix("HTTP transfer failed:")
         .unwrap_or(&error);
     assert!(!reason.trim().is_empty(), "{error}");
+    server.finish();
 }
 
 #[test]

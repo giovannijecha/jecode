@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::terminal::fixtures;
 use crate::{
     agent::Agent,
     backend::openrouter::OpenRouter,
@@ -48,9 +49,6 @@ mod native_mcp;
 
 #[path = "native_lsp.rs"]
 mod native_lsp;
-
-#[path = "startup_tests.rs"]
-mod startup_tests;
 
 #[path = "native_script.rs"]
 mod native_script;
@@ -249,15 +247,15 @@ fn full_width_console() {
 #[ignore = "private child fixture of the native Windows ConPTY check"]
 fn native_console_fixture() {
     let scenario = std::env::var("JECODE_NATIVE_CASE").unwrap();
-    if scenario.starts_with("startup-") {
-        startup_tests::fixture(&scenario);
-        return;
-    }
     if scenario.starts_with("setup-") {
         crate::setup::native_sign_in_fixture(&scenario);
         return;
     }
     let path = std::path::PathBuf::from(std::env::var_os("JECODE_NATIVE_DIR").unwrap());
+    if scenario.starts_with("startup-") {
+        fixtures::startup(&path, &scenario);
+        return;
+    }
     if scenario == "verify-owner-death" {
         restored(&path);
         println!("NATIVE_OWNER_RESTORED");
@@ -266,12 +264,12 @@ fn native_console_fixture() {
     println!("NATIVE_SHELL_SENTINEL");
     std::fs::write(path.join("modes.txt"), probe().lines().next().unwrap()).unwrap();
     if scenario == "direct-input" {
-        native_direct_input::fixture(&path);
+        fixtures::direct_input(&path);
         restored(&path);
         return;
     }
     if scenario == "permissions" {
-        native_permissions::fixture(&path);
+        fixtures::permissions(&path);
         restored(&path);
         println!("NATIVE_PERMISSIONS_RESTORED");
         return;
@@ -295,7 +293,7 @@ fn native_console_fixture() {
         return;
     }
     if matches!(scenario.as_str(), "background-light" | "background-native") {
-        native_background::fixture(&path, &scenario);
+        fixtures::background(&path, &scenario);
         restored(&path);
         return;
     }

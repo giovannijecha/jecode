@@ -119,21 +119,11 @@ fn private_directory(path: &Path) -> Result<(), String> {
 }
 
 pub(super) fn add_exclusion(root: &Path, path: &Path, excluded: &mut Vec<String>) {
-    let mut parts = path.components();
-    for expected in root.components() {
-        let Some(actual) = parts.next() else { return };
-        #[cfg(windows)]
-        if actual.as_os_str().to_string_lossy().to_lowercase()
-            != expected.as_os_str().to_string_lossy().to_lowercase()
-        {
-            return;
-        }
-        #[cfg(not(windows))]
-        if actual != expected {
-            return;
-        }
-    }
-    let rest: Option<Vec<_>> = parts
+    let Some(suffix) = crate::disk::strip_prefix(path, root) else {
+        return;
+    };
+    let rest: Option<Vec<_>> = suffix
+        .components()
         .map(|part| match part {
             Component::Normal(name) => name.to_str(),
             _ => None,

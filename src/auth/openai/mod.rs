@@ -309,7 +309,7 @@ impl Session {
     }
     /// Rewrites the record as a refresh or another process does; an empty token
     /// is a signed-out account.
-    #[cfg(all(test, windows))]
+    #[cfg(test)]
     pub fn fixture_replace_token(&self, token: &str) {
         let cancel = Cancellation::default();
         let files = self.store.files();

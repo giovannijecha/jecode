@@ -2,6 +2,9 @@
 //! stdin, never in arguments or files.
 
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
@@ -38,8 +41,12 @@ impl Adapter {
             .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .creation_flags(crate::process::CREATE_NO_WINDOW);
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        command.creation_flags(crate::process::CREATE_NO_WINDOW);
+        // Its own group: Ctrl+C at the terminal must not end a shared adapter.
+        #[cfg(unix)]
+        command.process_group(0);
         // It outlives the commands around it and must not pin their folder.
         if let Some(folder) = executable.parent() {
             command.current_dir(folder);

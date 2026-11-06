@@ -308,6 +308,7 @@ impl Tools {
                             policy.protect_session_home(self.session_home.as_deref())?;
                             policy.allow_installed_rust_tools(self.session_home.as_deref())?;
                             policy.allow_installed_node_tools(self.session_home.as_deref())?;
+                            policy.allow_path_tools(self.session_home.as_deref())?;
                             if name == "bash" {
                                 policy.allow_owned_shell()?;
                             }

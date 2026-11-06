@@ -148,3 +148,81 @@ pub fn sync_directory(_path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 }
+
+/// Remove a known directory prefix without normalizing the remaining path.
+/// Unix volumes may differ in case and Unicode normalization rules: a different
+/// spelling is an alias only when the filesystem identifies the same directory.
+pub fn strip_prefix<'a>(path: &'a Path, root: &Path) -> Option<&'a Path> {
+    let mut parts = path.components();
+    let mut same = true;
+    for expected in root.components() {
+        let actual = parts.next()?;
+        same &= if cfg!(windows) {
+            actual.as_os_str().to_string_lossy().to_lowercase()
+                == expected.as_os_str().to_string_lossy().to_lowercase()
+        } else {
+            actual == expected
+        };
+    }
+    if !same {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let prefix: PathBuf = path.components().take(root.components().count()).collect();
+            let actual = fs::metadata(prefix).ok()?;
+            let expected = fs::metadata(root).ok()?;
+            if !actual.is_dir()
+                || !expected.is_dir()
+                || actual.dev() != expected.dev()
+                || actual.ino() != expected.ino()
+            {
+                return None;
+            }
+        }
+        #[cfg(not(unix))]
+        return None;
+    }
+    Some(parts.as_path())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::Directory;
+
+    #[test]
+    fn directory_aliases_follow_the_filesystems_case_rules() {
+        let temp = Directory::new();
+        let upper = temp.path().join("Project");
+        let lower = temp.path().join("project");
+        fs::create_dir(&upper).unwrap();
+        let distinct = match fs::create_dir(&lower) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+            Err(error) => panic!("{error}"),
+        };
+        let path = lower.join("missing/../child");
+        assert_eq!(
+            strip_prefix(&path, &upper),
+            (!distinct).then_some(Path::new("missing/../child"))
+        );
+        assert_eq!(
+            strip_prefix(&upper.join("child"), &upper),
+            Some(Path::new("child"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_directory_aliases_preserve_the_unresolved_suffix() {
+        let temp = Directory::new();
+        let root = temp.path().join("root");
+        let alias = temp.path().join("alias");
+        fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        assert_eq!(
+            strip_prefix(&alias.join("link/../child"), &root),
+            Some(Path::new("link/../child"))
+        );
+    }
+}

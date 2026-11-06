@@ -48,6 +48,7 @@ result, with up to 50 named paths:
 - sockets, pipes and devices;
 - names that are not UTF-8 or contain `:` or `\`;
 - files that cannot be read, such as files locked by another process;
+- files replaced while they were being copied;
 - directories that cannot be listed (the directory itself is still created);
 - links that cannot be created, such as symbolic links or junctions on Windows
   without Developer Mode or administrator rights.

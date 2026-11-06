@@ -1,5 +1,7 @@
 use super::RunError;
 use crate::cancel::Cancellation;
+use crate::sandbox::MARKER;
+use std::ffi::OsStr;
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -9,6 +11,15 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 mod input;
+
+/// The guardian restores these names once the policy holds; see `restore_deferred`.
+const DEFERRED: &str = "JECODE_INTERNAL_DEFERRED_";
+
+/// Variables the dynamic loader acts on before the guardian's `main`.
+fn loader_variable(name: &OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    name.starts_with(b"LD_") || name.starts_with(b"DYLD_")
+}
 
 pub(super) struct Spawned {
     pub child: Child,
@@ -29,6 +40,16 @@ impl Drop for Owner {
         // Only the owner holds this write end. No target inherits it.
         drop(self.control.take());
     }
+}
+
+/// The sandbox policy carried by the trusted marker. An empty marker carries
+/// no policy and is treated exactly like an absent one.
+pub(crate) fn sandbox_policy(command: &Command) -> Option<&OsStr> {
+    command
+        .get_envs()
+        .find(|(key, _)| *key == MARKER)
+        .and_then(|(_, value)| value)
+        .filter(|value| !value.is_empty())
 }
 
 pub(super) fn spawn(
@@ -57,6 +78,12 @@ fn spawn_input(
         .transpose()?;
     let executable = crate::native::helper("process_unix").map_err(before_start)?;
     let mut helper = Command::new(executable);
+    let confined = sandbox_policy(command).is_some();
+    if confined {
+        // The target inherits the guardian's environment. `get_envs` below lists
+        // only what the policy selected, so nothing else may come from this process.
+        helper.env_clear();
+    }
     helper
         .arg("guard")
         .arg(
@@ -74,7 +101,13 @@ fn spawn_input(
     }
     for (key, value) in command.get_envs() {
         if let Some(value) = value {
-            helper.env(key, value);
+            if confined && loader_variable(key) {
+                let mut carried = std::ffi::OsString::from(DEFERRED);
+                carried.push(key);
+                helper.env(carried, value);
+            } else {
+                helper.env(key, value);
+            }
         } else {
             helper.env_remove(key);
         }
@@ -126,6 +159,15 @@ fn spawn_input(
                     stdin,
                 });
             }
+            Ok((_, Ok(header))) if header == *b"NOBOX\n" => {
+                let _ = terminate(&mut child);
+                let _ = handshake.join();
+                let mut detail = String::new();
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_string(&mut detail);
+                }
+                return Err(before_start(confinement_refused(detail.trim())));
+            }
             Ok(_) => {
                 let _ = terminate(&mut child);
                 let _ = handshake.join();
@@ -144,6 +186,17 @@ fn spawn_input(
             }
         }
     }
+}
+
+fn confinement_refused(detail: &str) -> String {
+    let requirement = if cfg!(target_os = "linux") {
+        "Workspace confinement needs Linux 5.13 or later with Landlock enabled. "
+    } else {
+        ""
+    };
+    format!(
+        "Workspace commands cannot be confined on this system: {detail}. {requirement}Choose /permissions full to run without confinement."
+    )
 }
 
 fn before_start(message: String) -> RunError {

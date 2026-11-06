@@ -11,8 +11,8 @@ fn main() {
     let target = env::var("CARGO_CFG_TARGET_OS").expect("Cargo target OS");
     let mut assets = Vec::new();
     shell(&out, &mut assets, &target);
+    sandbox_probe(&out, &target);
     if target == "windows" {
-        sandbox_probe(&out, &target);
         windows(&out, &mut assets);
     } else if target == "linux" || target == "macos" {
         unix(&out, &mut assets, &target);
@@ -49,10 +49,11 @@ fn sandbox_probe(out: &Path, target: &str) {
     let source = "src/test_support/sandbox_probe.rs";
     println!("cargo:rerun-if-changed={source}");
     let mut command = rust_command("jecode_sandbox_probe", target);
+    // The same name on every system, so the test fixture can embed it.
     command
         .arg(source)
         .arg("-o")
-        .arg(out.join("jecode-sandbox-probe.exe"));
+        .arg(out.join("sandbox-probe-fixture"));
     checked(&mut command, "sandbox probe");
 }
 
@@ -197,7 +198,29 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
         checked(&mut command, "http");
         assets.push(("http".into(), binary));
     }
+    if target == "macos" {
+        let fixture = "src/test_support/macos_http_proxy.m";
+        println!("cargo:rerun-if-changed={fixture}");
+        let mut command = c_compiler();
+        command.arg("-fobjc-arc");
+        command
+            .arg(fixture)
+            .arg("-o")
+            .arg(out.join("http-proxy-fixture"));
+        command.args(["-framework", "Foundation", "-framework", "CFNetwork"]);
+        checked(&mut command, "http-proxy-fixture");
+    }
     if target == "linux" {
+        let fixture = "src/test_support/linux_http_target.c";
+        println!("cargo:rerun-if-changed={fixture}");
+        let mut command = c_compiler();
+        command.arg("-std=c11");
+        command
+            .arg(fixture)
+            .arg("-o")
+            .arg(out.join("http-target-fixture"));
+        command.arg("-ldl");
+        checked(&mut command, "http-target-fixture");
         let binary = out.join("jecode-clipboard_linux");
         let mut command = c_compiler();
         command.arg("-std=c11");
@@ -255,6 +278,11 @@ fn c_compiler() -> Command {
     command.args(["-O2", "-Wall", "-Wextra"]);
     if env::var("PROFILE").as_deref() == Ok("debug") {
         command.arg("-Werror");
+    }
+    if triple.ends_with("-apple-darwin") {
+        // An API newer than the deployment target would fail at launch on older macOS.
+        println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+        command.arg("-Werror=unguarded-availability");
     }
     command
 }

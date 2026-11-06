@@ -63,7 +63,7 @@ a real one.
 | Key | Action |
 | --- | --- |
 | Enter | Send the draft, or queue it while the agent works. |
-| Ctrl+J | Insert a newline. Shift+Enter and Alt+Enter also work when the terminal reports them. |
+| Ctrl+J | Insert a newline. Shift+Enter and Alt+Enter also work when the terminal reports them; on Linux and macOS, Jecode asks for that through the keyboard protocol terminals such as kitty, Ghostty, WezTerm and iTerm2 support. |
 | Left, Right | Move by character. |
 | Ctrl+Left, Ctrl+Right | Move by word. |
 | Up, Down | Move between rows of the draft. In an empty composer, Up takes back the pending message. |
@@ -73,7 +73,7 @@ a real one.
 | Ctrl+Backspace, Ctrl+Delete, Ctrl+W | Delete a word, when the terminal reports the shortcut. |
 | Ctrl+U | Delete to the start of the line. |
 | Ctrl+P, Ctrl+N | Browse your last 50 sent messages; Esc returns to the draft. |
-| Alt+V | Attach an image from the clipboard. Ctrl+V stays your terminal's text paste. |
+| Alt+V, or Ctrl+V on Linux and macOS | Attach an image from the clipboard. On Windows, Ctrl+V stays your terminal's text paste. |
 | `/` | Open the command list; Up/Down select, Tab completes, Enter runs. |
 
 ### Conversation and work
@@ -87,6 +87,12 @@ a real one.
 | F1 | Open help, also during a turn. |
 | Page Up, Page Down, mouse wheel | Scroll the conversation. |
 | Alt+Home, Alt+End | Jump to the beginning, or return to the latest output. |
+
+On a Mac, Option types characters unless your terminal sends it as Alt: in Terminal,
+turn on **Use Option as Meta key** in the profile's Keyboard settings; iTerm2 has a
+similar setting per profile. Jecode never treats a typed character as a shortcut,
+because Option+V is `@` on a Czech keyboard. Without a Home or End key, scrolling to the
+end with the wheel or sending a message also returns to the latest output.
 
 ### Menus and panels
 

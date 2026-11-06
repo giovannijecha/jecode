@@ -18,6 +18,8 @@ use unix as platform;
 use windows as platform;
 
 pub(crate) const MAX_INPUT: usize = 64 * 1024;
+const QUEUE_FULL: &str = "Terminal input queue is full; poll before sending more";
+const DIRECT_WAIT: Duration = Duration::from_millis(250);
 const DELIVERY: Duration = Duration::from_secs(2);
 
 struct Message {
@@ -267,9 +269,7 @@ impl Control {
         .ok_or("Terminal has ended")?
         .try_send(Message { bytes, receipt })
         .map_err(|error| match error {
-            mpsc::TrySendError::Full(_) => {
-                "Terminal input queue is full; poll before sending more".into()
-            }
+            mpsc::TrySendError::Full(_) => QUEUE_FULL.into(),
             mpsc::TrySendError::Disconnected(_) => "Terminal control channel closed".into(),
         })
     }
@@ -330,12 +330,23 @@ impl Control {
         self.deliver(Self::input_packet(bytes)?, false, cancellation)
     }
 
-    /// Local user input is not a tool call or a conversation message.
+    /// Local user input is not a tool call or a conversation message. Each key is
+    /// one message, so a burst can outrun the writer for a moment: only a program
+    /// that stopped reading turns a full queue into a failure.
     pub fn write_direct(&self, bytes: &[u8]) -> Result<(), String> {
-        #[cfg(unix)]
-        return self.enqueue_input(bytes, None);
-        #[cfg(windows)]
-        self.enqueue(Self::input_packet(bytes)?, false, None)
+        let deadline = Instant::now() + DIRECT_WAIT;
+        loop {
+            #[cfg(unix)]
+            let result = self.enqueue_input(bytes, None);
+            #[cfg(windows)]
+            let result = self.enqueue(Self::input_packet(bytes)?, false, None);
+            match result {
+                Err(error) if error == QUEUE_FULL && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                other => return other,
+            }
+        }
     }
 
     pub fn resize(&self, size: (u16, u16), cancellation: &Cancellation) -> Result<(), String> {

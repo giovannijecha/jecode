@@ -1,5 +1,6 @@
 mod driver;
 mod npm_tests;
+mod scenarios;
 use super::*;
 use crate::{
     agent::Agent,
@@ -10,6 +11,7 @@ use crate::{
     test_support::{HttpFixture, completion, tool_call},
     tools::Tools,
 };
+use std::time::Instant;
 
 #[cfg(target_os = "macos")]
 const PENDIN: u32 = 0x2000_0000;
@@ -99,9 +101,13 @@ fn controls_and_terminal_lifetime() {
     terminal.send(b"\x03");
     terminal.wait_after("Settings · saved defaults", providers);
     terminal.send(b"\x03");
-    terminal.resize(40, 12);
-    terminal.resize(5, 2);
-    terminal.resize(80, 24);
+    // The guardian reports each size; a report that never arrives leaves no repaint.
+    // The opening keeps blinking, so only a clearing repaint proves one arrived.
+    for (columns, rows) in [(40, 12), (5, 2), (80, 24)] {
+        let before = terminal.mark();
+        terminal.resize(columns, rows);
+        terminal.wait_raw(b"\x1b[2J", before);
+    }
     terminal.send("\x1b[200~first α🙂\nline\x1b[201~".as_bytes());
     thread::sleep(Duration::from_millis(200));
     assert!(!terminal.directory().join("command-started").exists());
@@ -195,6 +201,9 @@ fn native_pty_fixture() {
             "raw-mode control did not set PENDIN"
         );
     }
+    if scenarios::fixture(&case, &path, &tty, &original) {
+        return;
+    }
     if std::env::var("JECODE_TUI_CASE").unwrap() == "guardian-loss" {
         let mut terminal = Terminal::open().unwrap();
         terminal.mode.close_for_fixture();
@@ -207,7 +216,7 @@ fn native_pty_fixture() {
         return;
     }
     if std::env::var("JECODE_TUI_CASE").unwrap() == "owner-death" {
-        let _mode = mode::Mode::open(tty).unwrap();
+        let _mode = mode::Mode::open(tty, |_| true).unwrap();
         eprintln!("PTY_OWNER_READY");
         loop {
             thread::sleep(Duration::from_secs(1));
@@ -246,8 +255,8 @@ fn native_pty_fixture() {
     );
     let mut settings =
         Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
-    // Unix has no Workspace command confinement. The fixture explicitly opts
-    // into Full for its private sleep/interruption command.
+    // The fixture explicitly opts into Full for its private sleep/interruption
+    // command, so it depends on the terminal alone and not on confinement.
     settings.default_permissions = crate::permissions::Level::Full;
     let config = || SessionConfig {
         store: Store::new(path.join("home")),

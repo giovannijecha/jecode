@@ -18,7 +18,7 @@ fn owner_exit_fixture() {
         .current_dir(&directory);
     process::run_observed(
         &mut command,
-        None,
+        (mode == "input-exit").then(|| vec![b'x'; 1024 * 1024]),
         None,
         4096,
         &Cancellation::default(),
@@ -35,7 +35,7 @@ fn owner_exit_fixture() {
                 );
                 thread::sleep(Duration::from_millis(10));
             }
-            if mode == "exit" {
+            if mode == "exit" || mode == "input-exit" {
                 std::process::exit(0);
             }
             Ok(())
@@ -142,7 +142,7 @@ fn owner_disappears(mode: &str, delay: Duration) {
         );
         thread::sleep(Duration::from_millis(10));
     };
-    assert_eq!(status.success(), mode == "exit", "unexpected owner exit");
+    assert_eq!(status.success(), mode != "kill", "unexpected owner exit");
     let stopped = Instant::now();
     loop {
         let live = live_group(group);
@@ -170,6 +170,11 @@ fn owner_sigkill_stops_commands() {
 #[test]
 fn delayed_owner_exit_still_stops_commands() {
     owner_disappears("exit", Duration::from_secs(2));
+}
+
+#[test]
+fn owner_exit_stops_a_blocked_input_relay() {
+    owner_disappears("input-exit", Duration::from_millis(100));
 }
 
 #[test]
@@ -250,6 +255,28 @@ fn input_eof_arrives_while_the_owner_remains_alive() {
     assert_eq!(output.exit_code, Some(0));
     assert!(!output.timed_out);
     assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn reopening_stdin_reads_input_and_reaches_eof() {
+    for input in [Vec::new(), b"canary\n".to_vec()] {
+        let mut command = Command::new("cat");
+        command.arg("/dev/stdin");
+        let output = process::run_observed(
+            &mut command,
+            Some(input.clone()),
+            Duration::from_secs(2),
+            4096,
+            &Cancellation::default(),
+            None,
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(output.exit_code, Some(0), "timed out: {}", output.timed_out);
+        assert!(!output.timed_out);
+        assert_eq!(output.stdout, input);
+        assert_eq!(output.input_error, None);
+    }
 }
 
 #[test]

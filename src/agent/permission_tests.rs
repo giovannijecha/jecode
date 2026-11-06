@@ -61,15 +61,11 @@ fn workspace_shell_is_confined_even_when_parallel_and_full_runs_outside() {
     );
     agent.run_turn("Try Bash", &mut |_| Ok(())).unwrap();
     let refused = result(&agent, "workspace-bash");
-    if cfg!(windows) {
-        assert_eq!(
-            refused.get("exit_code"),
-            Some(&Value::number(1)),
-            "{refused:?}"
-        );
-    } else {
-        assert!(refused.encode().contains("only on Windows"), "{refused:?}");
-    }
+    assert_eq!(
+        refused.get("exit_code"),
+        Some(&Value::number(1)),
+        "{refused:?}"
+    );
     assert!(!marker.exists());
 
     agent.permissions().set_level(Level::Full).unwrap();

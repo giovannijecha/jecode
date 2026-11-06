@@ -1,4 +1,4 @@
-//! Standalone native fixture for Windows Process Security Environment tests.
+//! Standalone native fixture for Workspace command confinement tests.
 
 use std::env;
 use std::path::PathBuf;
@@ -15,6 +15,13 @@ fn main() {
             assert_eq!(env::var("JECODE_TEST_ENV").as_deref(), Ok("sentinel"));
             assert!(env::var_os("JECODE_SECRET_CANARY").is_none());
             assert!(env::var_os("GH_TOKEN").is_none());
+            #[cfg(target_os = "linux")]
+            if let Some(parent_environment) = env::var_os(PRIVATE) {
+                assert_eq!(
+                    std::fs::read(parent_environment).unwrap_err().kind(),
+                    std::io::ErrorKind::PermissionDenied
+                );
+            }
             println!("WORKSPACE_NATIVE:sentinel:");
         }
         "write" => {

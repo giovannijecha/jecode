@@ -8,7 +8,7 @@ conversation.
 
 | Where | How |
 | --- | --- |
-| TUI | Drop files onto the terminal window, or paste their paths. Press Alt+V to attach an image from the clipboard. |
+| TUI | Drop files onto the terminal window, or paste their paths. Press Alt+V, or Ctrl+V on Linux and macOS, to attach an image from the clipboard. |
 | `jecode --plain` | Start with `jecode --plain --attach PATH`. Enter on an empty line sends only the staged attachments. |
 | Single prompt or pipe | `jecode --attach PATH [--attach PATH]... "prompt"` |
 
@@ -21,9 +21,9 @@ Wait for an import to finish before sending; pressing Enter early keeps the
 draft and sends nothing. Any regular file up to 1 GiB can be attached, including
 binaries and files outside the project. A single drop accepts up to 64 paths.
 
-Ctrl+V remains your terminal's normal text paste. Jecode reads the clipboard only
-on Alt+V and only for an image; if there is none, it shows a warning and keeps
-the draft.
+Your terminal's own paste, such as Cmd+V, Ctrl+Shift+V or Ctrl+V on Windows, stays
+text paste. Jecode reads the clipboard only on these shortcuts and only for an
+image; if there is none, it shows a warning and keeps the draft.
 
 ### How drops are recognized
 
@@ -82,7 +82,7 @@ copy the files.
 
 ## Platform requirements
 
-| Platform | Clipboard image (Alt+V) | Image conversion |
+| Platform | Clipboard image | Image conversion |
 | --- | --- | --- |
 | Windows | Windows PowerShell 5.1 (`powershell.exe`) with System.Windows.Forms | System.Drawing through PowerShell |
 | WSL | `powershell.exe` through Windows interop | The same, through interop |

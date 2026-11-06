@@ -20,7 +20,6 @@ impl App {
                     }
                 }
             }
-            #[cfg(any(windows, test))]
             Input::Key(key) => {
                 for decoded in decoder.key(key) {
                     if self.input(decoded)? {

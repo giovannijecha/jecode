@@ -108,6 +108,21 @@ all four conversation requests, including the cancelled one, and `http` for the
 session title. These were functional checks, not latency benchmarks. Live MCP
 and OAuth sign-in or refresh through the pooled adapter were not repeated.
 
+Linux was checked on 2026-11-05 from WSL2 on the same PC, with API keys. A loopback
+server that counted connections saw four HTTPS requests share one, with OpenSSL 3.5
+and with OpenSSL 1.1 on Debian 10 and AlmaLinux 8. A connection closed while idle
+was replaced. One that died holding a request repeated a GET and reported a POST
+without resending it. Four-turn `--plain` conversations on Ubuntu 26.04 and Debian
+10 recorded `socket` for every OpenAI conversation request and `http` for the title.
+Linux latency was not benchmarked, and none of this has run on macOS. Unix adapters
+drop a cached connection after 90 seconds idle, because no close arrives after a
+computer sleeps and a request sent on it would wait out the receive limit.
+
+The same day and machine, an idle TUI on a Linux PTY created no process in 3 s and
+repainted 51 ms after a resize. A typed key reached the terminal in a median of
+1.5 ms over 200 keys (95th percentile 1.9 ms, maximum 2.4 ms), through `script`:
+`scenarios::measure_unix_input_to_vt_latency`.
+
 ### Instruction discovery metadata
 
 Recorded 2026-11-05 on Windows 11 with Rust 1.95.0, using an optimized standalone

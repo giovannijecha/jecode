@@ -133,7 +133,15 @@ fn keys(width: usize) -> Line {
     panel::row(
         &[
             key("/", "commands"),
-            key("Alt+V", "image"),
+            // Option types a character on a Mac unless the terminal maps it to Alt.
+            key(
+                if cfg!(target_os = "macos") {
+                    "Ctrl+V"
+                } else {
+                    "Alt+V"
+                },
+                "image",
+            ),
             key("Ctrl+O", "expand"),
             key("Ctrl+Q", "quit"),
         ],

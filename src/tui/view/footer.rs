@@ -257,7 +257,7 @@ pub(super) fn home_relative(directory: &str, home: Option<&str>) -> String {
         .filter(|home| !home.is_empty());
     let split = home.and_then(|home| {
         let (prefix, rest) = (directory.get(..home.len())?, directory.get(home.len()..)?);
-        let same = if cfg!(windows) {
+        let same = if cfg!(any(windows, target_os = "macos")) {
             prefix.eq_ignore_ascii_case(home)
         } else {
             prefix == home

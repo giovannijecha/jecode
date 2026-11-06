@@ -177,7 +177,8 @@ conversation is never dumped into your terminal's scrollback; it stays in the
 
 - The TUI needs a VT-compatible terminal. If it cannot start, the error suggests
   `jecode --plain`.
-- Colors are 24-bit and `NO_COLOR` is ignored. Jecode keeps dark terminal
+- Colors are 24-bit, or the 256-color palette on a Linux or macOS terminal that does
+  not declare 24-bit support; see [Theme](THEME.md). `NO_COLOR` is ignored. Jecode keeps dark terminal
   backgrounds; on a terminal it detects as light, it paints its own dark
   background without changing your terminal's palette.
 - Bold, italics, underline, strikethrough, emoji and wide characters depend on

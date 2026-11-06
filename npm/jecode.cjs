@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const { existsSync } = require('node:fs');
 const { constants } = require('node:os');
 const path = require('node:path');
-const { targetFor } = require('./targets.cjs');
+const { targets, targetFor } = require('./targets.cjs');
 
 function signalExitCode(signal) {
   const number = constants.signals[signal];
@@ -13,7 +13,8 @@ function signalExitCode(signal) {
 }
 
 function glibcMeetsMinimum(version, minimum) {
-  if (!/^\d+\.\d+$/.test(version)) return false;
+  // Development builds report a third part, such as Fedora Rawhide's 2.40.9000.
+  if (!/^\d+\.\d+(?:\.\d+)*$/.test(version)) return false;
   const [major, minor] = version.split('.').map(Number);
   const [requiredMajor, requiredMinor] = minimum.split('.').map(Number);
   return major > requiredMajor || (major === requiredMajor && minor >= requiredMinor);
@@ -29,7 +30,7 @@ function launch({
   if (!target) {
     runtime.stderr.write(
       `jecode: unsupported platform ${runtime.platform}-${runtime.arch}. ` +
-      'Supported: win32-x64, linux-x64, darwin-arm64.\n',
+      `Supported: ${Object.keys(targets).join(', ')}.\n`,
     );
     runtime.exitCode = 1;
     return null;

@@ -35,7 +35,7 @@ fn read_request(stream: &mut TcpStream) -> String {
 fn reply(stream: &mut TcpStream, status: u16, extra: &str, body: &str) {
     write!(
         stream,
-        "HTTP/1.1 {status} Result\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{extra}\r\n{body}",
+        "HTTP/1.1 {status} Result\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{extra}\r\n{body}",
         body.len()
     )
     .unwrap();

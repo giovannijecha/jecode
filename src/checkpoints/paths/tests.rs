@@ -145,12 +145,16 @@ fn directory_link_is_an_entry_and_never_a_scope_root() {
     assert!(!explicit.partial.is_empty());
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn case_aliases_keep_the_existing_final_entry_spelling() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.0.join("Folder")).unwrap();
     fs::write(fixture.0.join("Folder/Name.txt"), b"x").unwrap();
+    if !fixture.0.join("folder/name.TXT").exists() {
+        eprintln!("SKIPPED: this volume distinguishes case variants");
+        return;
+    }
     assert_eq!(
         relative(&fixture.0, &fixture.0.join("folder/name.TXT")),
         Some("Folder/Name.txt".into())

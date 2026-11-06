@@ -219,7 +219,10 @@ impl App {
                 .scroll(super::viewport::Scroll::Page(key.code == 33));
             return Ok(false);
         }
-        if key.alt() && !key.ctrl() && key.code == 86 {
+        // Unix terminals deliver Ctrl+V, unlike Windows consoles, where it pastes text.
+        // Option+V types a character on a Mac, such as `@` on a Czech keyboard.
+        let image_key = key.alt() != key.ctrl() && (key.alt() || cfg!(unix));
+        if image_key && key.code == 86 {
             // The clipboard is read only for this explicit shortcut.
             self.state.feedback_input(true);
             #[cfg(not(test))]

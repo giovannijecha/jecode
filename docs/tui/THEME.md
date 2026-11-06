@@ -14,9 +14,19 @@ background palette entry, captured before entering the alternate screen. On
 other terminals without a reply, cells use the terminal's own background
 (SGR 49). A dark result also uses SGR 49. The terminal palette is never
 changed, and exit restores its original background. Text and surfaces use the
-Violet palette below. Colour is 24-bit; `NO_COLOR` is ignored. The terminal
+Violet palette below. `NO_COLOR` is ignored. The terminal
 still chooses the font and how bold, italic, underline and strikethrough look. Tokens live in
 [`src/tui/theme.rs`](https://github.com/giovannijecha/jecode/blob/main/src/tui/theme.rs).
+
+Colour is 24-bit on Windows and on Unix terminals that declare it through
+`COLORTERM`, `TERM`, `TERM_PROGRAM` or their own variable. Other terminals, such as
+Terminal.app before macOS 26 or a session over SSH without `COLORTERM`, get the
+nearest entry of the 256-colour palette: its cube and grey ramp, never the first 16
+colours a theme can change. The dark tints that carry meaning would all turn grey
+there, so diffs use palette greens and reds (22, 52) and the shell, coordination and
+failure badges keep a hue (25, 23, 88). Setting `COLORTERM=truecolor` asks for 24-bit
+colour on a terminal Jecode does not recognize. Tests hold text on every surface at 4
+or more in the palette, and 3 for the gutter numbers on an added row.
 
 ## Tokens
 
@@ -95,7 +105,7 @@ An empty conversation shows a centred startup splash above the dock: the
 `>_ jecode` scanline mark in `ACCENT`, its blinking `_` in `LIT`, the version,
 a `/permissions` tip, the available skill count and whether this folder has
 an `AGENTS.md`. The key row offers `/ commands · Alt+V image · Ctrl+O expand ·
-Ctrl+Q quit`. Saved conversations add `Recent in this folder` in `DIM`, up to
+Ctrl+Q quit`, with `Ctrl+V image` on macOS. Saved conversations add `Recent in this folder` in `DIM`, up to
 three titles with compact ages such as `2h`, and a ` /resume ` keycap.
 Deleting a conversation through `/resume` updates this list at once.
 

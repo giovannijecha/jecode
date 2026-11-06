@@ -193,6 +193,21 @@ fn alt_v_reads_the_clipboard_only_on_request_and_failures_keep_the_draft() {
 }
 
 #[test]
+fn ctrl_v_attaches_an_image_only_where_unix_terminals_deliver_it() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let mut app = app(&home, &directory, OFFLINE);
+    app.clipboard_image = Some(Ok(png()));
+    key(&mut app, 86, 4);
+    settle(&mut app);
+    if cfg!(unix) {
+        assert_eq!(app.state.editor.attachments.len(), 1);
+    } else {
+        assert!(app.imports.is_empty() && app.state.editor.attachments.is_empty());
+    }
+}
+
+#[test]
 fn dropped_attachment_only_messages_reach_the_provider_as_parts() {
     let home = Directory::new();
     let directory = Directory::new();

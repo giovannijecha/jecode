@@ -7,6 +7,24 @@ import {
 } from './common.mjs';
 import {verifyArchive} from './archive.mjs';
 import {auditLinux} from './linux-abi.mjs';
+import {auditMacos} from './macos-abi.mjs';
+import {auditWindows} from './windows-abi.mjs';
+
+const OsFloors = ['glibcMinimum', 'macosMinimum', 'windowsBuildMinimum'];
+
+// Fails when the executable or an embedded helper needs more than the OS floor.
+function auditFloor(target, executable, bytes) {
+  if (target.platform === 'linux') {
+    return {glibcMinimum: target.glibcMinimum, abiCheckedFiles: auditLinux(executable, bytes, target.glibcMinimum)};
+  }
+  if (target.platform === 'darwin') {
+    return {macosMinimum: target.macosMinimum, abiCheckedFiles: auditMacos(executable, bytes, target.macosMinimum)};
+  }
+  return {
+    windowsBuildMinimum: target.windowsBuildMinimum,
+    abiCheckedFiles: auditWindows(executable, bytes, target.windowsBuildMinimum),
+  };
+}
 
 export async function stage(binary, destination) {
   const target = targets[host];
@@ -20,10 +38,7 @@ export async function stage(binary, destination) {
     throw new Error(`Expected the native ${host} release build ${releaseVersion}; got ${check.stdout.trim() || check.stderr.trim()}`);
   }
   if (digest(regularFile(executable)) !== digest(bytes)) throw new Error('The binary changed during staging.');
-  const abi = process.platform === 'linux' ? {
-    glibcMinimum: target.glibcMinimum,
-    abiCheckedFiles: auditLinux(executable, bytes, target.glibcMinimum),
-  } : {};
+  const abi = auditFloor(target, executable, bytes);
   const output = freshDirectory(destination);
   fs.writeFileSync(path.join(output, target.binary), bytes, {mode: 0o755, flag: 'wx'});
   json(path.join(output, 'manifest.json'), {
@@ -52,8 +67,8 @@ export function collect(artifacts, {local = false} = {}) {
     if (!local && manifest.sourceClean !== true) {
       throw new Error(`Release artifact was staged from modified source: ${id}; use a clean checkout.`);
     }
-    if (target.glibcMinimum && manifest.glibcMinimum !== target.glibcMinimum) {
-      throw new Error(`Artifact glibc baseline mismatch: ${id}`);
+    for (const floor of OsFloors) {
+      if (target[floor] !== manifest[floor]) throw new Error(`Artifact OS floor mismatch: ${id}`);
     }
     const bytes = regularFile(path.join(folder, target.binary));
     if (bytes.length !== manifest.bytes || digest(bytes) !== manifest.sha256) {
