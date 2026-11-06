@@ -102,6 +102,9 @@ process it starts:
   one; keep publishing tokens in `credentials.toml`, which stays unreadable.
   A linked ancestor configuration does not grant its target extra access; if
   that target is outside the permitted locations, choose Full.
+  On macOS, Jecode locates the installed SDK before launching a Workspace command
+  and supplies `SDKROOT` when unset, so Rust does not need `xcrun` to find it.
+  An inherited or explicitly set `SDKROOT`, and an explicit removal, take precedence.
 - Node.js runtimes installed through Volta, nvm, nvm-windows or fnm are readable,
   as is an install on `PATH` with npm beside it. On Linux and macOS, so are the
   folders on `PATH` inside your home, such as `~/.local/bin`, but not what their links
