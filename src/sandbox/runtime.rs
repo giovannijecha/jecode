@@ -38,8 +38,9 @@ impl Policy {
         };
         let protected = protected_home.map(canonical_directory).transpose()?;
         for ancestor in root.ancestors().skip(1) {
-            for name in [".cargo/config.toml", ".cargo/config"] {
-                if let Ok(file) = std::fs::canonicalize(ancestor.join(name))
+            for name in ["config.toml", "config"] {
+                let spelled = ancestor.join(".cargo").join(name);
+                if let Ok(file) = std::fs::canonicalize(&spelled)
                     && file.is_file()
                     && !self.read.contains(&file)
                 {
@@ -49,14 +50,12 @@ impl Policy {
                     {
                         return Err("A Cargo configuration resolves inside Jecode's configuration directory; Workspace command launch was refused".into());
                     }
-                    // An ancestor can contain an untrusted link to an unrelated
-                    // private file. Do not turn that link into a new read grant.
-                    if std::fs::symlink_metadata(ancestor.join(name))
-                        .is_ok_and(|metadata| crate::disk::linked(&metadata))
-                    {
-                        continue;
+                    // An ancestor can contain an untrusted link, at `.cargo` or at the
+                    // file, to something private. The ancestor itself is canonical, so
+                    // a different resolved path means a link: it grants nothing.
+                    if file == spelled {
+                        self.read.push(file);
                     }
-                    self.read.push(file);
                 }
             }
         }
@@ -73,7 +72,10 @@ impl Policy {
         let (Some(home), Some(search)) = (user_home(), std::env::var_os("PATH")) else {
             return Ok(());
         };
-        let home = canonical_directory(&home)?;
+        // A service account's home may not exist; nothing on PATH is then inside it.
+        let Ok(home) = canonical_directory(&home) else {
+            return Ok(());
+        };
         let protected = protected_home.map(canonical_directory).transpose()?;
         for directory in std::env::split_paths(&search) {
             let Ok(directory) = canonical_directory(&directory) else {

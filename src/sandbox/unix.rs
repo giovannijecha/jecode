@@ -101,6 +101,11 @@ const SEATBELT_BASE: &str = r##"(version 1)
   (literal "/bin/launchctl")
   (literal "/usr/bin/open")
   (literal "/usr/bin/osascript"))
+(deny signal)
+(allow signal (target same-sandbox))
+(deny sysctl-read
+  (sysctl-name "kern.procargs")
+  (sysctl-name "kern.procargs2"))
 (deny mach-lookup)
 (allow mach-lookup
   (global-name "com.apple.SecurityServer")
@@ -124,6 +129,7 @@ const SEATBELT_BASE: &str = r##"(version 1)
   (global-name "com.apple.trustd")
   (global-name "com.apple.trustd.agent")
   (local-name "com.apple.cfprefsd.agent"))
+(deny file-link)
 (deny file-write*)
 (allow file-write*
   (literal "/dev/null")
@@ -136,7 +142,7 @@ const SEATBELT_BASE: &str = r##"(version 1)
   (literal "/dev/stderr")
   (literal "/dev/dtracehelper")
   (regex #"^/dev/(fd/[0-9]+|ttys[0-9]+)$"))
-(deny file-read-data process-exec* file-map-executable
+(deny file-read-data file-clone process-exec* file-map-executable
   (subpath "/Users")
   (subpath "/System/Volumes/Data/Users")
   (subpath "/Volumes")
@@ -156,20 +162,21 @@ pub(super) fn seatbelt_profile(
 ) -> Result<String, String> {
     let mut profile = String::from(SEATBELT_BASE);
     if let Some(home) = protected_home {
-        profile.push_str("(deny file-read-data process-exec* file-map-executable");
+        profile.push_str("(deny file-read-data file-clone process-exec* file-map-executable");
         profile.push_str(&subpath(home)?);
         profile.push_str(")\n");
     }
     let readable = read.iter().chain(write).collect::<Vec<_>>();
     if !readable.is_empty() {
-        profile.push_str("(allow file-read-data process-exec* file-map-executable");
+        profile.push_str("(allow file-read-data file-clone process-exec* file-map-executable");
         for path in readable {
             profile.push_str(&subpath(path)?);
         }
         profile.push_str(")\n");
     }
     if !write.is_empty() {
-        profile.push_str("(allow file-write*");
+        // A hard link gives its file another name: only one already writable may get one.
+        profile.push_str("(allow file-write* file-link");
         for path in write {
             profile.push_str(&subpath(path)?);
         }

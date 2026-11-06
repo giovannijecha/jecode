@@ -206,8 +206,9 @@ impl Policy {
                 .find(|directory| directory.is_absolute() && node_in(directory).is_some())
         }) {
             self.add_node_path(&directory);
-            // A Unix install keeps npm and global packages beside `bin`. The home
-            // itself can look like such a prefix and is never granted.
+            // A Unix install keeps npm and global packages beside `bin`. Only those are
+            // granted: a prefix such as `~/.local` also holds other programs' data, and
+            // the home itself can look like one.
             if let Some(prefix) = std::fs::canonicalize(&directory)
                 .ok()
                 .and_then(|bin| bin.parent().map(Path::to_path_buf))
@@ -217,7 +218,11 @@ impl Policy {
                     .and_then(|home| std::fs::canonicalize(home).ok())
                     .is_some_and(|home| home.starts_with(&prefix))
             {
-                self.allow_existing_read_directory(&prefix, protected_home)?;
+                self.allow_existing_read_directory(&prefix.join("bin"), protected_home)?;
+                self.allow_existing_read_directory(
+                    &prefix.join("lib/node_modules"),
+                    protected_home,
+                )?;
             }
             // A file link can place node.exe on another drive even when its
             // PATH directory is not itself linked.
@@ -488,7 +493,11 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
 }
 
 #[cfg(test)]
+mod node_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(all(test, unix))]
+mod unix_escape_tests;
 #[cfg(all(test, unix))]
 mod unix_tests;
 #[cfg(all(test, windows))]

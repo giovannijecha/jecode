@@ -33,6 +33,14 @@ fn workspace_shell_uses_the_native_boundary() {
     let result = tools
         .execute_begun(begun, "bash", &arguments, &Cancellation::default())
         .result;
+    // Kernels without Landlock refuse Workspace commands; `sandbox::unix_tests` says so.
+    if result
+        .get("error")
+        .and_then(Value::as_str)
+        .is_some_and(|error| error.contains("cannot be confined on this system"))
+    {
+        return;
+    }
     assert_eq!(
         result.get("exit_code"),
         Some(&Value::number(0)),

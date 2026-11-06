@@ -8,7 +8,7 @@ use crate::test_support::{Directory, sandbox as probe};
 use crate::tools::{Begun, Tools};
 
 /// Kernels without Landlock refuse Workspace commands; a skipped test says so.
-fn available() -> bool {
+pub(super) fn available() -> bool {
     let root = Directory::new();
     let tools = fixture(root.path());
     let result = exec(&tools, "/bin/sh", &["-c", "exit 0"]);
@@ -19,21 +19,29 @@ fn available() -> bool {
     if refused {
         #[cfg(target_os = "macos")]
         panic!("macOS must enforce Workspace confinement: {result:?}");
+        // CI sets this: libtest hides the message of a passing test, so a kernel
+        // without Landlock would otherwise leave these checks green and empty.
         #[cfg(target_os = "linux")]
-        eprintln!("SKIPPED: this kernel cannot confine commands: {result:?}");
+        {
+            assert!(
+                std::env::var_os("JECODE_REQUIRE_CONFINEMENT").is_none(),
+                "This job requires Workspace confinement: {result:?}"
+            );
+            eprintln!("SKIPPED: this kernel cannot confine commands: {result:?}");
+        }
     } else {
         assert_exit(&result, 0);
     }
     !refused
 }
 
-fn fixture(root: &Path) -> Tools {
+pub(super) fn fixture(root: &Path) -> Tools {
     let mut tools = Tools::new(root).unwrap();
     tools.configure_output(root.join("logs"), Redactor::empty());
     tools
 }
 
-fn run(tools: &Tools, name: &str, arguments: Value) -> Value {
+pub(super) fn run(tools: &Tools, name: &str, arguments: Value) -> Value {
     tools
         .execute_begun(
             Begun::default().with_permission(Level::Workspace, None),
@@ -44,7 +52,7 @@ fn run(tools: &Tools, name: &str, arguments: Value) -> Value {
         .result
 }
 
-fn exec(tools: &Tools, program: &str, args: &[&str]) -> Value {
+pub(super) fn exec(tools: &Tools, program: &str, args: &[&str]) -> Value {
     run(
         tools,
         "exec",
@@ -54,17 +62,17 @@ fn exec(tools: &Tools, program: &str, args: &[&str]) -> Value {
                 "args",
                 Value::Array(args.iter().map(|arg| Value::string(*arg)).collect()),
             ),
-            ("timeout_ms", Value::number(30_000)),
+            ("timeout_seconds", Value::number(30)),
         ]),
     )
 }
 
-fn text<'a>(value: &'a Value, name: &str) -> &'a str {
+pub(super) fn text<'a>(value: &'a Value, name: &str) -> &'a str {
     value.get(name).and_then(Value::as_str).unwrap_or("")
 }
 
 #[track_caller]
-fn assert_exit(result: &Value, code: u32) {
+pub(super) fn assert_exit(result: &Value, code: u32) {
     assert_eq!(
         result.get("exit_code"),
         Some(&Value::number(code)),
@@ -100,7 +108,7 @@ fn child_and_grandchild_enforce_the_file_policy() {
                     (probe::ESCAPED, Value::string(escaped.to_string_lossy())),
                 ]),
             ),
-            ("timeout_ms", Value::number(10_000)),
+            ("timeout_seconds", Value::number(10)),
         ]),
     );
     assert_exit(&result, 0);
@@ -154,7 +162,7 @@ fn commands_do_not_inherit_the_parent_environment() {
                     ),
                 ]),
             ),
-            ("timeout_ms", Value::number(10_000)),
+            ("timeout_seconds", Value::number(10)),
         ]),
     );
     assert_exit(&result, 0);

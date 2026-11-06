@@ -2,6 +2,8 @@
    macOS. Jecode generates the complete policy; this file only applies it. A
    command must never run unconfined after a failure, so errors are returned. */
 #define CONFINE_MARKER "JECODE_INTERNAL_SANDBOX_POLICY"
+/* Prefixes loader variables on their way through this helper; see restore_deferred. */
+#define CONFINE_DEFERRED "JECODE_INTERNAL_DEFERRED_"
 
 #if defined(__linux__)
 #include <stdint.h>
@@ -20,6 +22,7 @@ enum { CREATE_RULESET = 444, ADD_RULE = 445, RESTRICT_SELF = 446 };
 #define FIRST_ABI_RIGHTS ((1ULL << 13) - 1)
 #define READ_RIGHTS (RIGHT_EXECUTE | RIGHT_READ_FILE | RIGHT_READ_DIR)
 #define FILE_RIGHTS (RIGHT_EXECUTE | RIGHT_WRITE_FILE | RIGHT_READ_FILE | RIGHT_TRUNCATE)
+#define SCOPE_ABSTRACT_SOCKET (1ULL << 0)
 #define SCOPE_SIGNAL (1ULL << 1)
 
 struct ruleset_attributes {
@@ -69,7 +72,7 @@ static int confine(char *policy) {
     }
     uint64_t write_rights = FIRST_ABI_RIGHTS | (abi >= 2 ? RIGHT_REFER : 0) | (abi >= 3 ? RIGHT_TRUNCATE : 0);
     /* Older kernels accept only the fields they know. */
-    struct ruleset_attributes attributes = { write_rights, 0, abi >= 6 ? SCOPE_SIGNAL : 0 };
+    struct ruleset_attributes attributes = { write_rights, 0, abi >= 6 ? SCOPE_SIGNAL | SCOPE_ABSTRACT_SOCKET : 0 };
     size_t size = abi >= 6 ? sizeof attributes : sizeof attributes.handled_filesystem;
     int ruleset = (int)syscall(CREATE_RULESET, &attributes, size, 0UL);
     if (ruleset < 0) {

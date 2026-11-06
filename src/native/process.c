@@ -10,12 +10,44 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include "process_confine.h"
+
+extern char **environ;
+
+/* With a controlling terminal a confined command could type into Jecode or the
+   user's shell through TIOCSTI. This process never leads a session, so only it and
+   its future children let go of the terminal. */
+static int leave_terminal(void) {
+    int terminal = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (terminal < 0) return 0;
+    int result = ioctl(terminal, TIOCNOTTY);
+    close(terminal);
+    if (result < 0) fprintf(stderr, "Could not leave the controlling terminal: %s", strerror(errno));
+    return result;
+}
+
+/* The dynamic loader acts on its variables before main, outside the policy. They
+   reach this helper under another name and take effect only for the command. */
+static int restore_deferred(void) {
+    size_t length = strlen(CONFINE_DEFERRED);
+    for (char **entry = environ; *entry;) {
+        if (strncmp(*entry, CONFINE_DEFERRED, length)) { entry++; continue; }
+        char *carried = strdup(*entry), *value = carried ? strchr(carried, '=') : NULL;
+        if (!value) { free(carried); return -1; }
+        *value++ = 0;
+        int failed = setenv(carried + length, value, 1) < 0 || unsetenv(carried) < 0;
+        free(carried);
+        if (failed) return -1;
+        entry = environ; /* Both calls can move the array. */
+    }
+    return 0;
+}
 
 /* This adapter uses libc directly; no command shell or utilities are needed. */
 static char *resolve(const char *program) {
@@ -82,7 +114,7 @@ static int guard(const char *input, char **argv) {
     if (confined) {
         policy = strdup(policy);
         unsetenv(CONFINE_MARKER);
-        if (!policy || confine(policy) < 0) {
+        if (!policy || leave_terminal() < 0 || confine(policy) < 0 || restore_deferred() < 0) {
             /* Reported to the owner in place of READY; the target never starts. */
             if (write(STDOUT_FILENO, "NOBOX\n", 6) != 6) {}
             free(program);

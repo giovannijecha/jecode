@@ -46,6 +46,11 @@ pub(super) fn fixture(case: &str, path: &Path, tty: &File, saved: &str) -> bool 
             assert_mode_restored(tty, saved);
             println!("NATIVE_PALETTE_RESTORED");
         }
+        "terminal-probe" => {
+            terminal_probe_conversation(path);
+            assert_mode_restored(tty, saved);
+            println!("NATIVE_TERMINAL_PROBE_RESTORED");
+        }
         "latency" => {
             idle_conversation(path);
             assert_mode_restored(tty, saved);
@@ -112,6 +117,69 @@ fn palette_conversation(path: &Path) {
     let saved = store.fixture_load(&sessions[0].id).unwrap();
     assert_eq!(saved.input.draft.text, "first\nsecond");
     assert_eq!(fixture.finish().len(), 2);
+}
+
+/// Workspace's default level, under a process that does have a controlling terminal.
+fn terminal_probe_conversation(path: &Path) {
+    let probe =
+        "if (: < /dev/tty) 2> /dev/null; then echo reachable; else echo detached; fi > tty-probe";
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "probe",
+                    "exec",
+                    Value::object([
+                        ("executable", Value::string("/bin/sh")),
+                        (
+                            "args",
+                            Value::Array(vec![Value::string("-c"), Value::string(probe)]),
+                        ),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("Terminal probed.", vec![])),
+    ]);
+    let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
+    let config = SessionConfig {
+        store: Store::new(path.join("home")),
+        settings,
+    };
+    config.store.save(&config.settings).unwrap();
+    // Workspace refuses a working folder that holds the Jecode home.
+    let project = path.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(&project).unwrap(),
+    );
+    agent
+        .permissions()
+        .set_default(crate::permissions::Level::Workspace);
+    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+    let requests = fixture.finish();
+    assert_eq!(
+        std::fs::read_to_string(project.join("tty-probe"))
+            .ok()
+            .as_deref(),
+        Some("detached\n"),
+        "{:?}",
+        requests.last().map(|request| &request.body)
+    );
+}
+
+/// With the terminal, a command could type `/permissions full` into Jecode (TIOCSTI).
+#[test]
+#[ignore = "requires the system script tool for a native Unix PTY"]
+fn native_unix_confined_commands_have_no_terminal() {
+    let mut t = Pty::new("terminal-probe");
+    t.wait("Ask anything");
+    command(&mut t, "probe");
+    t.wait("Terminal probed.");
+    t.quit_with(b"\x11", "NATIVE_TERMINAL_PROBE_RESTORED");
 }
 
 #[test]

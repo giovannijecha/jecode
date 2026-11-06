@@ -266,6 +266,8 @@ impl Agent {
         // References the main agent hands over resolve in its own storage.
         child.tools.inherit_references(&self.tools);
         child.enable_checkpoints(&child_home);
+        // Confinement protects the whole Jecode home, not this agent's own part of it.
+        child.tools.configure_session_home(&home);
         child.skills.configure(&home);
         let _ = child.configure_mcp(&home);
         let _ = child.configure_lsp(&home);

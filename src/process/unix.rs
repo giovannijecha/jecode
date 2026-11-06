@@ -12,6 +12,15 @@ use std::time::{Duration, Instant};
 
 mod input;
 
+/// The guardian restores these names once the policy holds; see `restore_deferred`.
+const DEFERRED: &str = "JECODE_INTERNAL_DEFERRED_";
+
+/// Variables the dynamic loader acts on before the guardian's `main`.
+fn loader_variable(name: &OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    name.starts_with(b"LD_") || name.starts_with(b"DYLD_")
+}
+
 pub(super) struct Spawned {
     pub child: Child,
     pub stdout: ChildStdout,
@@ -69,7 +78,8 @@ fn spawn_input(
         .transpose()?;
     let executable = crate::native::helper("process_unix").map_err(before_start)?;
     let mut helper = Command::new(executable);
-    if sandbox_policy(command).is_some() {
+    let confined = sandbox_policy(command).is_some();
+    if confined {
         // The target inherits the guardian's environment. `get_envs` below lists
         // only what the policy selected, so nothing else may come from this process.
         helper.env_clear();
@@ -91,7 +101,13 @@ fn spawn_input(
     }
     for (key, value) in command.get_envs() {
         if let Some(value) = value {
-            helper.env(key, value);
+            if confined && loader_variable(key) {
+                let mut carried = std::ffi::OsString::from(DEFERRED);
+                carried.push(key);
+                helper.env(carried, value);
+            } else {
+                helper.env(key, value);
+            }
         } else {
             helper.env_remove(key);
         }

@@ -121,8 +121,8 @@ what a command will change. The model can list the files or directories a
 command may modify in its `protect` argument, and Jecode saves them before the
 command starts.
 
-On Linux and macOS, commands need the Full permission level; see
-[Platform limits](PERMISSIONS.md#platform-limits).
+In Workspace, commands run inside an operating-system confinement; see
+[Command confinement](PERMISSIONS.md#command-confinement).
 
 ### Background processes
 

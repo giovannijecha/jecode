@@ -27,7 +27,7 @@ subdirectories.
 | Level | In the working folder | Outside it |
 | --- | --- | --- |
 | **Read** | Read and search files; fetch web pages with GET or HEAD. No edits, commands, checkpoint restores or browser control. | Refused. |
-| **Workspace** (default) | Read and edit files; run commands, confined on Windows (see [Platform limits](#platform-limits)). Network access is allowed. | Each file access, and each command started from an outside directory, asks for [approval](#approval-requests). |
+| **Workspace** (default) | Read and edit files; run commands, [confined](#command-confinement) by the operating system. Network access is allowed. | Each file access, and each command started from an outside directory, asks for [approval](#approval-requests). |
 | **Full** | Everything, with your normal user permissions. | Everything, with your normal user permissions. |
 
 Levels govern Jecode's tool calls. Once a command runs, it acts with whatever
@@ -92,8 +92,10 @@ Seatbelt on macOS. The system enforces a filesystem policy on the command and ev
 process it starts:
 
 - The working folder and the conversation's temporary area are writable.
-- System locations are readable, but the rest of your files are not: your home
-  folder, with SSH keys, cloud credentials and browser data, stays out of reach.
+- System locations are readable, but your home folder, with SSH keys, cloud
+  credentials and browser data, stays out of reach. On Linux and Windows nothing else
+  is readable either. On macOS, external volumes and temporary folders are also closed,
+  but other top-level folders, such as `/opt`, stay readable.
 - Installed Rust toolchain data is readable, and Cargo's cache is redirected to
   the temporary area. Cargo's own configuration files (`.cargo/config.toml`) in the
   working folder's parents are readable too, because Cargo stops when it cannot open
@@ -102,7 +104,8 @@ process it starts:
   that target is outside the permitted locations, choose Full.
 - Node.js runtimes installed through Volta, nvm, nvm-windows or fnm are readable,
   as is an install on `PATH` with npm beside it. On Linux and macOS, so are the
-  folders on `PATH` inside your home, such as `~/.local/bin`.
+  folders on `PATH` inside your home, such as `~/.local/bin`, but not what their links
+  point to: tools installed with pipx or uv need Full.
 - On Linux and macOS, a program outside these locations cannot start, and the cache,
   settings and npm folders programs usually keep in your home (`XDG_CACHE_HOME`,
   `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `npm_config_cache`) point at
@@ -121,6 +124,9 @@ process it starts:
 - Commands inherit only a fixed set of operating-system and toolchain
   environment variables, not arbitrary tokens from your shell. Values set
   explicitly in an `exec` call still apply.
+- On Linux and macOS, commands run without a controlling terminal, so they cannot
+  type into Jecode or your shell and programs that ask for a password on `/dev/tty`
+  fail at once.
 
 If the Jecode home lies inside the working folder, Workspace refuses to run
 commands. Start Jecode in a narrower project directory, or choose Full.
@@ -142,8 +148,16 @@ owned shell executable.
 - **Older Linux kernels confine less.** Landlock does not cover `truncate` below
   Linux 6.2, or sending signals to your other programs below 6.12.
 - **Local sockets on Linux and macOS.** A confined command can still connect to
-  a Unix socket by its path, such as Docker's. Variables that name one, like
-  `SSH_AUTH_SOCK`, are not passed on, but the path can be guessed.
+  a Unix socket by its path. Variables that name one, like `SSH_AUTH_SOCK`, are not
+  passed on, but the path can be guessed. A service reached this way acts outside the
+  confinement: Docker can, and on Linux so can your session's D-Bus, through
+  `systemd-run --user`. Do not rely on Workspace to contain a hostile command where
+  these services run.
+- **Terminal devices on Linux and macOS.** A confined command can still open your
+  other terminal windows by device path and read or write them, though it cannot type
+  into them as if you had.
+- **Reopening standard input on Linux.** With `stdin` in an `exec` call, a program that
+  reopens `/dev/stdin` instead of reading its standard input gets a permission error.
 - **macOS services.** Commands cannot send Apple Events or reach most system
   services, which `open`, `osascript`, `launchctl` and Xcode's `xcodebuild` need.
   Choose Full for those.
