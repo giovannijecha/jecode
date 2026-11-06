@@ -41,7 +41,11 @@ fn loader_variables_reach_the_command_but_never_the_guardian() {
         ]),
     );
     assert_exit(&result, 0);
-    assert!(!text(&result, "stderr").contains("dyld"), "{result:?}");
+    // On macOS the loader prints each program to stderr; the command may appear there.
+    assert!(
+        !text(&result, "stderr").contains("process_unix"),
+        "{result:?}"
+    );
     #[cfg(target_os = "linux")]
     {
         assert_eq!(
