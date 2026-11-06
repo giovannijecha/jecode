@@ -4,8 +4,10 @@ import {embeddedFiles, exceeds, requireFiles} from './common.mjs';
 const Elf = Buffer.from([127, 69, 76, 70]);
 
 export function checkVersions(text, ceiling, file) {
-  const required = [...text.matchAll(/Name: GLIBC_(\d+(?:\.\d+)+)/g)].map(match => match[1]);
-  if (!required.length || text.includes('GLIBC_PRIVATE')) {
+  // A symbolic need such as GLIBC_ABI_DT_RELR has no number to compare, and old loaders
+  // refuse it: anything but a numbered public version fails the audit.
+  const required = [...text.matchAll(/Name: GLIBC_(\S+)/g)].map(match => match[1]);
+  if (!required.length || required.some(version => !/^\d+(?:\.\d+)+$/.test(version))) {
     throw new Error(`Could not establish a public glibc ABI for ${file}`);
   }
   for (const version of required) {

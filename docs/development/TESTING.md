@@ -184,8 +184,13 @@ The normal suite launches an original Rust probe inside the Workspace
 confinement and checks permitted and denied file operations, inherited
 confinement in descendants, and rejection of interactive terminals. On Linux and
 macOS, `sandbox::unix_tests` also runs the system shell, `cc`, Git and any of
-`cargo`, `node`, `npm` and `python3` the host has, and skips with a printed reason on a
-kernel without Landlock. A skipped test does not establish coverage.
+`cargo`, `node`, `npm` and `python3` the host has. On a kernel without Landlock they
+skip with a printed reason, which the test harness hides when a test passes. CI sets
+`JECODE_REQUIRE_CONFINEMENT` so that a job on such a kernel fails instead of staying
+green with nothing checked. `sandbox::unix_escape_tests` covers routes around the
+policy: loader variables and, on macOS, hard links, clones, other processes'
+environments and signals. `native_unix_confined_commands_have_no_terminal` needs a
+real controlling terminal, so it runs with the native conversations.
 
 On Windows it also checks drive-root listing only for an installed Node.js
 runtime. PowerShell and .NET

@@ -84,7 +84,7 @@ test('Linux without glibc fails before checking the binary or spawning', () => {
 });
 
 test('Linux rejects glibc 2.27 and accepts 2.28 and 3.0', () => {
-  for (const [version, accepted] of [['2.27', false], ['2.28', true], ['3.0', true]]) {
+  for (const [version, accepted] of [['2.27', false], ['2.28', true], ['2.40.9000', true], ['3.0', true]]) {
     const { runtime, errors } = runtimeFor('linux', 'x64');
     runtime.report.getReport = () => ({ header: { glibcVersionRuntime: version } });
     const { child } = fakeChild();

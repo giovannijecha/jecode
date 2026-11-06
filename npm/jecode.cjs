@@ -13,7 +13,8 @@ function signalExitCode(signal) {
 }
 
 function glibcMeetsMinimum(version, minimum) {
-  if (!/^\d+\.\d+$/.test(version)) return false;
+  // Development builds report a third part, such as Fedora Rawhide's 2.40.9000.
+  if (!/^\d+\.\d+(?:\.\d+)*$/.test(version)) return false;
   const [major, minor] = version.split('.').map(Number);
   const [requiredMajor, requiredMinor] = minimum.split('.').map(Number);
   return major > requiredMajor || (major === requiredMajor && minor >= requiredMinor);

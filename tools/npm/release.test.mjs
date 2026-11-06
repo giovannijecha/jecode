@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import {root, targets, version, revision, sourceClean, digest, json, command} from './common.mjs';
+import {root, targets, version, revision, sourceClean, digest, json, command, exceeds} from './common.mjs';
 import {stage, collect, pack} from './release.mjs';
 import {unpack} from './archive.mjs';
 import {checkVersions} from './linux-abi.mjs';
@@ -100,6 +100,15 @@ test('Linux ABI checks include version needs beyond the documented runtime basel
   checkVersions('Name: GLIBC_2.2.5 Flags: none\nName: GLIBC_2.39 Flags: none', '2.39', 'fixture');
   assert.throws(() => checkVersions('Name: GLIBC_2.40 Flags: none', '2.39', 'fixture'), /requires glibc 2.40/);
   assert.throws(() => checkVersions('Name: GLIBC_PRIVATE', '2.39', 'fixture'), /public glibc ABI/);
+  assert.throws(() => checkVersions('Name: GLIBC_2.17 Flags: none\nName: GLIBC_ABI_DT_RELR Flags: none', '2.39', 'fixture'), /public glibc ABI/);
+});
+
+test('OS floors compare numerically, not as text', () => {
+  assert.equal(exceeds('2.9', '2.28'), false);
+  assert.equal(exceeds('2.28', '2.9'), true);
+  assert.equal(exceeds('9.0', '11.0'), false);
+  assert.equal(exceeds('11.0.0', '11.0'), false);
+  assert.equal(exceeds('11.0.1', '11.0'), true);
 });
 
 test('macOS deployment targets are read from either load command and fail closed', () => {

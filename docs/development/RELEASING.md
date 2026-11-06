@@ -52,7 +52,7 @@ Its required job names are `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)`, and
    and `npm view @giovannijecha/jecode time --json`. Removed
    versions may be absent from `versions` but remain in `time`; npm permanently
    reserves them. Choose a version that has never been published.
-2. Merge the intended revision to `main` after its three CI jobs pass. Set the
+2. Merge the intended revision to `main` after its four CI jobs pass. Set the
    release version in `Cargo.toml` and review the corresponding lockfile and
    user documentation in that revision.
 3. Run the **Prepare npm release** workflow manually for that revision. Its
@@ -78,7 +78,8 @@ Once two public versions exist, also verify
 version.
 
 To check one platform from a local checkout, build its release executable with
-`cargo build --release --locked --offline` (on Linux, against the sysroot; see
+`cargo build --release --locked --offline` (on Linux, against the sysroot; on macOS,
+with `MACOSX_DEPLOYMENT_TARGET=11.0`; see
 [Development and testing](TESTING.md#os-floors)), then run:
 
 ```text

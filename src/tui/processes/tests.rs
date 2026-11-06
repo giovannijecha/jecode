@@ -55,8 +55,12 @@ fn wait_until(app: &mut App, mut done: impl FnMut(&mut App) -> bool) {
         app.poll().unwrap();
         assert!(
             Instant::now() < deadline,
-            "Timed out while {}",
-            app.state.status
+            "Timed out while {}; selected process: {:?}",
+            app.state.status,
+            app.state
+                .processes
+                .as_ref()
+                .and_then(|panel| panel.selected_process())
         );
         thread::sleep(Duration::from_millis(10));
     }

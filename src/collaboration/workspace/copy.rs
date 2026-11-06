@@ -187,7 +187,9 @@ fn same_file(listed: &fs::Metadata, opened: &fs::Metadata) -> bool {
         use std::os::unix::fs::MetadataExt;
         listed.dev() == opened.dev() && listed.ino() == opened.ino()
     }
-    // Stable Rust exposes no Windows file index, but a replacement has its own creation time.
+    // Stable Rust exposes no Windows file index. Creation time catches most replacements;
+    // NTFS can give a same-named replacement the old time, as it did for every file
+    // before this check, and the merge review still detects the changed contents.
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;

@@ -76,6 +76,13 @@ fn routing(app: &App) -> Routing {
 
 #[test]
 fn opening_routing_refreshes_an_expired_listing() {
+    // A Windows `Instant` cannot precede boot, and this machine's CI can run right
+    // after a restart. Only then is an expired listing impossible to express.
+    let Some(fetched) =
+        Instant::now().checked_sub(crate::backend::openrouter::routing::policy::FRESH)
+    else {
+        return;
+    };
     let home = Directory::new();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, listing())]);
@@ -86,7 +93,7 @@ fn opening_routing_refreshes_an_expired_listing() {
         .offer_endpoints(crate::backend::Endpoints {
             model: "fixture/model".into(),
             list: vec![],
-            fetched: Instant::now() - crate::backend::openrouter::routing::policy::FRESH,
+            fetched,
         });
     app.dispatch("/routing".into()).unwrap();
     assert_eq!(

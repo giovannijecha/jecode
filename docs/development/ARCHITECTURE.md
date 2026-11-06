@@ -323,7 +323,8 @@ children that create their own process group or session leave that cleanup
 boundary. Losing the Unix owner and guardian at the same time can prevent
 terminal restoration.
 
-The TUI uses the alternate screen, 24-bit color and changed-row painting. On
+The TUI uses the alternate screen, changed-row painting and 24-bit color, or the
+256-color palette on a Unix terminal that does not declare 24-bit support. On
 Windows frames use `CONOUT$` to avoid the small writes made by standard output
 to a console. This reduces ConPTY frame delays; it does not bypass the host's
 own rendering or frame pacing. The terminal adapter selects UTF-8 output.

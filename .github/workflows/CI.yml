@@ -43,6 +43,7 @@ jobs:
       RUST_BACKTRACE: 1
       RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
       MACOSX_DEPLOYMENT_TARGET: '11.0'
+      JECODE_REQUIRE_CONFINEMENT: '1'
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

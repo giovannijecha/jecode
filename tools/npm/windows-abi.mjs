@@ -67,7 +67,10 @@ export function peImage(bytes, file) {
     return address - section.address + section.raw;
   };
   const libraries = [];
-  const directory = bytes.readUInt32LE(optional + (wide ? 112 : 96) + 8);
+  const directories = optional + (wide ? 112 : 96);
+  // The audit reads the import table; a delay-loaded library would escape it.
+  if (bytes.readUInt32LE(directories + 13 * 8)) throw new Error(`${file} delay-loads libraries, which this audit cannot read.`);
+  const directory = bytes.readUInt32LE(directories + 8);
   if (directory) {
     for (let entry = offset(directory); bytes.readUInt32LE(entry + 12); entry += 20) {
       const start = offset(bytes.readUInt32LE(entry + 12));

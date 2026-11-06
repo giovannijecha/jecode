@@ -40,6 +40,7 @@ jobs:
       RUST_BACKTRACE: 1
       RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
       MACOSX_DEPLOYMENT_TARGET: '11.0'
+      JECODE_REQUIRE_CONFINEMENT: '1'
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -88,12 +89,18 @@ jobs:
       - name: Verify native Windows interactive input
         if: runner.os == 'Windows'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native Windows LSP panels
+        if: runner.os == 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::windows::native_tests::native_lsp::native_windows_lsp_panels -- --exact --ignored --nocapture --test-threads=1
       - name: Verify native Linux PTY
         if: runner.os == 'Linux'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
       - name: Verify native macOS PTY
         if: runner.os == 'macOS'
         run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
+      - name: Verify native Unix conversations
+        if: runner.os != 'Windows'
+        run: cargo +${{ matrix.toolchain }} test --locked --offline tui::terminal::unix::native_tests::scenarios::native_unix -- --ignored --nocapture --test-threads=1
       - name: Build release executable
         run: cargo +${{ matrix.toolchain }} build --release --locked --offline
       - name: Run the release executable on the glibc floor

@@ -271,6 +271,16 @@ mod tests {
             retarget(&project, "node_modules/pkg", &lower.join("store/pkg")),
             Path::new("..").join("store").join("pkg")
         );
+        // A dangling link stops resolution, so only the alias check can place this one.
+        std::os::unix::fs::symlink("missing", project.join("dangling")).unwrap();
+        assert_eq!(
+            retarget(
+                &project,
+                "node_modules/pkg",
+                &lower.join("dangling/../store/pkg")
+            ),
+            Path::new("..").join("dangling/../store/pkg")
+        );
     }
 
     #[cfg(unix)]
