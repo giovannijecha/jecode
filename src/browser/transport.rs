@@ -85,6 +85,9 @@ impl Cdp {
             .ok_or("No loopback address")?;
         let mut stream =
             TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|e| e.to_string())?;
+        // Every call waits for its reply, so Nagle would hold a frame's payload
+        // for the delayed acknowledgement of its header: 40 ms a call on Linux.
+        stream.set_nodelay(true).map_err(|e| e.to_string())?;
         stream
             .set_write_timeout(Some(Duration::from_secs(2)))
             .map_err(|e| e.to_string())?;

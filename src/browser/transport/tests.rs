@@ -34,6 +34,15 @@ fn accept_key(socket: &mut TcpStream) -> String {
 }
 
 #[test]
+fn connections_send_each_frame_without_a_nagle_delay() {
+    let (url, server) = super::super::tests::fake_page(|_, _| (vec![], None));
+    let connection = Cdp::connect(&url).unwrap();
+    assert!(connection.stream.nodelay().unwrap());
+    drop(connection);
+    server.join().unwrap();
+}
+
+#[test]
 fn delayed_fragmented_handshake_succeeds_within_two_seconds() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = endpoint(&listener);
