@@ -169,14 +169,32 @@ static int socket_forward(struct channel *channel) {
     return sent;
 }
 
+// A TLS ticket can make the descriptor readable without delivering WebSocket
+// bytes. Peek without waiting for a later application record on the same socket.
+static int socket_application_ready(struct channel *channel) {
+    if (!channel->ssl || ssl_pending(channel->ssl) > 0) return 1;
+    int flags = fcntl(channel->socket, F_GETFL, 0);
+    if (flags < 0 || fcntl(channel->socket, F_SETFL, flags | O_NONBLOCK) < 0) return -1;
+    unsigned char byte;
+    err_clear_error();
+    int count = ssl_peek(channel->ssl, &byte, 1);
+    int error = count <= 0 ? ssl_get_error(channel->ssl, count) : 0;
+    if (fcntl(channel->socket, F_SETFL, flags) < 0) return -1;
+    if (count > 0) return 1;
+    if (error == 2) return 0; // WANT_READ
+    if (error == 3) return 2; // WANT_WRITE
+    return -1;
+}
+
 // Serves messages in both directions until the connection ends, leaving its reason.
 static void socket_loop(struct channel *channel, unsigned long long idle_limit) {
     struct socket_message message = {0};
     long long activity = now_ms();
+    short wait_events = POLLIN;
     for (;;) {
         int buffered = channel->start != channel->end || (channel->ssl && ssl_pending(channel->ssl) > 0);
         int waiting = input_start != input_end;
-        struct pollfd ready[2] = { { channel->socket, POLLIN, 0 }, { STDIN_FILENO, POLLIN, 0 } };
+        struct pollfd ready[2] = { { channel->socket, wait_events, 0 }, { STDIN_FILENO, POLLIN, 0 } };
         if (!buffered && !waiting) {
             long long left = (long long)idle_limit - (now_ms() - activity);
             if (left <= 0) _exit(0);
@@ -184,7 +202,14 @@ static void socket_loop(struct channel *channel, unsigned long long idle_limit) 
             if (polled < 0 && errno != EINTR) { fail('E', "Native HTTP socket wait failed"); return; }
             if (polled <= 0) continue;
         }
-        if (buffered || (ready[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+        int incoming = buffered || (ready[0].revents & (wait_events | POLLHUP | POLLERR));
+        if (incoming && channel->ssl && !buffered) {
+            int ready = socket_application_ready(channel);
+            if (ready < 0) { fail('E', "Native HTTP socket failed"); return; }
+            wait_events = ready == 2 ? POLLOUT : POLLIN;
+            incoming = ready == 1;
+        }
+        if (incoming) {
             // 2 is a control frame: a pinging server must not defeat the idle limit.
             int received = socket_receive(channel, &message);
             if (!received) return;

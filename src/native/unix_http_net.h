@@ -133,7 +133,9 @@ static void free_target(struct target *target) {
 }
 
 static int loopback_host(const char *host) {
-    return !strcasecmp(host, "localhost") || !strncmp(host, "127.", 4) || !strcmp(host, "::1");
+    if (!strcasecmp(host, "localhost") || !strcmp(host, "::1")) return 1;
+    struct in_addr address;
+    return inet_pton(AF_INET, host, &address) == 1 && (ntohl(address.s_addr) >> 24) == 127;
 }
 
 #ifdef __APPLE__

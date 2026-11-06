@@ -22,6 +22,7 @@ static unsigned long (*err_peek_last_error)(void);
 static void (*err_clear_error)(void);
 static int (*ssl_write)(SSL *, const void *, int);
 static int (*ssl_read)(SSL *, void *, int);
+static int (*ssl_peek)(SSL *, void *, int);
 static int (*ssl_pending)(const SSL *);
 static unsigned char *(*sha1_digest)(const unsigned char *, size_t, unsigned char *);
 static int tls3;
@@ -52,6 +53,7 @@ static int load_tls(void) {
     if (tls3) *(void **)(&err_peek_last_error) = dlsym(library, "ERR_peek_last_error");
     SYMBOL(ssl_write, "SSL_write");
     SYMBOL(ssl_read, "SSL_read");
+    SYMBOL(ssl_peek, "SSL_peek");
     SYMBOL(ssl_pending, "SSL_pending");
     /* In libcrypto, which libssl loads; only the WebSocket handshake needs it. */
     *(void **)(&sha1_digest) = dlsym(library, "SHA1");

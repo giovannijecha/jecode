@@ -183,3 +183,5 @@ mod macos_proxy_tests;
 mod pool_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, target_os = "linux"))]
+mod unix_target_tests;

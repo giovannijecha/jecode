@@ -54,6 +54,8 @@ static CFArrayRef scripted_routes(const char *script) {
 }
 
 static int pac_order(void) {
+    CHECK(!loopback_host("127.example.test"));
+    CHECK(loopback_host("127.0.0.2"));
     CFArrayRef routes = scripted_routes("function FindProxyForURL(url, host) { return 'PROXY 127.0.0.1:12345; DIRECT'; }");
     CHECK(routes && CFArrayGetCount(routes) == 2);
     CFDictionaryRef first = CFArrayGetValueAtIndex(routes, 0);

@@ -211,6 +211,16 @@ fn unix(out: &Path, assets: &mut Vec<(String, PathBuf)>, target: &str) {
         checked(&mut command, "http-proxy-fixture");
     }
     if target == "linux" {
+        let fixture = "src/test_support/linux_http_target.c";
+        println!("cargo:rerun-if-changed={fixture}");
+        let mut command = c_compiler();
+        command.arg("-std=c11");
+        command
+            .arg(fixture)
+            .arg("-o")
+            .arg(out.join("http-target-fixture"));
+        command.arg("-ldl");
+        checked(&mut command, "http-target-fixture");
         let binary = out.join("jecode-clipboard_linux");
         let mut command = c_compiler();
         command.arg("-std=c11");
