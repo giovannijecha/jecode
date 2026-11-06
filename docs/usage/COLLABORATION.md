@@ -6,6 +6,11 @@ agent; it writes the assignments, follows their progress, reviews what comes
 back and decides what to keep. You can watch with `/agents`, but reviewing and
 closing assignments is the main agent's job.
 
+The main agent is told that a collaborator starts without its context and usually
+costs more than doing the work itself, so it delegates only when you ask or when
+the work splits into independent parts that together would take many calls. To get
+collaborators for smaller work, ask for them.
+
 ## How collaborators work
 
 Each collaborator starts with its own conversation and the main agent's current
@@ -15,8 +20,8 @@ skills and the shared project-map notes. It does not receive the main
 conversation. Later model changes in the main conversation do not affect
 collaborators that already exist.
 
-Collaborators have the same file, command, process, checkpoint, web, browser,
-map and plan tools as the main agent, and follow the same permission level and
+Collaborators have every tool the main agent has except `agent` and `ask_user`,
+including `mcp`, `lsp` and `steps`, and follow the same permission level and
 approvals. They cannot delegate further and cannot ask you questions; they
 report questions to the main agent. Each collaborator has its own processes,
 browsers, temporary files and history. Within one conversation `tmp:` and

@@ -64,7 +64,7 @@ fn ending(state: &State, width: usize) -> Vec<Line> {
     } else {
         state.editor.text.split_whitespace().next()
     }
-    .is_some_and(crate::tui::commands::immediate);
+    .is_some_and(|name| crate::tui::commands::immediate(name) || crate::tui::commands::menu(name));
     let action = if state.activity.is_some() && !immediate {
         "queue"
     } else {

@@ -3,7 +3,8 @@
 Manage global HTTP MCP connections in **Settings > MCP**. `/mcp` inspects only
 configured connections and their tools. Multiple connections to the same
 service use distinct names. They apply to every conversation and collaborator.
-Plain mode has no MCP settings; edit `~/.jecode/mcp.json` there or use the TUI.
+Plain mode has no MCP settings; use the TUI or
+[edit the file directly](#edit-the-file-directly).
 
 ## Connect a server
 
@@ -46,6 +47,28 @@ they grant it access to. A public server with no authentication reads
 The [Vercel client setup](../development/VERCEL_MCP_CLIENT.md) records the
 public metadata URL and publication requirement. Vercel CLI/API tokens are not
 assumed to authorize the MCP endpoint; access follows its OAuth grants.
+
+## Edit the file directly
+
+`~/.jecode/mcp.json` is a JSON object with a `connections` array:
+
+```json
+{
+  "connections": [
+    {
+      "id": "docs",
+      "name": "Docs",
+      "endpoint": "https://example.com/mcp",
+      "method": "none"
+    }
+  ]
+}
+```
+
+`id` uses letters, digits and dashes. `method` is `none` or `token`, which also needs a
+`token` field holding the bearer token. Optional fields are `enabled` (default `true`),
+`timeout_secs` (1–600, default 60) and `headers`. Browser and device sign-in records are
+written by the TUI's sign-in flow.
 
 ## Global configuration and permissions
 

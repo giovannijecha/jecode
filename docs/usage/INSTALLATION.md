@@ -35,14 +35,19 @@ npm install -g @giovannijecha/jecode
 jecode --version
 ```
 
-The command installs the current npm release. A 0.3.5 build prints a line
-beginning with `jecode 0.3.5`; until that version is published, npm installs the
-earlier published version. The package includes the native executables and
+The command installs the current npm release, and `jecode --version` prints its
+number, such as `jecode 0.3.5 (…)`. The package includes the native executables and
 does not build Rust code or download a binary when you first run it. Node.js
 starts the npm command; the standalone executable below needs no Node.js.
 
 If a global npm install fails with a permissions error, follow
 [npm's user-owned installation guidance](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally/).
+On Windows, if PowerShell reports that running scripts is disabled, use `npm.cmd` and
+`jecode.cmd`, or allow local scripts with
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+Next, connect a provider and start working: see
+[First task](../../README.md#first-task).
 
 ### Update or remove the npm installation
 
@@ -202,8 +207,8 @@ executable to
 export PATH="${XDG_DATA_HOME:-$HOME/.local/share}/jecode/bin:$PATH"
 ```
 
-To install elsewhere, pass an absolute directory your user can write to.
-For example, using the Linux x86_64 package:
+To install elsewhere, pass an absolute directory your user can write to; the
+executable goes in its `bin` folder. For example, using the Linux x86_64 package:
 
 ```sh
 sh target/package/jecode-linux-x86_64/INSTALL.sh "$HOME/.local/opt/jecode"

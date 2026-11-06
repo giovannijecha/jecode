@@ -91,7 +91,9 @@ confinement: a Process Security Environment on Windows, Landlock on Linux and
 Seatbelt on macOS. The system enforces a filesystem policy on the command and every
 process it starts:
 
-- The working folder and the conversation's temporary area are writable.
+- The working folder and the conversation's temporary area are writable. An `exec`
+  call you approve with an outside working directory can also read and write that
+  whole directory, for that call.
 - System locations are readable, but your home folder, with SSH keys, cloud
   credentials and browser data, stays out of reach. On Linux and Windows nothing else
   is readable either. On macOS, external volumes and temporary folders are also closed,
@@ -111,8 +113,11 @@ process it starts:
   point to: tools installed with pipx or uv need Full.
 - On Linux and macOS, a program outside these locations cannot start, and the cache,
   settings and npm folders programs usually keep in your home (`XDG_CACHE_HOME`,
-  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `npm_config_cache`) point at
-  the temporary area. Your real ones are not used.
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `npm_config_cache`,
+  `CLANG_MODULE_CACHE_PATH`) point at the temporary area. Your real ones are not used.
+- `GIT_CONFIG_GLOBAL` points at the temporary area on every platform, so your global
+  Git identity, aliases and credential helpers do not apply. Set `user.name` and
+  `user.email` in the repository, or choose Full.
 - On Windows, when `node.exe` is on `PATH`, including a version-manager shim, commands
   can also list the drives that hold the writable folders, the executable and
   configured manager homes, because Node.js checks each drive root while resolving

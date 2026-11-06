@@ -29,9 +29,9 @@ of them. Exact arguments and limits are in the
 
 | Tool | What it does |
 | --- | --- |
-| `read` | Read a text file a page at a time, or show an image or PDF to the model. Also reads saved command output, earlier conversation history, skills, attachments and checkpoints. |
+| `read` | Read a text file a page at a time, up to 12 files in one call, or show an image or PDF to the model. Also reads saved command output, earlier conversation history, skills, attachments and checkpoints. |
 | `write` | Create or replace a whole text file. |
-| `edit` | Apply one or more exact text replacements to a file, all or nothing. |
+| `edit` | Apply exact text replacements to one file, or to up to 12 files in one call. Each file changes all or nothing; with several files, one that fails does not stop or undo the others. |
 | `list` | List files and directories, optionally recursively and filtered by a pattern. |
 | `search` | Find literal text in project files, with line numbers and context. |
 | `map` | Summarize the project's structure and keep source-backed notes about it. |
@@ -70,7 +70,8 @@ copy, so a failed edit leaves the original intact. Text is UTF-8.
 
 `edit` applies its replacements in order to the result of the previous ones.
 Each one must match exactly once, including whitespace and line endings; a
-missing or ambiguous match changes nothing. For files inside the project,
+missing or ambiguous match leaves that file unchanged, and in a multi-file call the
+other files are still written. For files inside the project,
 `write` and `edit` attempt to save the previous state in a
 [checkpoint](CHECKPOINTS.md). The receipt reports what was captured; a save
 failure does not block the file change.

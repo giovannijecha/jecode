@@ -13,8 +13,6 @@ repository root.
 | [Providers](usage/PROVIDERS.md) | OpenRouter, OpenAI and Anthropic API keys; ChatGPT sign-in and the Claude account compatibility route. |
 | [Terminal interface](tui/INTERFACE.md) | Working in the fullscreen interface: sending, queueing, stopping, reading and quitting. |
 | [Command line](usage/CLI.md) | Single prompts, pipes, plain chat, options and exit codes. |
-| [Agent benchmark](development/AGENT_BENCHMARK.md) | Measured efficiency against Codex and Claude Code, with per-run results and limits. |
-| [Release notes](../CHANGELOG.md) | Changes prepared for 0.3.5. |
 
 ## Work with Jecode
 
@@ -45,6 +43,15 @@ repository root.
 | [Markdown display](tui/MARKDOWN.md) | How answers are formatted in the terminal. |
 | [Tool reference](usage/TOOL_REFERENCE.md) | Exact tool arguments, defaults and limits. |
 | [Command language](usage/SHELL.md) | Syntax and built-ins of the `bash` tool. |
+
+## Project
+
+| Page | Contents |
+| --- | --- |
+| [Release notes](../CHANGELOG.md) | What changed in each version, with upgrade notes. |
+| [Agent benchmark](development/AGENT_BENCHMARK.md) | Measured efficiency against Codex and Claude Code, with per-run results and limits. |
+| [Security](../SECURITY.md) | Stored data, credentials and reporting a vulnerability. |
+| [Contributing](../CONTRIBUTING.md) | How to propose a change. |
 
 ## Development
 

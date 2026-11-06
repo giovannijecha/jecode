@@ -13,7 +13,7 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
 ![Jecode running in Windows Terminal, with its startup screen, composer and model status](docs/images/jecode-startup.png)
 
-*Windows Terminal capture on 0.2.5, before the 0.3.5 version bump.*
+*Windows Terminal, on a pre-release build of this interface that still reports 0.2.5.*
 
 ## Measured efficiency
 
@@ -28,16 +28,15 @@ Sonnet 5.5. Every run passed all 21 hidden acceptance tests.
 
 These are maintainer measurements from one Node project on Windows, recorded
 2026-11-04: 7 vs 6 GPT runs and 4 vs 3 Claude runs. Jecode used account sign-in;
-its API-key routes were not compared.
-Time excludes two deliberate 6.5-minute pauses. Weighted tokens account for
-cache reads, writes and output; they are not raw token totals, API bills or a
-multiplier for your plan's quota. Read the
+its API-key routes were not compared. Time excludes two deliberate 6.5-minute
+pauses. Weighted tokens account for cache reads, writes and output; they are not
+raw token totals, API bills or a multiplier for your plan's quota. Read the
 [method, per-run data and limits](docs/development/AGENT_BENCHMARK.md).
 
 Jecode supports prompt caching, batched file operations and prepared tool
 sequences in one request. Native HTTP connections persist between requests;
-OpenAI conversations use WebSocket with HTTP fallback.
-Separate [transport measurements](docs/development/PERFORMANCE.md#provider-transports)
+OpenAI conversations use WebSocket with HTTP fallback. Separate
+[transport measurements](docs/development/PERFORMANCE.md#provider-transports)
 record lower first-update latency on Windows; the comparison above predates
 that work.
 
@@ -55,14 +54,15 @@ then works through the task in the same window:
   the project directory;
 - checkpoints let you inspect and restore captured file changes; each receipt
   tells you what was saved;
-- Ctrl+G opens commands over your draft; menus keep it intact, and dark and
-  light themes keep your terminal's own background.
+- `/` lists commands as you type, and Ctrl+G opens them without touching your
+  draft;
+- Auto, Dark and Light themes keep your terminal's own background.
 
 When you quit, Jecode prints a summary and the command to continue later:
 
 ```text
 >_ jecode closed · 3 prompts · 12 tools · 4m 12s
-   jecode resume 7f3a9c2e
+   jecode resume 1793721600123-4812-0
 ```
 
 You can also run one task without the fullscreen interface, or pipe one in; see
@@ -76,10 +76,9 @@ jecode "Explain the structure of this project"
 
 Install Jecode with Node.js 22 or later and npm on Windows 10 1809 or later (x64),
 Linux x64 (glibc 2.28 or newer), or macOS 11 or later on Apple silicon or Intel.
+On macOS 11–13.4, use Node.js 22: Node.js 24 needs macOS 13.5 or later.
 [Platform support](docs/development/PLATFORMS.md#supported-versions) records what
 has actually run on each of them.
-
-On macOS 11–13.4, use Node.js 22; Node.js 24 needs macOS 13.5 or later.
 
 ```sh
 npm install -g @giovannijecha/jecode
@@ -126,12 +125,11 @@ quit, and `/help` or F1 for commands and common shortcuts.
 ## Status
 
 Jecode is usable and still evolving. Commands, settings and storage formats may
-change between releases. See the [0.3.5 release notes](CHANGELOG.md).
+change between releases; the [release notes](CHANGELOG.md) list what changed.
 
 - Windows x64, Linux x64, and macOS on Apple silicon and Intel have native
   builds and terminal fixtures in CI. Interactive use on macOS has not been
-  verified. See
-  [Platform support](docs/development/PLATFORMS.md).
+  verified. See [Platform support](docs/development/PLATFORMS.md).
 - Command confinement in the Workspace permission level needs Landlock on Linux and a
   recent Windows, and uses Seatbelt on macOS. Hosts without confinement need the
   Full level; macOS terminal hosts still need manual validation.

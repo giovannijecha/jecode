@@ -19,9 +19,12 @@ below the title:
 | Call | Result |
 | --- | --- |
 | Read | Lines shown and where, such as `9 lines · from line 33 of 212`. A skill read shows `Loaded skill`. |
+| Read (several paths) | `3 files · 120 lines`, adding `N not read` when a path failed, then each file under its path. |
+| Read (image or PDF) | `Opened image · 800×600 · 12 KiB`, or `Opened PDF · 4 pages · 1.2 MiB`. |
 | List, Search | Entry or match counts, files searched, errors, and `more from N` when there is another page. |
 | Map | Counts of entries, files and notes; `partial` when the survey was cut short. |
 | Update | `+N −M lines`, followed by the diff. Used for `edit` and for a `write` that replaced an existing file. |
+| Update (several files) | One card naming every path, with `3 files · +9 −1 lines` and `N failed` in red. The first three diffs stay open; later files keep their heading. |
 | Write (new file) | `New file · N lines` and the first six lines. |
 | Bash, Exec, Process | The last output line and the duration, such as `Done in 1.2s`. |
 | Failed command | `Exit N` with the error and up to two lines of stderr, in red. |
@@ -31,6 +34,9 @@ below the title:
 | Browser | Where it navigated or what it saved, such as `Screenshot 1280×720`. |
 | Save | A short result; Ctrl+O shows the rest. |
 | Any error | The error message, such as `Not found`. |
+
+A `steps` call shows each step as its own card, in order, live and after resume.
+Only a refused call has a `STEPS` card, with the tools it named and the reason.
 
 MCP cards use the quiet badge surface and identify the connection and remote
 operation, such as `GitHub › create_issue`. Arguments use the same `│` row,
@@ -55,8 +61,8 @@ a note such as `stdout trimmed to the last 64 KiB of 89 KiB · full output saved
 says so. A checkpoint saved before a command appears as a quiet note; partial
 or failed checkpoint coverage shows a warning.
 
-Cards show the result as it was when the call returned. For the current state of
-a background process, use `/terminal`.
+Cards show the result as it was when the call returned. For a process still
+running, use `/terminal`.
 
 ## Work chapters
 

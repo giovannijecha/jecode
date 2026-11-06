@@ -80,7 +80,7 @@ use the ignored `.tmp/` or `target` directories.
 
 These drive the real renderer through a pseudo-terminal and check input,
 resize, quitting and terminal restoration after normal exit and owner loss. CI
-runs the one for each platform. Run them after the normal suite, one at a time;
+runs the fixtures for each platform. Run them after the normal suite, one at a time;
 running them concurrently with other suites can exceed their wait limits.
 Windows screen snapshots compile the owned C# probe once per fixture, then run
 the executable directly. Repeated snapshots keep the same native cell and mode
@@ -141,10 +141,11 @@ the Actions toolset is visible. On Windows on 2026-11-03 all four completed
 authorization, refresh and discovery; Vercel returned 241 tools, Supabase 31,
 Cloudflare 4 and GitHub 48. Resource access and remote mutations were not tested.
 
-Interactive `exec` tests need `cc` on first use on Unix, plus `/proc` on Linux
-or `/bin/ps` on macOS. The compiled helper is cached under
-`target/measurements/pty-cache`. Unix interrupt probes also use the system
-`stty` and `od`, and owner-loss tests use `ps`.
+On Unix, `cc` builds the interactive `exec` helper during the Cargo build, and the
+test suite uses it again for strict-warning and PTY contract checks. Under test the
+helper installs to `.tmp/native-tests`. Job-control cleanup uses `/proc` on Linux and
+`/bin/ps` on macOS. Unix interrupt probes also use the system `stty` and `od`, and
+owner-loss tests use `ps`.
 
 ## Opt-in language-server interoperability
 
@@ -376,8 +377,9 @@ run anything: only macOS CI establishes those.
 
 [`CI.yml`](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml)
 runs formatting, the offline build, all-target Clippy and the test suite, then
-the platform's native terminal fixtures (on Windows, also the direct-input
-fixture). It also builds a release executable, tests npm packaging and the
+the platform's native checks: the fullscreen, direct-input and LSP panel fixtures
+on Windows, the PTY fixture and native conversations on Linux and macOS, and the
+native TLS check on macOS. It also builds a release executable, tests npm packaging and the
 install/update/uninstall lifecycle, and runs the opt-in native terminal fixture
 through the npm launcher. The required checks are
 `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)` and `Rust (macOS Intel)`.

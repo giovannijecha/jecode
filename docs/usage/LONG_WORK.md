@@ -14,8 +14,8 @@ between attempts grows from 2 to 64 seconds and honors a longer `Retry-After`
 from the provider; there is no attempt limit. The TUI status row shows the
 countdown, attempt number and reason, and you can keep typing or stop the turn.
 
-- A request that receives no data for 120 seconds is retried. On Windows and
-  Linux, connecting has a 10-second deadline.
+- A request that receives no data for 120 seconds is retried. Connecting has a
+  10-second deadline; on Linux and macOS it bounds each address attempt.
 - An empty response is retried; three empty responses for the same request end
   the turn with an error.
 - Invalid requests, rejected credentials, invalid local proxy settings, TLS

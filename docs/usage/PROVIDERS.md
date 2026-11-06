@@ -183,7 +183,9 @@ If the default provider loses its credentials, the TUI uses another configured
 provider for the conversation, restores that provider's last saved model when
 there is one, and shows a warning with the reason. A `--model` override is
 skipped in that case, because model IDs differ between providers. Your saved
-defaults do not change. Single prompts and piped tasks fail instead.
+defaults do not change. `--plain` and single prompts in an interactive terminal
+start setup instead. Piped or redirected runs fail with an instruction to run
+`jecode setup`.
 
 ## Troubleshooting
 
@@ -201,8 +203,8 @@ defaults do not change. Single prompts and piped tasks fail instead.
 
 Without a configuration file, `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` can
 configure a run without saving anything. Set `OPENROUTER_API_KEY` and either
-`OPENROUTER_MODEL` or `--model`; when both name a model, `OPENROUTER_MODEL`
-wins. Once `config.json` exists, these variables are ignored.
+`OPENROUTER_MODEL` or `--model`; when both name a model, `--model` wins for that
+run. Once `config.json` exists, these variables are ignored.
 
 ```sh
 OPENROUTER_API_KEY=YOUR_OPENROUTER_KEY OPENROUTER_MODEL=provider/model-id jecode "Summarize this project"

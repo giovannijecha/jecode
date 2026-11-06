@@ -1,42 +1,70 @@
 # Release notes
 
-## 0.3.5 — Unreleased
+## 0.3.5
 
-This release brings the work merged since 0.2.5 into one native package for
-Windows x64, Linux x64, and macOS on Apple silicon and Intel.
+Changes since 0.2.5.
 
-### Efficient model work
+### Highlights
 
-- Prompt caching keeps stable context reusable, with a one-hour Claude cache
-  lifetime by default and shared instructions for collaborating agents.
-- File tools accept batches, and `steps` lets the model prepare several tools
-  in one request while keeping each step's permissions, checkpoints and card.
-- A [five-turn benchmark](docs/development/AGENT_BENCHMARK.md) records lower
-  weighted token use than Codex and Claude Code on one project, with all hidden
-  acceptance tests passing. It also records the GPT time tradeoff.
-- Native HTTP adapters reuse connections; OpenAI conversations use WebSocket
-  with HTTP fallback. [Windows measurements](docs/development/PERFORMANCE.md#provider-transports)
-  record lower first-update latency after the transport change.
+- **Workspace runs commands on Linux and macOS.** In 0.2.5 the default permission
+  level refused `bash` and `exec` outside Windows. They now run under
+  [operating-system confinement](docs/usage/PERMISSIONS.md#command-confinement):
+  Landlock on Linux and Seatbelt on macOS. Hosts without that support still need
+  the Full level.
+- **More systems.** The npm package adds macOS on Intel and lowers the Linux
+  floor from glibc 2.39 to 2.28. Release checks also enforce floors of macOS 11
+  and Windows 10 1809, though not every floor has run Jecode yet; see the
+  [evidence for each one](docs/development/PLATFORMS.md#supported-versions).
+- **Lower token use.** A [five-turn benchmark](docs/development/AGENT_BENCHMARK.md)
+  recorded fewer weighted tokens than Codex and Claude Code on one project, with
+  all hidden acceptance tests passing. With GPT, Codex finished sooner.
+- **A new terminal design.** Auto, Dark and Light themes keep your terminal's own
+  background, and commands and settings open in place of the composer without
+  touching your draft.
+- **Language servers.** Definitions, references and diagnostics through servers
+  you [enable yourself](docs/usage/LSP.md).
 
-### Native terminal interface
+### Model efficiency
 
-- Dark, light and automatic themes preserve the terminal's background.
-- Commands and settings replace the composer while keeping the draft above
-  them. Ctrl+G opens commands without editing the draft; Esc returns one level.
-- Tool badges, status text, the startup screen and browser sign-in pages follow
-  the same design. Async questions and checkpoint completion preserve which
-  panel owns the keys.
+- Claude models keep the prompt cache for one hour by default, so a break no
+  longer rewrites the conversation into the cache.
+- Collaborating agents share the main conversation's prompt cache.
+- `read` and `edit` accept several files in one call, and `steps` lets the model
+  prepare several tools in one request while keeping each step's permissions,
+  checkpoints and card.
 
-### Tools and platforms
+### Connections
 
-- Opt-in language-server connections provide definitions, references and
-  diagnostics through the owned LSP adapter.
-- MCP sign-in and connection handling include the OAuth and release-check
-  fixes merged after 0.2.5.
-- Linux and macOS share persistent HTTP transport and native terminal support.
-  Release packaging enforces glibc 2.28, macOS 11 and Windows build 17763 floors;
-  see [platform evidence and remaining manual checks](docs/development/PLATFORMS.md).
-- macOS finds the SDK before confining build commands, so the compiler keeps
-  access to its platform headers.
+- Native HTTP adapters reuse connections between requests on Windows, Linux and
+  macOS. OpenAI conversations use WebSocket with HTTP fallback.
+  [Windows measurements](docs/development/PERFORMANCE.md#provider-transports)
+  record lower first-update latency after the change.
 
-This version is pending review and publication.
+### Terminal interface
+
+- `/settings` → **Theme** chooses **Auto**, **Dark** or **Light**.
+- Ctrl+G opens the commands in a sheet with its own filter while your draft waits
+  above it; Esc goes back one level.
+- Tool badges, status text, the startup screen and the browser sign-in pages share
+  the new design.
+- Long approval requests scroll with PgUp and PgDn and keep their choices on screen.
+- A question or checkpoint finishing in the background no longer takes the keyboard
+  from the panel you are using.
+
+### Tools and commands
+
+- The `bash` tool adds here-documents, here-strings, path patterns and the `grep`,
+  `head` and `tail` built-ins; see [Command language](docs/usage/SHELL.md).
+- `write` creates a new file's missing parent directories.
+- In Workspace, commands can read Node.js runtimes installed through Volta, nvm,
+  nvm-windows or fnm, and macOS locates the SDK first so Rust builds keep their
+  platform headers.
+
+### Upgrade notes
+
+- **Prompt cache cost.** One-hour cache writes cost more: twice the input price
+  instead of 1.25 times, at Anthropic's list prices. If you rarely pause, choose
+  **5 minutes** in `/settings` → **Context** → **Prompt cache**.
+- **Permissions on Linux and macOS.** If you chose Full only because Workspace
+  refused commands, `/permissions` can take you back. Tools outside the permitted
+  locations, such as those installed with pipx or uv, still need Full.

@@ -452,7 +452,7 @@ pub(super) fn immediate(name: &str) -> bool {
 
 /// Commands that open a menu over a running turn instead of waiting for it.
 /// Commands that start work or replace the conversation still wait.
-fn menu(name: &str) -> bool {
+pub(super) fn menu(name: &str) -> bool {
     let name = commands::canonical(name);
     [
         "/settings",

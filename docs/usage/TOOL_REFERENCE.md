@@ -16,9 +16,9 @@ Neither changes what the call does.
 
 | Tool | Required | Optional |
 | --- | --- | --- |
-| `read` | `path` | `offset`, `limit`, `byte_offset` |
+| `read` | `path` or `paths` | `offset`, `limit`, `byte_offset` (with `path` only) |
 | `write` | `path`, `content` | — |
-| `edit` | `path`, `edits` | — |
+| `edit` | `path` and `edits`, or `files` | Top-level `old_text` and `new_text` instead of `edits`, for compatibility |
 | `list` | — | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit` |
 | `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit` |
 | `map` | — | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources` |
@@ -40,7 +40,8 @@ Neither changes what the call does.
 `steps` runs up to 12 tools in order with one call, so the model does not pay a
 request between calls that do not need each other's results. Each entry has
 `tool` and `arguments`, the same arguments as that tool alone, and keeps its own
-permission check, checkpoint and card.
+permission check, checkpoint and card. A call naming an unknown tool, `ask_user` or
+`steps`, or with more than 12 entries, is refused whole and runs nothing.
 
 The call has one result, a `steps` array in the same order. Each entry names its
 `tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
@@ -59,15 +60,15 @@ it.
 ## Scheduling
 
 These calls run in parallel automatically when adjacent, up to four at a time:
-`list`, `search`, `read` (except `history:` and `skill:` references), `map`
-overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
+`list`, `search`, single-path `read` (except `history:` and `skill:` references),
+`map` overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
 `tools`, and `web fetch` or `download` using GET or HEAD without a body.
 
 `parallel: true` on adjacent calls declares them independent, including writes
 and commands; they run in waves of at most four. A call without it ends the
 declared group. `parallel: false` always runs in order. `agent`, `ask_user`,
-`steps`, `todo_list`, `history:` and `skill:` reads and calls that need approval
-always run in order. Jecode never infers independence from different paths.
+`steps`, `todo_list`, multi-path `read`, `history:` and `skill:` reads and calls
+that need approval always run in order. Jecode never infers independence from different paths.
 
 In a declared group, each result is saved as it completes and shown in the TUI;
 the model receives all results in the original order. One failure does not undo
@@ -92,15 +93,17 @@ Instead of `path`, `paths` reads up to 12 files in one call (not both). Each
 file uses the default window and the results come back in order, each with its
 own result or error, so one missing file does not stop the others. Paths
 outside the working folder fail and images or PDFs are not shown: read them
-alone with `path`, which also asks for access when needed. The combined result
-is capped at 96 KiB; later paths report that they were not read.
+alone with `path`, which also asks for access when needed. Jecode starts no new
+read once the combined result reaches 96 KiB, and later paths report that they
+were not read. The read that crosses that size is kept, so the result can exceed
+96 KiB.
 
 Images and PDFs are recognized from their contents. The result returns an
 `attachment:ID` reference to a stored copy, which stays readable after the
 original changes or the temporary area is cleared. Other binary files and
 invalid UTF-8 fail.
 
-`path` also accepts these read-only references:
+`path` also accepts these references:
 
 | Reference | Content |
 | --- | --- |
@@ -116,7 +119,7 @@ invalid UTF-8 fail.
 
 History pages survive compaction and resume, exclude provider-specific
 reasoning, and mask known credentials. Input you took back into the composer is
-excluded. None of these references can be written.
+excluded. Only `tmp:relative/path` can be written; the others are read-only.
 
 ## write and edit
 
@@ -128,7 +131,8 @@ content is an error.
 
 To change several files in one call, send `files: [{"path": "...", "edits":
 [...]}, ...]` instead of `path` (up to 12 entries, each file once, not combined
-with a top-level `path`). Each file is applied all or nothing like a single
+with top-level `edits`, `old_text` or `new_text`; a top-level `path` beside `files`
+is ignored). Each file is applied all or nothing like a single
 `edit`; a failed file does not stop the others, and the result lists each file
 in order with its own outcome or error. The call needs one permission decision.
 

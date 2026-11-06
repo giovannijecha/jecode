@@ -106,7 +106,10 @@ counted; access errors and a corrupt selected account remain explicit errors.
   stays in the cacheable history; only state sent for the first time at the end
   is covered by the automatic breakpoint alone. On the Claude plan, for models
   documented to accept mid-conversation system messages, state is sent as a
-  `role: "system"` message; otherwise it is a user message.
+  `role: "system"` message; otherwise it is a user message. The shared built-in
+  block always lasts one hour. The other breakpoints follow the saved **Prompt
+  cache** lifetime: one hour by default, or the provider's five minutes when chosen.
+  Requests without that setting, such as standalone maintenance, use five minutes.
 
 Effort and adaptive thinking are separate catalog capabilities. Adaptive
 thinking is sent only when the model reports support for it. Compaction first
@@ -130,12 +133,15 @@ callback and token validation, model metadata, signed thinking, tool replay,
 cache usage and rate-limit handling. They never read Claude Code credentials or
 start a real sign-in.
 
-The live route has been exercised on Windows only, with an isolated
-`JECODE_HOME`, Opus 5.5 and extra usage verified as disabled: browser sign-in,
-model listing, a streamed reply, a two-request signed tool round trip, an
-ordinary CLI `read` turn, a forced token refresh with rotation, and resuming
-that conversation from a separate process. Other models, attachments, and live
-use on Linux or macOS have not been exercised.
+The account route has been exercised live on Windows only. With an isolated
+`JECODE_HOME`, Opus 5.5 and extra usage verified as disabled, that covered browser
+sign-in, model listing, a streamed reply, a two-request signed tool round trip, an
+ordinary CLI `read` turn, a forced token refresh with rotation, and resuming that
+conversation from a separate process. Sonnet 5.5 ran the transport probe in
+[Performance](PERFORMANCE.md#provider-transports) and the
+[benchmark](AGENT_BENCHMARK.md). The API-key route has also run live conversations
+under WSL; see [Platform support](PLATFORMS.md). Attachments, other models, the
+account route on Linux, and any live use on macOS have not been exercised.
 
 The opt-in live checks are listed in
 [Development and testing](TESTING.md#live-provider-checks).

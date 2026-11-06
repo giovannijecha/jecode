@@ -156,9 +156,10 @@ define this route; it is narrower than the API-key Responses API.
 ## Caching
 
 The local transcript is the recoverable copy and is independent of provider
-caching. Each request sends the conversation ID as `prompt_cache_key` and as the
-`session-id` header for cache affinity; a stable key does not guarantee a cache
-hit. The subscription route rejected explicit `prompt_cache_options`, so Jecode
+caching. A request with a conversation sends its key as `prompt_cache_key`; the
+ChatGPT route also sends it as the `session-id` header for cache affinity.
+Collaborators use the main conversation's key, and requests without a conversation
+send neither. A stable key does not guarantee a cache hit. The subscription route rejected explicit `prompt_cache_options`, so Jecode
 relies on implicit caching and sends runtime session state as developer
 messages anchored where each was first sent, added again only when it changes,
 so earlier requests stay an identical prefix. Reported `cached_tokens` appear with

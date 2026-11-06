@@ -28,10 +28,13 @@ Files are saved exactly; directories include their eligible contents. `"."`
 protects the whole eligible workspace. Protection does not limit what the
 command can change, and there is no scan after it finishes.
 
-Each modifying call returns a receipt with a `ref` such as `rc-…`, the saved
-paths, an expiry time and a status: `saved`, `partial` (some paths could not be
-saved; reasons are listed) or `none`. Check the status and listed paths before
-relying on a restore: `none` means no earlier state was saved. The receipt says
+Each modifying call returns a receipt with a `status` (`saved`, `partial` or
+`none`) and `saved_paths`, the number of paths saved. When something was saved it
+also has a `ref` such as `rc-…` and `expires_at`. `partial` lists the paths that
+could not be saved, with reasons (the first 20; `partial_count` gives the total
+when there are more), and a failed capture can carry a `reason`. Check the status,
+and use `inspect` to see which paths a checkpoint holds before relying on a
+restore: `none` means no earlier state was saved. The receipt says
 nothing about whether the call then succeeded. A failure to save is reported
 but does not block the call.
 

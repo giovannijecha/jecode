@@ -45,6 +45,11 @@ the scalar measurements behind these means.
   three of a final candidate, both with steps and delegation guidance. The four
   Claude runs use the final candidate. They are not seven repeats of one
   identical release binary.
+- Other Jecode development variants ran the same evening and are not reported:
+  they tested ideas that were later changed or removed. The reported builds carry
+  the design that was kept, chosen with this same fixture, so the gap could be
+  smaller on other projects. Every rival run from that evening is reported;
+  earlier rival runs are not, so each comparison shares the same evening.
 - Rivals ran the same evening as Jecode. The GPT runs span several blocks;
   the Claude pair began together. Multiple sessions shared the machine and
   network. This was not an idle-machine latency test or a randomized trial.
@@ -95,6 +100,16 @@ The CSV publishes sanitized per-run counts and durations so the means and
 percentages can be checked. The fixture, driver and private transcripts remain
 local, so the full experiment is **not independently reproducible from this
 repository**.
+
+| CSV column | Meaning |
+| --- | --- |
+| `model`, `harness` | The model and the agent with its version. |
+| `configuration` | The setup. For Jecode with GPT, `build-a` is the development binary and `final` the final candidate. |
+| `sample` | The maintainer's run number within that harness and model. Gaps are normal. |
+| `weighted_tokens` | Cost-weighted tokens, as defined above. |
+| `model_requests` | Requests counted in the totals, including subagents and collaborators. |
+| `active_seconds` | Active time, as defined above. |
+| `hidden_passed`, `hidden_total` | Hidden acceptance tests passed and run. |
 
 These results support lower weighted token use on this workload. They do not
 establish universal superiority, a plan-usage multiplier, API-key performance,

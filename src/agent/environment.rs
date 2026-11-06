@@ -32,11 +32,7 @@ impl Agent {
             ),
             (
                 "bash_access",
-                Value::string(if cfg!(windows) {
-                    "Workspace or Full permission level"
-                } else {
-                    "Full permission level"
-                }),
+                Value::string("Workspace or Full permission level"),
             ),
             ("tool_execution", Value::string("direct")),
             // Spares version-control probes in folders that have none.
