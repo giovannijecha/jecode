@@ -27,7 +27,7 @@ Neither changes what the call does.
 | `process` | `action` | `process_id`, `text`, `key`, `cols`, `rows`, `protect`, `wait_ms`, `output_limit_bytes`, `output_mode` |
 | `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` |
 | `web` | `action`; `url` for `fetch` and `download`; `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` |
-| `browser` | `action`; `url` for `navigate`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
+| `browser` | `action`; `url` for `navigate`; `key` for `press`; `text` for `fill`/`type`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `modifiers`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
 | `mcp` | `action`: `list`, `tools` or `call`; `connection` for `tools` and `call`; `tool` for `call` | `arguments` (JSON object), `query`, `offset`, `limit` |
 | `lsp` | `action`: `status`, `definition`, `references` or `diagnostics`; `path` except for status; `line` and `column` for positional actions | `server`, `include_declaration` |
 | `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
@@ -306,7 +306,7 @@ process running.
 
 ## browser
 
-Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`,
+Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`, `type`,
 `scroll`, `wait`, `screenshot`, `evaluate`, `cdp`, `logs`, `close`, `stop`.
 
 - `open` starts a browser, headless unless `visible: true`, and returns
@@ -320,6 +320,25 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`,
   accessible name, type, current value (never for passwords) and state. The full
   snapshot is saved to `snapshot_path`. `selector` accepts a reference or a CSS
   selector.
+- `press` sends key-down and key-up events for a character, a named key such as
+  `Enter` or `ArrowLeft`, or a chord such as `Ctrl+z`, `Meta+z` or `Shift+Tab`.
+  `modifiers` is an optional CDP bitmask: Alt = 1, Ctrl = 2, Meta/Command = 4,
+  Shift = 8; combine flags by adding them. Chord flags and the mask combine.
+  Printable keys insert text; shortcuts do not insert their letter. ASCII
+  physical codes use the US keyboard layout; Unicode characters preserve their
+  text without inventing a physical code.
+  On macOS, Command+A/C/X/V/Z and Command+Shift+Z include the corresponding
+  native editing command; page key handlers can still cancel its default action.
+- `type` sends `text` as successive key-down/key-up pairs. Newlines press
+  `Enter` (CRLF counts once), and tabs press `Tab`. For `press` and `type`, an
+  optional `selector` focuses the element once; subsequent input follows page
+  focus, including navigation performed by the app. The whole keyboard action
+  shares `timeout_ms` (default 15,000).
+- `fill` replaces an input's value using text insertion, without per-character
+  keyboard events. Use `type` and `press` when verifying an editor, shortcuts or
+  keyboard navigation. For example, after clicking cell A1,
+  `{"action":"type","text":"first\nsecond\tthird"}` types `first`, presses
+  Enter, types `second`, presses Tab, then types `third` wherever focus moved.
 - `wait` waits for `text` in the page or the selected element, up to
   `timeout_ms` (default 15,000). On timeout it reports the elapsed time, tab,
   URL and whether the selector or the text was missing.

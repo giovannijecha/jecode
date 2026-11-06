@@ -217,11 +217,20 @@ after browser changes. The last one briefly opens a visible window.
 ```text
 cargo test --locked --offline agent::browser_tests::native_browser_tool_delivers_images_and_preserves_only_named_profile_state -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline browser::tests::live_chromium_localhost_interaction_and_profile_persistence -- --exact --ignored --test-threads=1
+cargo test --locked --offline browser::keyboard_live_tests -- --ignored --nocapture --test-threads=1
 cargo test --locked --offline browser::live_tests::live_chromium_viewport_dimensions_and_validation -- --exact --ignored --test-threads=1
 cargo test --locked --offline browser::live_tests::live_chromium_snapshot_semantics_logs_and_wait_diagnostics -- --exact --ignored --test-threads=1
 cargo test --locked --offline browser::snapshot::tests::live_chromium_snapshot_values_text_and_refs -- --exact --ignored --test-threads=1
 cargo test --locked --offline browser::live_tests::live_chromium_visible_viewport -- --exact --ignored --test-threads=1
 ```
+
+The keyboard fixtures exercise printable keys and Enter in a textarea and form,
+select-all/delete/undo/redo, reverse Tab, Unicode contenteditable input, and a
+single `type` sequence that follows Enter/Tab focus changes between grid cells.
+They inspect trusted DOM events and the resulting values and focus. CI runs
+these keyboard checks on all four targets using installed Chrome or Edge.
+The Linux CI wrapper uses the runner's outer sandbox because nested Chrome
+sandbox namespaces are disabled there; ordinary browser launches are unchanged.
 
 `http::tests::trusted_https_uses_os_tls_policy` accepts `https://example.com/`
 and rejects `https://self-signed.badssl.com/` without account credentials. macOS

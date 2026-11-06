@@ -247,46 +247,14 @@ pub(super) fn execute(
                 ("tab_id", Value::string(id)),
             ]))
         }
-        "press" => {
-            if let Some(target) = arguments.get("selector").and_then(Value::as_str) {
-                let script = format!(
-                    "(()=>{{const e={};if(!e)return false;e.focus();return true}})()",
-                    element_expr(target)
-                );
-                if evaluate(connection, &script, cancellation, timeout)? != Value::Bool(true) {
-                    return Err("Browser element not found".into());
-                }
-            }
-            let key = required(arguments, "key")?;
-            let code = match key {
-                "Enter" => 13,
-                "Tab" => 9,
-                "Escape" => 27,
-                "Backspace" => 8,
-                "Delete" => 46,
-                "ArrowLeft" => 37,
-                "ArrowUp" => 38,
-                "ArrowRight" => 39,
-                "ArrowDown" => 40,
-                _ => 0,
+        "press" | "type" => {
+            super::keyboard::run(connection, action, arguments, cancellation, timeout)?;
+            let receipt = if action == "press" {
+                ("pressed", Value::string(required(arguments, "key")?))
+            } else {
+                ("typed", Value::Bool(true))
             };
-            for kind in ["keyDown", "keyUp"] {
-                connection.call(
-                    "Input.dispatchKeyEvent",
-                    Value::object([
-                        ("type", Value::string(kind)),
-                        ("key", Value::string(key)),
-                        ("code", Value::string(key)),
-                        ("windowsVirtualKeyCode", Value::number(code)),
-                    ]),
-                    cancellation,
-                    timeout,
-                )?;
-            }
-            Ok(Value::object([
-                ("pressed", Value::string(key)),
-                ("tab_id", Value::string(id)),
-            ]))
+            Ok(Value::object([receipt, ("tab_id", Value::string(id))]))
         }
         "scroll" => {
             let x = arguments.get("x").cloned().unwrap_or(Value::number(400));

@@ -1,5 +1,10 @@
 //! Dedicated local Chromium sessions controlled through the DevTools protocol.
 mod actions;
+mod keyboard;
+#[cfg(test)]
+mod keyboard_live_tests;
+#[cfg(test)]
+mod keyboard_tests;
 mod launch;
 #[cfg(test)]
 mod live_tests;
