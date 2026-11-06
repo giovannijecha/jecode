@@ -8,6 +8,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
@@ -19,6 +20,7 @@ struct channel {
     char *key;
     unsigned char pending[16384];
     size_t start, end;
+    time_t kept_at;
 };
 
 #ifdef __APPLE__
@@ -130,6 +132,14 @@ static void free_target(struct target *target) {
 #endif
 }
 
+static int loopback_host(const char *host) {
+    return !strcasecmp(host, "localhost") || !strncmp(host, "127.", 4) || !strcmp(host, "::1");
+}
+
+#ifdef __APPLE__
+#include "macos_http_proxy.h"
+#else
+// `example.com`, `.example.com` and `*.example.com` all cover the domain's hosts.
 static int proxy_bypassed(const char *host) {
     const char *no_proxy = getenv("NO_PROXY");
     if (!no_proxy) no_proxy = getenv("no_proxy");
@@ -137,20 +147,23 @@ static int proxy_bypassed(const char *host) {
     int bypass = 0;
     if (list) {
         char *save = NULL;
+        size_t host_length = strlen(host);
         for (char *entry = strtok_r(list, ",", &save); entry; entry = strtok_r(NULL, ",", &save)) {
-            while (*entry == ' ') entry++;
-            if (!strcmp(entry, "*") || !strcasecmp(entry, host)) bypass = 1;
-            size_t host_length = strlen(host), entry_length = strlen(entry);
-            if (entry_length && entry[0] == '.' && host_length > entry_length &&
-                !strcasecmp(host + host_length - entry_length, entry)) bypass = 1;
+            while (*entry == ' ' || *entry == '\t') entry++;
+            size_t length = strlen(entry);
+            while (length && (entry[length - 1] == ' ' || entry[length - 1] == '\t')) entry[--length] = 0;
+            if (!strcmp(entry, "*")) bypass = 1;
+            if (entry[0] == '*' && entry[1] == '.') { entry++; length--; }
+            if (entry[0] == '.') { entry++; length--; }
+            if (!length) continue;
+            if (!strcasecmp(entry, host) ||
+                (host_length > length && host[host_length - length - 1] == '.' &&
+                 !strcasecmp(host + host_length - length, entry))) bypass = 1;
         }
         free(list);
     }
     return bypass;
 }
-
-#ifdef __APPLE__
-#include "macos_http_proxy.h"
 #endif
 
 static int target_key(struct target *target) {
@@ -189,10 +202,14 @@ static int parse_target(const char *url, struct target *target) {
     }
     target->connect_host = target->host;
     target->connect_port = target->port;
+    if (loopback_host(target->host)) return target_key(target);
+#ifdef __APPLE__
+    // macOS follows the system settings alone; the WebSocket uses them too.
+    if (!system_proxy(target, url)) return 0;
+#else
     const char *proxy_url = getenv(target->secure ? "HTTPS_PROXY" : "HTTP_PROXY");
     if (!proxy_url) proxy_url = getenv(target->secure ? "https_proxy" : "http_proxy");
-    if (proxy_url && *proxy_url && strcmp(target->host, "localhost") && strcmp(target->host, "127.0.0.1") &&
-        strcmp(target->host, "::1") && !proxy_bypassed(target->host)) {
+    if (proxy_url && *proxy_url && !proxy_bypassed(target->host)) {
         const char *origin = proxy_url;
         if (strstr(proxy_url, "://")) {
             if (strncasecmp(proxy_url, "http://", 7))
@@ -203,14 +220,20 @@ static int parse_target(const char *url, struct target *target) {
         if (!target->proxy_hostport || strchr(target->proxy_hostport, '@'))
             return fail('E', "Native HTTP proxy address is invalid");
         target->connect_host = target->proxy_hostport;
-        char *colon = strrchr(target->proxy_hostport, ':');
-        if (colon) { *colon = 0; target->connect_port = colon + 1; }
-        else target->connect_port = "80";
+        target->connect_port = "80";
+        char *separator = target->proxy_hostport;
+        if (*separator == '[') {
+            char *end = strchr(separator, ']');
+            if (!end || (end[1] && end[1] != ':')) return fail('E', "Native HTTP proxy address is invalid");
+            *end = 0;
+            target->connect_host = separator + 1;
+            separator = end[1] == ':' ? end + 1 : NULL;
+        } else {
+            separator = strrchr(separator, ':');
+        }
+        if (separator) { *separator = 0; target->connect_port = separator + 1; }
         target->proxy = 1;
     }
-#ifdef __APPLE__
-    if ((!proxy_url || !*proxy_url) && strcmp(target->host, "localhost") && strcmp(target->host, "127.0.0.1") &&
-        strcmp(target->host, "::1") && !proxy_bypassed(target->host) && !system_proxy(target, url)) return 0;
 #endif
     return target_key(target);
 }
@@ -240,8 +263,10 @@ static void set_socket_limits(struct channel *channel, int milliseconds) {
 
 static int open_tunnel(struct channel *channel, const struct target *target) {
     char request[2048], reply[65536];
-    int length = snprintf(request, sizeof(request), "CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n",
-        target->host, target->port, target->host, target->port);
+    int literal = strchr(target->host, ':') != NULL; // An IPv6 address needs its brackets back.
+    const char *left = literal ? "[" : "", *right = literal ? "]" : "";
+    int length = snprintf(request, sizeof(request), "CONNECT %s%s%s:%s HTTP/1.1\r\nHost: %s%s%s:%s\r\n",
+        left, target->host, right, target->port, left, target->host, right, target->port);
 #ifdef __APPLE__
     if (length > 0 && length < (int)sizeof(request) && target->proxy_authorization)
         length += snprintf(request + length, sizeof(request) - (size_t)length,
@@ -270,7 +295,8 @@ static struct channel *open_channel_once(const struct target *target, int connec
     hints.ai_socktype = SOCK_STREAM;
     int lookup = getaddrinfo(target->connect_host, target->connect_port, &hints, &addresses);
     if (lookup) {
-        fail(lookup == EAI_AGAIN ? 'T' : 'E', "Native HTTP could not resolve the host");
+        // Without a network macOS answers EAI_NONAME, so an unknown name may be temporary too.
+        fail(lookup == EAI_AGAIN || lookup == EAI_NONAME ? 'T' : 'E', "Native HTTP could not resolve the host");
         return NULL;
     }
     struct channel *channel = calloc(1, sizeof(*channel));
@@ -305,13 +331,16 @@ static struct channel *open_channel_once(const struct target *target, int connec
 }
 
 // A small cache: an adapter serves one request at a time, usually to one host.
-enum { CACHED_CHANNELS = 4 };
+enum { CACHED_CHANNELS = 4, CHANNEL_IDLE_SECONDS = 90 };
 static struct channel *cached[CACHED_CHANNELS];
 
 // Whether an idle connection can still carry a request. A TLS session ticket is
-// expected on an idle connection; anything else readable means it is ending.
+// expected on an idle connection; anything else readable means it is ending. A
+// connection silent for long is not trusted: after a computer sleeps no close ever
+// arrives, and a request sent on it would wait out the whole receive limit.
 static int channel_idle_usable(struct channel *channel) {
-    if (channel->start != channel->end) return 0;
+    if (channel->start != channel->end || (channel->ssl && tls_pending(channel) > 0)) return 0;
+    if (difftime(time(NULL), channel->kept_at) > CHANNEL_IDLE_SECONDS) return 0;
     struct pollfd ready = { channel->socket, POLLIN, 0 };
     int polled = poll(&ready, 1, 0);
     if (polled == 0) return 1;
@@ -331,6 +360,7 @@ static struct channel *take_cached(const char *key) {
 }
 
 static void keep_channel(struct channel *channel) {
+    channel->kept_at = time(NULL);
     for (int i = 0; i < CACHED_CHANNELS; i++) {
         if (!cached[i]) { cached[i] = channel; return; }
     }

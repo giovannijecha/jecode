@@ -114,7 +114,9 @@ and with OpenSSL 1.1 on Debian 10 and AlmaLinux 8. A connection closed while idl
 was replaced. One that died holding a request repeated a GET and reported a POST
 without resending it. Four-turn `--plain` conversations on Ubuntu 26.04 and Debian
 10 recorded `socket` for every OpenAI conversation request and `http` for the title.
-Linux latency was not benchmarked, and none of this has run on macOS.
+Linux latency was not benchmarked, and none of this has run on macOS. Unix adapters
+drop a cached connection after 90 seconds idle, because no close arrives after a
+computer sleeps and a request sent on it would wait out the receive limit.
 
 The same day and machine, an idle TUI on a Linux PTY created no process in 3 s and
 repainted 51 ms after a resize. A typed key reached the terminal in a median of

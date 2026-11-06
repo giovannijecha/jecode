@@ -120,6 +120,9 @@ static int system_proxy(struct target *target, const char *text) {
     if (proxies) CFRelease(proxies);
     if (url) CFRelease(url);
     target->proxy_routes = routes;
+    // A PAC file out of reach, as on a laptop away from its network, leaves no route.
+    // Connect directly, as browsers do, rather than refusing every request.
+    if (routes && CFArrayGetCount(routes) == 0) return 1;
     return next_system_proxy(target) ? 1 : fail('E', "Native HTTP proxy configuration failed");
 }
 

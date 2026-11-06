@@ -74,8 +74,8 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
   deadline; on Unix it bounds each address attempt.
 - **Provider latency.** All three keep HTTP adapters alive between requests and
   use the OpenAI Responses WebSocket. Only Windows uses HTTP/2; Linux and macOS use
-  HTTP/1.1. Provider latency has been measured on Windows and Linux; no comparable
-  macOS timing is recorded. Linux and macOS share the owned
+  HTTP/1.1. Provider latency has been measured only on Windows; no comparable Linux
+  or macOS timing is recorded. Linux and macOS share the owned
   HTTP/1.1 parser, connection cache and replay policy, with OS TLS underneath. See
   [Performance](PERFORMANCE.md#provider-transports).
 

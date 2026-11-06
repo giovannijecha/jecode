@@ -25,6 +25,49 @@ fn request(reader: &mut BufReader<TcpStream>) -> (String, Vec<(String, String)>,
     (first, headers, body)
 }
 
+/// A `web` call chooses the method, so its length must not overrun the request head.
+#[test]
+fn a_long_method_reaches_the_server_intact() {
+    let method = "M".repeat(16 * 1024);
+    let server = Server::start(|listener, stop| {
+        let stream = server::accept(&listener, &stop).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+        let (first, _, _) = request(&mut reader);
+        writer
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .unwrap();
+        first
+    });
+    let pool = pool::Pool::new();
+    let limits = pool::Limits {
+        timeout: Some(Duration::from_secs(5)),
+        idle: None,
+        output: 4096,
+    };
+    let output = pool
+        .run(
+            wire_request(&Request {
+                url: &server.endpoint,
+                method: &method,
+                headers: &[],
+                body: None,
+                timeout: limits.timeout,
+                idle: None,
+                output_limit: 4096,
+            }),
+            limits,
+            &Cancellation::default(),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(output.exit_code, Some(0));
+    assert_eq!(server.finish(), format!("{method} / HTTP/1.1\r\n"));
+}
+
 #[test]
 fn body_framing_is_owned_by_the_transport_on_reused_connections() {
     let server = Server::start(|listener, stop| {

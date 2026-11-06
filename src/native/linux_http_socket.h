@@ -138,8 +138,8 @@ static int socket_receive(struct channel *channel, struct socket_message *messag
     if (length && !receive_exact(channel, target, (size_t)length)) return fail('E', "Native HTTP socket failed");
     if (masked) for (uint64_t i = 0; i < length; i++) target[i] ^= key[i % 4];
     switch (opcode) {
-        case OP_PING: return socket_send(channel, OP_PONG, control_bytes, (size_t)length);
-        case OP_PONG: return 1;
+        case OP_PING: return socket_send(channel, OP_PONG, control_bytes, (size_t)length) ? 2 : 0;
+        case OP_PONG: return 2;
         case OP_CLOSE: return fail('E', "Native HTTP socket was closed");
         case OP_TEXT: case OP_BINARY: case OP_CONTINUE: break;
         default: return fail('E', "Native HTTP socket frame is invalid");
@@ -185,8 +185,10 @@ static void socket_loop(struct channel *channel, unsigned long long idle_limit) 
             if (polled <= 0) continue;
         }
         if (buffered || (ready[0].revents & (POLLIN | POLLHUP | POLLERR))) {
-            if (!socket_receive(channel, &message)) return;
-            activity = now_ms();
+            // 2 is a control frame: a pinging server must not defeat the idle limit.
+            int received = socket_receive(channel, &message);
+            if (!received) return;
+            if (received == 1) activity = now_ms();
         }
         if (waiting || (ready[1].revents & (POLLIN | POLLHUP | POLLERR))) {
             if (!socket_forward(channel)) return;

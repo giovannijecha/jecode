@@ -49,7 +49,7 @@ static int send_request(struct channel *channel, const struct exchange *exchange
     if (target->proxy && !target->secure && target->proxy_authorization)
         capacity += strlen(target->proxy_authorization) + 32;
 #endif
-    capacity += strlen(exchange->url);
+    capacity += strlen(exchange->method) + strlen(exchange->url) + target->authority_length;
     char *head = malloc(capacity);
     if (!head) return fail('E', "Native HTTP is out of memory");
     const char *leading_slash = *target->path == '?' ? "/" : "";
