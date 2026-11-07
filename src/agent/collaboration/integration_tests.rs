@@ -14,7 +14,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Default)]
@@ -224,10 +224,17 @@ fn live_return_continues_main_model_without_new_user_message() {
         record.encode()
     );
     shared.release_child.store(true, Ordering::SeqCst);
-    agent
-        .collaboration()
-        .wait(Some("a1"), Duration::from_secs(5), &Cancellation::default())
-        .unwrap();
+    // The final record becomes visible before its durable return receipt.
+    // Continuation starts from that receipt, not from the worker's status.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !agent.can_continue_collaboration() {
+        assert!(
+            Instant::now() < deadline,
+            "return receipt did not arrive: {:?}",
+            agent.collaboration().snapshot()
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let user_messages_before = agent
         .archive()
         .messages
