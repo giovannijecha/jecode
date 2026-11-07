@@ -113,9 +113,10 @@ receive `JECODE_TMP` and `TMPDIR` pointing to the conversation's
 when its path is 260 characters or longer. Provider credentials are removed from their
 environment.
 
-Commands have no timeout unless the model sets one. Each result includes the
-exit code and a preview of stdout and stderr (16 KiB per stream by default);
-the complete output is saved and the model can read all of it.
+Commands have no timeout unless the model sets one. A command that ends within
+its initial wait returns the exit code and a preview of stdout and stderr (16 KiB
+per stream by default); the complete output is saved and the model can read all
+of it.
 
 Commands do not create checkpoints automatically, because Jecode cannot know
 what a command will change. The model can list the files or directories a
@@ -125,18 +126,41 @@ command starts.
 In Workspace, commands run inside an operating-system confinement; see
 [Command confinement](PERMISSIONS.md#command-confinement).
 
-### Background processes
+### Processes
 
-For a server, a watcher or a long build, the model can return after a short wait
-and leave the command running. It gets a process ID and uses `process` to check
-output, send input to an interactive program, interrupt or stop it. Background
-processes last until they finish, are stopped, or the conversation is closed,
-switched or deleted. Jecode does not notify the model when a process changes; the
-model checks when it matters.
+Every command is a process that you and the model can see and control while it
+runs. If it is still running after its initial wait, 10 seconds unless the model
+chooses another, the call returns a process ID and the command keeps running, so
+the model can get on with independent work. Reaching the wait never stops a
+command: only a timeout the model set, a stop, or the end of the conversation
+does. The model uses `process` to read output, send input to an interactive
+program, interrupt or stop it.
 
-To see or stop processes yourself, use `/terminal`: it lists the conversation's
-processes and shows their output without adding anything to the conversation.
-See [Terminal interface](../tui/INTERFACE.md#background-processes).
+When a process ends, the model is told once at its next request, with the outcome
+and references to the saved output, so it does not have to keep checking. An idle
+conversation continues on its own when a process ends by itself. If you stopped
+the turn or it failed, the outcome waits for your next message, and a process you
+stopped yourself never starts a turn. Queued messages go first, and an open menu,
+question or permission prompt holds the continuation until you close or answer it.
+In the plain chat the conversation continues at the next line you enter, an empty
+one included, because reading a line blocks; a failed turn holds it until your next
+prompt. A single prompt (`jecode "..."` or piped input) ends with its answer, and
+that stops its processes.
+
+The model decides what depends on what. Builds, tests, generation and exports
+need their outcome before dependent work or a claim of success; servers and
+watchers need a real readiness check, and a live process or empty output does not
+establish one. Processes last until they finish, are stopped, or the conversation
+is closed, switched or deleted, and are never restarted.
+
+To see, stop or background processes yourself, use `/process`: it lists the
+conversation's running and recent processes and shows their output without adding
+anything to the conversation. See
+[Terminal interface](../tui/INTERFACE.md#processes).
+
+Saved completion rows remain available after reopening a conversation, including
+in plain chat. The model can read `history:processes` to recover a recorded outcome
+when its original process ID is no longer live. This never restarts the command.
 
 ## Web and browser
 

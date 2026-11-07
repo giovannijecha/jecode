@@ -84,6 +84,12 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                 return Ok(());
             }
             Event::ToolNote { text, .. } => format!("[{text}]"),
+            Event::ProcessFinished { process } => format!(
+                "[process: {}] {} · {}",
+                process.label(),
+                clean(&process.command),
+                process.id
+            ),
             Event::Recovering {
                 attempt,
                 delay,
@@ -139,6 +145,21 @@ pub(crate) fn collaboration_line(event: &crate::json::Value) -> String {
             .map_or_else(|| text("id").to_owned(), |number| format!("AGENT {number}"))
     };
     clean(&format!("[{label}: {}] {}", text("title"), text("summary")))
+}
+
+pub(crate) fn restored_process_line(event: &crate::json::Value) -> String {
+    let field = |key| {
+        event
+            .get(key)
+            .and_then(crate::json::Value::as_str)
+            .unwrap_or("")
+    };
+    clean(&format!(
+        "[restored process: {}] {} · {}",
+        crate::events::tool_summary("process", event),
+        field("command"),
+        field("process_id")
+    ))
 }
 
 #[cfg(test)]

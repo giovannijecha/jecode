@@ -177,13 +177,39 @@ The TUI and agent share a locked inbox. Accepting a follow-up into the active
 turn and removing it from the saved queue happen in one save. Local commands
 wait until the interface is idle.
 
-`process::start_logged` creates a command handle; `Started::supervise` owns its
-timeout, cancellation, output and cleanup. Foreground and persistent commands
-share that path. Each persistent process has a monitor thread and a stop token
-in the conversation's `tools/processes.rs` registry. `/terminal` observes the
-registry through a weak handle with its own output cursors, so it cannot keep a
-process alive. Conversation switches, deletion of the live session and agent
-drop stop and join registered processes.
+`process::start_logged_input` creates a command handle; `Started::supervise` owns
+its timeout, cancellation, output and cleanup. Every `bash` and `exec` launch is an
+entry in the conversation's `tools/processes.rs` registry, with a monitor thread and
+a stop token; the launching call only waits for it. `/process` observes the registry
+through a weak handle with its own output cursors, so it cannot keep a process
+alive. Conversation switches, deletion of the live session and agent drop stop and
+join registered processes.
+
+A terminal transition is reported exactly once under the entry's state lock. A
+process ending while a call waits belongs to that call's result, because the call
+stays counted until it reports. Any other ending is numbered as a `Completion`, read
+only after supervision returned and the saved streams are final. Numbers are taken
+under the list lock a reader holds across its scan, so an interface's cursor never
+passes a number it has not seen; the lock order is list, then entry state.
+`tools/processes/lifecycle.rs` keeps delivery to the model separate from each
+interface's own cursor: the agent adds pending completions to the session state of
+the next request and commits them when the provider accepts it and the sink has shown
+them, so a rejected request sends them again and an accepted one never does. They end
+the state's text as a section that is shown once, so later state comparisons ignore
+them; a portion summary reads that section from any state leaving the window.
+`save_session` records outcomes no request has carried yet, and the TUI saves each one
+as it appears; both deduplicate by process ID.
+Each receipt records whether it appeared inside a turn, so restoring an idle
+completion keeps it outside the preceding Work chapter even when the agent saved
+it before the interface observed it.
+`Agent::continue_processes` resumes an idle conversation; only the interface decides
+when, through `can_continue_processes` and its own record of an explicit stop. The
+same check decides whether a turn continues past a final answer, so single prompts and
+collaborators end with theirs.
+The model receives `background_resume: automatic` in the TUI, `on_input` with the
+plain chat's blocking line reader, and `none` in single prompts and collaborators.
+Failed or explicitly stopped turns hold continuation until another model prompt;
+local process inspection does not restart them.
 
 ## Questions and plans
 

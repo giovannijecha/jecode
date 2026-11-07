@@ -1,5 +1,14 @@
 # Release notes
 
+## Unreleased
+
+- Commands remain visible and controllable during their initial wait, and long
+  commands return control without stopping the process.
+- `/process` replaces `/terminal`, with running and recent commands, saved output
+  and a control to move a waiting call into the background without restarting it.
+- Finished processes report their outcome to the model and conversation. The TUI
+  can continue automatically; plain chat continues after the next entered line.
+
 ## 0.3.5
 
 Changes since 0.2.5.

@@ -158,6 +158,8 @@ impl Agent {
 /// A step that failed stops the rest: they were planned on its success.
 /// An outcome other than `completed` means refused, failed or unknown. LSP
 /// queries and background commands report failures through their status.
+/// A command that yielded before its outcome was known cannot have succeeded
+/// yet, unless the step asked for that with its own `wait_ms`.
 /// A multi-file edit fails when any file does, and a restore when any path
 /// conflicts, fails or is skipped; a multi-file read reports each path and
 /// goes on, as it does alone.
@@ -168,6 +170,8 @@ fn failed(tool: &str, result: &Value) -> bool {
             .is_some_and(|outcome| outcome.as_str() != Some("completed"))
         || result.get("timed_out") == Some(&Value::Bool(true))
         || result.get("cancelled") == Some(&Value::Bool(true))
+        || result.get("yielded") == Some(&Value::Bool(true))
+        || result.get("moved_to_background") == Some(&Value::Bool(true))
         || (tool == "lsp"
             && result
                 .get("status")
@@ -175,6 +179,9 @@ fn failed(tool: &str, result: &Value) -> bool {
                 .is_some_and(|status| status != "ready"))
         || (matches!(tool, "bash" | "exec" | "process")
             && result.get("status").and_then(Value::as_str) == Some("timed_out"))
+        // Stopping is what a process step can ask for; a command did not.
+        || (matches!(tool, "bash" | "exec")
+            && result.get("status").and_then(Value::as_str) == Some("stopped"))
         || matches!(result.get("exit_code"), Some(Value::Number(code)) if code != "0")
         || (tool == "edit"
             && result

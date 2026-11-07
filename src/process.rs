@@ -117,7 +117,8 @@ pub fn run_logged(
 }
 
 /// Runs a supervised command while saving both streams and sending optional stdin.
-pub fn run_logged_input(
+#[cfg(test)]
+fn run_logged_input(
     command: &mut Command,
     input: Option<Vec<u8>>,
     timeout: Option<Duration>,

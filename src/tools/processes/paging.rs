@@ -76,7 +76,9 @@ pub(super) fn read_after(
             end = width;
         }
     }
-    if finished && bytes.len() <= limit {
+    if finished && (bytes.len() <= limit || end == 0) {
+        // An incomplete final character will never receive more bytes. Return
+        // its replacement now, even when its fragment exceeds a tiny budget.
         end = bytes.len();
     }
     Ok(Chunk {
@@ -171,6 +173,25 @@ mod tests {
         );
         for value in [Value::string("unknown"), Value::number(1), Value::Null] {
             assert!(OutputMode::parse(&Value::object([("output_mode", value)])).is_err());
+        }
+    }
+
+    #[test]
+    fn final_incomplete_utf8_makes_progress_with_tiny_limits() {
+        let directory = Directory::new();
+        let path = directory.path().join("stream");
+        for (bytes, limit) in [
+            (&b"\xE2\x82"[..], 1),
+            (&b"\xF0\x9F\x99"[..], 2),
+            (&b"\xF0\x9F\x99"[..], 3),
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            let live = read_after(&path, 0, false, limit).unwrap();
+            assert_eq!((live.text.as_str(), live.next), ("", 0));
+            let chunk = read_after(&path, 0, true, limit).unwrap();
+            assert_eq!(chunk.text, "\u{FFFD}");
+            assert_eq!(chunk.next, bytes.len() as u64);
+            assert_eq!(chunk.length, bytes.len() as u64);
         }
     }
 }

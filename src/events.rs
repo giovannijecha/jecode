@@ -76,6 +76,11 @@ pub enum Event {
         id: String,
         text: String,
     },
+    /// A process's terminal transition reached the model. The TUI reads
+    /// completions from its observer, which also sees them while idle.
+    ProcessFinished {
+        process: crate::tools::processes::Completion,
+    },
 }
 
 pub trait EventSink {

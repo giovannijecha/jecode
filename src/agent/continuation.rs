@@ -73,6 +73,10 @@ impl Agent {
         if !self.can_continue_collaboration() {
             return Ok(false);
         }
+        self.continue_turn(events)
+    }
+
+    pub(super) fn continue_turn(&mut self, events: &mut impl EventSink) -> Result<bool, String> {
         if self.prepared.is_some() {
             return Err("A prompt is already prepared".into());
         }

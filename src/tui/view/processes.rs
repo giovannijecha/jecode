@@ -1,15 +1,19 @@
-//! The `/terminal` panel in the menu standard: the process list is a menu,
+//! The `/process` panel in the menu standard: the process list is a menu,
 //! stopping asks in place of the key row, and output runs on the code
 //! surface from column 2 to the edge, with Output and Errors as tabs.
 
 use super::panel::{self, Key, Part, Sheet, key};
 use crate::tools::processes::Process;
 use crate::tui::{
+    activity,
     line::Line,
     processes::{Logs, Panel, STREAMS},
     text,
     theme::{BAD, BODY, CODE_SURFACE, GOOD, MUTED, STRONG, Style, WARNING},
 };
+
+/// A row names the process ID beside its time from this width on.
+const ID_COLUMNS: usize = 72;
 
 pub(super) fn sheet(panel: &Panel, columns: usize) -> Sheet<'_> {
     match &panel.logs {
@@ -47,24 +51,30 @@ fn ending(panel: &Panel, keys: &[Key], width: usize, overflow: bool) -> Vec<Line
 
 fn list(panel: &Panel, columns: usize) -> Sheet<'_> {
     let total = panel.processes.len();
-    let aside = if total == 0 {
-        String::new()
-    } else {
-        format!("{total} running")
+    let running = panel.processes.iter().filter(|p| p.active()).count();
+    let recent = total - running;
+    let aside = match (running, recent) {
+        (0, 0) => String::new(),
+        (running, 0) => format!("{running} running"),
+        (0, recent) => format!("{recent} recent"),
+        (running, recent) => format!("{running} running · {recent} recent"),
     };
-    let keys: Vec<Key> = if total == 0 {
-        vec![key("Esc", "close")]
-    } else {
-        vec![
-            key("↑↓", "move").optional(),
-            key("Enter", "output"),
-            key("Ctrl+D", "stop"),
-            key("Esc", "close"),
-        ]
-    };
+    let selected = panel.processes.get(panel.selected);
+    let mut keys: Vec<Key> = Vec::new();
+    if total > 0 {
+        keys.push(key("↑↓", "move").optional());
+        keys.push(key("Enter", "output"));
+    }
+    if selected.is_some_and(|process| process.awaited) {
+        keys.push(key("b", "background"));
+    }
+    if selected.is_some_and(Process::active) {
+        keys.push(key("Ctrl+D", "stop"));
+    }
+    keys.push(key("Esc", "close"));
     let width = panel::text_width(columns);
     Sheet {
-        title: panel::title(None, "Background processes", "this conversation"),
+        title: panel::title(None, "Processes", "this conversation"),
         aside: Line::new(&aside, MUTED),
         field: None,
         draft_caret: false,
@@ -79,7 +89,7 @@ fn list(panel: &Panel, columns: usize) -> Sheet<'_> {
 fn processes(panel: &Panel, columns: usize, room: usize) -> Vec<(Line, Part)> {
     let total = panel.processes.len();
     if total == 0 {
-        let empty = Line::new("Nothing running", MUTED);
+        let empty = Line::new("No processes yet", MUTED);
         return vec![(panel::indent(empty, columns), Part::Keep)];
     }
     let start = panel::start(panel.selected, total, room);
@@ -111,7 +121,13 @@ fn processes(panel: &Panel, columns: usize, room: usize) -> Vec<(Line, Part)> {
                 &single_line(&process.command),
                 if deleting { BAD } else { STRONG },
             );
-            let line = panel::spread(line, Line::new(&process.id, MUTED), end, None);
+            let time = activity::duration(process.elapsed());
+            let facts = if columns >= ID_COLUMNS {
+                format!("{time} · {}", process.id)
+            } else {
+                time
+            };
+            let line = panel::spread(line, Line::new(&facts, MUTED), end, None);
             panel::choice(line, on, columns)
         })
         .collect();
@@ -194,6 +210,9 @@ fn keys(process: Option<&Process>, logs: &Logs) -> Vec<Key<'static>> {
         key("End", "follow").scrolling()
     });
     keys.push(key("PgUp/PgDn", "page").scrolling().optional());
+    if process.is_some_and(|process| process.awaited) {
+        keys.push(key("b", "background"));
+    }
     if process.is_some_and(Process::active) {
         if logs.interactive {
             keys.push(key("i", "input"));
@@ -256,9 +275,19 @@ fn output<'a>(panel: &'a Panel, logs: &'a Logs, columns: usize) -> Sheet<'a> {
         Some(process) => Line::new(&display_status(process), status_style(process)),
         None => Line::new("unavailable", BAD),
     };
-    aside.push(&format!(" · {}", logs.id), MUTED);
+    if let Some(process) = process {
+        aside.push(
+            &format!(" · {}", activity::duration(process.elapsed())),
+            MUTED,
+        );
+    }
     // Keep the outcome visible beside long commands at ordinary widths.
-    // The breadcrumb and the rule use twelve and eight cells respectively.
+    // The breadcrumb and the rule use twelve and eight cells respectively,
+    // and the title keeps twelve. The ID goes first: the list names it too.
+    let id = format!(" · {}", logs.id);
+    if panel::cells(&aside) + id.chars().count() + 32 <= columns {
+        aside.push(&id, MUTED);
+    }
     let title = text::ellipsize(
         &title,
         columns.saturating_sub(panel::cells(&aside) + 20).max(12),

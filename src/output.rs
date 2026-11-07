@@ -88,6 +88,10 @@ impl Store {
         self.redactor.include(redactor);
     }
 
+    pub fn redactor(&self) -> &Redactor {
+        &self.redactor
+    }
+
     fn owned_directory(&self) -> Result<PathBuf, String> {
         let _establishment = self.establishment.lock().unwrap_or_else(|e| e.into_inner());
         Ok(if let Some(owner) = &self.owner {

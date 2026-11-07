@@ -14,6 +14,62 @@ fn read(agent: &Agent, path: &str, byte_offset: usize) -> Value {
 }
 
 #[test]
+fn a_saved_process_outcome_is_readable_after_resume_without_restarting_it() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![]);
+    let mut agent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.messages.lock().unwrap().push(Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Verify the earlier build")),
+    ]));
+    agent.save_session().unwrap();
+    let event = Value::object([
+        ("type", Value::string("process_finished")),
+        ("process_id", Value::string("past-process")),
+        ("command", Value::string("verify\x1b[2J")),
+        ("status", Value::string("exited")),
+        ("exit_code", Value::number(7)),
+        ("stdout_file", Value::string("saved-output")),
+    ]);
+    agent
+        .sessions()
+        .unwrap()
+        .append_event(&agent.archive(), event)
+        .unwrap();
+    let id = agent.sessions().unwrap().id();
+    drop(agent);
+    let mut resumed = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    let page = read(&resumed, "history:processes", 0);
+    assert!(page.get("error").is_none(), "{}", page.encode());
+    let content = page.get("content").and_then(Value::as_str).unwrap();
+    assert!(content.contains("past-process"), "{content}");
+    assert!(content.contains(r#""exit_code":7"#), "{content}");
+    assert!(content.contains("saved-output"), "{content}");
+    assert!(resumed.processes().processes().unwrap().is_empty());
+    assert!(!resumed.can_continue_processes());
+    let saved = resumed.sessions().unwrap().snapshot();
+    let event = saved
+        .events
+        .iter()
+        .find(|event| event.get("process_id").and_then(Value::as_str) == Some("past-process"))
+        .unwrap();
+    let line = crate::console::restored_process_line(event);
+    assert!(line.contains("exit 7"), "{line}");
+    assert!(!line.contains('\x1b'), "{line}");
+    assert!(fixture.finish().is_empty());
+}
+
+#[test]
 fn returned_input_is_not_readable_through_numeric_or_request_history() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(

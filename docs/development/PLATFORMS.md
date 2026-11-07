@@ -49,7 +49,7 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
   unverified. See
   [Permissions](../usage/PERMISSIONS.md#platform-limits).
 - **Interactive terminals.** Interactive `exec` (`tty: true`) requires Full on
-  every platform. The `/terminal` view shows a transcript of the output; it does
+  every platform. The `/process` view shows a transcript of the output; it does
   not emulate full-screen terminal applications.
 - **Unix control sockets.** Interactive terminals need a native Unix temporary
   filesystem. Under WSL, Windows-backed mounts such as `/mnt/c` do not support

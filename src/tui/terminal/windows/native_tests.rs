@@ -50,6 +50,9 @@ mod native_mcp;
 #[path = "native_lsp.rs"]
 mod native_lsp;
 
+#[path = "native_processes.rs"]
+mod native_processes;
+
 #[path = "native_script.rs"]
 mod native_script;
 
@@ -287,6 +290,12 @@ fn native_console_fixture() {
         native_mcp::console();
         restored(&path);
         println!("NATIVE_MCP_RESTORED");
+        return;
+    }
+    if scenario == "process-panels" {
+        native_processes::console();
+        restored(&path);
+        println!("NATIVE_PROCESS_PANELS_RESTORED");
         return;
     }
     if scenario == "lsp-panels" {

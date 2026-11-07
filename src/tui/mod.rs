@@ -119,6 +119,11 @@ struct App {
     lsp: lsp::Ui,
     /// Reads the current conversation's processes, including while a worker owns the agent.
     process_observer: crate::tools::processes::Observer,
+    /// The completions this interface has shown.
+    process_cursor: usize,
+    /// A process that ends by itself may continue the conversation. False
+    /// after a stopped or failed turn, until the user sends something.
+    process_auto_resume: bool,
     collaboration_observer: crate::collaboration::Observer,
     question_observer: crate::ask::Observer,
     /// The conversation's permissions, shared with the agent and its collaborators.
@@ -185,6 +190,8 @@ impl App {
             started: Instant::now(),
             archive: agent.archive(),
             process_observer: agent.processes(),
+            process_cursor: 0,
+            process_auto_resume: true,
             collaboration_observer: agent.collaboration(),
             question_observer: agent.questions(),
             permission_observer: agent.permissions(),
@@ -238,6 +245,7 @@ impl App {
             clipboard_image: None,
         };
         app.recent_sessions();
+        app.watch_processes();
         app.refresh_agents();
         app.question_observer.set_available(true);
         app.permission_observer

@@ -91,6 +91,29 @@ impl Tools {
         self.processes.observer(redactor)
     }
 
+    /// Terminal transitions the model has not seen, for the next request.
+    pub fn process_completions(
+        &self,
+        redactor: &crate::redact::Redactor,
+    ) -> Vec<processes::Completion> {
+        self.processes.completions(redactor)
+    }
+
+    /// The model received these completions; they are never sent again.
+    pub fn processes_reported(&self, ids: &[String]) {
+        self.processes.mark_reported(ids);
+    }
+
+    /// A process ended by itself and the model has not been told.
+    pub fn process_completion_waiting(&self) -> bool {
+        self.processes.completion_waiting()
+    }
+
+    #[cfg(test)]
+    pub fn set_default_wait(&self, wait: std::time::Duration) {
+        self.processes.set_default_wait(wait);
+    }
+
     pub fn configure_temporary(&mut self, area: crate::scratch::Area) {
         self.temporary = Some(area);
     }

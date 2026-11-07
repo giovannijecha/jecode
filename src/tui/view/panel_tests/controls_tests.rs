@@ -10,7 +10,7 @@ fn active_command_controls_describe_execution_queueing_and_closing() {
         ("/", "queue"),
         ("/copy", "run"),
         ("/COPY latest", "run"),
-        ("/terminal", "run"),
+        ("/process", "run"),
         ("/TODO", "run"),
         ("/settings", "run"),
         ("/MODEL", "run"),

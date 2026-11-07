@@ -43,6 +43,9 @@ fn open_output(app: &mut App, output: &str) {
         status: "exited",
         exit_code: Some(0),
         error: None,
+        started: std::time::Instant::now(),
+        finished: None,
+        awaited: false,
     };
     let mut panel = Panel::new(vec![]);
     panel.logs = Some(Logs {
@@ -219,7 +222,7 @@ fn resizing_paused_output_preserves_the_reading_position() {
 #[test]
 fn prepending_a_page_uses_rows_of_the_joined_output() {
     let directory = Directory::new();
-    let command = "seq 0 30000 | tr -d '\\n'";
+    let command = "seq 0 30000 | tr -d '\\n'; until [ -e ended ]; do sleep 0.02; done";
     let fixture = HttpFixture::new(vec![
         (
             200,
@@ -236,15 +239,21 @@ fn prepending_a_page_uses_rows_of_the_joined_output() {
             ),
         ),
         (200, completion("Started.", vec![])),
+        (200, completion("Ended.", vec![])),
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "Start.");
     wait_until(&mut app, |app| app.worker.is_none());
+    std::fs::write(directory.path().join("ended"), "").unwrap();
     wait_until(&mut app, |app| {
-        app.process_observer.processes().is_some_and(|list| {
-            list.first()
-                .is_some_and(|process| process.label() == "exited 0")
-        })
+        app.process_observer.processes().unwrap()[0].label() == "exited 0"
+            && app.worker.is_none()
+            && app
+                .state
+                .rows()
+                .iter()
+                .flatten()
+                .any(|row| row.plain() == "● Ended.")
     });
     let id = app.process_observer.processes().unwrap()[0].id.clone();
     app.open_processes(&id);
@@ -286,7 +295,7 @@ fn prepending_a_page_uses_rows_of_the_joined_output() {
     let width = view::process_width(&app.state);
     let expected = ((old_start - stream.start()) as usize / width).saturating_sub(1);
     assert_eq!(stream.offset, expected);
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]

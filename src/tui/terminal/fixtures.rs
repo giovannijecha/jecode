@@ -154,6 +154,7 @@ pub(super) fn direct_input(path: &Path) {
             ),
         ),
         (200, completion("Native terminal started.", vec![])),
+        (200, completion("Native terminal finished.", vec![])),
     ]);
     let mut config = isolated_config(path);
     // Interactive terminals require explicit Full authority on this host.
@@ -174,7 +175,7 @@ pub(super) fn direct_input(path: &Path) {
     let archive = format!("{:?}{:?}{:?}", saved.input, saved.messages, saved.events);
     assert!(!archive.contains("NATIVE_SECRET_42"));
     assert_eq!(saved.input.draft.text, "kept draft");
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish().len(), 3);
     println!("NATIVE_DIRECT_INPUT_RESTORED");
 }
 

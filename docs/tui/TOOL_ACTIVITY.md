@@ -62,7 +62,9 @@ says so. A checkpoint saved before a command appears as a quiet note; partial
 or failed checkpoint coverage shows a warning.
 
 Cards show the result as it was when the call returned. For a process still
-running, use `/terminal`.
+running, use `/process`. When a process that no call is waiting for ends, a
+`PROCESS` row reports its command and outcome at that point in the conversation;
+Ctrl+O opens the end of its output.
 
 ## Work chapters
 

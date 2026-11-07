@@ -114,6 +114,8 @@ invalid UTF-8 fail.
 | `history:N` | The original message at zero-based index `N`. |
 | `history:requests` | All your original requests, in order. |
 | `history:memory` | The current compaction summary. |
+| `history:processes` | Saved outcomes of finished processes, one JSON object per line. |
+| `history:processes` | Recorded process outcomes, including results saved before the model received them. Reading them does not restart a process. |
 | `skill:NAME`, `skill:NAME/path` | A skill's `SKILL.md`, or a file inside the skill. |
 | `attachment:ID` | An attached file; images and PDFs are shown again. |
 | `checkpoint:rc-ID:path` | A file as saved before one modifying call. |
@@ -224,15 +226,22 @@ still correct.
 | Argument | Behavior |
 | --- | --- |
 | `timeout_seconds` | Positive integer measured from launch. Without it there is no timeout. |
-| `wait_ms` | Return after this many milliseconds with a `process_id` and leave the command running. `0` returns at once. |
+| `wait_ms` | Wait this many milliseconds, then return a `process_id` and the next output window, leaving the command running. `0` returns at once. Omitted, the call waits up to 10 seconds and returns the result below if the command ends in time. |
 | `output_limit_bytes` | Preview size per stream, default 16 KiB, at most 256 KiB. Larger values are clamped. |
 | `protect` | Files or directories to save in a checkpoint before launch. `"."` protects the whole eligible workspace. |
 
-A finished command returns `exit_code`, `cancelled`, `timed_out`, byte counts
-and a preview of each stream; truncated previews keep the beginning and end.
-`stdout_file` and `stderr_file` reference the complete saved streams. Known
-credentials are masked before output is saved. If saving output or confirming
-cleanup fails after launch, the result is `outcome: "unknown"`.
+A command that ends within an omitted `wait_ms` returns `exit_code`, `cancelled`,
+`timed_out`, byte counts and a preview of each stream; truncated previews keep the
+beginning and end. `stdout_file` and `stderr_file` reference the complete saved
+streams. Known credentials are masked before output is saved. If saving output or
+confirming cleanup fails after launch, the result is `outcome: "unknown"`.
+
+One still running after those 10 seconds returns `yielded: true` and the fields of
+a `process` result, and keeps running. Interrupting the turn during that wait stops
+the command; interrupting a wait the model chose returns `wait_cancelled: true` and
+leaves it running. `moved_to_background: true` means the user released the wait
+from `/process`. In a `steps` call, a command that yielded stops the remaining steps,
+which were planned on its outcome; a step with its own `wait_ms` does not.
 
 **bash** runs the [command language](SHELL.md) with closed stdin and a fresh
 state per call. Its environment drops `BASH_ENV`, `ENV` and provider
@@ -260,7 +269,7 @@ quoting or expansion. Details:
 
 | Action | Behavior |
 | --- | --- |
-| `list` | IDs, commands, statuses and output references for this conversation. |
+| `list` | IDs, commands up to 200 characters, statuses, elapsed seconds and output references for this conversation's running and recent processes. The oldest finished ones leave the list once the model has seen them; 32 are kept. |
 | `poll` | New output and status for `process_id`. Optional `wait_ms`, default 0. |
 | `stop` | Stop the process and its descendants, waiting up to 10 seconds. If the status is `stopping`, poll again. |
 | `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. At most 64 KiB per call. |
@@ -278,6 +287,28 @@ default (`output_limit_bytes` up to 256 KiB). `*_offset`, `*_next_offset` and
 skips unread output. `output_mode: "tail"` on `poll` or `stop` returns the
 newest bytes instead and reports skipped bytes in `*_skipped_bytes`; the full
 log stays readable.
+
+A tiny byte limit can be exceeded to return one UTF-8 character. An incomplete
+trailing character waits while the process runs; once the stream is final, it is
+returned as a replacement character so the output cursor can reach the end.
+
+When no call is waiting for a process that ends, its outcome joins the session
+state of the next accepted request, once: identity, status, exit code when known,
+elapsed time, command, `stdout_file`, `stderr_file` and up to 1 KiB from the end of
+each stream, credential-masked. It moves no output cursor, so `poll` still returns
+everything unread. A `poll`, `stop` or `list` that reports the final status replaces
+this delivery. An idle main conversation continues when a process ends by itself,
+unless the turn was stopped or failed, or queued input or an open menu, question or
+permission prompt comes first; the environment's `background_resume` is `automatic`
+for idle continuation, `on_input` when plain chat must wait for another entered line,
+and `none` for single prompts and collaborators, whose answer ends the run even if a
+process ended while it was written. With `on_input` or `none`, the model waits for an
+outcome needed by its answer rather than promising a follow-up that cannot start by
+itself. Saved outcomes stay readable through `history:processes`, and a compaction
+keeps an outcome that has left the window in its summary. Resuming a saved session
+does not reattach processes or automatically replay an outcome the model never
+received; the model can read its recorded result from `history:processes` before
+deciding whether another command is needed.
 
 A `write` receipt confirms delivery to the terminal, not that the program
 processed it. On Unix, `interrupt` follows the terminal's current `ISIG`,

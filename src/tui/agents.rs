@@ -363,6 +363,7 @@ impl App {
         self.collaboration_receipt_calls.clear();
         self.collaboration_return_pending = false;
         self.collaboration_auto_resume = true;
+        self.process_auto_resume = true;
         self.refresh_agents();
     }
     pub(super) fn open_agents(&mut self) {

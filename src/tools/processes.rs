@@ -1,33 +1,41 @@
-//! Persistent command processes owned by one conversation runtime.
+//! Command processes owned by one conversation runtime.
 //!
-//! Each process keeps the supervised boundary of a foreground command; a
-//! monitor thread owns it until completion, the execution timeout or a stop.
-//! Results read the saved, credential-masked streams from per-process
-//! cursors, so every byte is either returned or identified for `read`.
-//! An [`Observer`] reads the same streams without touching those cursors.
+//! Every Bash and exec launch is one of these. A monitor thread owns the
+//! supervised boundary until completion, the execution timeout or a stop; the
+//! launching call only waits for it. Results read the saved, credential-masked
+//! streams from per-process cursors, so every byte is either returned or
+//! identified for `read`. An [`Observer`] reads the same streams without
+//! touching those cursors.
 
 #[cfg(test)]
 use super::OUTPUT_LIMIT;
 use super::required_string;
 use crate::cancel::Cancellation;
 use crate::json::Value;
-use crate::process::{RunError, Started};
-use std::collections::BTreeMap;
+use crate::process::Started;
 use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::AtomicUsize;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+mod entry;
+mod lifecycle;
 mod observer;
 mod paging;
+pub use lifecycle::Completion;
 #[cfg(test)]
 use observer::read_window;
 pub use observer::{Observer, Page, Process, Window};
 #[cfg(test)]
 use paging::read_after;
-use paging::{OutputMode, complete_prefix, read_output};
+use paging::{OutputMode, complete_prefix};
 
 const STOP_WAIT: Duration = Duration::from_secs(10);
+/// How long a launch without `wait_ms` holds the call before yielding.
+pub(super) const DEFAULT_WAIT: Duration = Duration::from_secs(10);
 pub(super) const DEFAULT_OUTPUT_LIMIT: usize = 16 * 1024;
 pub(super) const MAX_OUTPUT_LIMIT: usize = 256 * 1024;
 
@@ -35,11 +43,17 @@ pub(super) const MAX_OUTPUT_LIMIT: usize = 256 * 1024;
 pub(super) struct Registry {
     // Replaced when the conversation ends, so observers never see a later one.
     scope: Mutex<Arc<Scope>>,
+    #[cfg(test)]
+    default_wait: Mutex<Option<Duration>>,
 }
 
 #[derive(Default)]
 struct Scope {
     entries: Mutex<Vec<Arc<Entry>>>,
+    /// Numbers terminal transitions no call reported.
+    sequence: AtomicUsize,
+    /// Wakes a local interface when a process starts or ends.
+    listener: Mutex<Option<lifecycle::Listener>>,
 }
 
 pub(super) struct Stream {
@@ -56,26 +70,67 @@ struct Entry {
     changed: Condvar,
     monitor: Mutex<Option<JoinHandle<()>>>,
     terminal: Option<Arc<crate::pty::Control>>,
+    started: Instant,
+    scope: Weak<Scope>,
 }
 
 #[derive(Default)]
 struct State {
     outcome: Option<Outcome>,
     cursors: [u64; 2],
+    finished: Option<Instant>,
+    /// Calls that will report this process's state when they stop waiting.
+    /// While there are any, a completion needs no announcement.
+    waiters: usize,
+    /// Advances when the user moves the current waits into the background.
+    released: usize,
+    /// The launching call has returned without a final result.
+    returned: bool,
+    /// Set when no call reported the terminal transition; orders completions.
+    sequence: Option<usize>,
+    /// The model has seen the terminal transition.
+    reported: bool,
 }
 
-struct Outcome {
-    status: &'static str,
-    exit_code: Option<i32>,
-    error: Option<String>,
+/// How one process ended, once its final output is available.
+#[derive(Clone)]
+pub(super) struct Outcome {
+    pub status: &'static str,
+    pub exit_code: Option<i32>,
+    pub error: Option<String>,
+    pub stdout_bytes: usize,
+    pub stderr_bytes: usize,
+    /// False when supervision itself failed and no output counts exist.
+    pub supervised: bool,
 }
 
 /// Controls the initial wait and the lifetime of one launched process.
 pub(super) struct Adoption<'a> {
     pub timeout: Option<Duration>,
     pub wait: Duration,
+    /// The caller left the wait to Jecode: the wait keeps the turn's
+    /// cancellation ownership and a finished command returns its final result.
+    pub foreground: bool,
     pub output_limit: usize,
     pub cancellation: &'a Cancellation,
+}
+
+/// What a launching call returns.
+pub(super) enum Launched {
+    /// A foreground command ended within its wait.
+    Finished(Outcome),
+    Report(Result<Value, String>),
+}
+
+/// Why a call stopped waiting for a process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WaitEnd {
+    /// The process finished or the wait elapsed.
+    Elapsed,
+    /// `cancellation` interrupted the wait.
+    Cancelled,
+    /// The user moved this wait into the background.
+    Released,
 }
 
 impl Registry {
@@ -88,6 +143,19 @@ impl Registry {
         Observer::new(Arc::downgrade(&self.scope.lock().unwrap()), redactor)
     }
 
+    pub(super) fn default_wait(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(wait) = *self.default_wait.lock().unwrap() {
+            return wait;
+        }
+        DEFAULT_WAIT
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_default_wait(&self, wait: Duration) {
+        *self.default_wait.lock().unwrap() = Some(wait);
+    }
+
     /// Adopts a launched process, then waits up to `wait` for completion.
     pub(super) fn adopt(
         &self,
@@ -95,7 +163,7 @@ impl Registry {
         streams: [Stream; 2],
         started: Started,
         adoption: Adoption<'_>,
-    ) -> Result<Value, String> {
+    ) -> Launched {
         self.adopt_control(command, streams, started, adoption, None)
     }
 
@@ -107,7 +175,10 @@ impl Registry {
         adoption: Adoption<'_>,
         terminal: Arc<crate::pty::Control>,
     ) -> Result<Value, String> {
-        self.adopt_control(command, streams, started, adoption, Some(terminal))
+        match self.adopt_control(command, streams, started, adoption, Some(terminal)) {
+            Launched::Report(report) => report,
+            Launched::Finished(_) => unreachable!("only a foreground wait returns a final result"),
+        }
     }
 
     fn adopt_control(
@@ -117,50 +188,82 @@ impl Registry {
         started: Started,
         adoption: Adoption<'_>,
         terminal: Option<Arc<crate::pty::Control>>,
-    ) -> Result<Value, String> {
+    ) -> Launched {
         let Adoption {
             timeout,
             wait,
+            foreground,
             output_limit,
             cancellation,
         } = adoption;
+        let scope = self.scope();
         let entry = Arc::new(Entry {
             id: format!("process-{}", crate::sessions::identifier()),
             command: command.into(),
             streams,
             stop: Cancellation::default(),
-            state: Mutex::default(),
+            // The launching call reports whatever happens from here on.
+            state: Mutex::new(State {
+                waiters: 1,
+                ..State::default()
+            }),
             changed: Condvar::new(),
             monitor: Mutex::new(None),
             terminal,
+            started: Instant::now(),
+            scope: Arc::downgrade(&scope),
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
-        let scope = self.scope();
-        scope.entries.lock().unwrap().push(Arc::clone(&entry));
+        scope.adopt(Arc::clone(&entry));
         let owner = Arc::clone(&entry);
         let monitor = thread::spawn(move || {
             let result = started.supervise(timeout, &owner.stop, &mut |_| Ok(()));
             if let Some(terminal) = &owner.terminal {
                 terminal.close();
             }
-            let mut state = owner.state.lock().unwrap();
-            state.outcome = Some(Outcome::from(result));
-            drop(state);
+            owner.transition(|state| {
+                state.outcome = Some(Outcome::from(result));
+                state.finished = Some(Instant::now());
+            });
             owner.changed.notify_all();
+            owner.notify();
         });
         *entry.monitor.lock().unwrap() = Some(monitor);
-        let interrupted = entry.wait(wait, cancellation);
-        entry.report(interrupted, output_limit, OutputMode::Next)
+        // The launching waiter was registered with the entry at generation 0.
+        let end = entry.wait_held(wait, cancellation, Some(0));
+        if !foreground {
+            return Launched::Report(entry.report(end, output_limit, OutputMode::Next));
+        }
+        if end == WaitEnd::Cancelled {
+            // Interrupting a foreground wait ends the command it was waiting for.
+            entry.stop.cancel();
+            entry.wait_held(STOP_WAIT, &Cancellation::default(), None);
+        }
+        if let Some(outcome) = entry.final_outcome() {
+            return Launched::Finished(outcome);
+        }
+        let mut report = entry.report(end, output_limit, OutputMode::Next);
+        // A process ending just now is a result, in the form of a process report.
+        if let Ok(Value::Object(fields)) = &mut report
+            && matches!(
+                fields.get("status").and_then(Value::as_str),
+                Some("running" | "stopping")
+            )
+        {
+            fields.insert("yielded".into(), Value::Bool(true));
+        }
+        Launched::Report(report)
     }
 
     pub(super) fn execute(
         &self,
         arguments: &Value,
         cancellation: &Cancellation,
+        redactor: &crate::redact::Redactor,
     ) -> Result<Value, String> {
         let action = required_string(arguments, "action")?;
         if action == "list" {
-            return Ok(self.list());
+            return Ok(self.list(redactor));
         }
         if !matches!(action, "poll" | "stop" | "write" | "resize" | "interrupt") {
             return Err("action must be list, poll, stop, write, resize or interrupt".into());
@@ -171,6 +274,12 @@ impl Registry {
         }
         let output_limit = output_limit(arguments)?;
         let output_mode = OutputMode::parse(arguments)?;
+        // Checked before acting: a rejected call must not have delivered input.
+        let wait = if action == "stop" {
+            STOP_WAIT
+        } else {
+            wait_argument(arguments)?.unwrap_or(Duration::ZERO)
+        };
         let entry = self
             .scope()
             .entries
@@ -214,17 +323,14 @@ impl Registry {
                 _ => terminal.interrupt(cancellation)?,
             }
         }
-        let interrupted = if action == "stop" {
-            entry.stop.cancel();
-            entry.wait(STOP_WAIT, cancellation)
-        } else {
-            let wait = wait_argument(arguments)?.unwrap_or(Duration::ZERO);
-            entry.wait(wait, cancellation)
-        };
-        entry.report(interrupted, output_limit, output_mode)
+        if action == "stop" {
+            entry.request_stop();
+        }
+        let end = entry.wait(wait, cancellation);
+        entry.report(end, output_limit, output_mode)
     }
 
-    fn list(&self) -> Value {
+    fn list(&self, redactor: &crate::redact::Redactor) -> Value {
         let scope = self.scope();
         let entries = scope.entries.lock().unwrap();
         Value::object([(
@@ -233,9 +339,18 @@ impl Registry {
                 entries
                     .iter()
                     .map(|entry| {
-                        let state = entry.state.lock().unwrap();
+                        let mut state = entry.state.lock().unwrap();
+                        // A final status here is the model learning the outcome.
+                        state.reported |= state.outcome.is_some();
                         let mut fields = entry.status(&state);
-                        fields.insert("command".into(), Value::string(&entry.command));
+                        fields.insert(
+                            "command".into(),
+                            Value::string(lifecycle::bounded_command(&entry.command, redactor)),
+                        );
+                        fields.insert(
+                            "elapsed_seconds".into(),
+                            Value::number(entry.elapsed(&state).as_secs()),
+                        );
                         for (stream, name) in entry.streams.iter().zip(["stdout", "stderr"]) {
                             fields.insert(format!("{name}_file"), Value::string(&stream.reference));
                         }
@@ -264,134 +379,6 @@ impl Registry {
 impl Drop for Registry {
     fn drop(&mut self) {
         self.stop_all();
-    }
-}
-
-impl Entry {
-    /// Returns true when `cancellation` interrupted the wait.
-    fn wait(&self, wait: Duration, cancellation: &Cancellation) -> bool {
-        // An unrepresentable deadline waits until completion or cancellation.
-        let deadline = Instant::now().checked_add(wait);
-        let mut state = self.state.lock().unwrap();
-        while state.outcome.is_none() {
-            if cancellation.requested() {
-                return true;
-            }
-            let slice = deadline.map_or(Duration::from_millis(20), |deadline| {
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .min(Duration::from_millis(20))
-            });
-            if slice.is_zero() {
-                break;
-            }
-            state = self.changed.wait_timeout(state, slice).unwrap().0;
-        }
-        false
-    }
-
-    fn status_name(&self, state: &State) -> &'static str {
-        match &state.outcome {
-            Some(outcome) => outcome.status,
-            None if self.stop.requested() => "stopping",
-            None => "running",
-        }
-    }
-
-    fn status(&self, state: &State) -> BTreeMap<String, Value> {
-        let mut fields = BTreeMap::new();
-        fields.insert("process_id".into(), Value::string(&self.id));
-        fields.insert("status".into(), Value::string(self.status_name(state)));
-        if let Some(terminal) = &self.terminal {
-            let (cols, rows) = terminal.size();
-            fields.insert("tty".into(), Value::Bool(true));
-            fields.insert("cols".into(), Value::number(cols));
-            fields.insert("rows".into(), Value::number(rows));
-        }
-        if let Some(outcome) = &state.outcome {
-            if outcome.exit_code.is_some() || outcome.status == "exited" {
-                fields.insert(
-                    "exit_code".into(),
-                    outcome.exit_code.map_or(Value::Null, Value::number),
-                );
-            }
-            if let Some(error) = &outcome.error {
-                fields.insert("error".into(), Value::string(error));
-                fields.insert("outcome".into(), Value::string("unknown"));
-            }
-        }
-        fields
-    }
-
-    /// Reports state, then output after each stream cursor. State is read
-    /// first: a final state guarantees that the saved streams are complete.
-    fn report(
-        &self,
-        interrupted: bool,
-        output_limit: usize,
-        output_mode: OutputMode,
-    ) -> Result<Value, String> {
-        let mut state = self.state.lock().unwrap();
-        let mut fields = self.status(&state);
-        let finished = state.outcome.is_some();
-        let mut cursors = state.cursors;
-        for (index, name) in ["stdout", "stderr"].into_iter().enumerate() {
-            let stream = &self.streams[index];
-            let from = state.cursors[index];
-            let chunk = read_output(&stream.path, from, finished, output_limit, output_mode)
-                .map_err(|error| format!("Could not read saved {name} for {}: {error}", self.id))?;
-            cursors[index] = chunk.next;
-            fields.insert(name.into(), Value::string(chunk.text));
-            fields.insert(format!("{name}_offset"), Value::number(chunk.offset));
-            fields.insert(format!("{name}_next_offset"), Value::number(chunk.next));
-            fields.insert(
-                format!("{name}_remaining_bytes"),
-                Value::number(chunk.length - chunk.next),
-            );
-            fields.insert(
-                format!("{name}_skipped_bytes"),
-                Value::number(chunk.offset - from),
-            );
-            fields.insert(format!("{name}_file"), Value::string(&stream.reference));
-        }
-        state.cursors = cursors;
-        fields.insert("output_limit_bytes".into(), Value::number(output_limit));
-        fields.insert("output_mode".into(), Value::string(output_mode.name()));
-        if interrupted {
-            fields.insert("wait_cancelled".into(), Value::Bool(true));
-        }
-        Ok(Value::Object(fields))
-    }
-}
-
-impl From<Result<crate::process::Output, RunError>> for Outcome {
-    fn from(result: Result<crate::process::Output, RunError>) -> Self {
-        let (status, exit_code, error) = match result {
-            Ok(output) if output.cancelled => ("stopped", None, None),
-            Ok(output) if output.timed_out => ("timed_out", None, None),
-            Ok(output) if output.input_error.is_some() => (
-                "unknown",
-                output.exit_code,
-                Some(format!(
-                    "The command started but input delivery failed: {}. Execution may already have changed the workspace; inspect it before repeating the command.",
-                    output.input_error.unwrap()
-                )),
-            ),
-            Ok(output) => ("exited", output.exit_code, None),
-            Err(error) => (
-                "unknown",
-                None,
-                Some(format!(
-                    "The command started but its completion or cleanup could not be confirmed: {}. Execution may already have changed the workspace; inspect it before repeating the command.",
-                    error.message
-                )),
-            ),
-        };
-        Self {
-            status,
-            exit_code,
-            error,
-        }
     }
 }
 

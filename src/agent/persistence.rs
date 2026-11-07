@@ -93,6 +93,7 @@ impl Agent {
     }
 
     pub fn save_session(&self) -> Result<(), String> {
+        self.save_known_completions();
         self.checkpoint(Stage::Preserve)
     }
 

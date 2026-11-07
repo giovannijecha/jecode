@@ -250,6 +250,22 @@ impl Worker {
             cancellation,
         }
     }
+    pub fn continue_processes(mut agent: Agent) -> Self {
+        let cancellation = agent.cancellation();
+        let (sender, events) = event_channel();
+        let token = cancellation.clone();
+        let task = thread::spawn(move || {
+            let result = agent
+                .continue_processes(&mut |event| sender.send(event, &token))
+                .map(|_| ());
+            (agent, result)
+        });
+        Self {
+            events,
+            task: Some(task),
+            cancellation,
+        }
+    }
     pub fn start(mut agent: Agent, prompt: crate::attachments::Prompt) -> Self {
         let cancellation = agent.cancellation();
         cancellation.reset();

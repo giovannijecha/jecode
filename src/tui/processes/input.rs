@@ -15,13 +15,17 @@ impl App {
         let Some(panel) = self.state.processes.as_ref() else {
             return;
         };
-        let Some(logs) = panel.logs.as_ref() else {
-            return;
-        };
-        if logs.input_mode {
+        if panel.logs.as_ref().is_some_and(|logs| logs.input_mode) {
             self.send_direct(text.as_bytes());
             return;
         }
+        if text == "b" && !pasted && panel.confirm_stop.is_none() {
+            self.move_process_to_background();
+            return;
+        }
+        let Some(logs) = panel.logs.as_ref() else {
+            return;
+        };
         if pasted
             || text != "i"
             || panel.confirm_stop.is_some()

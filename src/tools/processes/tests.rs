@@ -201,7 +201,13 @@ fn output_between_polls_and_immediately_before_exit_is_retained() {
     });
     release(&directory, "two");
     // The process exits between polls; its final output remains readable.
-    wait_for(|| tools.processes.list().encode().contains("exited"));
+    wait_for(|| {
+        tools
+            .processes
+            .list(&Redactor::empty())
+            .encode()
+            .contains("exited")
+    });
     let last = process(&tools, "poll", &id, None);
     assert_eq!(text(&last, "status"), "exited");
     assert_eq!(stdout + &text(&last, "stdout"), "a\nb\nc");
@@ -262,7 +268,13 @@ fn wait_expiry_keeps_the_process_and_the_execution_timeout_needs_no_polling() {
         ],
     );
     let id = text(&limited, "process_id");
-    wait_for(|| tools.processes.list().encode().contains("timed_out"));
+    wait_for(|| {
+        tools
+            .processes
+            .list(&Redactor::empty())
+            .encode()
+            .contains("timed_out")
+    });
     assert!(started.elapsed() < Duration::from_secs(8));
     let result = process(&tools, "poll", &id, None);
     assert_eq!(text(&result, "status"), "timed_out");
@@ -442,21 +454,27 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
                 status: "exited",
                 exit_code: Some(0),
                 error: None,
+                stdout_bytes: 13,
+                stderr_bytes: 13,
+                supervised: true,
             }),
-            cursors: [0, 0],
+            waiters: 2,
+            ..State::default()
         }),
         changed: Condvar::new(),
         monitor: Mutex::new(None),
+        started: Instant::now(),
+        scope: Weak::new(),
     };
     assert!(
         entry
-            .report(false, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
+            .report(WaitEnd::Elapsed, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
             .unwrap_err()
             .contains("saved stderr")
     );
     std::fs::write(stderr, "unread stderr").unwrap();
     let recovered = entry
-        .report(false, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
+        .report(WaitEnd::Elapsed, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
         .unwrap();
     assert_eq!(text(&recovered, "stdout"), "unread stdout");
     assert_eq!(text(&recovered, "stderr"), "unread stderr");
@@ -471,14 +489,13 @@ fn foreground_bash_without_wait_keeps_its_result_shape() {
     let result = bash(&tools, "printf out; exit 4", &[]);
     assert!(result.get("process_id").is_none());
     assert_eq!(number(&result, "exit_code"), 4);
+    // It stays in the list as a finished process, like any other.
     let listed = tools.execute("process", r#"{"action":"list"}"#);
-    assert_eq!(
-        listed
-            .get("processes")
-            .and_then(Value::as_array)
-            .map(<[_]>::len),
-        Some(0)
-    );
+    let processes = listed.get("processes").and_then(Value::as_array).unwrap();
+    assert_eq!(processes.len(), 1);
+    assert_eq!(text(&processes[0], "status"), "exited");
 }
 
+mod lifecycle_tests;
 mod observer_tests;
+mod wait_tests;

@@ -1,5 +1,5 @@
-//! The `/terminal` panel: active background processes, saved output and manual
-//! stop requests. The registry stays in the core; this
+//! The `/process` panel: active and recent processes, saved output and manual
+//! controls. The registry stays in the core; this
 //! module keeps only what the panel shows and its own read positions.
 
 use super::{App, terminal::Key};
@@ -16,6 +16,8 @@ pub(super) struct Panel {
     pub logs: Option<Logs>,
     pub confirm_stop: Option<Process>,
     refreshed: Instant,
+    /// The whole second the running times were last drawn at.
+    clock: u64,
 }
 
 pub(super) struct Logs {
@@ -41,16 +43,17 @@ pub(super) struct Stream {
 impl Panel {
     pub fn new(processes: Vec<Process>) -> Self {
         Self {
-            processes: processes.into_iter().filter(Process::active).collect(),
+            processes,
             selected: 0,
             logs: None,
             confirm_stop: None,
             refreshed: Instant::now(),
+            clock: 0,
         }
     }
 
     /// Replaces the list, keeping the selected process by identity.
-    fn update(&mut self, mut processes: Vec<Process>) -> bool {
+    fn update(&mut self, processes: Vec<Process>) -> bool {
         let mut changed = false;
         if let Some(logs) = &mut self.logs {
             let current = processes
@@ -70,7 +73,6 @@ impl Panel {
             changed |= confirm != current;
             *confirm = current.clone();
         }
-        processes.retain(Process::active);
         let selected = self.processes.get(self.selected).map(|p| p.id.clone());
         self.selected = selected
             .and_then(|id| processes.iter().position(|process| process.id == id))
@@ -100,7 +102,7 @@ impl App {
         if self.state.processes.is_none() {
             return;
         }
-        if let Some(id) = crate::session::commands::terminal_stop_id(id) {
+        if let Some(id) = crate::session::commands::process_stop_id(id) {
             self.stop_process(id);
             return;
         }
@@ -125,15 +127,19 @@ impl App {
 
     /// Takes the current conversation's observer while this thread holds the
     /// agent; a different conversation closes the panel.
-    fn sync_process_observer(&mut self) {
+    pub(super) fn sync_process_observer(&mut self) {
         let Some(agent) = &self.agent else {
             return;
         };
         let current = agent.processes();
-        if !current.same(&self.process_observer) {
-            self.state.processes = None;
-        }
+        let same = current.same(&self.process_observer);
+        // Taken every time: it carries the conversation's current credentials.
         self.process_observer = current;
+        if !same {
+            self.state.processes = None;
+            self.process_cursor = 0;
+            self.watch_processes();
+        }
     }
 
     /// Re-reads statuses and followed output at most every `REFRESH`.
@@ -157,6 +163,11 @@ impl App {
             return true;
         };
         let mut dirty = panel.update(processes);
+        let clock = self.started.elapsed().as_secs();
+        if panel.clock != clock && panel.processes.iter().any(Process::active) {
+            panel.clock = clock;
+            dirty = true;
+        }
         if let Some(logs) = &mut panel.logs {
             let terminal = self.process_observer.terminal_size(&logs.id).is_some();
             if terminal && !logs.interactive {
@@ -422,6 +433,7 @@ fn follow(observer: &Observer, logs: &mut Logs) -> bool {
 
 mod control;
 mod input;
+mod lifecycle;
 mod stream;
 #[cfg(test)]
 use stream::RETAINED;

@@ -350,6 +350,7 @@ fn persistent_exec_receives_stdin_until_eof_and_preserves_saved_output() {
                 ("wait_ms", Value::number(15_000)),
             ]),
             &Cancellation::default(),
+            &crate::redact::Redactor::empty(),
         )
         .unwrap();
     assert_eq!(

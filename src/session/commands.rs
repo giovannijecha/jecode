@@ -21,7 +21,7 @@ impl Command {
     }
     pub fn description(&self, tui: bool) -> &'static str {
         match (tui, self.name) {
-            (false, "/terminal") => "List processes, inspect output or send local input",
+            (false, "/process") => "List processes, inspect output or send local input",
             (false, "/help") => "Show commands",
             (false, "/exit") => "Quit",
             _ => self.description,
@@ -127,10 +127,10 @@ pub const COMMANDS: [Command; 21] = [
         plain_usage: Some("/checkpoints"),
     },
     Command {
-        name: "/terminal",
-        description: "Inspect, stop or type into a background process",
-        tui_usage: "/terminal [ID]",
-        plain_usage: Some("/terminal [ID]"),
+        name: "/process",
+        description: "Inspect, stop or type into running and recent processes",
+        tui_usage: "/process [ID]",
+        plain_usage: Some("/process [ID]"),
     },
     Command {
         name: "/agents",
@@ -158,8 +158,8 @@ pub const COMMANDS: [Command; 21] = [
     },
 ];
 
-const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image; Ctrl+V too on Linux and macOS\nBackspace/Del Remove an attachment element whole\nUp            Edit the pending draft from an empty composer\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel or prompt history, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Quit, asking first while work runs\nCtrl+D        In /terminal, mark stop; in /resume, mark deletion; Enter confirms, Esc cancels\ni             In active terminal output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End returns to the bottom and follows new output.\nHost scrolling shortcuts take precedence.";
-const PLAIN_CONTROLS: &str = "/terminal write ID TEXT   Send one line directly to an interactive process\n/terminal interrupt ID    Send Ctrl+C to an interactive process\n/terminal resize ID C R   Resize its terminal to C columns and R rows\n/terminal stop ID         Request a stop for a background process\n\nUse fullscreen direct input for hidden password entry.\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
+const TUI_CONTROLS: &str = "Enter         Send, or queue while working\nCtrl+J        New line (Shift/Alt+Enter when supported)\nAlt+V         Attach the clipboard image; Ctrl+V too on Linux and macOS\nBackspace/Del Remove an attachment element whole\nUp            Edit the pending draft from an empty composer\nCtrl+P/N      Sent prompt history, excluding commands\nEsc           Close a panel or prompt history, or stop work\nCtrl+C        Stop work, close a menu, or clear the draft; never quit\nCtrl+Q        Quit, asking first while work runs\nCtrl+D        In /process, mark stop; in /resume, mark deletion; Enter confirms, Esc cancels\nb             In /process, move a command a call is waiting for into the background\ni             In active process output, enter direct input mode\nCtrl+]       Leave direct input; Ctrl+C sends an interrupt there\n\nPage Up/Down and mouse wheel browse the conversation.\nAlt+End returns to the bottom and follows new output.\nHost scrolling shortcuts take precedence.";
+const PLAIN_CONTROLS: &str = "/process write ID TEXT    Send one line directly to an interactive process\n/process interrupt ID     Send Ctrl+C to an interactive process\n/process resize ID C R    Resize its terminal to C columns and R rows\n/process stop ID          Request a stop for a running process\n\nUse fullscreen direct input for hidden password entry.\nType a message and press Enter to send it. Type /exit to quit.\nIn /resume, type d NUMBER or d ID to delete a listed conversation.";
 
 pub fn help(tui: bool) -> String {
     let mut rows = COMMANDS
@@ -224,9 +224,9 @@ pub fn canonical(name: &str) -> &str {
 }
 
 pub const INIT_PROMPT: &str = "/init\n\nInspect this project's files and conventions using the available tools. Create or update only the root AGENTS.md with concise, verified project instructions for coding agents. Preserve useful existing content and make targeted updates instead of replacing it wholesale. Base every rule on what you observe in this project; do not invent commands or policies. Do not write other files.";
-/// Returns the ID after a local `/terminal stop ID` action, including an empty
+/// Returns the ID after a local `/process stop ID` action, including an empty
 /// ID when `stop` was supplied without an argument.
-pub fn terminal_stop_id(arguments: &str) -> Option<&str> {
+pub fn process_stop_id(arguments: &str) -> Option<&str> {
     let mut parts = arguments.trim().splitn(2, char::is_whitespace);
     parts
         .next()
@@ -335,13 +335,13 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stop_parser_preserves_the_remaining_id() {
-        assert_eq!(terminal_stop_id("stop process-1"), Some("process-1"));
-        assert_eq!(terminal_stop_id(" STOP \t process-1  "), Some("process-1"));
-        assert_eq!(terminal_stop_id("stop"), Some(""));
-        assert_eq!(terminal_stop_id("stop  "), Some(""));
-        assert_eq!(terminal_stop_id("stopping process-1"), None);
-        assert_eq!(terminal_stop_id("process-1"), None);
+    fn process_stop_parser_preserves_the_remaining_id() {
+        assert_eq!(process_stop_id("stop process-1"), Some("process-1"));
+        assert_eq!(process_stop_id(" STOP \t process-1  "), Some("process-1"));
+        assert_eq!(process_stop_id("stop"), Some(""));
+        assert_eq!(process_stop_id("stop  "), Some(""));
+        assert_eq!(process_stop_id("stopping process-1"), None);
+        assert_eq!(process_stop_id("process-1"), None);
     }
 
     #[test]

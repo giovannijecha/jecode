@@ -96,6 +96,8 @@ pub(super) enum Deferred {
 impl App {
     /// Takes the agent for a turn, keeping what the menus read meanwhile.
     pub(super) fn hold(&mut self) -> Agent {
+        // The observer cannot follow a conversation change once the agent is gone.
+        self.sync_process_observer();
         let agent = self.agent.take().expect("agent available");
         self.held = Some(Facts::of(&agent));
         agent

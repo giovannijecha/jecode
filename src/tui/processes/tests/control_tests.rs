@@ -2,7 +2,7 @@ use super::*;
 use crate::tools::processes::Window;
 
 #[test]
-fn the_list_excludes_finished_commands_and_keeps_an_open_final_log() {
+fn the_list_keeps_recent_commands_and_an_open_final_log() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (
@@ -15,32 +15,35 @@ fn the_list_excludes_finished_commands_and_keeps_an_open_final_log() {
                         "printf 'ready\\n'; until [ -e finish ]; do sleep 0.02; done; printf 'final\\n'; exit 7",
                         true,
                     ),
-                    bash("short", "printf short", true),
+                    bash("short", "printf short", false),
                     bash("foreground", "printf foreground", false),
                 ],
             ),
         ),
         (200, completion("Started.", vec![])),
+        (200, completion("It failed.", vec![])),
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "Start.");
     wait_until(&mut app, |app| app.worker.is_none());
-    wait_until(&mut app, |app| {
-        app.process_observer.processes().is_some_and(|processes| {
-            processes.len() == 2 && processes.iter().filter(|p| p.active()).count() == 1
-        })
-    });
     app.open_processes("");
-    assert_eq!(panel(&app).processes.len(), 1);
+    assert_eq!(panel(&app).processes.len(), 3);
+    assert!(panel(&app).processes[0].active());
+    // The latest finished process comes first after the active ones.
+    assert_eq!(panel(&app).processes[1].command, "printf foreground");
+    assert_eq!(panel(&app).processes[2].label(), "exited 0");
+    let list = frame(&app).join("\n");
+    assert!(list.contains("1 running · 2 recent"), "{list}");
+    assert!(list.contains("exited 0"), "{list}");
+    assert!(list.contains("Ctrl+D stop"), "{list}");
     let id = panel(&app).processes[0].id.clone();
     key(&mut app, 13, 0);
     create(&directory, "finish");
     wait_until(&mut app, |app| {
         app.refresh_processes(true);
-        panel(app).processes.is_empty()
-            && panel(app)
-                .selected_process()
-                .is_some_and(|p| p.label() == "exited 7")
+        panel(app)
+            .selected_process()
+            .is_some_and(|p| p.label() == "exited 7")
     });
     assert_eq!(logs(&app).id, id);
     assert!(stream(&app).text().ends_with("ready\nfinal\n"));
@@ -51,12 +54,34 @@ fn the_list_excludes_finished_commands_and_keeps_an_open_final_log() {
     let rule = frame(&app)
         .into_iter()
         .find(|line| line.starts_with("─ Processes"));
-    assert!(rule.is_some_and(|rule| rule.contains(&format!("exited 7 · {id} ─"))));
+    assert!(
+        rule.is_some_and(
+            |rule| rule.contains("exited 7 · ") && rule.contains(&format!(" · {id} ─"))
+        )
+    );
     app.state.width = 80;
     key(&mut app, ESC, 0);
     assert!(panel(&app).logs.is_none());
-    assert!(frame(&app).join("\n").contains("Nothing running"));
-    assert_eq!(fixture.finish().len(), 2);
+    let list = frame(&app).join("\n");
+    assert!(list.contains("3 recent"), "{list}");
+    assert!(list.contains("exited 7"), "{list}");
+    // A finished process offers its output and nothing to stop.
+    key(&mut app, 40, 0);
+    assert!(!frame(&app).join("\n").contains("Ctrl+D stop"));
+    key(&mut app, 68, 4);
+    assert!(panel(&app).confirm_stop.is_none());
+    key(&mut app, 13, 0);
+    assert!(logs(&app).process.as_ref().is_some_and(|p| !p.active()));
+    wait_until(&mut app, |app| {
+        app.worker.is_none()
+            && app
+                .state
+                .rows()
+                .iter()
+                .flatten()
+                .any(|row| row.plain() == "● It failed.")
+    });
+    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]
@@ -104,7 +129,12 @@ fn stopping_from_a_paused_log_preserves_the_draft_and_the_active_turn() {
             .selected_process()
             .is_some_and(|p| p.status == "stopped")
     });
-    assert!(panel(&app).processes.is_empty());
+    assert!(
+        panel(&app)
+            .processes
+            .iter()
+            .any(|process| process.id == id && !process.active())
+    );
     assert!(!stream(&app).follow);
     assert_eq!(stream(&app).anchor, anchor);
     assert!(app.worker.is_some() && app.agent.is_none());
@@ -119,7 +149,7 @@ fn stopping_from_a_paused_log_preserves_the_draft_and_the_active_turn() {
 }
 
 #[test]
-fn a_finished_confirmation_never_stops_the_next_selected_process() {
+fn a_finished_confirmation_never_stops_the_next_process() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (
@@ -141,6 +171,7 @@ fn a_finished_confirmation_never_stops_the_next_selected_process() {
             ),
         ),
         (200, completion("Started.", vec![])),
+        (200, completion("The first ended.", vec![])),
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "Start.");
@@ -159,17 +190,33 @@ fn a_finished_confirmation_never_stops_the_next_selected_process() {
             .is_some_and(|p| !p.active())
     });
     assert_eq!(panel(&app).confirm_stop.as_ref().unwrap().id, first);
-    assert_eq!(panel(&app).selected_process().unwrap().id, second);
+    // The selection stays on the process the confirmation was for.
+    assert_eq!(panel(&app).selected_process().unwrap().id, first);
     key(&mut app, 13, 0);
     assert!(panel(&app).confirm_stop.is_none());
+    assert_eq!(panel(&app).processes[0].id, second);
     assert!(panel(&app).processes[0].active());
+    wait_until(&mut app, |app| {
+        app.worker.is_none()
+            && app
+                .state
+                .rows()
+                .iter()
+                .flatten()
+                .any(|row| row.plain() == "● The first ended.")
+    });
 
     // The explicit command uses the same local path, with no new model call.
     key(&mut app, ESC, 0);
-    submit(&mut app, &format!("/terminal stop {second}"));
+    submit(&mut app, &format!("/process stop {second}"));
     wait_until(&mut app, |app| {
         app.refresh_processes(true);
-        panel(app).processes.is_empty()
+        panel(app).processes.iter().all(|p| !p.active())
     });
-    assert_eq!(fixture.finish().len(), 2);
+    for _ in 0..5 {
+        app.poll().unwrap();
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(app.worker.is_none(), "a requested stop starts no turn");
+    assert_eq!(fixture.finish().len(), 3);
 }

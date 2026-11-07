@@ -308,7 +308,7 @@ fn during_a_turn_what_can_run_runs_and_the_rest_says_when() {
     // What `submit` would run at once, and what it would queue.
     for name in [
         "/copy",
-        "/terminal",
+        "/process",
         "/agents",
         "/permissions",
         "/mcp",

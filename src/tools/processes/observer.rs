@@ -5,13 +5,14 @@
 //! The handle is weak: it neither extends processes nor survives the
 //! conversation that owned them.
 
-use super::{Entry, Scope, complete_prefix};
+use super::{Completion, Entry, Scope, complete_prefix};
 use crate::redact::Redactor;
 use crate::tools::OUTPUT_LIMIT;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant};
 
 const ENDED: &str = "The conversation that owned these processes has ended";
 const STREAMS: [&str; 2] = ["stdout", "stderr"];
@@ -30,11 +31,21 @@ pub struct Process {
     pub status: &'static str,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
+    pub started: Instant,
+    pub finished: Option<Instant>,
+    /// A tool call is waiting for it, and can be released into the background.
+    pub awaited: bool,
 }
 
 impl Process {
     pub fn active(&self) -> bool {
         matches!(self.status, "running" | "stopping")
+    }
+
+    /// How long it ran, or has been running.
+    pub fn elapsed(&self) -> Duration {
+        self.finished
+            .map_or_else(|| self.started.elapsed(), |end| end - self.started)
     }
 
     /// The status, with the exit code when one is known.
@@ -119,14 +130,74 @@ impl Observer {
         Weak::ptr_eq(&self.scope, &other.scope)
     }
 
-    /// Active processes first, then finished ones, each in launch order;
-    /// `None` once the owning conversation has ended.
+    /// Active processes in launch order, then finished ones, the latest
+    /// first; `None` once the owning conversation has ended.
     pub fn processes(&self) -> Option<Vec<Process>> {
         let scope = self.scope.upgrade()?;
         let entries = scope.entries.lock().unwrap();
         let mut processes: Vec<_> = entries.iter().map(|entry| self.process(entry)).collect();
-        processes.sort_by_key(|process| !process.active());
+        processes.sort_by_key(|process| (!process.active(), std::cmp::Reverse(process.finished)));
         Some(processes)
+    }
+
+    /// Processes still running after their launching call returned.
+    pub fn background_count(&self) -> usize {
+        let Some(scope) = self.scope.upgrade() else {
+            return 0;
+        };
+        let entries = scope.entries.lock().unwrap();
+        entries
+            .iter()
+            .filter(|entry| {
+                let state = entry.state.lock().unwrap();
+                state.outcome.is_none() && state.returned
+            })
+            .count()
+    }
+
+    /// Terminal transitions no call reported, after this reader's own
+    /// `cursor`; independent of what the model has received.
+    pub fn completions_since(&self, cursor: usize) -> (usize, Vec<Completion>) {
+        let Some(scope) = self.scope.upgrade() else {
+            return (cursor, Vec::new());
+        };
+        let completions = scope.completions_after(cursor, &self.redactor, |_| true);
+        let next = completions.last().map_or(cursor, |last| last.sequence);
+        (next, completions)
+    }
+
+    /// Calls `listener` when a process of this conversation starts or ends.
+    pub fn on_change(&self, listener: Arc<dyn Fn() + Send + Sync>) {
+        if let Some(scope) = self.scope.upgrade() {
+            scope.set_listener(listener);
+        }
+    }
+
+    /// Returns control from any call waiting for this process, leaving the
+    /// process running; nothing restarts and no output is consumed.
+    pub fn move_to_background(&self, id: &str) -> Result<Process, String> {
+        let scope = self.scope.upgrade().ok_or(ENDED)?;
+        let entry = scope
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
+            .ok_or_else(|| {
+                self.redactor.text(&format!(
+                    "No process {id} belongs to this conversation runtime"
+                ))
+            })?;
+        {
+            let mut state = entry.state.lock().unwrap();
+            if state.outcome.is_some() || state.waiters == 0 {
+                return Err("No call is waiting for this process".into());
+            }
+            state.released = state.released.wrapping_add(1);
+        }
+        entry.changed.notify_all();
+        Ok(self.process(&entry))
     }
 
     /// Requests a stop without waiting for supervision or reading model output.
@@ -145,7 +216,7 @@ impl Observer {
                     "No process {id} belongs to this conversation runtime"
                 ))
             })?;
-        entry.stop.cancel();
+        entry.request_stop();
         Ok(self.process(&entry))
     }
 
@@ -185,23 +256,37 @@ impl Observer {
             error: outcome
                 .and_then(|outcome| outcome.error.as_deref())
                 .map(|error| self.redactor.text(error)),
+            started: entry.started,
+            finished: state.finished,
+            awaited: state.outcome.is_none() && state.waiters > 0,
         }
     }
 }
 
-/// Reads at most `OUTPUT_LIMIT` saved bytes. The redactor may read bounded
-/// context around the window; its replacement text does not change offsets.
-/// A window cut by the limit starts and ends on UTF-8 boundaries; while the
-/// process runs, a trailing incomplete sequence waits for a later read.
+/// Reads at most `OUTPUT_LIMIT` saved bytes; see `read_bounded`.
 pub(super) fn read_window(
     path: &Path,
     window: Window,
     finished: bool,
     redactor: &Redactor,
 ) -> std::io::Result<Page> {
+    read_bounded(path, window, finished, redactor, OUTPUT_LIMIT)
+}
+
+/// Reads at most `limit` saved bytes. The redactor may read bounded
+/// context around the window; its replacement text does not change offsets.
+/// A window cut by the limit starts and ends on UTF-8 boundaries; while the
+/// process runs, a trailing incomplete sequence waits for a later read.
+pub(super) fn read_bounded(
+    path: &Path,
+    window: Window,
+    finished: bool,
+    redactor: &Redactor,
+    limit: usize,
+) -> std::io::Result<Page> {
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
-    let limit = OUTPUT_LIMIT as u64;
+    let limit = limit as u64;
     let (mut start, end) = match window {
         Window::Tail => (length.saturating_sub(limit), length),
         Window::Before(end) => {

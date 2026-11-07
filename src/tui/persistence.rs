@@ -203,6 +203,7 @@ impl App {
                 self.collaboration_receipt_calls.clear();
                 self.collaboration_return_pending = false;
                 self.collaboration_auto_resume = true;
+                self.process_auto_resume = true;
                 let mut turn_recorded = false;
                 // Older events carry no call label: those recorded since the
                 // last other record take the work label of an agent call
@@ -211,6 +212,7 @@ impl App {
                 // Events recorded while a call ran followed its row live, so
                 // they follow its record.
                 let mut running = Vec::new();
+                let mut waiting_processes = Vec::new();
                 // MCP names come from one read of the connections, on demand.
                 let mut connections: Option<Vec<crate::mcp::Connection>> = None;
                 for record in document.records() {
@@ -322,11 +324,20 @@ impl App {
                                 });
                             }
                             self.state.event(Event::ToolFinished {
-                                id,
+                                id: id.clone(),
                                 name,
                                 summary,
                                 result,
                             });
+                            let mut remaining = Vec::new();
+                            for (after, event) in waiting_processes.drain(..) {
+                                if after == id {
+                                    self.state.process_completion(event);
+                                } else {
+                                    remaining.push((after, event));
+                                }
+                            }
+                            waiting_processes = remaining;
                             resume_collaboration(
                                 &mut self.state,
                                 &mut running,
@@ -352,6 +363,23 @@ impl App {
                                 },
                             });
                         }
+                        Record::ProcessFinished { event } => {
+                            let event = self.archive.redactor.value(&event);
+                            if event.get("in_turn") == Some(&crate::json::Value::Bool(false)) {
+                                self.state.finish_tool_turn();
+                            }
+                            let after =
+                                event.get("after_tool").and_then(crate::json::Value::as_str);
+                            if let Some(after) = after
+                                && !self.state.items.iter().any(
+                                    |item| matches!(item, Item::Tool { id, .. } if id == after),
+                                )
+                            {
+                                waiting_processes.push((after.to_owned(), event));
+                            } else {
+                                self.state.process_completion(event);
+                            }
+                        }
                         Record::Collaboration { event } => {
                             let sequence = super::agents::number(&event, "sequence");
                             if self.collaboration_seen.insert(sequence) {
@@ -370,6 +398,9 @@ impl App {
                         }
                     }
                 }
+                for (_, event) in waiting_processes {
+                    self.state.process_completion(event);
+                }
                 resume_collaboration(&mut self.state, &mut running, turn_recorded, &mut events);
                 self.state.close_tools();
                 self.collaboration_observer = agent.collaboration();
@@ -384,14 +415,20 @@ impl App {
                     .map(|record| self.archive.redactor.value(&record))
                     .collect();
                 self.collaboration_return_pending = agent.has_open_collaboration_report();
-                // Saved records do not contain execution timings.
+                // Saved records do not contain execution timings, except the
+                // time a process row carries in its own event.
                 if turn_recorded {
                     self.state.finish_tool_turn();
                 }
                 for item in &mut self.state.items {
-                    if let Item::Tool { presentation, .. } = item {
+                    if let Item::Tool {
+                        id, presentation, ..
+                    } = item
+                    {
                         presentation.started = None;
-                        presentation.elapsed = None;
+                        if !id.starts_with("process:") {
+                            presentation.elapsed = None;
+                        }
                     }
                 }
                 let cursor = document.input.draft.cursor;

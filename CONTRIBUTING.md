@@ -1,8 +1,14 @@
 # Contributing
 
-Open an issue for a bug or a concrete feature proposal, and discuss substantial
-changes before implementing them. Keep pull requests focused and explain the
-behavior a reviewer should check.
+Small, focused tweaks and documentation improvements can go straight into a pull
+request. For bug fixes, new features, substantial refactors, or changes to the
+interface or architecture, open an issue first so the maintainer can agree on the
+problem and approach before implementation. Use the bug report or feature request
+form as appropriate, and link the agreed issue from the pull request.
+
+Contributions are reviewed and may need changes and further verification before
+they are accepted. Keep pull requests focused and explain the behavior a reviewer
+should check.
 
 ## Ground rules
 
@@ -57,6 +63,13 @@ CI runs the checks on Windows, Linux and macOS; see
 [CI](docs/development/TESTING.md#ci). Windows and Linux run on maintainer-hosted
 runners that reject fork code before any step runs, so on a fork's pull request
 those checks do not verify your change. Run the normal checks locally and report
-the results; the maintainer decides how to verify the change before merging.
+the results. Approving a GitHub workflow does not bypass the local runners' fork
+policy. After reviewing an external contribution, the maintainer can bring the
+approved changes onto a branch in this repository and open a linked internal pull
+request for the full four-platform CI. Once that pull request is verified and
+merged, the external pull request is closed with a link to the integration.
+
+Opening a pull request grants no write or merge permission. Integration requires
+the maintainer's decision and all required checks passing on the final revision.
 
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).

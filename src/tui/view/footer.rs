@@ -26,6 +26,9 @@ pub(super) fn line(state: &State, model: &str, directory: &str, columns: usize) 
     if let Some(active) = agents_line(state, model, columns) {
         return active;
     }
+    if let Some(active) = processes_line(state, model, columns) {
+        return active;
+    }
     let path = path(directory);
     let directory = text::clean(directory.strip_prefix(r"\\?\").unwrap_or(directory));
     let project = directory
@@ -105,6 +108,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
     if running + review + unknown == 0 {
         return None;
     }
+    let processes = state.background_processes;
     let facts = |short: bool| {
         let mut parts = Vec::new();
         if short {
@@ -139,6 +143,18 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
         if unknown > 0 {
             parts.push(format!("{unknown} unknown"));
         }
+        if processes > 0 {
+            parts.push(format!(
+                "{processes} {}",
+                if short {
+                    "proc"
+                } else if processes == 1 {
+                    "process"
+                } else {
+                    "processes"
+                }
+            ));
+        }
         parts.join(" · ")
     };
     let style = if failed > 0 {
@@ -148,9 +164,6 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
     } else {
         MUTED
     };
-    let meter = state.context.as_ref().map(gauge);
-    let model = text::clean(model);
-    let short = model.rsplit('/').next().unwrap_or(&model);
     let summary = |short: bool| {
         let mut line = Line::default();
         line.push_on(
@@ -161,6 +174,42 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
         line.push(&format!(" {}", facts(short)), style);
         line
     };
+    Some(activity_line(state, model, columns, "/agents", summary))
+}
+
+/// The footer while processes keep running with nothing else to review: the
+/// agents' summary, in the `PROCESS` family name. The name takes seven cells,
+/// so the facts start on column 9 too.
+fn processes_line(state: &State, model: &str, columns: usize) -> Option<Line> {
+    let count = state.background_processes;
+    if count == 0 {
+        return None;
+    }
+    let summary = |short: bool| {
+        let mut line = Line::default();
+        line.push_on("PROCESS", LIT, BADGE_IDLE);
+        let label = if short { "run" } else { "running" };
+        line.push(&format!("  {count} {label}"), MUTED);
+        line
+    };
+    Some(activity_line(state, model, columns, "/process", summary))
+}
+
+/// A summary in the path's place, its accent command when space permits, and
+/// the model and gauge on the right. The gauge outlasts the model; counts
+/// shorten before any critical state is lost.
+fn activity_line(
+    state: &State,
+    model: &str,
+    columns: usize,
+    command: &str,
+    summary: impl Fn(bool) -> Line,
+) -> Line {
+    let meter = state.context.as_ref().map(gauge);
+    let model = text::clean(model);
+    let short = model.rsplit('/').next().unwrap_or(&model);
+    // The command, two cells before the right side, and two cells before it.
+    let hinted = text::cells(command) + 4;
     for short_counts in [false, true] {
         for model_chip in [
             Some(format!("{model} · {}", state.effort)),
@@ -183,17 +232,17 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
             let Some(gap) = columns.checked_sub(left_cells + right_cells) else {
                 continue;
             };
-            if gap < 2 || (gap < 11 && model_chip.is_some()) {
+            if gap < 2 || (gap < hinted && model_chip.is_some()) {
                 continue;
             }
-            if gap >= 11 {
-                left.push(&" ".repeat(gap - 9), MUTED);
-                left.push("/agents", ACCENT);
+            if gap >= hinted {
+                left.push(&" ".repeat(gap - (hinted - 2)), MUTED);
+                left.push(command, ACCENT);
                 left.push("  ", MUTED);
             } else {
                 left.push(&" ".repeat(gap), MUTED);
             }
-            return Some(left.append(right));
+            return left.append(right);
         }
     }
     let mut left = summary(true);
@@ -204,7 +253,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
         &" ".repeat(columns.saturating_sub(text::cells(&left.plain()) + right_cells)),
         MUTED,
     );
-    Some(left.append(right).shortened(columns))
+    left.append(right).shortened(columns)
 }
 
 /// `▰▰▰▰▱▱▱▱ 52%`: eight cells filling toward the auto-compact threshold,

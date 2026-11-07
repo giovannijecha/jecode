@@ -273,6 +273,36 @@ fn terminal_exec_preserves_argv_cwd_env_and_streams_across_process_actions() {
 }
 
 #[test]
+fn a_terminal_that_ends_by_itself_announces_its_outcome_once() {
+    let root = Directory::new();
+    let tools = tools(&root);
+    let started = execute(&tools, fixture(), &[], &[]);
+    let id = text(&started, "process_id").to_owned();
+    let mut output = text(&started, "stdout").to_owned();
+    collect_until(&tools, &id, &mut output, "READY");
+    // Local input consumes no model output and reports nothing to the model.
+    let observer = tools.observe_processes(Redactor::empty());
+    observer.write_direct(&id, b"bye\r").unwrap();
+    let begun = Instant::now();
+    while !tools.process_completion_waiting() {
+        assert!(begun.elapsed() < WAIT, "no completion");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let completions = tools.process_completions(&Redactor::empty());
+    assert_eq!(completions.len(), 1);
+    assert_eq!(completions[0].id, id);
+    assert!(completions[0].tty);
+    assert_eq!(completions[0].exit_code, Some(17));
+    assert!(!completions[0].report().contains("ends with"));
+    assert_eq!(completions[0].value().get("tty"), Some(&Value::Bool(true)));
+    // Reporting it through a poll ends the delivery, and its output is still unread.
+    let polled = action(&tools, &id, "poll", &[]);
+    assert_eq!(text(&polled, "status"), "exited");
+    assert!(text(&polled, "stdout").contains("INPUT:"), "{polled:?}");
+    assert!(!tools.process_completion_waiting());
+}
+
+#[test]
 fn stopping_a_terminal_stops_its_descendant_and_conversation_end_does_too() {
     for stop_conversation in [false, true] {
         let root = Directory::new();

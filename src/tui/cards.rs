@@ -111,6 +111,8 @@ impl Status {
                 && result
                     .get("exit_code")
                     .is_some_and(|code| code != &Value::number(0) && code != &Value::Null)
+            // A process that exited with no code was killed by a signal.
+            || process == Some("exited") && result.get("exit_code") == Some(&Value::Null)
         {
             Self::Failed
         } else {

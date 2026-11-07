@@ -50,7 +50,7 @@ It never asks for permission to edit: switch levels instead.
 The TUI shows the current level as a chip on the composer's lower border. A
 level change applies to later tool calls. Calls already running, including
 background processes, keep the authority they started with; stop a process from
-`/terminal` if needed. Resume restores the conversation's level and approvals;
+`/process` if needed. Resume restores the conversation's level and approvals;
 `/new` starts at the saved default.
 
 ## Approval requests

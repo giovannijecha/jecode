@@ -57,11 +57,15 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             (
                 "Ctrl+D",
-                "/resume: mark deletion · /terminal: mark a process to stop · Enter confirms, Esc cancels",
+                "/resume: mark deletion · /process: mark a process to stop · Enter confirms, Esc cancels",
+            ),
+            (
+                "b",
+                "/process: move a command a call is waiting for into the background",
             ),
             (
                 "Tab",
-                "/terminal output: switch Output and Errors · End follows",
+                "/process output: switch Output and Errors · End follows",
             ),
         ],
     ),

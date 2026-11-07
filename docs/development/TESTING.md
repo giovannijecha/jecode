@@ -65,7 +65,7 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | Routing | `agent::routing_tests`, `backend::openrouter`. |
 | Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
 | Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
-| Processes and terminals | `tools::processes`, `tools::exec`, `tools::interactive`, `process`. |
+| Processes and terminals | `tools::processes` (lifecycle, yielding, completions), `agent::process_delivery_tests` (delivery and idle continuation), `session::processes`, `tui::processes`, `tools::exec`, `tools::interactive`, `process`. |
 | Project map | `project_map`, `agent::map_tests`. |
 | Collaboration | `agent::collaboration`, `collaboration::workspace`, `session::agents`, `tui::agents`. |
 | Sessions and attachments | `sessions`, `attachments`. |
@@ -91,11 +91,12 @@ diagnostics retain the end of the terminal output so child failures stay visible
 cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_lsp::native_windows_lsp_panels -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::windows::native_tests::native_processes::native_windows_process_panels -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 ```
 
-The first three need Windows 10 or later with ConPTY; the Linux fixture needs the
+The first four need Windows 10 or later with ConPTY; the Linux fixture needs the
 util-linux `script` tool; the macOS fixture needs the system `script` and `tty`
 utilities. Do not run the private `native_pty_fixture` child directly. Other
 Windows fixtures cover permission requests

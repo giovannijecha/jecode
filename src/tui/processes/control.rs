@@ -28,7 +28,7 @@ impl App {
     /// Requests the selected runtime's stop without waiting or consuming output.
     pub(super) fn stop_process(&mut self, id: &str) {
         if id.is_empty() {
-            self.warn("Usage: /terminal stop PROCESS_ID");
+            self.warn("Usage: /process stop PROCESS_ID");
             return;
         }
         match self.process_observer.request_stop(id) {
@@ -43,6 +43,29 @@ impl App {
                     format!("{status} · {}", process.id),
                 ));
             }
+            Err(error) => self.warn(&error),
+        }
+        self.refresh_processes(true);
+    }
+
+    /// Returns control from the call waiting for the selected process. The
+    /// command keeps running untouched, and its outcome arrives later.
+    pub(super) fn move_process_to_background(&mut self) {
+        let Some(id) = self
+            .state
+            .processes
+            .as_ref()
+            .and_then(|panel| panel.selected_process())
+            .filter(|process| process.awaited)
+            .map(|process| process.id.clone())
+        else {
+            return;
+        };
+        match self.process_observer.move_to_background(&id) {
+            Ok(process) => self.state.notify(Feedback::result(
+                Kind::Notice,
+                format!("Moved to background · {}", process.id),
+            )),
             Err(error) => self.warn(&error),
         }
         self.refresh_processes(true);

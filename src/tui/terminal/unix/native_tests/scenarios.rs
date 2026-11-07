@@ -265,7 +265,8 @@ fn native_unix_direct_input() {
     t.wait("Ask anything");
     command(&mut t, "start terminal");
     t.wait("Native terminal started.");
-    command(&mut t, "/terminal");
+    t.wait("PROCESS  1 running");
+    command(&mut t, "/process");
     t.wait("1 running");
     t.send(b"\r");
     t.wait("i input");
@@ -299,6 +300,8 @@ fn native_unix_direct_input() {
     pause(200);
     t.send(b"\x1b");
     pause(200);
+    // The process ended by itself, so the idle conversation continued.
+    t.wait_after("Native terminal finished.", detached);
     t.send(b"kept draft");
     t.wait("kept draft");
     t.quit_with(b"\x11", "NATIVE_DIRECT_INPUT_RESTORED");
