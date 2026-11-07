@@ -156,6 +156,10 @@ pub fn target(name: &str, arguments: &Value) -> String {
     }
     if name == "process" {
         let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
+        // A completion row names the command it reports, not a call.
+        if !field("command").is_empty() {
+            return field("command").into();
+        }
         return format!("{} {}", field("action"), field("process_id"))
             .trim_end()
             .into();

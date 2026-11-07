@@ -41,6 +41,9 @@ fn process(id: &str, command: &str, status: &'static str, exit_code: Option<i32>
         status,
         exit_code,
         error: None,
+        started: std::time::Instant::now(),
+        finished: None,
+        awaited: false,
     }
 }
 
@@ -144,6 +147,17 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
 
     let mut list = Panel::new(running());
     list.selected = 1;
+    let mut recent = running();
+    recent[0].awaited = true;
+    recent.push(process("p4", "cargo build --locked", "exited", Some(0)));
+    recent.push(process(
+        "p5",
+        "cargo test --locked limiter",
+        "exited",
+        Some(101),
+    ));
+    recent.push(process("p6", "sleep 300", "stopped", None));
+    recent.push(process("p7", "npm run e2e", "timed_out", None));
     let mut stop = Panel::new(running());
     stop.selected = 1;
     stop.confirm_stop = Some(running().remove(1));
@@ -169,6 +183,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ("Temporary files", informed(columns, temporary)),
         ("Processes · none", listed(columns, Panel::new(vec![]))),
         ("Processes", listed(columns, list)),
+        (
+            "Processes · a waiting call and recent outcomes",
+            listed(columns, Panel::new(recent)),
+        ),
         ("Processes · stop", listed(columns, stop)),
         ("Output · following", viewing(columns, following)),
         ("Output · paused at the start", viewing(columns, paused)),

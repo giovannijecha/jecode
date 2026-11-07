@@ -60,46 +60,59 @@ pub(super) fn execute_command(
     let logs = outputs.create()?;
     let stdout_ref = logs.stdout_ref;
     let stderr_ref = logs.stderr_ref;
-    if let Some(wait) = wait {
-        let streams = streams(outputs, [&stdout_ref, &stderr_ref])?;
-        // The turn cancellation applies only to launch; the registry owns the process.
-        return match process::start_logged_input(
-            &mut command,
-            input,
-            cancellation,
-            [logs.stdout, logs.stderr],
-        ) {
-            Ok(started) => processes.adopt(
-                label,
-                streams,
-                started,
-                super::processes::Adoption {
-                    timeout,
-                    wait,
-                    output_limit,
-                    cancellation,
-                },
-            ),
-            Err(error) if !error.started => Err(error.message),
-            Err(error) => Ok(unknown_outcome(
-                &error.message,
-                streams.map(|s| s.reference),
-            )),
-        };
-    }
-    let run = process::run_logged_input(
+    let streams = streams(outputs, [&stdout_ref, &stderr_ref])?;
+    let started = match process::start_logged_input(
         &mut command,
         input,
-        timeout,
-        0,
         cancellation,
         [logs.stdout, logs.stderr],
-    );
-    let output = match run {
-        Ok(output) => output,
+    ) {
+        Ok(started) => started,
         Err(error) if !error.started => return Err(error.message),
         Err(error) => return Ok(unknown_outcome(&error.message, [stdout_ref, stderr_ref])),
     };
+    let launched = processes.adopt(
+        label,
+        streams,
+        started,
+        super::processes::Adoption {
+            timeout,
+            wait: wait.unwrap_or_else(|| processes.default_wait()),
+            foreground: wait.is_none(),
+            output_limit,
+            cancellation,
+        },
+    );
+    match launched {
+        super::processes::Launched::Report(report) => report,
+        super::processes::Launched::Finished(outcome) => Ok(finished(
+            outputs,
+            &outcome,
+            output_limit,
+            [stdout_ref, stderr_ref],
+        )),
+    }
+}
+
+/// The result of a command that ended within its foreground wait: previews
+/// of both streams from the complete saved output.
+fn finished(
+    outputs: &crate::output::Store,
+    outcome: &super::processes::Outcome,
+    output_limit: usize,
+    [stdout_ref, stderr_ref]: [String; 2],
+) -> Value {
+    if !outcome.supervised {
+        return Value::object([
+            (
+                "error",
+                Value::string(outcome.error.as_deref().unwrap_or_default()),
+            ),
+            ("outcome", Value::string("unknown")),
+            ("stdout_file", Value::string(stdout_ref)),
+            ("stderr_file", Value::string(stderr_ref)),
+        ]);
+    }
     let previews = (|| {
         Ok::<_, String>((
             preview(&outputs.resolve(&stdout_ref)?, output_limit)?,
@@ -108,7 +121,7 @@ pub(super) fn execute_command(
     })();
     let ((stdout, stdout_truncated), (stderr, stderr_truncated)) = match previews {
         Ok(previews) => previews,
-        Err(error) => return Ok(unknown_outcome(&error, [stdout_ref, stderr_ref])),
+        Err(error) => return unknown_outcome(&error, [stdout_ref, stderr_ref]),
     };
     let truncated = stdout_truncated || stderr_truncated;
     let mut result = Value::object([
@@ -116,31 +129,26 @@ pub(super) fn execute_command(
         ("stderr", Value::string(stderr)),
         (
             "exit_code",
-            output.exit_code.map_or(Value::Null, Value::number),
+            outcome.exit_code.map_or(Value::Null, Value::number),
         ),
-        ("timed_out", Value::Bool(output.timed_out)),
+        ("timed_out", Value::Bool(outcome.status == "timed_out")),
         ("truncated", Value::Bool(truncated)),
-        ("cancelled", Value::Bool(output.cancelled)),
-        ("stdout_bytes", Value::number(output.stdout_bytes)),
-        ("stderr_bytes", Value::number(output.stderr_bytes)),
+        ("cancelled", Value::Bool(outcome.status == "stopped")),
+        ("stdout_bytes", Value::number(outcome.stdout_bytes)),
+        ("stderr_bytes", Value::number(outcome.stderr_bytes)),
         ("stdout_truncated", Value::Bool(stdout_truncated)),
         ("stderr_truncated", Value::Bool(stderr_truncated)),
         ("output_limit_bytes", Value::number(output_limit)),
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
     ]);
-    if let Some(error) = output.input_error
+    if let Some(error) = &outcome.error
         && let Value::Object(fields) = &mut result
     {
         fields.insert("outcome".into(), Value::string("unknown"));
-        fields.insert(
-            "error".into(),
-            Value::string(format!(
-                "The command started but input delivery failed: {error}. Execution may already have changed the workspace; inspect it before repeating the command."
-            )),
-        );
+        fields.insert("error".into(), Value::string(error));
     }
-    Ok(result)
+    result
 }
 
 pub(super) fn timeout_argument(arguments: &Value) -> Result<Option<Duration>, String> {

@@ -94,6 +94,17 @@ impl Agent {
         let mut source = None;
         let text = if path == "history:memory" {
             self.context.summary.clone()
+        } else if path == "history:processes" {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("process_finished")
+                })
+                .map(Value::encode)
+                .collect::<Vec<_>>()
+                .join("\n")
         } else if path == "history:requests" {
             messages
                 .iter()
@@ -112,7 +123,8 @@ impl Agent {
             let id = path.strip_prefix("history:").unwrap();
             if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
                 return Err(
-                    "history: requires a zero-based message index, requests or memory".into(),
+                    "history: requires a zero-based message index, requests, memory or processes"
+                        .into(),
                 );
             }
             let index: usize = id.parse().map_err(|_| "Invalid history message index")?;

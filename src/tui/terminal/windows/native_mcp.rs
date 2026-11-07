@@ -185,7 +185,7 @@ pub(super) fn console() {
     drop(terminal);
 }
 
-fn wait_for_width(terminal: &Terminal, expected: usize) {
+pub(super) fn wait_for_width(terminal: &Terminal, expected: usize) {
     if terminal.size.0 == expected {
         return;
     }
@@ -210,7 +210,7 @@ fn settings_state(columns: usize, selector: Selector) -> State {
     }
 }
 
-fn paint(columns: usize, state: State, expected: &str) {
+pub(super) fn paint(columns: usize, state: State, expected: &str) {
     let frame = view::frame(&state, "fixture/model", "project");
     assert!(
         frame

@@ -121,6 +121,7 @@ impl Agent {
                     if let Some((before, state)) = request.state {
                         self.context.anchor_state(before, state);
                     }
+                    self.deliver_completions(request.completions, &mut emit)?;
                     if let Some(event) = completion.usage.as_ref().and_then(generated) {
                         emit(event)?;
                     }

@@ -6,8 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const PROMPT: &str = include_str!("PROMPT.md");
 
-/// Request instructions and collaborator reports, read before `messages` is locked.
-pub(super) struct Environment(String, pub(super) Vec<(String, String)>);
+/// Request instructions, collaborator reports and finished processes, read
+/// before `messages` is locked.
+pub(super) struct Environment(
+    String,
+    pub(super) Vec<(String, String)>,
+    pub(super) Vec<crate::tools::processes::Completion>,
+);
 
 fn join<const N: usize>(parts: [String; N]) -> String {
     parts
@@ -35,6 +40,7 @@ impl Agent {
                 Value::string("Workspace or Full permission level"),
             ),
             ("tool_execution", Value::string("direct")),
+            ("background_resume", Value::string(self.background_resume())),
             // Spares version-control probes in folders that have none.
             (
                 "git_repository",
@@ -138,6 +144,7 @@ impl Agent {
                 collaboration_instructions(&records),
             ]),
             collaboration_reports(&records),
+            self.tools.process_completions(&self.redactor),
         )
     }
 

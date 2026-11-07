@@ -39,6 +39,7 @@ pub struct Agent {
     questions: crate::ask::Observer,
     permissions: crate::permissions::Permissions,
     child: bool,
+    process_resume: processes::Resume,
     /// Generate a title after the first request (`name_sessions`).
     naming: bool,
     inherited_project_instructions: Option<String>,
@@ -103,6 +104,7 @@ impl Agent {
             questions: crate::ask::Observer::default(),
             permissions: crate::permissions::Permissions::default(),
             child: false,
+            process_resume: processes::Resume::Automatic,
             naming: false,
             inherited_project_instructions: None,
             collaboration_seen: 0,
@@ -193,11 +195,6 @@ impl Agent {
     /// Prompts submitted while this agent works; ordinary messages join the active turn.
     pub fn inbox(&self) -> crate::inbox::Inbox {
         self.inbox.clone()
-    }
-
-    /// Observes this conversation's persistent processes while a worker owns the agent.
-    pub fn processes(&self) -> crate::tools::processes::Observer {
-        self.tools.observe_processes(self.redactor.clone())
     }
 
     pub fn run_turn(
@@ -314,7 +311,8 @@ impl Agent {
                 return Err(error);
             }
             if completion.calls.is_empty() {
-                if self.accept_input(events)? {
+                // A process that ended meanwhile is news the answer did not have.
+                if self.accept_input(events)? || self.tools.process_completion_waiting() {
                     continue;
                 }
                 return Ok(());
@@ -429,6 +427,7 @@ mod permission;
 #[cfg(test)]
 mod permission_tests;
 mod persistence;
+mod processes;
 mod project_instructions;
 mod projection;
 pub(crate) mod read_paths;
@@ -491,6 +490,8 @@ mod naming_tests;
 mod network_tests;
 #[cfg(test)]
 mod persistence_tests;
+#[cfg(test)]
+mod process_delivery_tests;
 #[cfg(test)]
 mod process_tests;
 #[cfg(test)]

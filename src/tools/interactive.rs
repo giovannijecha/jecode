@@ -53,6 +53,7 @@ pub(super) fn execute(
         processes::Adoption {
             timeout,
             wait,
+            foreground: false,
             output_limit,
             cancellation,
         },

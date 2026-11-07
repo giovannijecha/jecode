@@ -81,6 +81,8 @@ impl State {
             Event::Accepted { .. } => {}
             // The application reads permission requests from their queue.
             Event::PermissionRequest { .. } => {}
+            // The application reads completions from its process observer.
+            Event::ProcessFinished { .. } => {}
             Event::UserQuestion { request } => {
                 if self.question.as_ref().is_none_or(|current| current.id != request.id) {
                     self.ask_panel = Some(crate::tui::ask::Panel::new(&request, self.ask_draft.as_ref()));

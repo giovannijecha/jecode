@@ -11,6 +11,9 @@ fn finished_terminal_keeps_clean_log_and_leaves_direct_input() {
         status: "running",
         exit_code: None,
         error: None,
+        started: std::time::Instant::now(),
+        finished: None,
+        awaited: false,
     };
     let raw = "\x1b]0;private title\x07hello\rDONE\x1b[31m\n";
     let mut output = Stream::default();
@@ -47,19 +50,24 @@ fn finished_terminal_keeps_clean_log_and_leaves_direct_input() {
 
 #[test]
 fn selection_follows_process_identity_and_the_draft_survives() {
+    let started = std::time::Instant::now();
     let process = |id: &str, status| Process {
         id: id.into(),
         command: format!("command {id}"),
         status,
         exit_code: None,
         error: None,
+        started,
+        finished: None,
+        awaited: false,
     };
     let mut list = Panel::new(vec![process("a", "running"), process("b", "running")]);
     list.selected = 1;
-    // Finished processes disappear while selection stays on the same active ID.
+    // Finished processes stay listed, and the selection stays on the same ID.
     assert!(list.update(vec![process("b", "running"), process("a", "exited")]));
     assert_eq!(list.selected_process().unwrap().id, "b");
-    assert_eq!(list.processes.len(), 1);
+    assert_eq!(list.selected, 0);
+    assert_eq!(list.processes.len(), 2);
     assert!(!list.update(vec![process("b", "running"), process("a", "exited")]));
     // A vanished selection clamps to the list.
     list.update(vec![process("c", "running")]);
@@ -77,7 +85,7 @@ fn selection_follows_process_identity_and_the_draft_survives() {
     assert!(
         frame(&app)
             .iter()
-            .any(|line| line.contains("Nothing running"))
+            .any(|line| line.contains("No processes yet"))
     );
     key(&mut app, 13, 0);
     key(&mut app, 40, 0);
@@ -108,6 +116,9 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             status: "running",
             exit_code: None,
             error: None,
+            started: std::time::Instant::now(),
+            finished: None,
+            awaited: false,
         },
         Process {
             id: "process-failed".into(),
@@ -115,6 +126,9 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             status: "exited",
             exit_code: Some(2),
             error: None,
+            started: std::time::Instant::now(),
+            finished: None,
+            awaited: false,
         },
         Process {
             id: "process-unknown".into(),
@@ -122,12 +136,15 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             status: "unknown",
             exit_code: None,
             error: Some("The command started but its completion could not be confirmed".into()),
+            started: std::time::Instant::now(),
+            finished: None,
+            awaited: false,
         },
     ]));
     let list = frame(&app).join("\n");
     assert!(list.contains("running"), "{list}");
     for finished in ["exited 2", "outcome unknown", "make test second line"] {
-        assert!(!list.contains(finished), "{finished}\n{list}");
+        assert!(list.contains(finished), "{finished}\n{list}");
     }
 
     let panel = app.state.processes.as_mut().unwrap();
@@ -143,6 +160,9 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             status: "unknown",
             exit_code: None,
             error: Some("The command started but its completion could not be confirmed".into()),
+            started: std::time::Instant::now(),
+            finished: None,
+            awaited: false,
         }),
         stream: 0,
         views: [output, Stream::default()],
@@ -151,7 +171,7 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
     });
     let details = frame(&app).join("\n");
     assert!(
-        details.contains("outcome unknown · process-unknown"),
+        details.contains("outcome unknown · ") && details.contains(" · process-unknown"),
         "{details}"
     );
     assert!(details.contains("could not be confirmed"), "{details}");

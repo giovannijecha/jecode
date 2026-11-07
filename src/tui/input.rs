@@ -425,6 +425,7 @@ impl App {
         if let Some(worker) = &self.worker {
             self.collaboration_auto_resume = false;
             self.collaboration_return_pending = false;
+            self.process_auto_resume = false;
             worker.cancel();
             if let Some(activity) = &mut self.state.activity {
                 activity.stopping = true;

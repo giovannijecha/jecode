@@ -12,6 +12,7 @@ use crate::json::Value;
 
 mod agents;
 mod events;
+mod process_rows;
 pub(super) mod rows;
 
 #[derive(Clone, Copy)]
@@ -108,6 +109,8 @@ pub struct State {
     pub information: Option<Information>,
     pub selector: Option<super::selector::Selector>,
     pub processes: Option<super::processes::Panel>,
+    /// Processes still running after their launching call returned.
+    pub background_processes: usize,
     pub collaboration: Vec<Value>,
     /// When each running collaborator was first seen running, for `/agents`.
     pub agent_clocks: std::collections::HashMap<String, std::time::Instant>,
@@ -157,6 +160,7 @@ impl Default for State {
             information: None,
             selector: None,
             processes: None,
+            background_processes: 0,
             collaboration: Vec::new(),
             agent_clocks: std::collections::HashMap::new(),
             agents_panel: None,

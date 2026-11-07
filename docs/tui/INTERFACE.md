@@ -72,7 +72,7 @@ generated. The counts appear while no tool progress is shown. The composer stays
   continues from there.
 - **Use menus.** `/settings`, `/model`, `/effort`, `/routing`, `/skills` and
   `/help` open immediately; what they change for this conversation applies from
-  the next turn. `/copy`, `/terminal`, `/agents`, `/ask`, `/todo`, `/permissions`,
+  the next turn. `/copy`, `/process`, `/agents`, `/ask`, `/todo`, `/permissions`,
   `/mcp` and `/lsp` also run immediately. Commands that start work or replace the
   conversation, such as `/init`, `/new`, `/resume`, `/export`, `/tmp`,
   `/checkpoints` and `/exit`, wait until the turn completes and any open menu
@@ -122,7 +122,10 @@ reliable figure yet. See
 
 While collaborators are working or waiting for review, an `AGENTS` badge with
 counts replaces the directory; see
-[Collaborating agents](../usage/COLLABORATION.md#watch-in-the-tui). On narrow
+[Collaborating agents](../usage/COLLABORATION.md#watch-in-the-tui). While processes
+keep running after their calls returned, a `PROCESS` badge with the count and the
+`/process` command does the same; with collaborators too, the `AGENTS` badge stays
+and counts them among its facts. On narrow
 terminals the footer drops the provider name, then shows the project name
 instead of the path, then drops the effort and the rest.
 
@@ -148,19 +151,29 @@ a choice returns you to the composer. `/new` and `/resume` carry your draft into
 the conversation they open; a resumed conversation's own saved draft joins below
 it.
 
-## Background processes
+## Processes
 
-`/terminal` lists the conversation's running background processes. Select one and press
-Enter to view its output; Tab switches between the **Output** and **Errors**
-tabs, the arrows, page keys and mouse wheel scroll, Home jumps to the start and
-End follows new output. Ctrl+D asks to stop the selected process; Enter confirms.
+`/process` lists the conversation's running processes, then its recent ones, the
+latest first, each with its state or outcome, command and time. It opens at once,
+also during a turn, and Ctrl+G reaches it with a draft in the composer. Select one
+and press Enter to view its saved output; Tab switches between the **Output** and
+**Errors** tabs, the arrows, page keys and mouse wheel scroll, Home jumps to the
+start and End follows new output. Ctrl+D asks to stop a running process; Enter
+confirms. When a call is waiting for the selected process, `b` moves it to the
+background: the call returns, and the command keeps running without restarting.
 For an interactive process, press `i` to type into it directly; Ctrl+] leaves
-direct input, and Ctrl+C there sends an interrupt. Nothing you do in `/terminal`
+direct input, and Ctrl+C there sends an interrupt. Nothing you do in `/process`
 enters the conversation or affects what the model sees.
 
-`/terminal ID` opens one process directly, including the saved output of one that
-has ended, and `/terminal stop ID` stops it. Tool cards show a process's state when
-the call returned; `/terminal` shows the ones still running.
+`/process ID` opens one process directly, including the saved output of one that
+has ended, and `/process stop ID` stops it. Esc during a turn stops the turn and any
+command whose call is still in its default wait; processes already in the background
+keep running.
+
+Tool cards show a process's state when the call returned. When a process that no
+call is waiting for ends, a `PROCESS` row reports it at that point in the
+conversation, with a notice on the status row, and an idle conversation continues
+from there. See [Processes](../usage/TOOLS.md#processes).
 
 ## Reading and scrolling
 

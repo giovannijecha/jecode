@@ -53,6 +53,7 @@ fn chat_inner(
     resume: Option<Option<String>>,
     mut staged: Vec<Attachment>,
 ) -> Result<(), String> {
+    agent.set_process_resume_on_input();
     let previous = agent.sessions();
     agent.enable_sessions(
         config
@@ -63,10 +64,11 @@ fn chat_inner(
     )?;
     writeln!(output, "Jecode - {}\nWorking directory: {}\nTools execute directly. Type a task, /help for commands, or /exit to quit.", agent.model(), std::env::current_dir().map_err(|error| error.to_string())?.display())
         .map_err(|error| error.to_string())?;
+    let mut process_resume = true;
     if let Some(id) = resume {
         persistence::resume(agent, config, id.as_deref(), input, output, status)?;
         if agent.has_pending_question() {
-            resume_question(agent, input, output, status)?;
+            process_resume = resume_question(agent, input, output, status)?;
         }
         if agent.has_open_collaboration_report() {
             run_plain(agent, Work::Collaboration, input, output, status)?;
@@ -80,10 +82,21 @@ fn chat_inner(
     }
     loop {
         if agent.has_pending_question() {
-            resume_question(agent, input, output, status)?;
+            process_resume = resume_question(agent, input, output, status)?;
         }
         if agent.has_open_collaboration_report() {
             run_plain(agent, Work::Collaboration, input, output, status)?;
+        }
+        // Reading the next line blocks, so a process that ends while it waits
+        // continues here, after that line or an empty one.
+        // A failed continuation is reported and waits for the next message.
+        if process_resume && agent.can_continue_processes() {
+            let result = run_plain(agent, Work::Processes, input, output, status)
+                .and_then(|()| agent.save_session());
+            if let Err(error) = result {
+                process_resume = false;
+                writeln!(status, "{}", agent.redact(&error)).map_err(|error| error.to_string())?;
+            }
         }
         write!(output, "\n> ")
             .and_then(|_| output.flush())
@@ -97,12 +110,16 @@ fn chat_inner(
         }
         let (name, arguments) = commands::split(line).unwrap_or(("", ""));
         let name = commands::canonical(name).to_ascii_lowercase();
-        let direct_write = name == "/terminal"
+        let runs_agent = !line.starts_with('/') || name == "/init" && arguments.is_empty();
+        if runs_agent {
+            process_resume = true;
+        }
+        let direct_write = name == "/process"
             && arguments
                 .split_whitespace()
                 .next()
                 .is_some_and(|action| action.eq_ignore_ascii_case("write"));
-        let terminal_arguments = if direct_write {
+        let process_arguments = if direct_write {
             raw_line
                 .trim_end_matches(['\r', '\n'])
                 .trim_start()
@@ -152,7 +169,7 @@ fn chat_inner(
                 persistence::resume(agent, config, None, input, output, status)
                     .and_then(|()| attach::transfer(agent, previous.as_ref(), &mut staged))
             }
-            ("/terminal", _) => processes::print(agent, terminal_arguments, output),
+            ("/process", _) => processes::print(agent, process_arguments, output),
             ("/agents", _) => agents::print(agent, arguments, output),
             ("/todo", "") => todo::print(agent, output),
             ("/tmp", _) => temporary::print(agent, arguments, output),
@@ -232,10 +249,13 @@ fn chat_inner(
         };
         let result = result.and(agent.save_session());
         if let Err(error) = result {
+            if runs_agent {
+                process_resume = false;
+            }
             if line.starts_with('/') {
                 if direct_write {
                     agent.record_local_details(
-                        "/terminal write [direct input]",
+                        "/process write [direct input]",
                         "Direct terminal input failed",
                         "error",
                         &[],
@@ -255,13 +275,14 @@ fn resume_question(
     input: &mut impl BufRead,
     output: &mut impl Write,
     status: &mut impl Write,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let result =
         run_plain(agent, Work::Question, input, output, status).and_then(|()| agent.save_session());
     match result {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(true),
         Err(error) => {
-            writeln!(status, "{}", agent.redact(&error)).map_err(|error| error.to_string())
+            writeln!(status, "{}", agent.redact(&error)).map_err(|error| error.to_string())?;
+            Ok(false)
         }
     }
 }
@@ -270,6 +291,7 @@ enum Work {
     Turn(Prompt),
     Question,
     Collaboration,
+    Processes,
 }
 
 fn run_plain(
@@ -312,6 +334,7 @@ fn run_plain(
         Work::Turn(prompt) => agent.run_turn(prompt, &mut sink),
         Work::Question => agent.continue_question(&mut sink).map(|_| ()),
         Work::Collaboration => agent.continue_collaboration(&mut sink).map(|_| ()),
+        Work::Processes => agent.continue_processes(&mut sink).map(|_| ()),
     };
     questions.set_available(false);
     permissions.set_surface(crate::permissions::Surface::None);

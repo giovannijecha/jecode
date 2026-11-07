@@ -71,7 +71,6 @@ fn a_worker_viewer_uses_credentials_updated_before_the_turn() {
     assert!(!process.command.contains(key));
     assert_eq!(logs(&app).views[0].text(), "[redacted]");
     std::fs::write(directory.path().join("finish-work"), "").unwrap();
-    std::fs::write(directory.path().join("stop-server"), "").unwrap();
     wait_until(&mut app, |app| app.worker.is_none());
     assert_eq!(fixture.finish().len(), 2);
 }

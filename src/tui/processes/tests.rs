@@ -13,6 +13,7 @@ use std::{thread, time::Instant};
 
 mod control_tests;
 mod credential_tests;
+mod lifecycle_tests;
 mod view_tests;
 
 const UP: u16 = 38;
@@ -133,8 +134,9 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
     submit(&mut app, "Start the fixture.");
     let history = app.state.history.snapshot();
     let observer = app.process_observer.clone();
+    // Both the launched process and the foreground call holding the turn.
     wait_until(&mut app, |_| {
-        observer.processes().is_some_and(|list| !list.is_empty())
+        observer.processes().is_some_and(|list| list.len() == 2)
     });
     let id = observer.processes().unwrap()[0].id.clone();
     wait_until(&mut app, |_| {
@@ -154,12 +156,13 @@ fn the_panel_opens_and_follows_output_while_the_worker_owns_the_agent() {
     let queued = app.state.queue.is_empty();
 
     // Opening is local and immediate: nothing is queued for the model.
-    submit(&mut app, "/terminal");
+    submit(&mut app, "/process");
     assert_eq!(app.state.queue.is_empty(), queued);
     assert!(app.state.editor.prompt().text.is_empty());
     assert_eq!(app.state.history.snapshot(), history);
-    assert_eq!(panel(&app).processes.len(), 1);
+    assert_eq!(panel(&app).processes.len(), 2);
     assert_eq!(panel(&app).processes[0].label(), "running");
+    assert!(panel(&app).processes[1].awaited);
     assert!(frame(&app).iter().any(|line| line.contains("seq 1 30000")));
 
     // Typing is ignored rather than reaching the hidden composer.
@@ -305,18 +308,34 @@ fn scrolling_loads_bounded_older_and_newer_pages() {
     let fixture = HttpFixture::new(vec![
         (
             200,
-            completion("", vec![bash("launch", "seq 1 30000", true)]),
+            completion(
+                "",
+                vec![bash(
+                    "launch",
+                    "seq 1 30000; until [ -e ended ]; do sleep 0.02; done",
+                    true,
+                )],
+            ),
         ),
         (200, completion("Started.", vec![])),
+        (200, completion("Ended.", vec![])),
     ]);
     let mut app = app(&directory, &fixture);
     submit(&mut app, "Start.");
     wait_until(&mut app, |app| app.worker.is_none());
+    create(&directory, "ended");
     wait_until(&mut app, |app| {
         app.process_observer.processes().unwrap()[0].label() == "exited 0"
+            && app.worker.is_none()
+            && app
+                .state
+                .rows()
+                .iter()
+                .flatten()
+                .any(|row| row.plain() == "● Ended.")
     });
     let id = app.process_observer.processes().unwrap()[0].id.clone();
-    submit(&mut app, &format!("/terminal {id}"));
+    submit(&mut app, &format!("/process {id}"));
     assert_eq!(logs(&app).id, id);
     let length = stream(&app).length();
     assert!(length > RETAINED);
@@ -350,7 +369,7 @@ fn scrolling_loads_bounded_older_and_newer_pages() {
     key(&mut app, 35, 0);
     assert!(stream(&app).follow);
     assert!(stream(&app).text().ends_with("30000\n"));
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]
@@ -375,7 +394,7 @@ fn a_new_conversation_closes_the_viewer_and_stops_its_processes() {
     wait_until(&mut app, |app| app.worker.is_none());
     let old = app.process_observer.clone();
     let id = old.processes().unwrap()[0].id.clone();
-    submit(&mut app, "/terminal");
+    submit(&mut app, "/process");
     key(&mut app, 13, 0);
     assert_eq!(logs(&app).id, id);
 
@@ -383,7 +402,7 @@ fn a_new_conversation_closes_the_viewer_and_stops_its_processes() {
     wait_until(&mut app, |app| app.state.processes.is_none());
     // The viewer kept neither the old conversation nor its process alive.
     assert!(old.processes().is_none());
-    submit(&mut app, &format!("/terminal {id}"));
+    submit(&mut app, &format!("/process {id}"));
     assert!(panel(&app).processes.is_empty());
     assert!(panel(&app).logs.is_none());
     assert!(!app.process_observer.same(&old));

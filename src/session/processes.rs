@@ -1,16 +1,16 @@
-//! Plain-chat `/terminal`: local inspection and control for this conversation.
+//! Plain-chat `/process`: local inspection and control for this conversation.
 //! It uses the observer, so the model's next poll is unchanged.
 
 use crate::agent::Agent;
-use crate::session::commands::terminal_stop_id;
+use crate::session::commands::process_stop_id;
 use crate::tools::processes::{Observer, Process, Window};
 use std::io::Write;
 
 pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> Result<(), String> {
     let observer = agent.processes();
-    let text = if let Some(id) = terminal_stop_id(arguments) {
+    let text = if let Some(id) = process_stop_id(arguments) {
         if id.is_empty() {
-            return Err("Usage: /terminal stop PROCESS_ID".into());
+            return Err("Usage: /process stop PROCESS_ID".into());
         }
         let process = observer.request_stop(id)?;
         if process.active() {
@@ -24,9 +24,9 @@ pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> 
     } else if let Some(rest) = action(arguments, "write") {
         let (id, text) = rest
             .split_once(char::is_whitespace)
-            .ok_or("Usage: /terminal write PROCESS_ID TEXT")?;
+            .ok_or("Usage: /process write PROCESS_ID TEXT")?;
         if id.is_empty() || text.is_empty() {
-            return Err("Usage: /terminal write PROCESS_ID TEXT".into());
+            return Err("Usage: /process write PROCESS_ID TEXT".into());
         }
         let mut line = text.as_bytes().to_vec();
         line.push(b'\r');
@@ -37,14 +37,14 @@ pub(super) fn print(agent: &Agent, arguments: &str, output: &mut impl Write) -> 
         format!("Input sent to {id}.\n")
     } else if let Some(id) = action(arguments, "interrupt") {
         if id.is_empty() || id.split_whitespace().count() != 1 {
-            return Err("Usage: /terminal interrupt PROCESS_ID".into());
+            return Err("Usage: /process interrupt PROCESS_ID".into());
         }
         observer.interrupt_direct(id)?;
         format!("Interrupt sent to {id}.\n")
     } else if let Some(rest) = action(arguments, "resize") {
         let fields: Vec<_> = rest.split_whitespace().collect();
         let [id, cols, rows] = fields.as_slice() else {
-            return Err("Usage: /terminal resize PROCESS_ID COLS ROWS".into());
+            return Err("Usage: /process resize PROCESS_ID COLS ROWS".into());
         };
         let size = (
             cols.parse::<u16>().map_err(|_| "Invalid terminal width")?,
@@ -67,25 +67,27 @@ fn action<'a>(arguments: &'a str, name: &str) -> Option<&'a str> {
     verb.eq_ignore_ascii_case(name).then_some(rest.trim_start())
 }
 
+/// Active processes, then recent ones, the latest first.
 fn list(observer: &Observer) -> String {
-    let processes: Vec<_> = observer
-        .processes()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(Process::active)
-        .collect();
+    let processes = observer.processes().unwrap_or_default();
     if processes.is_empty() {
-        return "No active background processes in this conversation.\n".into();
+        return "No processes in this conversation.\n".into();
     }
-    let mut text = format!("Active background processes ({}):\n", processes.len());
+    let running = processes.iter().filter(|process| process.active()).count();
+    let mut text = format!(
+        "Processes ({running} running, {} recent):\n",
+        processes.len() - running
+    );
     for process in &processes {
         text.push_str(&format!(
-            "  {}  running  {}\n",
+            "  {}  {}  {}s  {}\n",
             process.id,
+            process.label(),
+            process.elapsed().as_secs(),
             single_line(&process.command)
         ));
     }
-    text.push_str("Use /terminal PROCESS_ID for output, /terminal write PROCESS_ID TEXT to send a line, or /terminal stop PROCESS_ID to stop one.\n");
+    text.push_str("Use /process PROCESS_ID for output, /process write PROCESS_ID TEXT to send a line, or /process stop PROCESS_ID to stop one.\n");
     text
 }
 
@@ -96,12 +98,13 @@ fn details(observer: &Observer, id: &str) -> Result<String, String> {
         .into_iter()
         .find(|process| process.id == id)
         .ok_or_else(|| {
-            format!("No process {id} in this conversation. Use /terminal to list processes.")
+            format!("No process {id} in this conversation. Use /process to list processes.")
         })?;
     let mut text = format!(
-        "{} · {}\nCommand: {}\n",
+        "{} · {} · {}s\nCommand: {}\n",
         process.id,
         process.label(),
+        process.elapsed().as_secs(),
         single_line(&process.command)
     );
     if let Some(error) = &process.error {
@@ -148,5 +151,7 @@ fn visible(text: &str) -> String {
         .collect()
 }
 
+#[cfg(test)]
+mod resume_tests;
 #[cfg(test)]
 mod tests;

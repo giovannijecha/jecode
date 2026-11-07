@@ -51,6 +51,76 @@ fn a_failed_agent_keeps_the_chip_readable_on_both_terminals() {
 }
 
 #[test]
+fn running_processes_take_the_paths_place_and_name_their_panel() {
+    let state = |width, background_processes| State {
+        width,
+        height: 24,
+        background_processes,
+        context: Some(Status {
+            tokens: Some(61_000),
+            capacity: Some(100_000),
+            auto_compact: 80,
+            pending: None,
+        }),
+        ..State::default()
+    };
+    let wide = footer(&state(100, 2));
+    assert!(wide.starts_with("PROCESS  2 running"), "{wide}");
+    assert!(wide.contains("/process"), "{wide}");
+    assert!(wide.ends_with("▰▰▰▰▰▰▱▱ 61%"), "{wide}");
+    assert!(!wide.contains(r"C:\project"), "{wide}");
+    // The quiet badge, on the shared surface.
+    let frame = frame(&state(100, 1), "provider/model", r"C:\project");
+    let line = frame.live.last().unwrap();
+    assert!(line.spans.iter().any(|span| {
+        span.text == "PROCESS"
+            && span.style == crate::tui::theme::LIT
+            && span.background == Some(crate::tui::theme::BADGE_IDLE)
+    }));
+    // Narrow rows give up the model, then the hint; the gauge stays.
+    for width in [60, 44, 34, 28] {
+        let narrow = footer(&state(width, 1));
+        assert!(narrow.starts_with("PROCESS"), "{width}: {narrow}");
+        assert!(narrow.ends_with(" 61%"), "{width}: {narrow}");
+        assert!(text::cells(&narrow) <= width, "{width}: {narrow}");
+    }
+    // None running: the ordinary footer returns.
+    assert!(footer(&state(100, 0)).starts_with(r"C:\project"));
+}
+
+#[test]
+fn agents_keep_the_footer_and_count_processes_among_their_facts() {
+    let state = State {
+        width: 120,
+        height: 24,
+        background_processes: 2,
+        collaboration: vec![crate::json::Value::object([(
+            "state",
+            crate::json::Value::string("running"),
+        )])],
+        ..State::default()
+    };
+    let line = footer(&state);
+    assert!(
+        line.starts_with(" AGENTS  1 running · 2 processes"),
+        "{line}"
+    );
+    assert!(line.contains("/agents"), "{line}");
+    let mut narrow = state;
+    narrow.width = 44;
+    narrow.context = Some(Status {
+        tokens: Some(61_000),
+        capacity: Some(100_000),
+        auto_compact: 80,
+        pending: None,
+    });
+    let line = footer(&narrow);
+    assert!(line.contains("2 proc"), "{line}");
+    assert!(line.ends_with(" 61%"), "{line}");
+    assert!(text::cells(&line) <= 44, "{line}");
+}
+
+#[test]
 fn the_footer_shows_the_latest_provider_usage() {
     let mut state = with_status(61_000, Some(100_000));
     let idle = frame(&state, "provider/model", r"C:\project");

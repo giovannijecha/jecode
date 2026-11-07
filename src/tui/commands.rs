@@ -109,7 +109,8 @@ impl App {
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
             self.state.backend_failure = None;
-            self.process_observer = self.agent.as_ref().unwrap().processes();
+            self.sync_process_observer();
+            self.process_auto_resume = true;
             self.collaboration_auto_resume = true;
             self.collaboration_return_pending = false;
             let worker = Worker::start(self.hold(), execution);
@@ -385,13 +386,13 @@ impl App {
         }
     }
 
-    /// Runs `/copy`, `/terminal` or another panel command; returns false for other text.
+    /// Runs `/copy`, `/process` or another panel command; returns false for other text.
     fn run_immediate(&mut self, text: &str) -> bool {
         let text = text.trim();
         let (name, arguments) = text
             .split_once(char::is_whitespace)
             .map_or((text, ""), |(name, arguments)| (name, arguments.trim()));
-        if name.eq_ignore_ascii_case("/terminal") {
+        if name.eq_ignore_ascii_case("/process") {
             self.open_processes(arguments);
         } else if name.eq_ignore_ascii_case("/agents") {
             if arguments.is_empty() {
@@ -436,7 +437,7 @@ impl App {
 pub(super) fn immediate(name: &str) -> bool {
     [
         "/copy",
-        "/terminal",
+        "/process",
         "/agents",
         "/ask",
         "/todo",

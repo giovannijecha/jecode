@@ -114,9 +114,9 @@ commands:
 | `/export` | Save the conversation as JSON. |
 | `/tmp [clean]` | Show or clear the conversation's temporary files. |
 | `/checkpoints [COMMAND]` | Inspect or restore checkpoints. |
-| `/terminal [ID]` | List background processes or show one's status and last output. |
-| `/terminal stop ID` | Stop a process. |
-| `/terminal write ID TEXT`, `/terminal interrupt ID`, `/terminal resize ID COLS ROWS` | Type a line into, interrupt or resize an interactive process. |
+| `/process [ID]` | List running and recent processes, or show one's status and last output. |
+| `/process stop ID` | Stop a process. |
+| `/process write ID TEXT`, `/process interrupt ID`, `/process resize ID COLS ROWS` | Type a line into, interrupt or resize an interactive process. |
 | `/agents [NUMBER]` | List collaborators, or show one. |
 | `/todo` | Show the current plan. |
 | `/help` | Show commands. |

@@ -7,6 +7,9 @@ fn process(status: &'static str) -> Process {
         status,
         exit_code: None,
         error: None,
+        started: std::time::Instant::now(),
+        finished: None,
+        awaited: false,
     }
 }
 
@@ -46,7 +49,7 @@ fn long_output_commands_leave_room_for_the_exit_status() {
     let text = plain(&panel, 80, 12);
     assert!(text.contains("Processes › powershell"), "{text}");
     assert!(
-        text.contains("exited 0 · process-1793119373364-13804-6"),
+        text.contains(" · process-1793119373364-13804-6") && text.contains("exited 0"),
         "{text}"
     );
 }
@@ -61,13 +64,13 @@ fn one_row_stop_confirmation_keeps_its_question_visible() {
 #[test]
 fn list_is_a_standard_menu_with_status_command_id_and_empty_message() {
     let active = plain(&Panel::new(vec![process("running")]), 80, 10);
-    assert!(active.contains("Background processes · this conversation"));
+    assert!(active.contains("Processes · this conversation"));
     assert!(active.contains("1 running"), "{active}");
     assert!(active.contains("› running  printf catalog"), "{active}");
     assert!(active.contains("process-1"), "{active}");
     assert!(active.contains(" Ctrl+D stop"), "{active}");
     let empty = plain(&Panel::new(vec![]), 80, 8);
-    assert!(empty.contains("Nothing running"));
+    assert!(empty.contains("No processes yet"));
     assert!(empty.contains(" Esc close"));
 }
 
@@ -105,7 +108,8 @@ fn output_has_breadcrumb_status_stream_tabs_and_follow_mode() {
     panel.logs = Some(logs(1));
     let view = plain(&panel, 80, 12);
     assert!(view.contains("Processes › printf catalog"), "{view}");
-    assert!(view.contains("running · process-1"), "{view}");
+    assert!(view.contains("running · "), "{view}");
+    assert!(view.contains(" · process-1"), "{view}");
     assert!(view.contains("Output   Errors"), "{view}");
     assert!(view.contains("following"));
     assert!(view.contains("No output yet"));

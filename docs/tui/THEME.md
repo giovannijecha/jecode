@@ -310,7 +310,7 @@ text, `Ctrl+O` in bold `STRONG` and `expand` in `DIM`, ending two cells from the
 edge of the row reporting it, or on a row of its own when that row is full;
 expanded, the turn's first card names `collapse` on its title. Only the latest
 turn carries it. Tool cards keep the result reported when the call returned;
-`/terminal` shows the live process list.
+`/process` shows the live process list.
 
 ### Work chapters
 

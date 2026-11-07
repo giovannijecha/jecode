@@ -296,13 +296,20 @@ impl HttpFixture {
     }
 
     pub fn finish(self) -> Vec<Request> {
-        let requests = self.server.finish();
+        let expected = self.expected;
+        let requests = self.finish_received();
         assert_eq!(
             requests.len(),
-            self.expected,
+            expected,
             "fixture did not receive every expected request"
         );
         requests
+    }
+
+    /// Stops a fixture with optional responses so a test can assert which
+    /// requests were not made, without leaving an unexpected client blocked.
+    pub fn finish_received(self) -> Vec<Request> {
+        self.server.finish()
     }
 }
 

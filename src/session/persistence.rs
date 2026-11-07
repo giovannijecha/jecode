@@ -108,6 +108,10 @@ pub(super) fn resume(
     for record in document.records() {
         match record {
             Record::Question { .. } => {}
+            Record::ProcessFinished { event } => {
+                writeln!(status, "{}", crate::console::restored_process_line(&event))
+                    .map_err(|error| error.to_string())?;
+            }
             Record::Collaboration { event } => {
                 writeln!(status, "{}", crate::console::collaboration_line(&event))
                     .map_err(|error| error.to_string())?;

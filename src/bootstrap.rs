@@ -148,12 +148,14 @@ fn launch(
             .collect::<Vec<_>>(),
     )?;
     if let Some(prompt) = prompt {
+        agent.set_single_run();
         return agent.run_turn(
             Prompt::new(prompt, attachments),
             &mut Console::new(&mut output, &mut status),
         );
     }
     if !interactive {
+        agent.set_single_run();
         if let Some(resume) = resume {
             let id =
                 resume.ok_or("Choosing a session needs interactive input; supply a session ID")?;

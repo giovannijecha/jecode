@@ -19,6 +19,26 @@ fn printed(agent: &Agent, arguments: &str) -> String {
 }
 
 #[test]
+fn plain_command_name_and_usage_follow_the_rename() {
+    let directory = Directory::new();
+    let agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:9/".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    for (arguments, usage) in [
+        ("write", "Usage: /process write PROCESS_ID TEXT"),
+        ("interrupt", "Usage: /process interrupt PROCESS_ID"),
+        ("resize x", "Usage: /process resize PROCESS_ID COLS ROWS"),
+    ] {
+        assert_eq!(
+            print(&agent, arguments, &mut Vec::new()).unwrap_err(),
+            usage
+        );
+    }
+    assert!(crate::session::commands::unknown("/terminal").starts_with("Unknown command"));
+}
+
+#[test]
 fn write_action_preserves_whitespace_after_the_id_separator() {
     let rest = action("write process-1   padded  ", "write").unwrap();
     let (id, text) = rest.split_once(char::is_whitespace).unwrap();
@@ -123,14 +143,16 @@ fn plain_terminal_prints_locally_without_consuming_model_output() {
         .permissions()
         .set_level(crate::permissions::Level::Full)
         .unwrap();
-    assert_eq!(
-        printed(&agent, ""),
-        "No active background processes in this conversation.\n"
-    );
+    assert_eq!(printed(&agent, ""), "No processes in this conversation.\n");
     turn(&mut agent, &launch, "Start");
     let observer = agent.processes();
     let id = observer.processes().unwrap()[0].id.clone();
-    assert!(printed(&agent, "").contains(&id));
+    let listed = printed(&agent, "");
+    assert!(
+        listed.starts_with("Processes (1 running, 0 recent):\n"),
+        "{listed}"
+    );
+    assert!(listed.contains(&format!("{id}  running  ")), "{listed}");
     std::fs::write(directory.path().join("go"), "").unwrap();
     let started = Instant::now();
     while observer.processes().unwrap()[0].active() {
@@ -140,13 +162,15 @@ fn plain_terminal_prints_locally_without_consuming_model_output() {
     let messages = agent.archive().messages.lock().unwrap().len();
     let events = agent.archive().events.lock().unwrap().len();
 
-    assert_eq!(
-        printed(&agent, ""),
-        "No active background processes in this conversation.\n"
+    let listed = printed(&agent, "");
+    assert!(
+        listed.starts_with("Processes (0 running, 1 recent):\n"),
+        "{listed}"
     );
+    assert!(listed.contains(&format!("{id}  exited 4  ")), "{listed}");
     let details = printed(&agent, &id);
     assert!(
-        details.starts_with(&format!("{id} · exited 4\n")),
+        details.starts_with(&format!("{id} · exited 4 · ")),
         "{details}"
     );
     assert!(details.contains("Output:\nplain-out\n"), "{details}");
@@ -263,26 +287,21 @@ fn plain_terminal_requests_stop_without_touching_history_or_poll_cursor() {
     );
     let list = printed(&agent, "");
     assert!(
-        list.contains(&format!("{id}  running"))
-            || list == "No active background processes in this conversation.\n",
+        list.contains(&format!("{id}  stopping")) || list.contains(&format!("{id}  stopped")),
         "{list}"
     );
-    assert!(!list.contains("stopping"), "{list}");
     assert!(!agent.cancellation().requested());
     assert_eq!(agent.archive().messages.lock().unwrap().len(), messages);
     assert_eq!(agent.archive().events.lock().unwrap().len(), events);
     assert_eq!(
         print(&agent, "stop", &mut Vec::new()).unwrap_err(),
-        "Usage: /terminal stop PROCESS_ID"
+        "Usage: /process stop PROCESS_ID"
     );
     while observer.processes().unwrap()[0].active() {
         assert!(started.elapsed() < Duration::from_secs(10));
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_eq!(
-        printed(&agent, ""),
-        "No active background processes in this conversation.\n"
-    );
+    assert!(printed(&agent, "").contains(&format!("{id}  stopped")));
     assert!(printed(&agent, &id).contains("Output:\nready\n"));
     assert_eq!(launch.finish().len(), 2);
     let poll = HttpFixture::new(vec![

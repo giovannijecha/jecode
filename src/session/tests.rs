@@ -40,7 +40,7 @@ fn failed_plain_direct_write_records_only_a_safe_command_label() {
         &mut agent,
         &mut config,
         &mut Cursor::new(
-            "/terminal write missing SECRET_DIRECT_INPUT_42\n/terminal write SECRET_AS_ID\n/exit\n",
+            "/process write missing SECRET_DIRECT_INPUT_42\n/process write SECRET_AS_ID\n/exit\n",
         ),
         &mut output,
         &mut status,
@@ -54,7 +54,7 @@ fn failed_plain_direct_write_records_only_a_safe_command_label() {
     );
     assert!(!archive.contains("SECRET_DIRECT_INPUT_42"));
     assert!(!archive.contains("SECRET_AS_ID"));
-    assert!(archive.contains("/terminal write [direct input]"));
+    assert!(archive.contains("/process write [direct input]"));
     let status = String::from_utf8(status).unwrap();
     assert!(!status.contains("SECRET_DIRECT_INPUT_42"));
     assert!(!status.contains("SECRET_AS_ID"));

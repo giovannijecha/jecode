@@ -115,6 +115,8 @@ impl App {
                     }
                 }
                 result => {
+                    // A process ending later must not undo this stop or failure.
+                    self.process_auto_resume = false;
                     let error = result.err().unwrap_or_else(|| "Turn interrupted".into());
                     self.pause_draft();
                     self.state.clear_progress();
@@ -180,12 +182,14 @@ impl App {
                 break;
             }
         }
+        dirty |= self.poll_processes();
         dirty |= self.refresh_processes(false);
         dirty |= self.refresh_agents();
         dirty |= self.refresh_question();
         dirty |= self.refresh_permission();
         dirty |= self.refresh_todo();
         dirty |= self.start_collaboration_continuation();
+        dirty |= self.start_process_continuation();
         // Settle the command sheet's origin after every async owner has refreshed.
         self.follow_commands(false);
         Ok(dirty)

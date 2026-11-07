@@ -6,6 +6,18 @@ use crate::{context::state_message, json::Value};
 
 /// Starts the section of state that carries newly arrived collaborator reports.
 const REPORTS: &str = "Collaborator reports, each shown once when it arrives:";
+/// Starts the section of state that carries finished processes.
+const PROCESSES: &str = "Processes that finished, each shown once:";
+
+/// A state update without the sections shown only once.
+fn lasting_state(text: &str) -> &str {
+    let end = [REPORTS, PROCESSES]
+        .iter()
+        .filter_map(|section| text.find(section))
+        .min()
+        .unwrap_or(text.len());
+    text[..end].trim_end()
+}
 
 pub(super) struct Request {
     pub messages: Vec<Value>,
@@ -14,6 +26,8 @@ pub(super) struct Request {
     /// Runtime state sent at the end of this request, with its source position.
     /// Once the provider accepts the request, it stays at that position.
     pub state: Option<(usize, String)>,
+    /// Finished processes that state carries; delivered once it is accepted.
+    pub completions: Vec<crate::tools::processes::Completion>,
 }
 
 impl Agent {
@@ -41,6 +55,7 @@ impl Agent {
             measurement,
             estimated_tokens: self.context_estimate(&environment, &original),
             state: state.map(|text| (original.len(), text)),
+            completions: environment.2,
         }
     }
 
@@ -82,6 +97,7 @@ impl Agent {
     /// the window. Unchanged state is never repeated, so request prefixes stay
     /// identical across tool calls and provider caches keep advancing. Reports
     /// join once; after compaction, those of active collaborators are sent again.
+    /// Finished processes join until a request carrying them is accepted.
     fn pending_state(
         &self,
         context: &crate::context::Context,
@@ -99,17 +115,26 @@ impl Agent {
             })
             .map(|(_, entry)| entry.as_str())
             .collect::<Vec<_>>();
-        let latest = context.visible_states().last().map(|state| {
-            state
-                .text
-                .split_once(REPORTS)
-                .map_or(state.text.as_str(), |(base, _)| base)
-                .trim_end()
-        });
-        if reports.is_empty() {
+        let latest = context
+            .visible_states()
+            .last()
+            .map(|state| lasting_state(&state.text));
+        let completions = &environment.2;
+        if reports.is_empty() && completions.is_empty() {
             return (latest != Some(base.trim_end())).then_some(base);
         }
-        Some(format!("{base}\n\n{REPORTS}\n{}", reports.join("\n")))
+        let mut text = base;
+        if !reports.is_empty() {
+            text.push_str(&format!("\n\n{REPORTS}\n{}", reports.join("\n")));
+        }
+        if !completions.is_empty() {
+            let entries = completions
+                .iter()
+                .map(crate::tools::processes::Completion::report)
+                .collect::<Vec<_>>();
+            text.push_str(&format!("\n\n{PROCESSES}\n{}", entries.join("\n")));
+        }
+        Some(text)
     }
 
     pub(super) fn projected_context(

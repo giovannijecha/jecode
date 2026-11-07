@@ -13,6 +13,10 @@ pub enum Record {
     Collaboration {
         event: Value,
     },
+    /// A process's outcome reached the conversation, independently of model delivery.
+    ProcessFinished {
+        event: Value,
+    },
     TurnStart,
     Text {
         role: String,
@@ -212,6 +216,9 @@ fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<us
             }
         }
         Some("collaboration") => records.push(Record::Collaboration {
+            event: event.clone(),
+        }),
+        Some("process_finished") => records.push(Record::ProcessFinished {
             event: event.clone(),
         }),
         Some("turn_start") => records.push(Record::TurnStart),

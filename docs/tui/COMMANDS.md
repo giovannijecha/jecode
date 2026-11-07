@@ -47,7 +47,7 @@ and does not run. The Ctrl+G sheet never queues: commands that wait stay listed 
 | `/skills` | List your personal skills. See [Skills](../usage/SKILLS.md). | Opens |
 | `/tmp [clean]` | Show, or clear, the conversation's temporary files. See [Temporary files](../usage/TEMPORARY.md). | Waits |
 | `/checkpoints [COMMAND]` | List, inspect or restore checkpoints; `/checkpoints help` shows the commands. See [Checkpoints](../usage/CHECKPOINTS.md). | Waits |
-| `/terminal [ID]` | Inspect, stop or type into background processes; `/terminal stop ID` stops one. See [Terminal interface](INTERFACE.md#background-processes). | Now |
+| `/process [ID]` | Inspect, stop, background or type into running and recent processes; `/process stop ID` stops one. See [Terminal interface](INTERFACE.md#processes). | Now |
 
 ### Jecode
 
@@ -109,7 +109,8 @@ end with the wheel or sending a message also returns to the latest output.
 | Typing | Filter longer lists. |
 | Left, Right | Switch tabs, such as **Commands** and **Keys** in `/help`. |
 | Esc | Go back or close; first cancels a pending deletion mark. |
-| Ctrl+D | In `/resume`, mark the selected conversation for deletion; in `/terminal`, ask to stop the selected process. Enter confirms both. In `/permissions` → **Remembered**, revoke the selected approval at once, with no confirmation. |
+| Ctrl+D | In `/resume`, mark the selected conversation for deletion; in `/process`, ask to stop the selected process. Enter confirms both. In `/permissions` → **Remembered**, revoke the selected approval at once, with no confirmation. |
+| `b` | In `/process`, when a call is waiting for the selected process, move it to the background: the call returns and the command keeps running. |
 
 ### Background process output
 
