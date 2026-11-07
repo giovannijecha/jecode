@@ -412,14 +412,20 @@ impl App {
                     .map(|record| self.archive.redactor.value(&record))
                     .collect();
                 self.collaboration_return_pending = agent.has_open_collaboration_report();
-                // Saved records do not contain execution timings.
+                // Saved records do not contain execution timings, except the
+                // time a process row carries in its own event.
                 if turn_recorded {
                     self.state.finish_tool_turn();
                 }
                 for item in &mut self.state.items {
-                    if let Item::Tool { presentation, .. } = item {
+                    if let Item::Tool {
+                        id, presentation, ..
+                    } = item
+                    {
                         presentation.started = None;
-                        presentation.elapsed = None;
+                        if !id.starts_with("process:") {
+                            presentation.elapsed = None;
+                        }
                     }
                 }
                 let cursor = document.input.draft.cursor;

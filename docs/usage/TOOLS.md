@@ -139,11 +139,13 @@ program, interrupt or stop it.
 When a process ends, the model is told once at its next request, with the outcome
 and references to the saved output, so it does not have to keep checking. An idle
 conversation continues on its own when a process ends by itself. If you stopped
-the turn, the outcome waits for your next message, and a process you stopped
-yourself never starts a turn. In the plain chat the conversation continues at the
-next line you enter, an empty one included, because reading a line blocks. A single
-prompt (`jecode "..."` or piped input) ends with its answer, and that stops its
-processes.
+the turn or it failed, the outcome waits for your next message, and a process you
+stopped yourself never starts a turn. Queued messages go first, and an open menu,
+question or permission prompt holds the continuation until you close or answer it.
+In the plain chat the conversation continues at the next line you enter, an empty
+one included, because reading a line blocks; a failed turn holds it until your next
+prompt. A single prompt (`jecode "..."` or piped input) ends with its answer, and
+that stops its processes.
 
 The model decides what depends on what. Builds, tests, generation and exports
 need their outcome before dependent work or a claim of success; servers and

@@ -6,6 +6,20 @@ use crate::{json::Value, tui::cards::Presentation};
 use std::time::Duration;
 
 impl State {
+    /// Begins the turn a completion started. The rows that prompted it stay in
+    /// the range Ctrl+O opens when the turn finishes.
+    pub fn begin_process_turn(&mut self) {
+        let start = self
+            .items
+            .iter()
+            .rposition(|item| !matches!(item, Item::Tool { id, .. } if id.starts_with("process:")))
+            .map_or(0, |last| last + 1);
+        self.begin_tool_turn();
+        if let Some(turn) = &mut self.tool_details.turn {
+            turn.start = start;
+        }
+    }
+
     /// Places a completion at its position, as agent events are placed:
     /// inside a turn it joins the open chapter; outside one it is a lone row
     /// with its own Ctrl+O turn. Earlier rows and streaming prose stay as they are.
@@ -108,6 +122,18 @@ mod tests {
         assert!(shown.contains("PROCESS"), "{shown}");
         assert!(shown.contains("cargo test --locked"), "{shown}");
         assert!(shown.contains("Exit 1"), "{shown}");
+    }
+
+    #[test]
+    fn a_process_killed_by_a_signal_is_not_a_success() {
+        let mut state = state();
+        let mut killed = finished("process-1", 0);
+        if let Value::Object(fields) = &mut killed {
+            fields.insert("exit_code".into(), Value::Null);
+        }
+        state.process_completion(killed);
+        let shown = rows(&state);
+        assert!(shown.contains("Exit unknown"), "{shown}");
     }
 
     #[test]

@@ -52,6 +52,15 @@ impl Entry {
         WaitEnd::Elapsed
     }
 
+    /// Asks a running process to stop. One that already ended keeps its
+    /// outcome, and remains a process that ended by itself.
+    pub(super) fn request_stop(&self) {
+        let state = self.state.lock().unwrap();
+        if state.outcome.is_none() {
+            self.stop.cancel();
+        }
+    }
+
     /// The final state for a foreground call, which reports it itself.
     pub(super) fn final_outcome(&self) -> Option<Outcome> {
         let mut state = self.state.lock().unwrap();
@@ -122,7 +131,8 @@ impl Entry {
                 Ok(chunk) => chunk,
                 Err(error) => {
                     // This call cannot carry the outcome, so it is still owed.
-                    self.announce(&mut state);
+                    drop(state);
+                    self.transition(|_| {});
                     return Err(format!(
                         "Could not read saved {name} for {}: {error}",
                         self.id

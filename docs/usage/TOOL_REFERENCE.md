@@ -114,6 +114,7 @@ invalid UTF-8 fail.
 | `history:N` | The original message at zero-based index `N`. |
 | `history:requests` | All your original requests, in order. |
 | `history:memory` | The current compaction summary. |
+| `history:processes` | Saved outcomes of finished processes, one JSON object per line. |
 | `history:processes` | Recorded process outcomes, including results saved before the model received them. Reading them does not restart a process. |
 | `skill:NAME`, `skill:NAME/path` | A skill's `SKILL.md`, or a file inside the skill. |
 | `attachment:ID` | An attached file; images and PDFs are shown again. |
@@ -268,7 +269,7 @@ quoting or expansion. Details:
 
 | Action | Behavior |
 | --- | --- |
-| `list` | IDs, commands, statuses, elapsed seconds and output references for this conversation's running and recent processes. The oldest finished ones leave the list once the model has seen them; 32 are kept. |
+| `list` | IDs, commands up to 200 characters, statuses, elapsed seconds and output references for this conversation's running and recent processes. The oldest finished ones leave the list once the model has seen them; 32 are kept. |
 | `poll` | New output and status for `process_id`. Optional `wait_ms`, default 0. |
 | `stop` | Stop the process and its descendants, waiting up to 10 seconds. If the status is `stopping`, poll again. |
 | `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. At most 64 KiB per call. |
@@ -293,11 +294,14 @@ elapsed time, command, `stdout_file`, `stderr_file` and up to 1 KiB from the end
 each stream, credential-masked. It moves no output cursor, so `poll` still returns
 everything unread. A `poll`, `stop` or `list` that reports the final status replaces
 this delivery. An idle main conversation continues when a process ends by itself,
-unless the user stopped the turn or something is waiting for an answer; the
-environment's `background_resume` is `automatic` for idle continuation, `on_input`
-when plain chat must wait for another entered line, and `none` for single prompts
-and collaborators. With `on_input` or `none`, the model waits for an outcome needed
-by its answer rather than promising a follow-up that cannot start by itself.
+unless the turn was stopped or failed, or queued input or an open menu, question or
+permission prompt comes first; the environment's `background_resume` is `automatic`
+for idle continuation, `on_input` when plain chat must wait for another entered line,
+and `none` for single prompts and collaborators, whose answer ends the run even if a
+process ended while it was written. With `on_input` or `none`, the model waits for an
+outcome needed by its answer rather than promising a follow-up that cannot start by
+itself. Saved outcomes stay readable through `history:processes`, and a compaction
+keeps an outcome that has left the window in its summary.
 
 A `write` receipt confirms delivery to the terminal, not that the program
 processed it. On Unix, `interrupt` follows the terminal's current `ISIG`,

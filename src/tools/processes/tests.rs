@@ -201,7 +201,13 @@ fn output_between_polls_and_immediately_before_exit_is_retained() {
     });
     release(&directory, "two");
     // The process exits between polls; its final output remains readable.
-    wait_for(|| tools.processes.list().encode().contains("exited"));
+    wait_for(|| {
+        tools
+            .processes
+            .list(&Redactor::empty())
+            .encode()
+            .contains("exited")
+    });
     let last = process(&tools, "poll", &id, None);
     assert_eq!(text(&last, "status"), "exited");
     assert_eq!(stdout + &text(&last, "stdout"), "a\nb\nc");
@@ -262,7 +268,13 @@ fn wait_expiry_keeps_the_process_and_the_execution_timeout_needs_no_polling() {
         ],
     );
     let id = text(&limited, "process_id");
-    wait_for(|| tools.processes.list().encode().contains("timed_out"));
+    wait_for(|| {
+        tools
+            .processes
+            .list(&Redactor::empty())
+            .encode()
+            .contains("timed_out")
+    });
     assert!(started.elapsed() < Duration::from_secs(8));
     let result = process(&tools, "poll", &id, None);
     assert_eq!(text(&result, "status"), "timed_out");

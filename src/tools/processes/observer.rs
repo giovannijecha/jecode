@@ -216,7 +216,7 @@ impl Observer {
                     "No process {id} belongs to this conversation runtime"
                 ))
             })?;
-        entry.stop.cancel();
+        entry.request_stop();
         Ok(self.process(&entry))
     }
 

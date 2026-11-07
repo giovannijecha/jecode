@@ -218,40 +218,21 @@ fn an_idle_conversation_shows_the_outcome_once_and_continues() {
 
     poll_a_while(&mut app);
     assert_eq!(completion_rows(&app), 1);
+    // The turn it started keeps the row in Ctrl+O's range.
+    assert_eq!(
+        app.state.toggle_tools().map(|(expanded, _)| expanded),
+        Some(true)
+    );
+    let row = app.state.items.iter().find_map(|item| match item {
+        Item::Tool {
+            id, presentation, ..
+        } if id.starts_with("process:") => Some(presentation),
+        _ => None,
+    });
+    assert!(row.unwrap().expanded);
     let requests = fixture.finish();
     assert_eq!(requests.len(), 3);
     assert!(delivered(&requests[2].body));
-}
-
-#[test]
-fn a_failed_process_is_loud_on_its_row_and_the_status_row() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![
-        (
-            200,
-            completion(
-                "",
-                vec![bash(
-                    "start",
-                    "printf 'broken\\n' >&2; until [ -e go ]; do sleep 0.02; done; exit 3",
-                    true,
-                )],
-            ),
-        ),
-        (200, completion("Started.", vec![])),
-        (200, completion("It failed.", vec![])),
-    ]);
-    let mut app = app(&directory, &fixture);
-    submit(&mut app, "Build.");
-    wait_until(&mut app, |app| app.worker.is_none());
-    create(&directory, "go");
-    wait_until(&mut app, |app| completion_rows(app) == 1);
-    let transcript = rows(&app);
-    assert!(transcript.contains("Exit 3"), "{transcript}");
-    wait_until(&mut app, |app| {
-        app.worker.is_none() && rows(app).contains("It failed.")
-    });
-    assert_eq!(fixture.finish().len(), 3);
 }
 
 #[test]
@@ -448,3 +429,5 @@ fn the_previous_command_name_is_gone() {
     assert!(!commands::help(true).contains("/terminal"));
     assert!(!commands::help(false).contains("/terminal"));
 }
+
+mod outcome_tests;

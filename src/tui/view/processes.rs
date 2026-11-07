@@ -281,9 +281,13 @@ fn output<'a>(panel: &'a Panel, logs: &'a Logs, columns: usize) -> Sheet<'a> {
             MUTED,
         );
     }
-    aside.push(&format!(" · {}", logs.id), MUTED);
     // Keep the outcome visible beside long commands at ordinary widths.
-    // The breadcrumb and the rule use twelve and eight cells respectively.
+    // The breadcrumb and the rule use twelve and eight cells respectively,
+    // and the title keeps twelve. The ID goes first: the list names it too.
+    let id = format!(" · {}", logs.id);
+    if panel::cells(&aside) + id.chars().count() + 32 <= columns {
+        aside.push(&id, MUTED);
+    }
     let title = text::ellipsize(
         &title,
         columns.saturating_sub(panel::cells(&aside) + 20).max(12),

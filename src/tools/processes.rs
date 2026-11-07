@@ -221,11 +221,10 @@ impl Registry {
             if let Some(terminal) = &owner.terminal {
                 terminal.close();
             }
-            let mut state = owner.state.lock().unwrap();
-            state.outcome = Some(Outcome::from(result));
-            state.finished = Some(Instant::now());
-            owner.announce(&mut state);
-            drop(state);
+            owner.transition(|state| {
+                state.outcome = Some(Outcome::from(result));
+                state.finished = Some(Instant::now());
+            });
             owner.changed.notify_all();
             owner.notify();
         });
@@ -260,10 +259,11 @@ impl Registry {
         &self,
         arguments: &Value,
         cancellation: &Cancellation,
+        redactor: &crate::redact::Redactor,
     ) -> Result<Value, String> {
         let action = required_string(arguments, "action")?;
         if action == "list" {
-            return Ok(self.list());
+            return Ok(self.list(redactor));
         }
         if !matches!(action, "poll" | "stop" | "write" | "resize" | "interrupt") {
             return Err("action must be list, poll, stop, write, resize or interrupt".into());
@@ -274,6 +274,12 @@ impl Registry {
         }
         let output_limit = output_limit(arguments)?;
         let output_mode = OutputMode::parse(arguments)?;
+        // Checked before acting: a rejected call must not have delivered input.
+        let wait = if action == "stop" {
+            STOP_WAIT
+        } else {
+            wait_argument(arguments)?.unwrap_or(Duration::ZERO)
+        };
         let entry = self
             .scope()
             .entries
@@ -317,17 +323,14 @@ impl Registry {
                 _ => terminal.interrupt(cancellation)?,
             }
         }
-        let end = if action == "stop" {
-            entry.stop.cancel();
-            entry.wait(STOP_WAIT, cancellation)
-        } else {
-            let wait = wait_argument(arguments)?.unwrap_or(Duration::ZERO);
-            entry.wait(wait, cancellation)
-        };
+        if action == "stop" {
+            entry.request_stop();
+        }
+        let end = entry.wait(wait, cancellation);
         entry.report(end, output_limit, output_mode)
     }
 
-    fn list(&self) -> Value {
+    fn list(&self, redactor: &crate::redact::Redactor) -> Value {
         let scope = self.scope();
         let entries = scope.entries.lock().unwrap();
         Value::object([(
@@ -340,7 +343,10 @@ impl Registry {
                         // A final status here is the model learning the outcome.
                         state.reported |= state.outcome.is_some();
                         let mut fields = entry.status(&state);
-                        fields.insert("command".into(), Value::string(&entry.command));
+                        fields.insert(
+                            "command".into(),
+                            Value::string(lifecycle::bounded_command(&entry.command, redactor)),
+                        );
                         fields.insert(
                             "elapsed_seconds".into(),
                             Value::number(entry.elapsed(&state).as_secs()),

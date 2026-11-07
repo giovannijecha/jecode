@@ -260,7 +260,7 @@ impl Agent {
                 "The original user requests and system instructions leave no room for a summary within {budget_text}. The original session and previous context are preserved; raise Auto-compact at in /settings or choose a model with more context."
             ));
         }
-        let transcript = original[self.context.from..end]
+        let mut transcript = original[self.context.from..end]
             .iter()
             .enumerate()
             .filter(|(index, _)| !self.context.returned.contains(&(self.context.from + index)))
@@ -276,6 +276,14 @@ impl Agent {
                 )
             })
             .collect::<Vec<_>>();
+        // Portion summaries read records, and an outcome reported in state
+        // leaves the window here without being sent again.
+        for state in self.context.states.iter().filter(|s| s.before < end) {
+            if let Some(section) = super::projection::process_section(&state.text) {
+                let at = transcript.partition_point(|(index, _)| *index < state.before);
+                transcript.insert(at, (state.before, section.to_owned()));
+            }
+        }
         let requests = next.user_requests(&original);
         let before_bytes = self.context_bytes(&self.projected_context(&self.context, &original));
         drop(original);

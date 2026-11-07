@@ -109,7 +109,6 @@ impl App {
                 .message(Kind::User, &self.archive.redactor.text(&prompt.display()));
             self.state.activity = Some(Activity::new());
             self.state.backend_failure = None;
-            self.sync_process_observer();
             self.process_auto_resume = true;
             self.collaboration_auto_resume = true;
             self.collaboration_return_pending = false;

@@ -274,8 +274,6 @@ fn a_changed_conversation_never_receives_the_old_ones_processes() {
     agent
         .start_new(agent.model().into(), agent.effort())
         .unwrap();
-    release(&directory, "go");
-    std::thread::sleep(Duration::from_millis(100));
     assert!(!agent.can_continue_processes());
     agent.run_turn("Hello", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
@@ -334,7 +332,7 @@ fn a_delivered_completion_survives_resume_without_running_anything_again() {
 }
 
 #[test]
-fn a_refused_command_launches_nothing_and_a_process_keeps_its_level() {
+fn a_refused_command_launches_nothing() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![start("refused", &gate("go"))])),
@@ -372,19 +370,28 @@ fn background_resume_tells_the_model_what_happens_after_its_answer() {
 }
 
 #[test]
-fn a_single_run_reports_at_the_next_request_but_never_resumes_idle() {
+fn a_single_run_ends_with_its_answer_even_when_a_process_ends_during_it() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![start("start", &gate("go"))])),
         (200, completion("Started.", vec![])),
+        (200, completion("Unexpected second answer.", vec![])),
     ]);
     let mut agent = agent(&directory, &fixture.endpoint);
     agent.set_single_run();
-    agent.run_turn("Build it", &mut |_| Ok(())).unwrap();
-    release(&directory, "go");
-    wait_for(|| agent.tools.process_completion_waiting());
+    let observer = agent.processes();
+    agent
+        .run_turn("Build it", &mut |event| {
+            if matches!(&event, Event::Message { text } if text == "Started.") {
+                release(&directory, "go");
+                wait_for(|| !observer.completions_since(0).1.is_empty());
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert!(agent.tools.process_completion_waiting());
     assert!(!agent.can_continue_processes());
-    assert_eq!(fixture.finish().len(), 2);
+    assert_eq!(fixture.finish_received().len(), 2);
 }
 
 #[test]
@@ -456,3 +463,5 @@ fn a_command_that_yielded_stops_the_steps_planned_on_its_outcome() {
     release(&directory, "go");
     assert_eq!(fixture.finish().len(), 3);
 }
+
+mod outcomes;

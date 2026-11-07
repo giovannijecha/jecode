@@ -173,7 +173,9 @@ keep running.
 Tool cards show a process's state when the call returned. When a process that no
 call is waiting for ends, a `PROCESS` row reports it at that point in the
 conversation, with a notice on the status row, and an idle conversation continues
-from there. See [Processes](../usage/TOOLS.md#processes).
+from there unless the last turn was stopped or failed, or queued messages, a menu, a
+question or a permission prompt come first. See
+[Processes](../usage/TOOLS.md#processes).
 
 ## Reading and scrolling
 

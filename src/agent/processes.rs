@@ -3,6 +3,7 @@
 use super::Agent;
 use crate::events::{Event, EventSink};
 use crate::json::Value;
+use crate::tools::processes::Completion;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Resume {
@@ -60,36 +61,52 @@ impl Agent {
         self.child || self.process_resume == Resume::None
     }
 
-    /// Marks finished processes delivered to the model and tells the sink.
-    /// The UI may already have saved the transcript event before this point.
+    /// Saves finished processes, tells the sink, then marks them delivered to
+    /// the model. A sink failure loses the response, so they stay owed. The UI
+    /// may already have saved the transcript event before this point.
     pub(super) fn deliver_completions(
         &self,
-        completions: Vec<crate::tools::processes::Completion>,
+        completions: Vec<Completion>,
         emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<(), String> {
         if completions.is_empty() {
             return Ok(());
         }
         let ids: Vec<_> = completions.iter().map(|done| done.id.clone()).collect();
-        self.tools.processes_reported(&ids);
-        let after_message = self.messages.lock().unwrap().len();
+        for process in &completions {
+            self.save_completion(process);
+        }
         for process in completions {
-            let mut event = process.value();
-            if let Value::Object(fields) = &mut event {
-                fields.insert("type".into(), Value::string("process_finished"));
-                fields.insert("after_message".into(), Value::number(after_message));
-            }
-            let mut events = self.events.lock().unwrap();
-            if !events.iter().any(|saved| {
-                saved.get("type").and_then(Value::as_str) == Some("process_finished")
-                    && saved.get("process_id").and_then(Value::as_str) == Some(process.id.as_str())
-            }) {
-                events.push(event);
-            }
-            drop(events);
             emit(Event::ProcessFinished { process })?;
         }
+        self.tools.processes_reported(&ids);
         Ok(())
+    }
+
+    /// A saved conversation keeps every outcome known so far, including one
+    /// no request has carried: the conversation may end before the next one.
+    pub(super) fn save_known_completions(&self) {
+        for process in self.tools.process_completions(&self.redactor) {
+            self.save_completion(&process);
+        }
+    }
+
+    fn save_completion(&self, process: &Completion) {
+        let mut event = process.value();
+        if let Value::Object(fields) = &mut event {
+            fields.insert("type".into(), Value::string("process_finished"));
+            fields.insert(
+                "after_message".into(),
+                Value::number(self.messages.lock().unwrap().len()),
+            );
+        }
+        let mut events = self.events.lock().unwrap();
+        if !events.iter().any(|saved| {
+            saved.get("type").and_then(Value::as_str) == Some("process_finished")
+                && saved.get("process_id").and_then(Value::as_str) == Some(process.id.as_str())
+        }) {
+            events.push(event);
+        }
     }
 
     /// Observes this conversation's persistent processes while a worker owns the agent.

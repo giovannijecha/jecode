@@ -95,13 +95,14 @@ fn a_completion_racing_the_launch_receipt_is_delivered_exactly_once() {
         tools.set_default_wait(Duration::from_millis(wait));
         let result = bash(&tools, "printf x", &[]);
         if result.get("process_id").is_some() {
-            let id = text(&result, "process_id");
             let observer = observer(&tools);
             wait_for(|| !only(&observer).active());
-            wait_for(|| {
-                tools.process_completion_waiting()
-                    || text(&process(&tools, "poll", &id, None), "status") == "exited"
-            });
+            let announced = tools.process_completions(&Redactor::empty()).len();
+            if text(&result, "status") == "exited" {
+                assert_eq!(announced, 0, "the receipt carried it; wait {wait}");
+            } else {
+                assert_eq!(announced, 1, "only an announcement can; wait {wait}");
+            }
         } else {
             assert_eq!(number(&result, "exit_code"), 0, "{result:?}");
             assert!(!tools.process_completion_waiting(), "wait {wait}");
@@ -123,6 +124,134 @@ fn a_requested_stop_reaches_the_model_without_asking_it_to_run() {
     assert_eq!(completions.len(), 1);
     assert_eq!(completions[0].status, "stopped");
     assert!(completions[0].stop_requested);
+}
+
+#[test]
+fn a_stop_requested_after_the_end_leaves_the_outcome_alone() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let observer = observer(&tools);
+    let (id, _) = start(&tools, &format!("{}; exit 3", gate("go")));
+    release(&directory, "go");
+    wait_for(|| tools.process_completion_waiting());
+    assert_eq!(observer.request_stop(&id).unwrap().exit_code, Some(3));
+    // It still ended by itself, so it still gives the model a reason to run.
+    assert!(tools.process_completion_waiting());
+    assert!(!tools.process_completions(&Redactor::empty())[0].stop_requested);
+}
+
+#[test]
+fn a_rejected_process_call_acts_on_nothing() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let (id, _) = start(&tools, &gate("go"));
+    let arguments = Value::object([
+        ("action", Value::string("write")),
+        ("process_id", Value::string(&id)),
+        ("text", Value::string("input")),
+        ("wait_ms", Value::string("soon")),
+    ]);
+    // Rejected before the terminal check, which precedes delivering input.
+    assert_eq!(
+        text(&tools.execute("process", &arguments.encode()), "error"),
+        "wait_ms must be a nonnegative integer"
+    );
+    release(&directory, "go");
+}
+
+#[test]
+fn numbering_waits_for_a_reader_already_scanning_the_list() {
+    let scope = Arc::new(Scope::default());
+    let entry = Arc::new(Entry {
+        terminal: None,
+        id: "process-fixture".into(),
+        command: "fixture".into(),
+        streams: ["stdout", "stderr"].map(|name| Stream {
+            reference: name.into(),
+            path: name.into(),
+        }),
+        stop: Cancellation::default(),
+        state: Mutex::new(State::default()),
+        changed: Condvar::new(),
+        monitor: Mutex::new(None),
+        started: Instant::now(),
+        scope: Arc::downgrade(&scope),
+    });
+    // A reader past this entry must not find a later number on another one.
+    let scanning = scope.entries.lock().unwrap();
+    let ending = Arc::clone(&entry);
+    let finished = thread::spawn(move || {
+        ending.transition(|state| state.outcome = Some(exited()));
+    });
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(entry.state.lock().unwrap().sequence, None);
+    drop(scanning);
+    finished.join().unwrap();
+    assert_eq!(entry.state.lock().unwrap().sequence, Some(1));
+}
+
+#[test]
+fn a_report_that_cannot_read_its_output_still_owes_the_outcome() {
+    let directory = Directory::new();
+    let scope = Arc::new(Scope::default());
+    let entry = Entry {
+        terminal: None,
+        id: "process-fixture".into(),
+        command: "fixture".into(),
+        streams: ["stdout", "stderr"].map(|name| Stream {
+            reference: name.into(),
+            path: directory.path().join(name),
+        }),
+        stop: Cancellation::default(),
+        state: Mutex::new(State {
+            outcome: Some(exited()),
+            waiters: 1,
+            ..State::default()
+        }),
+        changed: Condvar::new(),
+        monitor: Mutex::new(None),
+        started: Instant::now(),
+        scope: Arc::downgrade(&scope),
+    };
+    assert!(
+        entry
+            .report(WaitEnd::Elapsed, DEFAULT_OUTPUT_LIMIT, OutputMode::Next)
+            .is_err()
+    );
+    let state = entry.state.lock().unwrap();
+    assert_eq!((state.sequence, state.reported), (Some(1), false));
+}
+
+fn exited() -> Outcome {
+    Outcome {
+        status: "exited",
+        exit_code: Some(0),
+        error: None,
+        stdout_bytes: 0,
+        stderr_bytes: 0,
+        supervised: true,
+    }
+}
+
+#[test]
+fn every_completion_ending_together_reaches_a_reader_once() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let observer = observer(&tools);
+    let ids: Vec<_> = (0..8).map(|_| start(&tools, &gate("go")).0).collect();
+    release(&directory, "go");
+    let mut seen = Vec::new();
+    let mut cursor = 0;
+    wait_for(|| {
+        let (next, completions) = observer.completions_since(cursor);
+        cursor = next;
+        seen.extend(completions.into_iter().map(|done| done.id));
+        seen.len() >= ids.len()
+    });
+    seen.sort();
+    let mut expected = ids;
+    expected.sort();
+    assert_eq!(seen, expected);
 }
 
 #[test]
@@ -152,12 +281,54 @@ fn completions_mask_credentials_and_bound_their_text() {
     assert!(!completion.report().contains("private-key-value"));
 
     let masked = {
-        let (_, _) = start(&tools, "printf done; # private-key-value");
+        let (_, _) = start(
+            &tools,
+            &format!("{}; printf done; # private-key-value", gate("masked")),
+        );
+        release(&directory, "masked");
         wait_for(|| tools.process_completions(&redactor).len() == 2);
         tools.process_completions(&redactor)
     };
     assert!(masked[1].command.contains("[redacted]"), "{:?}", masked[1]);
     assert!(!masked[1].report().contains("private-key-value"));
+}
+
+#[test]
+fn a_tail_is_masked_even_when_the_saved_stream_is_not() {
+    let directory = Directory::new();
+    // The spool saves raw bytes here, so only the completion can mask them.
+    let tools = tools(&directory, Redactor::empty());
+    let (_, _) = start(
+        &tools,
+        &format!("printf 'private-key-value\\n'; {}", gate("go")),
+    );
+    release(&directory, "go");
+    wait_for(|| tools.process_completion_waiting());
+    let completions = tools.process_completions(&Redactor::new("private-key-value".into()));
+    assert!(!completions[0].tails[0].is_empty());
+    assert!(!completions[0].tails[0].contains("private-key-value"));
+    assert!(!completions[0].report().contains("private-key-value"));
+}
+
+#[test]
+fn a_listed_command_is_bounded_after_masking() {
+    let directory = Directory::new();
+    let secret = "private-key-value";
+    let tools = tools(&directory, Redactor::new(secret.into()));
+    // The cut at 200 characters lands five into the credential; masking
+    // first leaves none of it.
+    let prefix = format!("{}; # ", gate("go"));
+    let command = format!("{prefix}{}{secret}", "x".repeat(195 - prefix.len()));
+    let (_, _) = start(&tools, &command);
+    let listed = tools.execute("process", r#"{"action":"list"}"#);
+    let shown = text(
+        &listed.get("processes").unwrap().as_array().unwrap()[0],
+        "command",
+    );
+    assert_eq!(shown.chars().count(), 201, "{shown}");
+    assert!(shown.ends_with('…'), "{shown}");
+    assert!(!shown.contains("priva"), "{shown}");
+    release(&directory, "go");
 }
 
 #[test]

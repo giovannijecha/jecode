@@ -322,7 +322,11 @@ impl Tools {
                         };
                         let mut result = match name {
                             "bash" => shell::execute(context, &arguments, cancellation),
-                            "process" => self.processes.execute(&arguments, cancellation),
+                            "process" => self.processes.execute(
+                                &arguments,
+                                cancellation,
+                                self.outputs.redactor(),
+                            ),
                             _ => match arguments.get("tty") {
                                 None | Some(Value::Bool(false)) => {
                                     exec::execute(context, &arguments, cancellation)

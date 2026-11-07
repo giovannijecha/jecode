@@ -4,6 +4,8 @@
 //! other ending is announced once, under the process's state lock, so a final
 //! receipt and an announcement can never both describe one transition. The
 //! model's delivery and each interface's reading position stay independent.
+//! Numbers are taken under the list lock a reader holds for its whole scan, so
+//! no reader can pass a process and then see a higher number.
 
 use super::observer::read_bounded;
 use super::{Entry, Registry, Scope, State, Window};
@@ -180,13 +182,18 @@ impl Entry {
         state.outcome.is_some() && state.reported && state.waiters == 0
     }
 
-    /// Numbers a terminal transition that no waiting call will report.
-    pub(super) fn announce(&self, state: &mut State) {
+    /// Applies `change`, then numbers a terminal transition that no waiting
+    /// call will report.
+    pub(super) fn transition(&self, change: impl FnOnce(&mut State)) {
+        let scope = self.scope.upgrade();
+        let _list = scope.as_ref().map(|scope| scope.entries.lock().unwrap());
+        let mut state = self.state.lock().unwrap();
+        change(&mut state);
         if state.outcome.is_some()
             && state.waiters == 0
             && !state.reported
             && state.sequence.is_none()
-            && let Some(scope) = self.scope.upgrade()
+            && let Some(scope) = &scope
         {
             state.sequence = Some(scope.sequence.fetch_add(1, Ordering::SeqCst) + 1);
         }
@@ -200,13 +207,6 @@ impl Entry {
 
     pub(super) fn completion(&self, state: &State, redactor: &Redactor) -> Completion {
         let outcome = state.outcome.as_ref();
-        let bounded = |text: &str, limit: usize| {
-            let text = redactor.text(text);
-            match text.char_indices().nth(limit) {
-                Some((end, _)) => format!("{}…", &text[..end]),
-                None => text,
-            }
-        };
         let tail = |index: usize| {
             read_bounded(
                 &self.streams[index].path,
@@ -220,12 +220,12 @@ impl Entry {
         Completion {
             sequence: state.sequence.unwrap_or(0),
             id: self.id.clone(),
-            command: bounded(&self.command, COMMAND_CHARS),
+            command: bounded_command(&self.command, redactor),
             status: self.status_name(state),
             exit_code: outcome.and_then(|outcome| outcome.exit_code),
             error: outcome
                 .and_then(|outcome| outcome.error.as_deref())
-                .map(|error| bounded(error, ERROR_CHARS)),
+                .map(|error| bounded(error, ERROR_CHARS, redactor)),
             elapsed: self.elapsed(state),
             stdout_file: self.streams[0].reference.clone(),
             stderr_file: self.streams[1].reference.clone(),
@@ -234,6 +234,20 @@ impl Entry {
             stop_requested: self.stop.requested(),
         }
     }
+}
+
+/// Masks first, so a cut can never leave part of a credential behind.
+fn bounded(text: &str, limit: usize, redactor: &Redactor) -> String {
+    let text = redactor.text(text);
+    match text.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text,
+    }
+}
+
+/// A command as the model sees it again after launching it.
+pub(super) fn bounded_command(command: &str, redactor: &Redactor) -> String {
+    bounded(command, COMMAND_CHARS, redactor)
 }
 
 impl Registry {

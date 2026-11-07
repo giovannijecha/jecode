@@ -111,7 +111,7 @@ impl App {
             return false;
         }
         let agent = self.hold();
-        self.state.begin_tool_turn();
+        self.state.begin_process_turn();
         self.state.activity = Some(activity::Activity::new());
         self.state.backend_failure = None;
         self.state.status = "Reviewing process results…".into();

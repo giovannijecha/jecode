@@ -129,6 +129,8 @@ Differences from the TUI:
 - Plain chat does not watch collaborators while it waits for your input, so a
   returned collaborator does not wake the main agent; live inspection and
   automatic continuation are TUI features.
+- A process that ends while plain chat waits for input appears at the next line you
+  enter. Its outcome is saved by then, or when you leave the conversation.
 - There is no `/ask`; questions are asked inline.
 
 ## Checkpoint commands

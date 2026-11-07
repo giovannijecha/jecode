@@ -19,6 +19,11 @@ fn lasting_state(text: &str) -> &str {
     text[..end].trim_end()
 }
 
+/// The finished processes a state update carried; always its last section.
+pub(super) fn process_section(text: &str) -> Option<&str> {
+    text.find(PROCESSES).map(|start| text[start..].trim_end())
+}
+
 pub(super) struct Request {
     pub messages: Vec<Value>,
     pub measurement: crate::context::measurement::RequestMeasurement,

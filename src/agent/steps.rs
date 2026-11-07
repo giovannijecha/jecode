@@ -179,6 +179,9 @@ fn failed(tool: &str, result: &Value) -> bool {
                 .is_some_and(|status| status != "ready"))
         || (matches!(tool, "bash" | "exec" | "process")
             && result.get("status").and_then(Value::as_str) == Some("timed_out"))
+        // Stopping is what a process step can ask for; a command did not.
+        || (matches!(tool, "bash" | "exec")
+            && result.get("status").and_then(Value::as_str) == Some("stopped"))
         || matches!(result.get("exit_code"), Some(Value::Number(code)) if code != "0")
         || (tool == "edit"
             && result

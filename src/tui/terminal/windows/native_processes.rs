@@ -47,13 +47,18 @@ fn native_windows_process_panels() {
 
 pub(super) fn console() {
     let terminal = Terminal::open().unwrap();
-    for columns in [44, 100] {
+    for columns in [44, 80, 100] {
         wait_for_width(&terminal, columns);
         for light in [false, true] {
             crate::tui::theme::set_light(light);
             paint(columns, sheet(columns, list()), "b background");
             paint(columns, sheet(columns, list()), "exited 1");
             paint(columns, sheet(columns, output()), "following");
+            // Narrower, the aside gives way to the breadcrumb, as every sheet's does.
+            if columns >= 80 {
+                paint(columns, sheet(columns, long_output()), "exited 1");
+                paint(columns, sheet(columns, long_output()), "2m 14s");
+            }
             paint(columns, footer(columns), "PROCESS");
             paint(columns, footer(columns), "2 running");
             paint(
@@ -66,6 +71,7 @@ pub(super) fn console() {
                 },
             );
             paint(columns, finished(columns, "exited", Some(1)), "Exit 1");
+            paint(columns, finished(columns, "exited", None), "Exit unknown");
             paint(columns, finished(columns, "exited", Some(0)), "Done");
             paint(columns, finished(columns, "stopped", None), "stopped");
             paint(columns, finished(columns, "timed_out", None), "Timed out");
@@ -121,6 +127,27 @@ fn output() -> Panel {
     });
     let mut panel = list();
     panel.logs = Some(logs);
+    panel
+}
+
+/// A long command with a real process ID, which must not cost it its outcome.
+fn long_output() -> Panel {
+    let mut process = process(
+        "process-1793119373364-13804-6",
+        &format!("cargo test {}", "--long-flag ".repeat(20)),
+        "exited",
+        Some(1),
+    );
+    process.finished = Some(Instant::now());
+    let mut panel = list();
+    panel.logs = Some(Logs {
+        id: process.id.clone(),
+        process: Some(process),
+        stream: 0,
+        views: Default::default(),
+        interactive: false,
+        input_mode: false,
+    });
     panel
 }
 

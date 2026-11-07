@@ -312,7 +312,7 @@ impl Agent {
             }
             if completion.calls.is_empty() {
                 // A process that ended meanwhile is news the answer did not have.
-                if self.accept_input(events)? || self.tools.process_completion_waiting() {
+                if self.accept_input(events)? || self.can_continue_processes() {
                     continue;
                 }
                 return Ok(());

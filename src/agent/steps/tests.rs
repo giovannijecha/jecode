@@ -10,6 +10,17 @@ mod integrations;
 mod interruption;
 mod restore;
 
+#[test]
+fn a_stopped_command_fails_its_step_and_a_requested_stop_does_not() {
+    let stopped = Value::object([
+        ("process_id", Value::string("process-1")),
+        ("status", Value::string("stopped")),
+    ]);
+    assert!(failed("bash", &stopped));
+    assert!(failed("exec", &stopped));
+    assert!(!failed("process", &stopped));
+}
+
 fn step(tool: &str, arguments: Value) -> Value {
     Value::object([("tool", Value::string(tool)), ("arguments", arguments)])
 }

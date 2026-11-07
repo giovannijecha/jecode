@@ -403,6 +403,8 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Wait("NATIVE_SHELL_SENTINEL");
                 pty.Resize(44, 30);
                 pty.Wait("PROCESS_NATIVE_44_VERIFIED");
+                pty.Resize(80, 30);
+                pty.Wait("PROCESS_NATIVE_80_VERIFIED");
                 pty.Resize(100, 30);
                 pty.Wait("PROCESS_NATIVE_100_VERIFIED");
                 pty.Wait("NATIVE_PROCESS_PANELS_RESTORED");
