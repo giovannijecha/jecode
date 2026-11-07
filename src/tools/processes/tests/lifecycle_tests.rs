@@ -61,6 +61,43 @@ fn completion_is_announced_once_after_final_output_is_available() {
     assert_eq!(observer.completions_since(0).1.len(), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_signaled_command_reports_an_exit_without_an_exit_code() {
+    let directory = Directory::new();
+    let tools = tools(&directory, Redactor::empty());
+    let launched = tools.execute(
+        "exec",
+        &Value::object([
+            ("executable", Value::string("/bin/sh")),
+            (
+                "args",
+                Value::Array(vec![
+                    Value::string("-c"),
+                    Value::string("until [ -f go ]; do :; done; kill -TERM $$"),
+                ]),
+            ),
+            ("wait_ms", Value::number(0)),
+            ("timeout_seconds", Value::number(15)),
+        ])
+        .encode(),
+    );
+    assert_eq!(text(&launched, "status"), "running");
+    let id = text(&launched, "process_id");
+    release(&directory, "go");
+    wait_for(|| tools.process_completion_waiting());
+
+    let completions = tools.process_completions(&Redactor::empty());
+    assert_eq!(completions.len(), 1);
+    let completion = &completions[0];
+    assert_eq!(completion.id, id);
+    assert_eq!(completion.status, "exited");
+    assert_eq!(completion.exit_code, None);
+    assert!(!completion.stop_requested);
+    assert_eq!(completion.value().get("exit_code"), Some(&Value::Null));
+    assert!(completion.report().contains("exited with no exit code"));
+}
+
 #[test]
 fn a_poll_or_list_that_reports_the_outcome_replaces_its_delivery() {
     let directory = Directory::new();

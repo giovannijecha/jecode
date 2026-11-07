@@ -144,6 +144,18 @@ fn a_completion_shown_behind_a_menu_survives_resume_without_replay() {
     create(&directory, "go");
     wait_until(&mut app, |app| completion_rows(app) == 1);
     assert_eq!(saved_completions(&app), 1);
+    assert!(
+        app.persistence
+            .as_ref()
+            .unwrap()
+            .snapshot()
+            .events
+            .iter()
+            .any(
+                |event| event.get("type").and_then(Value::as_str) == Some("process_finished")
+                    && event.get("in_turn") == Some(&Value::Bool(false))
+            )
+    );
     assert!(app.agent.as_ref().unwrap().can_continue_processes());
     let id = app.persistence.as_ref().unwrap().id();
     drop(app);
@@ -265,8 +277,33 @@ fn an_explicit_stop_is_not_undone_by_a_process_that_finishes_later() {
     assert!(!app.process_auto_resume);
 
     create(&directory, "go");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while observer.completions_since(0).1.is_empty() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    app.agent.as_ref().unwrap().save_session().unwrap();
+    let saved = app.persistence.as_ref().unwrap().snapshot();
+    let event = saved
+        .events
+        .iter()
+        .find(|event| event.get("type").and_then(Value::as_str) == Some("process_finished"));
+    assert_eq!(
+        event.and_then(|event| event.get("in_turn")),
+        Some(&Value::Bool(false))
+    );
     wait_until(&mut app, |app| completion_rows(app) == 1);
     assert_eq!(saved_completions(&app), 1);
+    let process_row = app
+        .state
+        .items
+        .iter()
+        .position(|item| matches!(item, Item::Tool { id, .. } if id.starts_with("process:")))
+        .unwrap();
+    assert!(!crate::tui::state::rows::in_chapter(
+        &app.state.items,
+        process_row
+    ));
     poll_a_while(&mut app);
     assert!(
         app.worker.is_none(),
@@ -281,6 +318,22 @@ fn an_explicit_stop_is_not_undone_by_a_process_that_finishes_later() {
     });
     assert_eq!(saved_completions(&app), 1);
     poll_a_while(&mut app);
+    let id = app.persistence.as_ref().unwrap().id();
+    drop(app);
+    let mut resumed = session_app(&home, &directory, &fixture);
+    resumed.resume_session(&id);
+    let process_row = resumed
+        .state
+        .items
+        .iter()
+        .position(|item| matches!(item, Item::Tool { id, .. } if id.starts_with("process:")))
+        .unwrap();
+    assert_eq!(completion_rows(&resumed), 1);
+    assert!(
+        !crate::tui::state::rows::in_chapter(&resumed.state.items, process_row),
+        "a completion outside a turn must stay a lone row after resume: {}",
+        rows(&resumed)
+    );
     let requests = fixture.finish();
     assert_eq!(requests.len(), 2);
     assert!(!delivered(&requests[0].body));

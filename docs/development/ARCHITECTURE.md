@@ -199,6 +199,9 @@ the state's text as a section that is shown once, so later state comparisons ign
 them; a portion summary reads that section from any state leaving the window.
 `save_session` records outcomes no request has carried yet, and the TUI saves each one
 as it appears; both deduplicate by process ID.
+Each receipt records whether it appeared inside a turn, so restoring an idle
+completion keeps it outside the preceding Work chapter even when the agent saved
+it before the interface observed it.
 `Agent::continue_processes` resumes an idle conversation; only the interface decides
 when, through `can_continue_processes` and its own record of an explicit stop. The
 same check decides whether a turn continues past a final answer, so single prompts and

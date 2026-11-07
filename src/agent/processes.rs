@@ -74,7 +74,7 @@ impl Agent {
         }
         let ids: Vec<_> = completions.iter().map(|done| done.id.clone()).collect();
         for process in &completions {
-            self.save_completion(process);
+            self.save_completion(process, true);
         }
         for process in completions {
             emit(Event::ProcessFinished { process })?;
@@ -86,15 +86,21 @@ impl Agent {
     /// A saved conversation keeps every outcome known so far, including one
     /// no request has carried: the conversation may end before the next one.
     pub(super) fn save_known_completions(&self) {
+        let in_turn = self.prepared.is_some()
+            || self
+                .persistence
+                .as_ref()
+                .is_some_and(|handle| handle.active());
         for process in self.tools.process_completions(&self.redactor) {
-            self.save_completion(&process);
+            self.save_completion(&process, in_turn);
         }
     }
 
-    fn save_completion(&self, process: &Completion) {
+    fn save_completion(&self, process: &Completion, in_turn: bool) {
         let mut event = process.value();
         if let Value::Object(fields) = &mut event {
             fields.insert("type".into(), Value::string("process_finished"));
+            fields.insert("in_turn".into(), Value::Bool(in_turn));
             fields.insert(
                 "after_message".into(),
                 Value::number(self.messages.lock().unwrap().len()),

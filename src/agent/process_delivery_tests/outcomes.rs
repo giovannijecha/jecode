@@ -3,6 +3,81 @@
 use super::*;
 
 #[test]
+fn resume_can_recover_an_undelivered_real_outcome_without_relaunching_the_command() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![start(
+                    "start",
+                    &format!("printf 'run\\n' >> runs; {}", gate("go")),
+                )],
+            ),
+        ),
+        (200, completion("Started.", vec![])),
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "saved-outcome",
+                    "read",
+                    Value::object([
+                        ("path", Value::string("history:processes")),
+                        ("byte_offset", Value::number(0)),
+                    ]),
+                )],
+            ),
+        ),
+        (200, completion("The saved build finished.", vec![])),
+    ]);
+    let mut running = agent(&directory, &fixture.endpoint);
+    running.enable_sessions(home.path()).unwrap();
+    running.run_turn("Build it", &mut |_| Ok(())).unwrap();
+    release(&directory, "go");
+    wait_for(|| running.tools.process_completion_waiting());
+    let process = running.tools.process_completions(&running.redactor)[0].clone();
+    running.save_session().unwrap();
+    let id = running.sessions().unwrap().id();
+    drop(running);
+
+    let mut resumed = agent(&directory, &fixture.endpoint);
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    assert!(resumed.processes().processes().unwrap().is_empty());
+    assert!(!resumed.can_continue_processes());
+    resumed
+        .run_turn("How did that build end?", &mut |_| Ok(()))
+        .unwrap();
+    let requests = fixture.finish();
+    let messages = request_messages(&requests[3].body);
+    let result = messages
+        .iter()
+        .find(|message| {
+            message.get("tool_call_id").and_then(Value::as_str) == Some("saved-outcome")
+        })
+        .unwrap();
+    let page = crate::json::parse(result.get("content").and_then(Value::as_str).unwrap()).unwrap();
+    assert!(page.get("error").is_none(), "{}", page.encode());
+    let saved = crate::json::parse(page.get("content").and_then(Value::as_str).unwrap()).unwrap();
+    assert_eq!(saved.get("process_id"), Some(&Value::string(&process.id)));
+    assert_eq!(saved.get("exit_code"), Some(&Value::number(0)));
+    assert_eq!(saved.get("stdout"), Some(&Value::string("finished")));
+    assert_eq!(
+        saved.get("stdout_file"),
+        Some(&Value::string(&process.stdout_file))
+    );
+    assert_eq!(saved_finishes(&resumed), 1);
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("runs")).unwrap(),
+        "run\n"
+    );
+}
+
+#[test]
 fn a_stop_the_user_asked_for_reaches_the_next_request_without_starting_one() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![

@@ -22,8 +22,9 @@ impl App {
         self.process_cursor = cursor;
         let mut dirty = !completions.is_empty();
         for completion in completions {
+            let in_turn = self.state.tool_details.active;
             self.show_process_completion(&completion);
-            if let Err(error) = self.save_process_completion(&completion) {
+            if let Err(error) = self.save_process_completion(&completion, in_turn) {
                 self.warn(&format!("Process result could not be saved: {error}"));
             }
         }
@@ -57,12 +58,14 @@ impl App {
     fn save_process_completion(
         &self,
         completion: &crate::tools::processes::Completion,
+        in_turn: bool,
     ) -> Result<(), String> {
         let mut event = completion.value();
         let Value::Object(fields) = &mut event else {
             unreachable!("a process completion is an object")
         };
         fields.insert("type".into(), Value::string("process_finished"));
+        fields.insert("in_turn".into(), Value::Bool(in_turn));
         // A receipt can be in the live conversation before the worker's
         // checkpoint. The durable event must retain the row it followed.
         if let Some(at) = self.state.items.iter().position(|item| {

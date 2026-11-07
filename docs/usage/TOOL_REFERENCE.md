@@ -288,6 +288,10 @@ skips unread output. `output_mode: "tail"` on `poll` or `stop` returns the
 newest bytes instead and reports skipped bytes in `*_skipped_bytes`; the full
 log stays readable.
 
+A tiny byte limit can be exceeded to return one UTF-8 character. An incomplete
+trailing character waits while the process runs; once the stream is final, it is
+returned as a replacement character so the output cursor can reach the end.
+
 When no call is waiting for a process that ends, its outcome joins the session
 state of the next accepted request, once: identity, status, exit code when known,
 elapsed time, command, `stdout_file`, `stderr_file` and up to 1 KiB from the end of
@@ -301,7 +305,10 @@ and `none` for single prompts and collaborators, whose answer ends the run even 
 process ended while it was written. With `on_input` or `none`, the model waits for an
 outcome needed by its answer rather than promising a follow-up that cannot start by
 itself. Saved outcomes stay readable through `history:processes`, and a compaction
-keeps an outcome that has left the window in its summary.
+keeps an outcome that has left the window in its summary. Resuming a saved session
+does not reattach processes or automatically replay an outcome the model never
+received; the model can read its recorded result from `history:processes` before
+deciding whether another command is needed.
 
 A `write` receipt confirms delivery to the terminal, not that the program
 processed it. On Unix, `interrupt` follows the terminal's current `ISIG`,
