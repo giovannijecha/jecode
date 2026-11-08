@@ -38,6 +38,9 @@ pub(super) fn available() -> bool {
 pub(super) fn fixture(root: &Path) -> Tools {
     let mut tools = Tools::new(root).unwrap();
     tools.configure_output(root.join("logs"), Redactor::empty());
+    // These fixtures assert final outcomes. Wait past their 30-second execution
+    // deadline instead of assuming compilation finishes before the normal yield.
+    tools.set_default_wait(std::time::Duration::from_secs(60));
     tools
 }
 
