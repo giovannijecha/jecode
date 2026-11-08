@@ -237,3 +237,88 @@ fn failed_questions_keep_their_failure_in_every_record_level() {
         }
     }
 }
+
+#[test]
+fn empty_placeholders_record_the_single_file_edit_that_ran() {
+    let replacement = Value::object([
+        ("old_text", Value::string("before")),
+        ("new_text", Value::string("after")),
+    ]);
+    let cases = [
+        Value::object([
+            ("path", Value::string("src/a.rs")),
+            ("edits", Value::Array(vec![replacement.clone()])),
+            ("files", Value::Array(Vec::new())),
+        ]),
+        Value::object([
+            ("path", Value::string("src/a.rs")),
+            ("edits", Value::Array(Vec::new())),
+            ("old_text", Value::string("before")),
+            ("new_text", Value::string("after")),
+        ]),
+    ];
+    for arguments in cases {
+        let messages = vec![
+            user("system"),
+            user("Rename the value."),
+            assistant("", &[("edit", "edit", arguments)]),
+            tool("edit", Value::object([("changed", Value::Bool(true))])),
+            assistant("Renamed.", &[]),
+        ];
+        for level in [1, 2, 3] {
+            let text = render(
+                &messages,
+                &Epoch::new(1, messages.len(), level, String::new()),
+                &BTreeSet::new(),
+            );
+            if level == 1 {
+                assert!(text.contains("edit src/a.rs (+1 -1): after"), "{text}");
+            } else {
+                assert!(text.contains("Changed: src/a.rs"), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn byte_range_reads_report_bytes_and_whether_more_remain() {
+    let page = |start: usize, bytes: usize, more: bool| {
+        Value::object([
+            ("content", Value::string("x".repeat(bytes))),
+            ("total_lines", Value::Null),
+            ("offset", Value::Null),
+            ("byte_offset", Value::number(start)),
+            ("bytes_returned", Value::number(bytes)),
+            ("lines_returned", Value::number(1)),
+            ("truncated", Value::Bool(more)),
+        ])
+    };
+    let read = |start: usize| {
+        Value::object([
+            ("path", Value::string("data.min.js")),
+            ("byte_offset", Value::number(start)),
+        ])
+    };
+    let messages = vec![
+        user("system"),
+        user("Inspect the minified bundle."),
+        assistant("", &[("first", "read", read(0))]),
+        tool("first", page(0, 4096, true)),
+        assistant("", &[("last", "read", read(4096))]),
+        tool("last", page(4096, 100, false)),
+    ];
+    let text = render(
+        &messages,
+        &Epoch::new(1, messages.len(), 1, String::new()),
+        &BTreeSet::new(),
+    );
+    assert!(
+        text.contains("read data.min.js (bytes 0-4096, more remain)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("read data.min.js (bytes 4096-4196)\n"),
+        "{text}"
+    );
+    assert!(!text.contains("(lines"), "{text}");
+}

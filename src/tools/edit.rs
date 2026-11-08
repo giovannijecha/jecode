@@ -89,7 +89,7 @@ fn count() -> String {
 }
 
 /// Native calls may send unused fields empty.
-fn placeholder(value: &Value) -> bool {
+pub(crate) fn placeholder(value: &Value) -> bool {
     match value {
         Value::Null => true,
         Value::String(text) => text.is_empty(),

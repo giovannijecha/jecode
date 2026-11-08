@@ -168,6 +168,17 @@ fn reading(arguments: &Value, result: &Value) -> Outcome {
         if let Some(state) = text(file, "outcome").filter(|state| *state != "completed") {
             return format!("{path} ({state})");
         }
+        // A byte-range page numbers no lines and never reports a total.
+        if matches!(file.get("offset"), Some(Value::Null))
+            && let Some(start) = file.get("byte_offset").and_then(Value::as_usize)
+        {
+            let end = start + number(file, "bytes_returned");
+            let more = file.get("truncated") == Some(&Value::Bool(true));
+            return format!(
+                "{path} (bytes {start}-{end}{})",
+                if more { ", more remain" } else { "" }
+            );
+        }
         let returned = number(file, "lines_returned");
         let offset = number(file, "offset").max(1);
         let end = (offset + returned).saturating_sub(1);
@@ -251,7 +262,11 @@ fn writing(arguments: &Value, result: &Value) -> Outcome {
 }
 
 fn editing(arguments: &Value, result: &Value) -> Outcome {
-    let files = arguments.get("files").map(decoded);
+    // An empty placeholder runs as a single-file edit, as the tool reads it.
+    let files = arguments
+        .get("files")
+        .map(decoded)
+        .filter(|files| !crate::tools::edit::placeholder(files));
     let groups = match files.as_ref().and_then(Value::as_array) {
         Some(files) => files.iter().collect::<Vec<_>>(),
         None => vec![arguments],
@@ -288,7 +303,10 @@ fn editing(arguments: &Value, result: &Value) -> Outcome {
             parts.push(format!("{path} (unchanged)"));
             continue;
         }
-        let edits = group.get("edits").map(decoded);
+        let edits = group
+            .get("edits")
+            .map(decoded)
+            .filter(|edits| !crate::tools::edit::placeholder(edits));
         let (added, removed) = match edits.as_ref().and_then(Value::as_array) {
             Some(edits) => edits
                 .iter()
