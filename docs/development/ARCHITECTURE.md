@@ -154,7 +154,9 @@ exchange whole, since its results may be unread even when a message arrived afte
 them, and earlier exchanges within a quarter of that window. At the budget,
 records that fit and save context take precedence over a model summary. Previews
 wait for the budget. Both thresholds scale with the square root of the backend's
-cache write premium, and the **Auto-compact at** budget always wins. Records that
+cache write premium over a cached read: about ×1.13 for five-minute Claude
+writes, ×1.45 for one-hour writes and ×1 where writes cost no premium. The
+**Auto-compact at** budget always wins. Records that
 outgrow their share are condensed oldest first, to one paragraph per turn and then
 to an index.
 
@@ -408,13 +410,15 @@ credential environment variables of every available backend before launch.
 
 Caching follows each provider's model. Anthropic requests cache the built-in
 prompt, shared by every conversation, for one hour on its own breakpoint, and
-mark recent durable user-message boundaries. Through OpenRouter, requests
-to models that accept explicit cache markers (`backend/openrouter/cache.rs`)
-mark up to four recent durable user or tool-batch boundaries. The saved
-**Prompt cache** lifetime (`backend/retention.rs`) reaches adapters as a
-request-only field of the system message, read at every request, so Claude
-breakpoints on Anthropic and OpenRouter take a one-hour TTL by default, or the
-provider's five minutes when that is chosen. The ChatGPT route
+mark the end of the exact records, when present, and recent durable
+user-message boundaries. Through OpenRouter, requests to models that accept
+explicit cache markers (`backend/openrouter/cache.rs`) mark up to four
+boundaries: the end of the records first, then recent durable user or
+tool-batch boundaries. The saved **Prompt cache** lifetime
+(`backend/retention.rs`) reaches adapters as a request-only field of the system
+message, read at every request, so Claude breakpoints on Anthropic and
+OpenRouter take the provider's five-minute TTL by default, or one hour when that
+is chosen. The ChatGPT route
 relies on implicit caching with a stable per-conversation key. Reported cache
 reads and writes stay separate from charged cost.
 

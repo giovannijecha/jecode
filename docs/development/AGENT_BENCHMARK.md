@@ -140,7 +140,7 @@ reported separately below. These figures are not in the CSV.
 | Six turns, budget near 60–70k, 3 runs each | Sonnet 5.5 | 634–804k · 299 s | Claude Code 1,090k · 635 s¹ | −42%..−26% | −53% |
 | Six turns, budget near 60k, 3 runs each | GPT-6.1 Sol | 557k · 476 s | Codex 528k · 641 s | +5% | −26% |
 | Six turns, budget near 100k, 3 runs each | GPT-6.1 Sol | 443k · 486 s | Codex 702k · 512 s | −37% | −5% |
-| Forty turns, 2 runs each² | GPT-6.1 Sol | 4,716k · 78 min | Codex 9,557k · 113 min | −51% | −31% |
+| Forty turns, 2 runs each² | GPT-6.1 Sol | 4,716k · 78 min | Codex 9,556k · 113 min | −51% | −31% |
 
 The Sonnet token intervals reflect unknown cache-write lifetimes, not run
 variation or a confidence interval. Those Jecode journals recorded aggregate
@@ -271,7 +271,9 @@ above. The variation and latest miss leave the general token floor open.
 
 The retained executable completed two 40-turn sessions per primary model.
 It reported version 0.3.5. The 0.4.5 preparation preserves that Windows
-model-facing runtime; Unix PTY changes have separate native regression checks.
+model-facing runtime, except for later review fixes to the record lines of
+byte-range reads and of edits sent with empty placeholder fields, which were
+not measured again; Unix PTY changes have separate native regression checks.
 The following cost/time comparisons use older rival runs from November 7, not
 same-hour controls. Claude Code stopped at 28 and 30 turns, so its comparison
 ends at the common turn 25. Token counters are cut at that turn's end, before any

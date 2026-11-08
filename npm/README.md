@@ -10,7 +10,7 @@ the result. Tool cards and diffs show the work as it happens.
 
 ## Measured efficiency
 
-In our five-turn coding benchmark, Jecode used **21% fewer cost-weighted tokens
+On a historical five-turn coding benchmark, Jecode used **21% fewer cost-weighted tokens
 than Codex** with GPT-6.1 Sol and **36% fewer than Claude Code** with Claude
 Sonnet 5.5. All runs passed 21/21 hidden acceptance tests.
 
@@ -69,7 +69,13 @@ sequences in one request. Native HTTP connections persist between requests;
 OpenAI conversations use WebSocket with HTTP fallback. Separate
 [performance measurements](https://github.com/giovannijecha/jecode/blob/main/docs/development/PERFORMANCE.md)
 record lower first-update latency on Windows; the comparison above predates
-that work.
+that work and the later native records for long conversations. The
+[benchmark report](https://github.com/giovannijecha/jecode/blob/main/docs/development/AGENT_BENCHMARK.md#exact-records-development-branch-2026-11-07)
+also records short and 40-turn context comparisons, including quality misses.
+They do not establish a general 25% token saving at equal quality. Separate
+[offline checks](https://github.com/giovannijecha/jecode/blob/main/docs/development/CONTEXT_CHECKS.md)
+screen long saved contexts without model calls; they do not establish a ten-hour
+live result.
 
 ## Update or remove
 

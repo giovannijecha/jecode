@@ -77,7 +77,9 @@ contain a tool call whose result has not arrived yet.
 or `http` for OpenAI routes, otherwise `null`), `status` (`complete`, `failed` or
 `cancelled`) and the token counts the provider reported (`input_tokens`,
 `output_tokens`, `total_tokens`, `cached_tokens`, `cache_write_tokens`,
-`reasoning_tokens`; missing counters are `null`). Cached tokens are already
+`cache_write_5m_tokens`, `cache_write_1h_tokens`, `reasoning_tokens`; missing
+counters are `null`). The two lifetime counters split Anthropic cache writes by
+TTL when the provider reports them. Cached tokens are already
 included in input and reasoning tokens in output, so do not add them again.
 These counters do not tell you how a subscription weights its usage.
 

@@ -431,23 +431,24 @@ fn routing_preference_is_scoped_to_its_backend_even_for_the_same_model_id() {
 }
 
 #[test]
-fn prompt_cache_defaults_to_one_hour_persists_and_rejects_unknown_values() {
+fn prompt_cache_defaults_to_five_minutes_keeps_a_saved_hour_and_rejects_unknown_values() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
     let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#;
     fs::write(store.path(), legacy).unwrap();
     let mut saved = store.load().unwrap().unwrap();
     assert_eq!(saved.cache_retention, CacheRetention::Short);
-    saved.cache_retention = CacheRetention::Short;
+    // 0.3.5 saved its one-hour default with every configuration; it stays chosen.
+    saved.cache_retention = CacheRetention::Long;
     store.save(&saved).unwrap();
     let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
     assert_eq!(
         document.get("context").unwrap().get("prompt_cache"),
-        Some(&Value::string("5m"))
+        Some(&Value::string("1h"))
     );
     assert_eq!(
         store.load().unwrap().unwrap().cache_retention,
-        CacheRetention::Short
+        CacheRetention::Long
     );
     for value in ["\"1d\"", "\"\"", "60", "null"] {
         let text = format!(

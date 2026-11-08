@@ -12,8 +12,9 @@ Changes since 0.3.5.
   model request, with references to the original conversation. Model summaries
   remain for when records and previews cannot make room.
 - Claude prompt caches default to five minutes; one-hour retention remains
-  available for breaks. This changes the 0.3.5 default: choose **1 hour** in
-  `/settings` → **Context** → **Prompt cache** to keep it. One-hour writes cost
+  available for breaks. Configurations saved by 0.3.5 already record its
+  one-hour default and keep it: choose **5 minutes** in `/settings` →
+  **Context** → **Prompt cache** to adopt the new default. One-hour writes cost
   more at Anthropic's API list prices; see
   [Configuration](docs/usage/CONFIGURATION.md#prompt-cache).
 
