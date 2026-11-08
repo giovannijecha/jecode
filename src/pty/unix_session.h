@@ -6,6 +6,8 @@ static void kill_session(pid_t child) {
     }
 }
 
+enum { WATCHER_EXITED = -2, WATCHER_RUNNING = -3, WATCHER_QUERY = 1 };
+
 /* POSIX has no signal-to-session operation. /proc supplies Linux candidates,
    while macOS uses its system ps. getsid verifies each before signaling.
    The session leader remains unreaped, so its session ID cannot be reused. */
@@ -154,13 +156,19 @@ static void watch_child(int master, int slave, int owner_read,
         target(master, slave, owner_read, owner_write, status_write,
                input, control, argv);
     close(slave);
+    /* Status may be sent before cleanup. A missing bridge must not let
+       SIGPIPE interrupt the watcher's session sweep. */
+    signal(SIGPIPE, SIG_IGN);
 
     int status = 0;
+    int query = 0;
     for (;;) {
         siginfo_t info;
         memset(&info, 0, sizeof(info));
         int observed = waitid(P_PID, (id_t)child, &info, WEXITED | WNOHANG | WNOWAIT);
         if (observed == 0 && info.si_pid == child) {
+            int exited = WATCHER_EXITED;
+            (void)write_all(status_write, &exited, sizeof(exited));
             /* Keep the leader's PID reserved until its whole group is killed. */
             int cleaned = stop_session(child);
             while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
@@ -172,6 +180,11 @@ static void watch_child(int master, int slave, int owner_read,
             (void)stop_session(child);
             break;
         }
+        if (query && observed == 0) {
+            int running = WATCHER_RUNNING;
+            (void)write_all(status_write, &running, sizeof(running));
+            query = 0;
+        }
         struct pollfd owner = { owner_read, POLLIN | POLLHUP, 0 };
         int ready = poll(&owner, 1, 50);
         if (ready > 0 && owner.revents) {
@@ -182,6 +195,7 @@ static void watch_child(int master, int slave, int owner_read,
                 while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
                 break;
             }
+            if (count == 1 && byte == WATCHER_QUERY) query = 1;
         }
     }
     close(owner_read);

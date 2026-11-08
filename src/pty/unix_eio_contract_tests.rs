@@ -27,7 +27,9 @@ static int probe_ioctl(int fd, unsigned long request, uintptr_t argument);
 
 static int exit_resize_mode(void) {
     const char *mode = getenv("JECODE_PTY_TEST_INJECT");
-    return mode && strcmp(mode, "exit_resize") == 0;
+    return mode && (!strcmp(mode, "exit_resize") ||
+                    !strcmp(mode, "exit_resize_error") ||
+                    !strcmp(mode, "exit_resize_epipe"));
 }
 
 /* A bounded, test-only event channel to the Rust fixture. S is held until the
@@ -73,10 +75,21 @@ static int probe_waitid(idtype_t type, id_t id, siginfo_t *info, int options) {
 }
 
 static int probe_ioctl(int fd, unsigned long request, uintptr_t argument) {
-    int result = ioctl(fd, request, (void *)argument);
+    const char *mode = getenv("JECODE_PTY_TEST_INJECT");
+    struct winsize *size = (struct winsize *)argument;
+    int forced_failure = mode && (!strcmp(mode, "live_resize_error") ||
+                                  !strcmp(mode, "exit_resize_error") ||
+                                  !strcmp(mode, "exit_resize_epipe")) &&
+        request == TIOCSWINSZ && size && size->ws_col == 81 && size->ws_row == 25;
+    int result;
+    if (forced_failure) {
+        errno = EBADF;
+        result = -1;
+    } else {
+        result = ioctl(fd, request, (void *)argument);
+    }
     int saved_errno = errno;
     if (exit_resize_mode() && request == TIOCSWINSZ && argument) {
-        struct winsize *size = (struct winsize *)argument;
         if (size->ws_col == 81 && size->ws_row == 25 &&
             probe_event('R', result < 0, result < 0 ? saved_errno : 0, 0) < 0)
             _exit(125);
@@ -87,15 +100,27 @@ static int probe_ioctl(int fd, unsigned long request, uintptr_t argument) {
 
 static int saw_end;
 static int injected;
+static int status_gate_opened;
+
+static int eio_mode(const char *mode) {
+    return mode && (!strcmp(mode, "eio") || !strcmp(mode, "eio_cleanup") ||
+                    !strcmp(mode, "other_error"));
+}
 
 static ssize_t probe_write(int fd, const void *bytes, size_t length) {
     const char *mode = getenv("JECODE_PTY_TEST_INJECT");
     const unsigned char *cursor = bytes;
+    if (mode && !strcmp(mode, "exit_resize_epipe") && length == 1 &&
+        cursor[0] == WATCHER_QUERY && fd > STDERR_FILENO && !isatty(fd)) {
+        errno = EPIPE;
+        return -1;
+    }
     if (exit_resize_mode() && length == sizeof(int) && fd > STDERR_FILENO &&
         !isatty(fd)) {
         int status;
         memcpy(&status, bytes, sizeof(status));
-        if (probe_event('S', status == -1, 0, 1) < 0) _exit(125);
+        unsigned char phase = status == WATCHER_EXITED ? 'M' : 'S';
+        if (probe_event(phase, status == -1, 0, 1) < 0) _exit(125);
     }
     if (fd == STDOUT_FILENO) {
         static size_t matched;
@@ -109,23 +134,28 @@ static ssize_t probe_write(int fd, const void *bytes, size_t length) {
             }
         }
     }
-    if (mode && strcmp(mode, "exit_resize") != 0 &&
-        length == sizeof(int) && fd > STDERR_FILENO && !isatty(fd)) {
-        struct pollfd gate = { status_gate[0], POLLIN, 0 };
-        unsigned char marker;
-        if (poll(&gate, 1, 1000) != 1 ||
-            read(status_gate[0], &marker, 1) != 1 || marker != 1) {
-            fprintf(stderr, "PROBE_GATE_TIMEOUT\n");
-            int failed = -1;
-            return write(fd, &failed, sizeof(failed));
+    if (eio_mode(mode) && length == sizeof(int) && fd > STDERR_FILENO &&
+        !isatty(fd)) {
+        int status;
+        memcpy(&status, bytes, sizeof(status));
+        if (status == WATCHER_EXITED && !status_gate_opened) {
+            struct pollfd gate = { status_gate[0], POLLIN, 0 };
+            unsigned char marker;
+            if (poll(&gate, 1, 1000) != 1 ||
+                read(status_gate[0], &marker, 1) != 1 || marker != 1) {
+                fprintf(stderr, "PROBE_GATE_TIMEOUT\n");
+                int failed = -1;
+                return write(fd, &failed, sizeof(failed));
+            }
+            status_gate_opened = 1;
         }
-        if (strcmp(mode, "eio_cleanup") == 0) {
+        if (status != WATCHER_EXITED && strcmp(mode, "eio_cleanup") == 0) {
             int failed = -1;
             fprintf(stderr, "PROBE_CLEANUP_FAILURE\n");
             return write(fd, &failed, sizeof(failed));
         }
     }
-    if (mode && !injected && length >= 100 && cursor[0] == 'x' &&
+    if (eio_mode(mode) && !injected && length >= 100 && cursor[0] == 'x' &&
         fd > STDERR_FILENO) {
         if (!saw_end) {
             errno = EAGAIN;
@@ -376,110 +406,5 @@ fn control_errors_identify_the_failed_operation() {
     );
 }
 
-fn next_gate_event(
-    listener: &std::os::unix::net::UnixListener,
-) -> ([u8; 3], std::os::unix::net::UnixStream) {
-    let started = std::time::Instant::now();
-    loop {
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                stream.set_nonblocking(true).unwrap();
-                let mut event = [0; 3];
-                let mut received = 0;
-                while received < event.len() {
-                    match stream.read(&mut event[received..]) {
-                        Ok(0) => panic!("watcher/resize gate closed after {received} bytes"),
-                        Ok(count) => received += count,
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-                            ) =>
-                        {
-                            assert!(
-                                started.elapsed() < std::time::Duration::from_secs(5),
-                                "watcher/resize gate event was incomplete"
-                            );
-                            std::thread::yield_now();
-                        }
-                        Err(error) => panic!("watcher/resize gate read failed: {error}"),
-                    }
-                }
-                return (event, stream);
-            }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                assert!(
-                    started.elapsed() < std::time::Duration::from_secs(5),
-                    "watcher/resize gate did not report within five seconds"
-                );
-                std::thread::yield_now();
-            }
-            Err(error) => panic!("watcher/resize gate failed: {error}"),
-        }
-    }
-}
-
-#[test]
-fn resize_after_target_exit_before_watcher_status() {
-    use std::os::unix::net::UnixListener;
-    use std::os::unix::{ffi::OsStrExt, fs::DirBuilderExt};
-    let probe = Probe::compile();
-    let directory =
-        std::path::PathBuf::from("/tmp").join(format!("jc-pty-{}", crate::sessions::identifier()));
-    let gate = directory.join("gate");
-    assert!(gate.as_os_str().as_bytes().len() < 96);
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&directory)
-        .unwrap();
-    let listener = UnixListener::bind(&gate).unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let endpoint = directory.join("control");
-    let mut command = Command::new(&probe.executable);
-    command
-        .arg(&endpoint)
-        .args(["80", "24", "/bin/sh", "-c", "exit 0"])
-        .env("JECODE_PTY_TEST_INJECT", "exit_resize")
-        .env("JECODE_PTY_STATUS_GATE", &gate)
-        .process_group(0)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut bridge = Bridge {
-        child: command.spawn().unwrap(),
-        directory,
-    };
-    let endpoint = endpoint.to_str().unwrap();
-    let cancellation = Cancellation::default();
-    let _input = connect(endpoint, &cancellation).unwrap();
-    let mut control = connect_control(endpoint, &cancellation).unwrap();
-
-    let (exit, _) = next_gate_event(&listener);
-    assert_eq!(exit, [b'E', 0, 0], "target exit was not observed");
-    let (cleaned, mut status_gate) = next_gate_event(&listener);
-    assert_eq!(cleaned, [b'S', 0, 0], "watcher cleanup did not finish");
-    control
-        .write_all(&crate::pty::frame(2, &[81, 0, 25, 0]))
-        .unwrap();
-    let (resize, _) = next_gate_event(&listener);
-    assert_eq!(resize[0], b'R', "resize ioctl was not reached");
-    status_gate.write_all(b"g").unwrap();
-    let status = finished(&mut bridge.child);
-    let mut diagnostics = String::new();
-    bridge
-        .child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut diagnostics)
-        .unwrap();
-    assert_eq!(
-        resize[1], 0,
-        "post-exit resize ioctl failed with errno {}: {diagnostics}",
-        resize[2]
-    );
-    assert_eq!(
-        status.code(),
-        Some(0),
-        "bridge exited after resize: {diagnostics}"
-    );
-}
+#[path = "unix_exit_resize_contract_tests.rs"]
+mod exit_resize;

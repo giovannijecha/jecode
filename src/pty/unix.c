@@ -247,22 +247,27 @@ static int bridge(int master, int *slave, int input, int control,
     int child_status = 0;
     int child_done = 0;
     int input_closed = 0;
+    int master_closed = 0;
+    int query_pending = 0;
+    int resize_errno = 0;
     struct interrupt_state interrupt;
     memset(&interrupt, 0, sizeof(interrupt));
     for (;;) {
         if (stopping) return 125;
-        while (interrupt.count) {
+        while (interrupt.count && !query_pending) {
             int sent = deliver_interrupt(master, *slave, &queue, &interrupt);
             if (sent < 0) return 125;
             if (!sent) break;
         }
         struct pollfd events[4] = {
-            { master, POLLIN |
-                (!input_closed && queue.count && !interrupt.count &&
+            { master_closed && !child_done ? -1 : master, POLLIN |
+                (!input_closed && !query_pending && queue.count && !interrupt.count &&
                  queue.generation[queue.first] <= interrupt.applied_generation
                      ? POLLOUT : 0), 0 },
-            { child_done || input_closed ? -1 : input, queue.count < 16 ? POLLIN : 0, 0 },
-            { child_done || input_closed || interrupt.count == 16 ? -1 : control, POLLIN, 0 },
+            { child_done || input_closed || query_pending ? -1 : input,
+              queue.count < 16 ? POLLIN : 0, 0 },
+            { child_done || input_closed || query_pending || interrupt.count == 16
+                  ? -1 : control, POLLIN, 0 },
             { child_done ? -1 : status_read, POLLIN, 0 },
         };
         int ready = poll(events, 4, child_done ? 100 : interrupt.count ? 50 : 1000);
@@ -277,15 +282,31 @@ static int bridge(int master, int *slave, int input, int control,
                 fprintf(stderr, "Unix PTY watcher status was incomplete\n");
                 return 125;
             }
-            if (child_status == -1) {
+            if (child_status == WATCHER_EXITED) {
+                query_pending = 0;
+                input_closed = 1;
+                interrupt.count = 0;
+                queue.count = 0;
+                if (*slave >= 0) close(*slave);
+                *slave = -1;
+            } else if (child_status == WATCHER_RUNNING) {
+                if (query_pending) {
+                    report_control_error(FRAME_RESIZE_FAILED, resize_errno);
+                } else {
+                    fprintf(stderr, "Unix PTY watcher status was unexpected\n");
+                }
+                return 125;
+            } else if (child_status == -1) {
                 fprintf(stderr, "Could not confirm Unix PTY session cleanup\n");
                 return 125;
+            } else {
+                child_done = 1;
+                master_closed = 0;
+                interrupt.count = 0;
+                queue.count = 0;
+                if (*slave >= 0) close(*slave);
+                *slave = -1;
             }
-            child_done = 1;
-            interrupt.count = 0;
-            queue.count = 0;
-            close(*slave);
-            *slave = -1;
         }
         if (events[0].revents & (POLLIN | POLLHUP | POLLERR)) {
             unsigned char output[8192];
@@ -297,21 +318,34 @@ static int bridge(int master, int *slave, int input, int control,
                 }
             } else if (count == 0 || errno == EIO) {
                 if (child_done) break;
+                master_closed = 1;
             } else if (errno != EINTR && errno != EAGAIN) {
                 fprintf(stderr, "Unix PTY master read failed: %s\n", strerror(errno));
                 return 125;
             }
         }
-        if (!child_done && !input_closed && interrupt.count < 16 && events[2].revents) {
+        if (!child_done && !input_closed && !query_pending &&
+            interrupt.count < 16 && events[2].revents) {
             int result = read_frame(control, &control_frame, *slave, master,
                                     NULL, &interrupt, &queue);
             if (result < 0) {
                 int saved_errno = errno;
-                report_control_error(result, saved_errno);
-                return 125;
+                if (result == FRAME_RESIZE_FAILED && saved_errno == EBADF) {
+                    unsigned char check = WATCHER_QUERY;
+                    if (write_all(owner_write, &check, 1) < 0 && errno != EPIPE) {
+                        fprintf(stderr, "Unix PTY watcher query failed: %s\n",
+                                strerror(errno));
+                        return 125;
+                    }
+                    query_pending = 1;
+                    resize_errno = saved_errno;
+                } else {
+                    report_control_error(result, saved_errno);
+                    return 125;
+                }
             }
         }
-        if ((events[0].revents & POLLOUT) && queue.count &&
+        if ((events[0].revents & POLLOUT) && queue.count && !query_pending &&
             !interrupt.count &&
             queue.generation[queue.first] <= interrupt.applied_generation) {
             ssize_t count = write(master, queue.bytes[queue.first] + queue.sent,
@@ -336,7 +370,8 @@ static int bridge(int master, int *slave, int input, int control,
                 return 125;
             }
         }
-        if (!child_done && !input_closed && queue.count < 16 && events[1].revents) {
+        if (!child_done && !input_closed && !query_pending &&
+            queue.count < 16 && events[1].revents) {
             int result = read_frame(input, &input_frame, *slave, master,
                                     &queue, &interrupt, &queue);
             if (result < 0) {
