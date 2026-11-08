@@ -181,6 +181,44 @@ The normal-budget mean exceeds the 25% target in this block, while the tight
 budget misses it. Codex's broad run ranges remain material. These results do not
 establish a 25% minimum on arbitrary tasks or across all backends.
 
+### Tight working-tail follow-up, 2026-11-08
+
+A later controlled block tested retaining more complete recent exchanges during
+work at a tight budget. The candidate changed only the working-tail allowance
+from `window / 4` to `min(max(window / 4, 30,000), window / 2)`. Digest triggers,
+gain thresholds and new-turn behavior stayed fixed. At windows of 120k or more,
+the allowance was unchanged. The hypothesis was fewer subsequent rereads; it
+still needed to offset sending a larger live tail.
+
+Four frozen control runs, four candidate runs and four fresh Codex runs used the
+same six-turn fixture, GPT-6.1 Sol/high and a budget near 60k on Windows. The block
+ran from 09:22 to 09:48 UTC in two matched waves, each starting two runs per
+group together. Several sessions shared the machine and network; local verification
+also ran during the block. Descendant usage is included with the fixed GPT
+weights. Token totals cover T1-T6; active time covers T1-T5.
+
+| Build, 4 runs each | Weighted tokens, mean (run range) | Against Codex | Active seconds, mean | Recall / 6 |
+| --- | ---: | ---: | ---: | ---: |
+| Retained control | 571,590 (520,838-625,107) | -20.0% | 516.0 | 5-6 |
+| Larger working tail | 604,266 (462,964-671,828) | -15.4% | 513.5 | 6 |
+| Codex | 714,629 (586,261-889,621) | Reference | 717.3 | 2-5 |
+
+All 12 runs completed all six turns and passed 21/21 hidden checks. All 12
+no-tools probes made zero calls and were verifiable. The original recall rubric
+and scores are retained, including the control's one uncertain function-name
+answer. No generated workspace or acceptance criterion was changed.
+
+The candidate spent **5.72% more weighted tokens than the control**. Mean fresh
+input rose from 306,258 to 345,940; output stayed near 20,240 tokens, and request
+count fell from 40.5 to 39.0. These small samples establish no general causal
+claim about rereads, but provide no reason to adopt the candidate. It was
+rejected and the retained context policy is unchanged. No additional Claude or
+forty-turn session was needed to select a rejected candidate.
+
+The retained control still missed 25% in this fresh block: the required maximum
+was 535,972, leaving 35,618 weighted tokens per run. This result supplements the
+earlier -12.5% tight block; neither block establishes the requested general floor.
+
 ### Forty-turn confirmation
 
 The same retained executable completed two 40-turn sessions per primary model.
