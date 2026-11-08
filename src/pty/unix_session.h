@@ -33,11 +33,14 @@ static int sweep_session(pid_t leader, int *active) {
             if (errno != ENOENT && errno != ESRCH) failure = 1;
             continue;
         }
-        int zombie = fgets(line, sizeof(line), stat) &&
-            strrchr(line, ')') && strrchr(line, ')')[2] == 'Z';
-        if (ferror(stat)) failure = 1;
+        errno = 0;
+        int got = fgets(line, sizeof(line), stat) != NULL;
+        int zombie = got && strrchr(line, ')') && strrchr(line, ')')[2] == 'Z';
+        /* A member reaped between open and read is gone, as when open fails. */
+        int gone = !got && (errno == ENOENT || errno == ESRCH);
+        if (ferror(stat) && !gone) failure = 1;
         fclose(stat);
-        if (zombie) continue;
+        if (zombie || gone) continue;
         if (getsid(pid) != leader) continue;
         ++*active;
         if (kill(pid, SIGKILL) < 0 && errno != ESRCH) failure = 1;
@@ -99,8 +102,10 @@ static int sweep_session(pid_t leader, int *active) {
 static int stop_session(pid_t leader) {
     kill_session(leader);
     for (int pass = 0; pass < 8; ++pass) {
+        /* Only a complete scan that finds no member confirms cleanup; a
+           failed one proves nothing either way, so a later pass retries. */
         int active;
-        if (sweep_session(leader, &active) < 0) return -1;
+        if (sweep_session(leader, &active) < 0) active = -1;
         if (!active) return 0;
         struct timespec pause = { 0, 20 * 1000 * 1000 };
         while (nanosleep(&pause, &pause) < 0 && errno == EINTR) {}

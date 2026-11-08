@@ -396,7 +396,6 @@ fn capture_probe_records_eof_after_unknown_cleanup() {
     let listener = UnixListener::bind(&gate.path).unwrap();
     listener.set_nonblocking(true).unwrap();
     let cancellation = Cancellation::default();
-    let signal = cancellation.clone();
     let (sender, receiver) = mpsc::channel();
     let acceptor = thread::spawn(move || {
         let result = (|| {
@@ -416,7 +415,6 @@ fn capture_probe_records_eof_after_unknown_cleanup() {
             read_gate_byte(&mut stream)?;
             Ok::<_, std::io::Error>(stream)
         })();
-        signal.cancel();
         let _ = sender.send(result);
     });
     let store = output::Store::new(directory.path().join("output"), Redactor::empty());
@@ -430,17 +428,16 @@ fn capture_probe_records_eof_after_unknown_cleanup() {
     let started =
         process::start_logged(&mut command, &cancellation, [logs.stdout, logs.stderr]).unwrap();
     let probe = started.capture_probe();
+    // Cancel only once start has returned: its startup handshake also honors
+    // cancellation, and the holder may connect before that handshake ends.
+    let holder = receiver.recv_timeout(Duration::from_secs(6));
+    cancellation.cancel();
+    gate.release = Some(holder.unwrap().unwrap());
     let result = started.supervise(None, &cancellation, &mut |_| Ok(()));
     let error = result.err().unwrap().message;
     assert!(error.contains("output capture remains active"), "{error}");
     assert_eq!(probe.eof_at()[0], None, "stdout EOF was already observed");
     let unknown_at = Instant::now();
-    gate.release = Some(
-        receiver
-            .recv_timeout(Duration::from_secs(6))
-            .unwrap()
-            .unwrap(),
-    );
     gate.release.as_mut().unwrap().write_all(b"x").unwrap();
     acceptor.join().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
