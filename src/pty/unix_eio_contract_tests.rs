@@ -383,11 +383,28 @@ fn next_gate_event(
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                    .unwrap();
+                stream.set_nonblocking(true).unwrap();
                 let mut event = [0; 3];
-                stream.read_exact(&mut event).unwrap();
+                let mut received = 0;
+                while received < event.len() {
+                    match stream.read(&mut event[received..]) {
+                        Ok(0) => panic!("watcher/resize gate closed after {received} bytes"),
+                        Ok(count) => received += count,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                            ) =>
+                        {
+                            assert!(
+                                started.elapsed() < std::time::Duration::from_secs(5),
+                                "watcher/resize gate event was incomplete"
+                            );
+                            std::thread::yield_now();
+                        }
+                        Err(error) => panic!("watcher/resize gate read failed: {error}"),
+                    }
+                }
                 return (event, stream);
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -395,7 +412,7 @@ fn next_gate_event(
                     started.elapsed() < std::time::Duration::from_secs(5),
                     "watcher/resize gate did not report within five seconds"
                 );
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::yield_now();
             }
             Err(error) => panic!("watcher/resize gate failed: {error}"),
         }
