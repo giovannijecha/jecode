@@ -31,7 +31,7 @@ repository root.
 | [Questions and plans](usage/QUESTIONS_AND_PLANS.md) | Answering the agent's questions and following its plan. |
 | [Copy and export](usage/COPY_AND_EXPORT.md) | Copying answers and saving conversations as JSON. |
 | [Temporary files](usage/TEMPORARY.md) | Each conversation's working area and its cleanup. |
-| [Long-running work](usage/LONG_WORK.md) | Retries, context compaction and history. |
+| [Long-running work](usage/LONG_WORK.md) | Retries, exact context records, fallback summaries and original history. |
 
 ## Reference
 
