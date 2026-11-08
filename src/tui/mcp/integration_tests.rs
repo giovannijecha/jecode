@@ -17,6 +17,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod connection_tests;
+
 fn app(directory: &Directory, fixture: &HttpFixture) -> App {
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap();
     let store = SettingsStore::new(directory.path().join("config"));
@@ -60,7 +62,8 @@ fn request(stream: &mut TcpStream) -> String {
 }
 
 fn reply(stream: &mut TcpStream, status: u16, body: &str) {
-    write!(stream, "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{body}", body.len()).unwrap();
+    // Every handler serves one request per socket.
+    write!(stream, "HTTP/1.1 {status} OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
 }
 
 #[test]
@@ -201,10 +204,20 @@ fn token_connection_saves_and_inspects_real_loopback_tools_without_losing_edits(
     app.open_mcp(false);
     settle(&mut app);
     app.choose_mcp(Panel::List, 0);
-    assert!(matches!(
-        app.state.selector.as_ref().unwrap().purpose,
-        Purpose::Mcp(Panel::Tools)
-    ));
+    assert!(
+        matches!(
+            app.state.selector.as_ref().unwrap().purpose,
+            Purpose::Mcp(Panel::Tools)
+        ),
+        "MCP inspection opened {:?}; health={:?}; notice={:?}",
+        panel(&app),
+        app.mcp
+            .health
+            .values()
+            .map(|result| result.as_ref().map(|catalog| catalog.tools.len()))
+            .collect::<Vec<_>>(),
+        app.state.notice.as_ref().map(|notice| &notice.text),
+    );
     app.choose_mcp(Panel::Tools, 0);
     let detail = app.state.information.as_ref().unwrap();
     assert!(
