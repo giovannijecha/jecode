@@ -6,7 +6,7 @@ the result. Tool cards and diffs show the work as it happens.
 
 ![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/main/docs/images/jecode-startup.png)
 
-*Windows Terminal, on a pre-release build of this interface that still reports 0.2.5.*
+*Jecode 0.4.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Measured efficiency
 
@@ -77,7 +77,23 @@ They do not establish a general 25% token saving at equal quality. Separate
 screen long saved contexts without model calls; they do not establish a ten-hour
 live result.
 
+## Long conversations and processes
+
+Earlier work becomes compact records of requests, answers and tool outcomes
+before Jecode needs a model summary. Recording requires no model request. The
+original conversation stays saved and available to the model by reference;
+summaries remain the fallback when records and tool-result previews cannot make
+room. Read [Long-running work](https://github.com/giovannijecha/jecode/blob/main/docs/usage/LONG_WORK.md).
+
+`/process` lists running and recent commands, with saved output and a control to
+move a waiting call into the background. Process completions reach the model and
+conversation while the status row keeps the current activity and final turn
+statistics visible.
+
 ## Update or remove
+
+Updating from 0.3.5? Read the [0.4.5 upgrade notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md#upgrading-from-035)
+for saved-session compatibility and the Claude prompt-cache default.
 
 Update the npm installation with:
 

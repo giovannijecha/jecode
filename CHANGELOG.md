@@ -15,15 +15,6 @@ Changes since 0.3.5.
 - Long conversations use deterministic native records of earlier work without a
   model request, with references to the original conversation. Model summaries
   remain for when records and previews cannot make room.
-- Sessions remain readable if an older version compacts them after a downgrade:
-  the new summary replaces stale records. Older versions cannot project native
-  records; continue those sessions in 0.4.5 or later.
-- Claude prompt caches default to five minutes; one-hour retention remains
-  available for breaks. Configurations saved by 0.3.5 already record its
-  one-hour default and keep it: choose **5 minutes** in `/settings` →
-  **Context** → **Prompt cache** to adopt the new default. One-hour writes cost
-  more at Anthropic's API list prices; see
-  [Configuration](docs/usage/CONFIGURATION.md#prompt-cache).
 
 ### Tools and browser
 
@@ -45,8 +36,23 @@ Changes since 0.3.5.
 - Process completions no longer create status-row notices, so the current
   activity and the turn's final statistics stay visible.
 
+### Upgrading from 0.3.5
+
+- Continue sessions with native records in **0.4.5 or later**. Version 0.3.5
+  cannot project those records, so a turn there may lack earlier work even
+  though the full history stays saved. If an older version compacts a session,
+  0.4.5 reads its new summary in place of stale records.
+- Claude prompt caches now default to **five minutes**; one-hour retention
+  remains available for breaks. Configurations saved by 0.3.5 keep its one-hour
+  default. Choose **5 minutes** in `/settings` → **Context** → **Prompt cache**
+  to adopt the new default. One-hour writes cost more at Anthropic's API list
+  prices; see [Configuration](docs/usage/CONFIGURATION.md#prompt-cache).
+
 ### Development
 
+- MCP inspection test servers explicitly close each HTTP connection and have a
+  regression check for discovery followed by a tools list. Failed inspection
+  assertions now include the panel and connection-health details.
 - On macOS, resizing a PTY after its target exits now checks the watcher's exit
   state and waits for confirmed cleanup before returning the child's status.
   The watcher rechecks exit after one polling interval before reporting a live

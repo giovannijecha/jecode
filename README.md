@@ -13,7 +13,7 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
 ![Jecode running in Windows Terminal, with its startup screen, composer and model status](docs/images/jecode-startup.png)
 
-*Windows Terminal, on a pre-release build of this interface that still reports 0.2.5.*
+*Jecode 0.4.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Measured efficiency
 
@@ -44,6 +44,19 @@ also records short and 40-turn context comparisons, including quality misses.
 They do not establish a general 25% token saving at equal quality. Separate
 [offline checks](docs/development/CONTEXT_CHECKS.md) screen long saved contexts
 without model calls; they do not establish a ten-hour live result.
+
+## Long conversations and processes
+
+Earlier work becomes compact records of requests, answers and tool outcomes
+before Jecode needs a model summary. Recording requires no model request. The
+full conversation stays saved, and the model can retrieve the originals by
+reference. If records and tool-result previews cannot make room, a model summary
+remains the fallback. See [Long-running work](docs/usage/LONG_WORK.md).
+
+Use `/process` to inspect running and recent commands, read their saved output
+or move a waiting call into the background. Completed commands report their
+outcome to the model and conversation while the status row keeps the current
+activity and final turn statistics visible.
 
 ## Work in your project
 
@@ -131,6 +144,8 @@ quit, and `/help` or F1 for commands and common shortcuts.
 
 Jecode is usable and still evolving. Commands, settings and storage formats may
 change between releases; the [release notes](CHANGELOG.md) list what changed.
+When updating from 0.3.5, read the [0.4.5 upgrade notes](CHANGELOG.md#upgrading-from-035)
+for saved-session compatibility and the Claude prompt-cache default.
 
 - Windows x64, Linux x64, and macOS on Apple silicon and Intel have native
   builds and terminal fixtures in CI. Interactive use on macOS has not been
