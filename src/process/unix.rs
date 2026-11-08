@@ -2,6 +2,7 @@ use super::RunError;
 use crate::cancel::Cancellation;
 use crate::sandbox::MARKER;
 use std::ffi::OsStr;
+use std::fs::File;
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -261,6 +262,30 @@ pub(super) fn terminate(child: &mut Child) -> Result<(), String> {
         let _ = child.wait();
     }
     result
+}
+
+pub(super) fn cleanup_receipt(receipt: &mut File, deadline: Instant) -> Result<(), String> {
+    let mut byte = [0];
+    loop {
+        match receipt.read(&mut byte) {
+            Ok(1) if byte[0] == 1 => return Ok(()),
+            Ok(1) if byte[0] == 0 => {
+                return Err("Unix PTY watcher could not confirm session cleanup".into());
+            }
+            Ok(1) => return Err("Unix PTY watcher cleanup receipt was invalid".into()),
+            Ok(0) => return Err("Unix PTY watcher cleanup receipt was missing".into()),
+            Ok(_) => unreachable!(),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("Unix PTY watcher cleanup receipt timed out".into());
+                }
+                thread::sleep(remaining.min(Duration::from_millis(10)));
+            }
+            Err(error) => return Err(format!("Could not read Unix PTY cleanup receipt: {error}")),
+        }
+    }
 }
 
 #[cfg(test)]

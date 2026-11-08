@@ -6,6 +6,8 @@ static void kill_session(pid_t child) {
     }
 }
 
+enum { WATCHER_EXITED = -2, WATCHER_RUNNING = -3, WATCHER_QUERY = 1 };
+
 /* POSIX has no signal-to-session operation. /proc supplies Linux candidates,
    while macOS uses its system ps. getsid verifies each before signaling.
    The session leader remains unreaped, so its session ID cannot be reused. */
@@ -31,11 +33,14 @@ static int sweep_session(pid_t leader, int *active) {
             if (errno != ENOENT && errno != ESRCH) failure = 1;
             continue;
         }
-        int zombie = fgets(line, sizeof(line), stat) &&
-            strrchr(line, ')') && strrchr(line, ')')[2] == 'Z';
-        if (ferror(stat)) failure = 1;
+        errno = 0;
+        int got = fgets(line, sizeof(line), stat) != NULL;
+        int zombie = got && strrchr(line, ')') && strrchr(line, ')')[2] == 'Z';
+        /* A member reaped between open and read is gone, as when open fails. */
+        int gone = !got && (errno == ENOENT || errno == ESRCH);
+        if (ferror(stat) && !gone) failure = 1;
         fclose(stat);
-        if (zombie) continue;
+        if (zombie || gone) continue;
         if (getsid(pid) != leader) continue;
         ++*active;
         if (kill(pid, SIGKILL) < 0 && errno != ESRCH) failure = 1;
@@ -97,8 +102,10 @@ static int sweep_session(pid_t leader, int *active) {
 static int stop_session(pid_t leader) {
     kill_session(leader);
     for (int pass = 0; pass < 8; ++pass) {
+        /* Only a complete scan that finds no member confirms cleanup; a
+           failed one proves nothing either way, so a later pass retries. */
         int active;
-        if (sweep_session(leader, &active) < 0) return -1;
+        if (sweep_session(leader, &active) < 0) active = -1;
         if (!active) return 0;
         struct timespec pause = { 0, 20 * 1000 * 1000 };
         while (nanosleep(&pause, &pause) < 0 && errno == EINTR) {}
@@ -134,7 +141,6 @@ static void watch_child(int master, int slave, int owner_read,
                         int input, int control, char **argv) {
     close(master);
     close(input);
-    close(control);
     close(owner_write);
     close(status_read);
     /* The bridge may be SIGKILLed before this watcher finishes its session
@@ -154,17 +160,27 @@ static void watch_child(int master, int slave, int owner_read,
         target(master, slave, owner_read, owner_write, status_write,
                input, control, argv);
     close(slave);
+    /* Status may be sent before cleanup. A missing bridge must not let
+       SIGPIPE interrupt the watcher's session sweep. */
+    signal(SIGPIPE, SIG_IGN);
 
     int status = 0;
+    int cleanup_confirmed = 0;
+    int query = 0;
+    int query_grace_elapsed = 0;
     for (;;) {
         siginfo_t info;
         memset(&info, 0, sizeof(info));
         int observed = waitid(P_PID, (id_t)child, &info, WEXITED | WNOHANG | WNOWAIT);
         if (observed == 0 && info.si_pid == child) {
+            int exited = WATCHER_EXITED;
+            (void)write_all(status_write, &exited, sizeof(exited));
             /* Keep the leader's PID reserved until its whole group is killed. */
             int cleaned = stop_session(child);
-            while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
-            if (cleaned < 0) status = -1;
+            pid_t reaped;
+            do { reaped = waitpid(child, &status, 0); } while (reaped < 0 && errno == EINTR);
+            cleanup_confirmed = cleaned == 0 && reaped == child;
+            if (!cleanup_confirmed) status = -1;
             (void)write_all(status_write, &status, sizeof(status));
             break;
         }
@@ -172,18 +188,37 @@ static void watch_child(int master, int slave, int owner_read,
             (void)stop_session(child);
             break;
         }
+        /* A revoked slave can precede waitid observing the target's exit.
+           Recheck after one full watcher poll before reporting it as live. */
+        if (query && observed == 0 && query_grace_elapsed) {
+            int running = WATCHER_RUNNING;
+            (void)write_all(status_write, &running, sizeof(running));
+            query = 0;
+        }
         struct pollfd owner = { owner_read, POLLIN | POLLHUP, 0 };
         int ready = poll(&owner, 1, 50);
+        if (query && ready == 0) query_grace_elapsed = 1;
         if (ready > 0 && owner.revents) {
             unsigned char byte;
             ssize_t count = read(owner_read, &byte, 1);
             if (count == 0 || (count < 0 && errno != EINTR)) {
-                (void)stop_session(child);
-                while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+                int cleaned = stop_session(child);
+                pid_t reaped;
+                do { reaped = waitpid(child, &status, 0); } while (reaped < 0 && errno == EINTR);
+                cleanup_confirmed = cleaned == 0 && reaped == child;
                 break;
+            }
+            if (count == 1 && byte == WATCHER_QUERY) {
+                query = 1;
+                query_grace_elapsed = 0;
             }
         }
     }
+    /* The control socket is full-duplex. The bridge only reads it, while
+       Jecode keeps a read handle for this watcher's cleanup receipt. */
+    unsigned char receipt = cleanup_confirmed ? 1 : 0;
+    (void)write_all(control, &receipt, 1);
+    close(control);
     close(owner_read);
     close(status_write);
     close(barrier);

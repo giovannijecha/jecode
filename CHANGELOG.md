@@ -2,12 +2,58 @@
 
 ## Unreleased
 
+## 0.4.5
+
+Changes since 0.3.5.
+
+### Long work and context
+
+- Long conversations use deterministic native records of earlier work without a
+  model request, with references to the original conversation. Model summaries
+  remain for when records and previews cannot make room.
+- Sessions remain readable if an older version compacts them after a downgrade:
+  the new summary replaces stale records. Older versions cannot project native
+  records; continue those sessions in 0.4.5 or later.
+- Claude prompt caches default to five minutes; one-hour retention remains
+  available for breaks. Configurations saved by 0.3.5 already record its
+  one-hour default and keep it: choose **5 minutes** in `/settings` →
+  **Context** → **Prompt cache** to adopt the new default. One-hour writes cost
+  more at Anthropic's API list prices; see
+  [Configuration](docs/usage/CONFIGURATION.md#prompt-cache).
+
+### Tools and browser
+
+- Ambiguous edits return bounded match excerpts to help find a unique match
+  before retrying. Prepared `steps` calls no longer have a fixed
+  entry-count limit; shared collaborators can inspect recorded edit hunks.
+- The built-in `wc` handles line and byte counts for files or standard input.
+- Browser `type` and `press` send keyboard events, including shortcuts, Enter and
+  Tab. Browser calls report blocking JavaScript dialogs so they can be handled
+  before continuing.
 - Commands remain visible and controllable during their initial wait, and long
   commands return control without stopping the process.
 - `/process` replaces `/terminal`, with running and recent commands, saved output
   and a control to move a waiting call into the background without restarting it.
+- Stopping a Unix terminal waits for the native cleanup result and final output.
+  Failed or unconfirmed cleanup remains an unknown outcome.
 - Finished processes report their outcome to the model and conversation. The TUI
   can continue automatically; plain chat continues after the next entered line.
+
+### Development
+
+- On macOS, resizing a PTY after its target exits now checks the watcher's exit
+  state and waits for confirmed cleanup before returning the child's status.
+  The watcher rechecks exit after one polling interval before reporting a live
+  resize failure. Resize failures while the target is running still report an
+  error. A closed PTY also stops being polled until final cleanup, avoiding a
+  reproduced busy loop while preserving output and exit codes.
+- Unix terminal errors identify a failed control read, resize or interrupt,
+  and distinguish malformed frames and closed channels from system errors.
+- GitHub Actions dependencies were updated. Offline context checks screen saved
+  checkpoints and sustained record growth without provider calls; they do not
+  establish a ten-hour live result. See
+  [context checks](docs/development/CONTEXT_CHECKS.md) and the
+  [benchmark conditions](docs/development/AGENT_BENCHMARK.md).
 
 ## 0.3.5
 

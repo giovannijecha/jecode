@@ -3,7 +3,7 @@ use super::pool::{Limits, Pool};
 use super::*;
 use crate::test_support::server::{self, Server};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 
@@ -201,6 +201,7 @@ fn a_post_processed_on_a_reused_connection_is_not_sent_again() {
         let mut effects = 0;
         assert!(read_request(&mut reader));
         effects += 1;
+        writer.shutdown(Shutdown::Both).unwrap();
         drop(reader);
         drop(writer);
         // Reconnecting here would execute the same POST twice.
@@ -210,10 +211,16 @@ fn a_post_processed_on_a_reused_connection_is_not_sent_again() {
     let (output, seen) = send(&pool, &server.endpoint);
     succeeded(&output, &seen);
     let (output, seen) = send(&pool, &server.endpoint);
-    assert_eq!(output.exit_code, Some(2));
+    let server_result = server.finish();
+    assert_eq!(
+        output.exit_code,
+        Some(2),
+        "timed_out={}; server={server_result:?}",
+        output.timed_out
+    );
     assert!(String::from_utf8_lossy(&output.stderr).starts_with("Native HTTP"));
     assert!(seen.is_empty());
-    assert_eq!(server.finish(), (1, true));
+    assert_eq!(server_result, (1, true));
 }
 
 #[test]

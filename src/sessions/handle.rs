@@ -111,6 +111,9 @@ impl Handle {
         document.pending.partial = redactor.text(&document.pending.partial);
         document.context.summary = redactor.text(&document.context.summary);
         document.context.skill_references = redactor.text(&document.context.skill_references);
+        for epoch in &mut document.context.digests {
+            epoch.notes = redactor.text(&epoch.notes);
+        }
         document.pending.tool = document.pending.tool.map(|id| redactor.text(&id));
         document.pending.reads = document
             .pending

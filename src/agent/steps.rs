@@ -163,7 +163,7 @@ impl Agent {
 /// A multi-file edit fails when any file does, and a restore when any path
 /// conflicts, fails or is skipped; a multi-file read reports each path and
 /// goes on, as it does alone.
-fn failed(tool: &str, result: &Value) -> bool {
+pub(crate) fn failed(tool: &str, result: &Value) -> bool {
     result.get("error").is_some()
         || result
             .get("outcome")

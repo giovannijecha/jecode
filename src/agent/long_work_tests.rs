@@ -268,6 +268,7 @@ fn an_interrupted_stream_is_archived_and_its_incomplete_tool_call_never_executes
 
 #[test]
 fn repeated_previews_keep_original_history_and_save_context_before_continuing() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let original = "source evidence\n".repeat(1600);
@@ -356,6 +357,7 @@ fn repeated_previews_keep_original_history_and_save_context_before_continuing() 
 
 #[test]
 fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![]);

@@ -325,6 +325,11 @@ impl OpenRouter {
             });
             cache::mark_recent(&mut messages, &marker);
         }
+        for message in &mut messages {
+            if let Value::Object(fields) = message {
+                fields.remove(crate::context::digest::ANCHOR);
+            }
+        }
         let mut body = Value::object([
             ("model", Value::string(&self.model)),
             ("messages", Value::Array(messages)),

@@ -188,6 +188,7 @@ fn large_read() -> Value {
 
 #[test]
 fn a_large_latest_read_result_is_previewed_and_stays_readable() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let original = "Original evidence Ω 日本\n".repeat(1900);
     std::fs::write(directory.path().join("source"), &original).unwrap();

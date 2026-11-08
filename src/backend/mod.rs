@@ -99,6 +99,8 @@ pub struct Usage {
     pub total_tokens: Option<usize>,
     pub cached_tokens: Option<usize>,
     pub cache_write_tokens: Option<usize>,
+    pub cache_write_5m_tokens: Option<usize>,
+    pub cache_write_1h_tokens: Option<usize>,
     /// Provider-reported reasoning is included in output_tokens, not added to it.
     pub reasoning_tokens: Option<usize>,
 }
@@ -116,6 +118,8 @@ impl Usage {
         self.output_tokens = newer.output_tokens.or(self.output_tokens);
         self.cached_tokens = newer.cached_tokens.or(self.cached_tokens);
         self.cache_write_tokens = newer.cache_write_tokens.or(self.cache_write_tokens);
+        self.cache_write_5m_tokens = newer.cache_write_5m_tokens.or(self.cache_write_5m_tokens);
+        self.cache_write_1h_tokens = newer.cache_write_1h_tokens.or(self.cache_write_1h_tokens);
         self.reasoning_tokens = newer.reasoning_tokens.or(self.reasoning_tokens);
     }
 
@@ -305,6 +309,10 @@ pub trait Backend: Send {
     /// Collaborators retain working tools but never receive delegation tools.
     fn set_delegation(&mut self, _enabled: bool) {}
     fn inputs(&self) -> Inputs;
+    /// What a cache write costs against uncached input, for reduction decisions.
+    fn cache_write_premium(&self, _retention: CacheRetention) -> f64 {
+        1.0
+    }
     fn limits(&mut self) -> Result<Option<Limits>, Failure>;
     fn known_limits(&self) -> Option<Limits>;
     /// Report usage through `Update::Usage` when the provider supplies it;

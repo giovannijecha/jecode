@@ -301,6 +301,9 @@ impl Backend for Anthropic {
         self.api.ensure_metadata().map_err(backend::Failure::from)?;
         Ok(self.known_limits())
     }
+    fn cache_write_premium(&self, retention: backend::CacheRetention) -> f64 {
+        retention.write_premium()
+    }
     fn known_limits(&self) -> Option<backend::Limits> {
         self.api.known_limits(&self.model)
     }

@@ -40,8 +40,19 @@ window is unknown. The figure includes cached input. It is not your plan's
 usage or remaining quota. The `↑` and `↓` counts in the status row are the
 turn's input tokens sent and generated output, not context.
 
-Before each model request, Jecode estimates whether the request would exceed the
-threshold. If it would:
+Well before that threshold, Jecode keeps the request small with exact records.
+When recording earlier work would free about 30,000 tokens at a new turn, or work
+under way passes a window of about 120,000 tokens plus existing records, earlier
+messages become one line per tool call with its outcome, next to excerpts of your
+requests and the model's answers. Each names the original as `history:N`. This
+takes no model request; records are derived from the saved conversation rather
+than from an earlier paraphrase. The thresholds adjust for cache write costs and
+the configured context limit. Work under way keeps its latest results verbatim.
+Very long conversations condense the oldest records further, to
+a paragraph per turn and then to an index of turns. Your context meter drops when
+this happens, and a notice says how many messages became records.
+
+If a request would still exceed the threshold:
 
 1. Large tool results, such as long file reads, are replaced by previews that
    point to the original.
@@ -65,6 +76,11 @@ conversation and export, and the model can read any part of it again with
 the [Tool reference](TOOL_REFERENCE.md#read). Skills the model had read are
 remembered so it can read them again. Compaction happens inside the current
 turn: it does not send your draft or rerun a completed tool call.
+
+Reopen sessions with native records in 0.4.5 or later. Version 0.3.5 cannot
+project those records, so a turn run there may lack earlier work even though
+the full original history remains saved. A later Jecode can reopen a session
+that 0.3.5 compacted, but it cannot restore context that older model never saw.
 
 If a provider rejects a request as too large, Jecode lowers its estimate of the
 window and compacts earlier. If even the instructions, your requests and a

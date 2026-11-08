@@ -69,6 +69,8 @@ struct Entry {
     state: Mutex<State>,
     changed: Condvar,
     monitor: Mutex<Option<JoinHandle<()>>>,
+    #[cfg(all(test, unix))]
+    capture_probe: Option<crate::process::CaptureProbe>,
     terminal: Option<Arc<crate::pty::Control>>,
     started: Instant,
     scope: Weak<Scope>,
@@ -197,6 +199,8 @@ impl Registry {
             cancellation,
         } = adoption;
         let scope = self.scope();
+        #[cfg(all(test, unix))]
+        let capture_probe = started.capture_probe();
         let entry = Arc::new(Entry {
             id: format!("process-{}", crate::sessions::identifier()),
             command: command.into(),
@@ -209,6 +213,8 @@ impl Registry {
             }),
             changed: Condvar::new(),
             monitor: Mutex::new(None),
+            #[cfg(all(test, unix))]
+            capture_probe: Some(capture_probe),
             terminal,
             started: Instant::now(),
             scope: Arc::downgrade(&scope),
@@ -359,6 +365,17 @@ impl Registry {
                     .collect(),
             ),
         )])
+    }
+
+    #[cfg(all(test, unix))]
+    pub(in crate::tools) fn capture_eof(&self, id: &str) -> Option<[Option<Instant>; 2]> {
+        self.scope()
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.id == id)
+            .and_then(|entry| entry.capture_probe.as_ref().map(|probe| probe.eof_at()))
     }
 
     /// Stops every owned process and forgets them; used when the conversation ends.

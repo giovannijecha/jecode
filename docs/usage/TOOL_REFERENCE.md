@@ -113,9 +113,8 @@ invalid UTF-8 fail.
 | `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | A command's complete saved stream, including one saved by the main agent or, for a main agent, by its collaborators. |
 | `history:N` | The original message at zero-based index `N`. |
 | `history:requests` | All your original requests, in order. |
-| `history:memory` | The current compaction summary. |
-| `history:processes` | Saved outcomes of finished processes, one JSON object per line. |
-| `history:processes` | Recorded process outcomes, including results saved before the model received them. Reading them does not restart a process. |
+| `history:memory` | The current compaction summary, followed by the exact records that currently replace earlier messages. |
+| `history:processes` | Recorded process outcomes, one JSON object per line, including results saved before the model received them. Reading them does not restart a process. |
 | `skill:NAME`, `skill:NAME/path` | A skill's `SKILL.md`, or a file inside the skill. |
 | `attachment:ID` | An attached file; images and PDFs are shown again. |
 | `checkpoint:rc-ID:path` | A file as saved before one modifying call. |

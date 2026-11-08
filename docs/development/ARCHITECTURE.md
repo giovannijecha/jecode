@@ -138,12 +138,34 @@ and the effective model window, lowered when a provider rejection reveals a
 smaller ceiling. Prompt estimates calibrate from provider usage when it is
 available.
 
-Before summarizing, `agent/compaction.rs` turns large tool payloads into
+`context/digest.rs` is the first reduction and usually the only one. It replaces
+earlier messages with exact native records: excerpts of user requests and
+assistant text, and one line per tool call with its outcome and failure text,
+each naming the original as `history:N`. Full payloads stay in history. Records
+take no model request and are rendered from original history, so they do not
+accumulate paraphrase errors. New spans append without rewriting earlier records;
+adapters with explicit breakpoints mark the last record (`jecode_cache_anchor`).
+Condensing older records later rewrites that part of the prefix, and cache reuse
+still depends on the provider. Each span saves its boundaries, level and runtime
+notes; its text is deterministic. `agent/compaction/records.rs` decides when. At
+the start of a turn it keeps only the new request, once that frees 30k tokens.
+During work it waits for a 120k window plus the records. It keeps the latest
+exchange whole, since its results may be unread even when a message arrived after
+them, and earlier exchanges within a quarter of that window. At the budget,
+records that fit and save context take precedence over a model summary. Previews
+wait for the budget. Both thresholds scale with the square root of the backend's
+cache write premium over a cached read: about ×1.13 for five-minute Claude
+writes, ×1.45 for one-hour writes and ×1 where writes cost no premium. The
+**Auto-compact at** budget always wins. Records that
+outgrow their share are condensed oldest first, to one paragraph per turn and then
+to an index.
+
+When records cannot make room, `agent/compaction.rs` turns large tool payloads into
 previews while keeping the original results. If that is not enough,
 `agent/summary.rs` asks the same model for a plain-text handoff targeting at
-most 16 KiB. Proactive compaction first appends the request to the
-conversation's own request, with its tool definitions and selected effort, so
-the provider's cached prefix is reused (`Purpose::CachedSummary`). If that
+most 16 KiB, which folds the records in. Proactive compaction first appends the
+request to the conversation's own request, with its tool definitions and selected
+effort, so the provider's cached prefix is reused (`Purpose::CachedSummary`). If that
 request leaves no room, fails on context or length, or returns tool calls or
 no text, and for forced compaction, the transcript is folded into the previous
 summary in chronological portions, without tools and at medium effort when
@@ -166,9 +188,10 @@ requests remain an identical prefix for the provider's cache. Neither
 projection rewrites the saved system message.
 
 Each request attempt records its operation, resolved effort, timing and the
-usage counters the provider reported. Background title requests run at low
-effort and portion summaries at medium; both fall back to the provider default
-when the model does not advertise that level. A cached summary uses the
+usage counters the provider reported, including separate five-minute and one-hour
+cache writes when available. Missing breakdowns stay unknown. Background title
+requests run at low effort and portion summaries at medium; both fall back to the
+provider default when the model does not advertise that level. A cached summary uses the
 selected effort.
 
 ### Input and processes
@@ -387,13 +410,15 @@ credential environment variables of every available backend before launch.
 
 Caching follows each provider's model. Anthropic requests cache the built-in
 prompt, shared by every conversation, for one hour on its own breakpoint, and
-mark recent durable user-message boundaries. Through OpenRouter, requests
-to models that accept explicit cache markers (`backend/openrouter/cache.rs`)
-mark up to four recent durable user or tool-batch boundaries. The saved
-**Prompt cache** lifetime (`backend/retention.rs`) reaches adapters as a
-request-only field of the system message, read at every request, so Claude
-breakpoints on Anthropic and OpenRouter take a one-hour TTL by default, or the
-provider's five minutes when that is chosen. The ChatGPT route
+mark the end of the exact records, when present, and recent durable
+user-message boundaries. Through OpenRouter, requests to models that accept
+explicit cache markers (`backend/openrouter/cache.rs`) mark up to four
+boundaries: the end of the records first, then recent durable user or
+tool-batch boundaries. The saved **Prompt cache** lifetime
+(`backend/retention.rs`) reaches adapters as a request-only field of the system
+message, read at every request, so Claude breakpoints on Anthropic and
+OpenRouter take the provider's five-minute TTL by default, or one hour when that
+is chosen. The ChatGPT route
 relies on implicit caching with a stable per-conversation key. Reported cache
 reads and writes stay separate from charged cost.
 

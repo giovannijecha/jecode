@@ -340,6 +340,14 @@ fn usage(value: &Value) -> Option<Usage> {
         total_tokens: None,
         cached_tokens: cached,
         cache_write_tokens: written,
+        cache_write_5m_tokens: value
+            .get("cache_creation")
+            .and_then(|creation| creation.get("ephemeral_5m_input_tokens"))
+            .and_then(Value::as_usize),
+        cache_write_1h_tokens: value
+            .get("cache_creation")
+            .and_then(|creation| creation.get("ephemeral_1h_input_tokens"))
+            .and_then(Value::as_usize),
         reasoning_tokens: value
             .get("output_tokens_details")
             .and_then(|details| details.get("thinking_tokens"))

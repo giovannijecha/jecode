@@ -173,6 +173,7 @@ fn preview_only_reduction_shows_its_estimate_without_a_provider_reading() {
 
 #[test]
 fn a_summary_shows_its_estimate_without_ordinary_usage() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
@@ -219,6 +220,7 @@ fn a_summary_shows_its_estimate_without_ordinary_usage() {
 
 #[test]
 fn provider_recovery_keeps_the_meter_unknown_when_catalog_capacity_was_unknown() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![

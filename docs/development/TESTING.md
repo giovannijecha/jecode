@@ -76,6 +76,14 @@ Check the reported count: a command that matched no tests verified nothing. Use
 Keep credentials, logs, screenshots and temporary drivers out of tracked files;
 use the ignored `.tmp/` or `target` directories.
 
+## Offline long-context checks
+
+[Context checks](CONTEXT_CHECKS.md) describes two opt-in, provider-free probes:
+360 synthetic turns of record growth and read-only replay of saved session
+checkpoints. They validate context serialization and projection before spending
+live model calls. They do not establish model quality, provider cache behavior
+or ten-hour live performance.
+
 ## Native terminal fixtures
 
 These drive the real renderer through a pseudo-terminal and check input,
@@ -275,7 +283,8 @@ cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_run
 
 `agent::compaction::live_tests::live_summary_and_resumed_readback_preserve_critical_work`
 makes two Claude requests to check that a compaction summary keeps critical
-task facts across a resume. Results are recorded in
+task facts across a resume. It turns exact records off, so the model summary
+runs as it does when records cannot make room. Results are recorded in
 [Performance](PERFORMANCE.md#subscription-context-reuse).
 
 ## Manual checks
@@ -337,12 +346,12 @@ node --test tools/npm/release.test.mjs
 ```
 
 The [release runbook](RELEASING.md) describes staging and packing the platform
-binaries. After preparing a tarball, replace
-`path/to/giovannijecha-jecode-0.3.5.tgz` below
-with its actual path and run the lifecycle fixture on each supported platform:
+binaries. After preparing a tarball, replace the path below with the actual
+tarball path and `<version>` with the package version from `Cargo.toml`. Run the
+lifecycle fixture on each supported platform:
 
 ```text
-node tools/npm/lifecycle.mjs path/to/giovannijecha-jecode-0.3.5.tgz
+node tools/npm/lifecycle.mjs path/to/giovannijecha-jecode-<version>.tgz
 ```
 
 The fixture uses an isolated npm installation, local registry, and user home

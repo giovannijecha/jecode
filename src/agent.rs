@@ -27,6 +27,9 @@ pub struct Agent {
     auto_compact: Arc<AtomicU8>,
     /// User preference: whether Claude prompt caches last an hour.
     cache_retention: Arc<std::sync::atomic::AtomicBool>,
+    /// Exact records come before previews and summaries. Tests of those
+    /// fallback tiers turn them off explicitly.
+    records: bool,
     project_instructions: String,
     skills: crate::skills::Library,
     used_skills: std::collections::BTreeSet<String>,
@@ -94,6 +97,7 @@ impl Agent {
             cache_retention: Arc::new(std::sync::atomic::AtomicBool::new(
                 crate::backend::CacheRetention::default() == crate::backend::CacheRetention::Long,
             )),
+            records: compaction::records_by_default(),
             project_instructions: String::new(),
             skills: crate::skills::Library::default(),
             used_skills: std::collections::BTreeSet::new(),

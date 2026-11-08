@@ -14,6 +14,10 @@ const WAIT: Duration = Duration::from_secs(10);
 #[path = "interactive_tests/validation.rs"]
 mod validation;
 
+#[cfg(unix)]
+#[path = "interactive_tests/cleanup_diagnostics.rs"]
+mod cleanup_diagnostics;
+
 #[cfg(windows)]
 #[path = "interactive_tests/windows.rs"]
 mod windows;
@@ -331,79 +335,6 @@ fn stopping_a_terminal_stops_its_descendant_and_conversation_end_does_too() {
             std::fs::metadata(&marker).unwrap().len(),
             length,
             "terminal descendant survived its owner"
-        );
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn interactive_bash_job_groups_end_on_stop_and_conversation_change() {
-    for stop_conversation in [false, true] {
-        let root = Directory::new();
-        let tools = tools(&root);
-        let heartbeat = root.path().join("job-heartbeat");
-        let shell_pid = root.path().join("shell-pid");
-        let job_pid = root.path().join("job-pid");
-        let script = r#"printf '%s' "$$" > "$JECODE_TTY_SHELL"; while :; do printf x >> "$JECODE_TTY_HEARTBEAT"; sleep 0.02; done & printf '%s' "$!" > "$JECODE_TTY_JOB"; wait"#;
-        let started = execute(
-            &tools,
-            Path::new("/bin/bash"),
-            &["--noprofile", "--norc", "-i", "-c", script],
-            &[(
-                "env",
-                Value::object([
-                    (
-                        "JECODE_TTY_HEARTBEAT",
-                        Value::string(heartbeat.to_string_lossy()),
-                    ),
-                    (
-                        "JECODE_TTY_SHELL",
-                        Value::string(shell_pid.to_string_lossy()),
-                    ),
-                    ("JECODE_TTY_JOB", Value::string(job_pid.to_string_lossy())),
-                ]),
-            )],
-        );
-        let id = text(&started, "process_id").to_owned();
-        let beginning = Instant::now();
-        while std::fs::metadata(&heartbeat).map_or(0, |entry| entry.len()) < 2 {
-            assert!(
-                beginning.elapsed() < WAIT,
-                "background job did not start: {started:?}"
-            );
-            thread::sleep(Duration::from_millis(20));
-        }
-        let shell = std::fs::read_to_string(&shell_pid).unwrap();
-        let job = std::fs::read_to_string(&job_pid).unwrap();
-        let groups = Command::new("ps")
-            .args(["-o", "pgid=", "-p"])
-            .arg(format!("{},{}", shell.trim(), job.trim()))
-            .output()
-            .unwrap();
-        assert!(groups.status.success());
-        let groups = String::from_utf8(groups.stdout).unwrap();
-        let groups: Vec<_> = groups.split_whitespace().collect();
-        assert_eq!(
-            groups.len(),
-            2,
-            "could not inspect Bash job control: {groups:?}"
-        );
-        assert_ne!(
-            groups[0], groups[1],
-            "interactive Bash did not create a separate job group"
-        );
-        if stop_conversation {
-            tools.stop_processes();
-        } else {
-            let stopped = action(&tools, &id, "stop", &[]);
-            assert_eq!(text(&stopped, "status"), "stopped");
-        }
-        let length = std::fs::metadata(&heartbeat).unwrap().len();
-        thread::sleep(Duration::from_millis(300));
-        assert_eq!(
-            std::fs::metadata(&heartbeat).unwrap().len(),
-            length,
-            "interactive Bash job survived terminal cleanup"
         );
     }
 }

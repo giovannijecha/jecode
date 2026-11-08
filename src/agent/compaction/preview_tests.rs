@@ -124,21 +124,25 @@ fn large_result_can_fit_by_preview(field: &str, forced: bool) {
 
 #[test]
 fn a_large_stdout_result_uses_a_preview_without_a_model_summary() {
+    crate::agent::compaction::test_fallback_tiers();
     large_result_can_fit_by_preview("stdout", false);
 }
 
 #[test]
 fn a_large_read_content_uses_a_preview_without_a_model_summary() {
+    crate::agent::compaction::test_fallback_tiers();
     large_result_can_fit_by_preview("content", false);
 }
 
 #[test]
 fn a_forced_context_recovery_tries_a_preview_before_a_model_summary() {
+    crate::agent::compaction::test_fallback_tiers();
     large_result_can_fit_by_preview("content", true);
 }
 
 #[test]
 fn a_provider_context_rejection_retries_with_a_preview_and_keeps_the_tool_pair() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (

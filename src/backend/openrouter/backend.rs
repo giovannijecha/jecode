@@ -51,6 +51,15 @@ impl Backend for OpenRouter {
     fn limits(&mut self) -> Result<Option<backend::Limits>, backend::Failure> {
         self.limits()
     }
+    fn cache_write_premium(&self, retention: backend::CacheRetention) -> f64 {
+        // Only Claude models take an explicit lifetime on this route.
+        let model = self.model.strip_prefix('~').unwrap_or(&self.model);
+        if model.starts_with("anthropic/claude-") {
+            retention.write_premium()
+        } else {
+            1.0
+        }
+    }
     fn known_limits(&self) -> Option<backend::Limits> {
         self.known_limits()
     }

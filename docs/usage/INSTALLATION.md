@@ -36,9 +36,9 @@ jecode --version
 ```
 
 The command installs the current npm release, and `jecode --version` prints its
-number, such as `jecode 0.3.5 (…)`. The package includes the native executables and
-does not build Rust code or download a binary when you first run it. Node.js
-starts the npm command; the standalone executable below needs no Node.js.
+installed version, platform and build details. The package includes the native
+executables and does not build Rust code or download a binary when first run.
+Node.js starts the npm command; the standalone executable below needs no Node.js.
 
 If a global npm install fails with a permissions error, follow
 [npm's user-owned installation guidance](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally/).
@@ -129,8 +129,8 @@ build runs offline. The result is
 ./target/release/jecode --version
 ```
 
-The output looks like `jecode 0.3.5 (linux-x86_64-release, exe fnv1a64:…)`: the
-version, the platform and build profile, and a fingerprint of the executable
+The output starts with `jecode` and the version from `Cargo.toml`, followed by
+the platform and build profile and a fingerprint of the executable
 that helps tell builds apart.
 
 ### Install the standalone executable
