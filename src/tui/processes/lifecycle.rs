@@ -2,7 +2,7 @@
 //! count, the completion row and the idle continuation.
 
 use crate::json::Value;
-use crate::tui::{App, Feedback, Kind, Worker, activity, state::Item, text};
+use crate::tui::{App, Worker, activity, state::Item};
 
 impl App {
     /// A process starting or ending wakes the loop, also when nothing else would.
@@ -23,7 +23,7 @@ impl App {
         let mut dirty = !completions.is_empty();
         for completion in completions {
             let in_turn = self.state.tool_details.active;
-            self.show_process_completion(&completion);
+            self.state.process_completion(completion.value());
             if let Err(error) = self.save_process_completion(&completion, in_turn) {
                 self.warn(&format!("Process result could not be saved: {error}"));
             }
@@ -34,23 +34,6 @@ impl App {
             dirty = true;
         }
         dirty
-    }
-
-    /// A row at its position in the conversation and a notice on the status
-    /// row, loud only when the process failed by itself.
-    fn show_process_completion(&mut self, completion: &crate::tools::processes::Completion) {
-        self.state.process_completion(completion.value());
-        let calm = completion.stop_requested
-            || completion.status == "exited" && completion.exit_code == Some(0);
-        let kind = if calm { Kind::Notice } else { Kind::Warning };
-        self.state.notify(Feedback::result(
-            kind,
-            format!(
-                "Process · {} · {}",
-                completion.label(),
-                text::clean(&completion.command).replace('\n', " ")
-            ),
-        ));
     }
 
     /// Save the visible row independently of delivery to the model. The

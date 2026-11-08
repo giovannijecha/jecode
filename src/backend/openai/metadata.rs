@@ -56,7 +56,8 @@ pub(super) fn parse(response: &Value) -> Result<Catalog, String> {
 }
 
 /// The public Models API supplies IDs and creation times but no context or
-/// reasoning capability data. Its order is unspecified, so newest come first.
+/// reasoning capability data. Exact documented models fill that gap;
+/// unrecognized IDs remain unknown. Its order is unspecified, so newest come first.
 pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
     let rows = response
         .get("data")
@@ -64,12 +65,18 @@ pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
         .ok_or("OpenAI returned an invalid API model list")?;
     let mut seen = BTreeSet::new();
     let mut dated = Vec::new();
+    let mut limits = BTreeMap::new();
     for row in rows {
         let Some(id) = row.get("id").and_then(Value::as_str) else {
             continue;
         };
         if validate_model(id).is_err() || other_api_endpoint(id) || !seen.insert(id.to_owned()) {
             continue;
+        }
+        let mut efforts = vec![Effort::Default];
+        if let Some((documented, limit)) = documented_api_model(id) {
+            efforts.extend_from_slice(documented);
+            limits.insert(id.into(), limit);
         }
         let created = row.get("created").and_then(Value::as_usize).unwrap_or(0);
         dated.push((
@@ -79,15 +86,45 @@ pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
                 name: id.into(),
                 prompt_price: None,
                 completion_price: None,
-                efforts: api_efforts(id),
+                efforts,
             },
         ));
     }
     dated.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
     Ok(Catalog {
         models: dated.into_iter().map(|(_, model)| model).collect(),
-        limits: BTreeMap::new(),
+        limits,
     })
+}
+
+/// Explicit reasoning levels and limits for exact model IDs documented on their
+/// current pages at developers.openai.com/api/docs/models. The public Models API
+/// has neither; there is no family or snapshot match. Subscription windows come
+/// from account metadata and can differ from these.
+fn documented_api_model(id: &str) -> Option<(&'static [Effort], Limits)> {
+    const LIMITS: Limits = Limits {
+        context: 1_050_000,
+        output: Some(128_000),
+    };
+    let efforts: &'static [Effort] = match id {
+        "gpt-6-astra" | "gpt-6.1-sol" => &[
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
+        "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-terra" => &[
+            Effort::None,
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
+        _ => return None,
+    };
+    Some((efforts, LIMITS))
 }
 
 /// The public catalog mixes endpoints. Omit established non-Responses families;
@@ -117,32 +154,6 @@ fn other_api_endpoint(id: &str) -> bool {
     ]
     .iter()
     .any(|prefix| id.starts_with(prefix))
-}
-
-/// The public Models API has no effort metadata. Keep only exact model IDs
-/// whose levels are documented on their current OpenAI API model pages.
-fn api_efforts(id: &str) -> Vec<Effort> {
-    let documented: &[Effort] = match id {
-        "gpt-6-astra" | "gpt-6.1-sol" => &[
-            Effort::Low,
-            Effort::Medium,
-            Effort::High,
-            Effort::Xhigh,
-            Effort::Max,
-        ],
-        "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-terra" => &[
-            Effort::None,
-            Effort::Low,
-            Effort::Medium,
-            Effort::High,
-            Effort::Xhigh,
-            Effort::Max,
-        ],
-        _ => &[],
-    };
-    let mut efforts = vec![Effort::Default];
-    efforts.extend_from_slice(documented);
-    efforts
 }
 
 fn efforts(row: &Value) -> Vec<Effort> {
@@ -204,6 +215,28 @@ mod tests {
         }
         assert_eq!(models[5].efforts, [Effort::Default]);
         assert_eq!(models[6].efforts, [Effort::Default]);
+    }
+
+    #[test]
+    fn api_catalog_uses_documented_windows_for_exact_models_only() {
+        let response = crate::json::parse(
+            r#"{"data":[{"id":"gpt-6-astra"},{"id":"gpt-6.1-sol"},{"id":"gpt-6-sol"},{"id":"gpt-6-luna"},{"id":"gpt-6.1-terra"},{"id":"gpt-6.1-sol-2026-11-01"},{"id":"unknown-model"}]}"#,
+        )
+        .unwrap();
+        let catalog = parse_api(&response).unwrap();
+        for id in [
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-6.1-terra",
+        ] {
+            let limits = catalog.limits.get(id).unwrap();
+            assert_eq!(limits.context, 1_050_000);
+            assert_eq!(limits.output, Some(128_000));
+        }
+        assert!(!catalog.limits.contains_key("gpt-6.1-sol-2026-11-01"));
+        assert!(!catalog.limits.contains_key("unknown-model"));
     }
 
     #[test]

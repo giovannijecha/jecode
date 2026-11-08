@@ -42,14 +42,15 @@ pub struct Status {
     /// the window at least one point from the reading. Automatic compaction
     /// decides with the same estimate; the next provider reading replaces it.
     pub pending: Option<usize>,
-    /// Context window declared by the provider; None while unknown.
+    /// Context window from provider metadata or an exact documented model ID;
+    /// None while unknown.
     pub capacity: Option<usize>,
     /// Configured automatic reduction threshold, in percent.
     pub auto_compact: u8,
 }
 
 impl Status {
-    /// Whole percentage of the provider-declared window, rounded down.
+    /// Whole percentage of the known context window, rounded down.
     pub fn percent(&self) -> Option<usize> {
         let capacity = self.capacity.filter(|capacity| *capacity > 0)?;
         let percent = self.pending.or(self.tokens)? as u128 * 100 / capacity as u128;

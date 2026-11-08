@@ -2,6 +2,8 @@ use super::*;
 use crate::context::{AUTO_COMPACT_DEFAULT, Status, threshold};
 use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 
+mod openai_api_tests;
+
 /// Provider usage snapshots in order, with the turn events that explain them.
 fn trace(agent: &mut Agent, prompt: &str) -> (Result<(), String>, Vec<(&'static str, Status)>) {
     let mut trace = Vec::new();

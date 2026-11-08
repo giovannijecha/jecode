@@ -8,7 +8,9 @@ use crate::{
     context::Status,
     tools::processes::{Completion, Page, Process},
     tui::{
-        Kind,
+        Feedback, Kind,
+        activity::Activity,
+        feedback::Ending,
         processes::{Logs, Panel},
         state::State,
     },
@@ -61,6 +63,7 @@ pub(super) fn console() {
             }
             paint(columns, footer(columns), "PROCESS");
             paint(columns, footer(columns), "2 running");
+            paint(columns, api_context(columns), "27%");
             paint(
                 columns,
                 combined_footer(columns),
@@ -75,6 +78,13 @@ pub(super) fn console() {
             paint(columns, finished(columns, "exited", Some(0)), "Done");
             paint(columns, finished(columns, "stopped", None), "stopped");
             paint(columns, finished(columns, "timed_out", None), "Timed out");
+            paint(columns, completion_status(columns, true), "Thinking");
+            paint(columns, completion_status(columns, false), "Done");
+            paint(columns, completion_status(columns, false), "4 tools");
+            if columns >= 80 {
+                paint(columns, completion_status(columns, false), "29.4k");
+                paint(columns, completion_status(columns, false), "2.1k");
+            }
         }
         crate::tui::theme::set_light(false);
         println!("PROCESS_NATIVE_{columns}_VERIFIED");
@@ -175,6 +185,20 @@ fn footer(columns: usize) -> State {
     }
 }
 
+fn api_context(columns: usize) -> State {
+    State {
+        width: columns,
+        height: 30,
+        context: Some(Status {
+            tokens: Some(286_600),
+            capacity: Some(1_050_000),
+            auto_compact: 80,
+            pending: None,
+        }),
+        ..State::default()
+    }
+}
+
 fn combined_footer(columns: usize) -> State {
     let mut state = footer(columns);
     state.collaboration = vec![crate::json::Value::object([(
@@ -208,5 +232,22 @@ fn finished(columns: usize, status: &'static str, exit_code: Option<i32>) -> Sta
         }
         .value(),
     );
+    state
+}
+
+fn completion_status(columns: usize, working: bool) -> State {
+    let mut state = finished(columns, "exited", Some(101));
+    if working {
+        let mut activity = Activity::with_elapsed(Duration::from_millis(38_200));
+        activity.sent = 29_400;
+        activity.generated = 2_100;
+        state.activity = Some(activity);
+        state.status = "Thinking".into();
+    } else {
+        state.notify(Feedback::ending(
+            Ending::Done,
+            "38.2s · 4 tools · ↑ 29.4k · ↓ 2.1k",
+        ));
+    }
     state
 }

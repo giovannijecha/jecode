@@ -78,10 +78,11 @@ any ChatGPT subscription.
 The API model list does not report context windows or reasoning levels.
 The selector omits known model families for embeddings, images, moderation,
 audio, transcription and realtime endpoints; unknown IDs remain available.
-Jecode leaves context unknown and provides the documented reasoning levels for
-known API models, including `gpt-6.1-sol`. Other model IDs keep `default` in the
-menu; `/effort NAME` can still request a level explicitly. API and subscription
-capabilities remain separate. The API can reject models or settings that your
+Jecode provides documented context windows, output limits and reasoning levels
+for known API models, including `gpt-6.1-sol`. Other model IDs keep an unknown
+window and `default` in the menu; `/effort NAME` can still request a level
+explicitly. API and subscription capabilities remain separate. The API can
+reject models or settings that your
 project does not support; see the [OpenAI adapter reference](../development/OPENAI.md#direct-api-key).
 
 ## Anthropic API key

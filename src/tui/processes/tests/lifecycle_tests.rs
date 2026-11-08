@@ -107,6 +107,9 @@ fn a_completion_during_another_call_restores_after_that_call() {
     });
     create(&directory, "go");
     wait_until(&mut app, |app| completion_rows(app) == 1);
+    assert!(app.state.notice.is_none());
+    let status = frame(&app).join("\n");
+    assert!(status.contains("Esc interrupt"), "{status}");
     let process_row = app
         .state
         .items
