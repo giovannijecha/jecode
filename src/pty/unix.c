@@ -120,6 +120,14 @@ struct interrupt_state {
     uint64_t cutoff;
 };
 
+enum frame_error {
+    FRAME_READ_FAILED = -1,
+    FRAME_INVALID = -2,
+    FRAME_RESIZE_FAILED = -3,
+    FRAME_INTERRUPT_FAILED = -4,
+    FRAME_CLOSED = -5,
+};
+
 static uint64_t frame_generation(const unsigned char *bytes) {
     uint64_t value = 0;
     for (int index = 7; index >= 0; --index)
@@ -158,8 +166,8 @@ static int read_frame(int socket, struct frame *frame, int slave, int master,
                       struct input_queue *input_queue) {
     ssize_t count = read(socket, frame->bytes + frame->have,
                          frame->need - frame->have);
-    if (count == 0) return -1;
-    if (count < 0) return errno == EAGAIN || errno == EINTR ? 0 : -1;
+    if (count == 0) return FRAME_CLOSED;
+    if (count < 0) return errno == EAGAIN || errno == EINTR ? 0 : FRAME_READ_FAILED;
     frame->have += (size_t)count;
     if (frame->have != frame->need) return 0;
     if (frame->need == 5) {
@@ -172,7 +180,7 @@ static int read_frame(int socket, struct frame *frame, int slave, int master,
             (operation == 2 && length != 4) ||
             (operation == 3 && length != 8) ||
             (operation != 1 && operation != 2 && operation != 3) ||
-            (queue && operation != 1)) return -2;
+            (queue && operation != 1)) return FRAME_INVALID;
         frame->need += length;
         if (length) return 0;
     }
@@ -181,7 +189,7 @@ static int read_frame(int socket, struct frame *frame, int slave, int master,
         size_t length = frame->need - 13;
         if (length) {
             if (generation < interrupt->cutoff) goto complete;
-            if (queue->count == 16) return -2;
+            if (queue->count == 16) return FRAME_INVALID;
             size_t last = (queue->first + queue->count) % 16;
             memcpy(queue->bytes[last], frame->bytes + 13, length);
             queue->length[last] = length;
@@ -192,20 +200,40 @@ static int read_frame(int socket, struct frame *frame, int slave, int master,
         const unsigned char *payload = frame->bytes + 5;
         uint16_t columns = (uint16_t)(payload[0] | (payload[1] << 8));
         uint16_t rows = (uint16_t)(payload[2] | (payload[3] << 8));
-        if (!columns || !rows || terminal_size(slave, columns, rows) < 0)
-            return -2;
+        if (!columns || !rows) return FRAME_INVALID;
+        if (terminal_size(slave, columns, rows) < 0)
+            return FRAME_RESIZE_FAILED;
     } else {
-        if (interrupt->count == 16) return -2;
+        if (interrupt->count == 16) return FRAME_INVALID;
         size_t last = (interrupt->first + interrupt->count) % 16;
         interrupt->generation[last] = frame_generation(frame->bytes + 5);
         ++interrupt->count;
         if (deliver_interrupt(master, slave, input_queue, interrupt) < 0)
-            return -2;
+            return FRAME_INTERRUPT_FAILED;
     }
 complete:
     frame->have = 0;
     frame->need = 5;
     return 0;
+}
+
+static void report_control_error(int result, int error) {
+    switch (result) {
+        case FRAME_READ_FAILED:
+            fprintf(stderr, "Unix PTY control read failed: %s\n", strerror(error));
+            break;
+        case FRAME_RESIZE_FAILED:
+            fprintf(stderr, "Unix PTY resize failed: %s\n", strerror(error));
+            break;
+        case FRAME_INTERRUPT_FAILED:
+            fprintf(stderr, "Unix PTY interrupt failed: %s\n", strerror(error));
+            break;
+        case FRAME_CLOSED:
+            fprintf(stderr, "Unix PTY control channel closed\n");
+            break;
+        default:
+            fprintf(stderr, "Unix PTY control frame was invalid\n");
+    }
 }
 
 static int bridge(int master, int *slave, int input, int control,
@@ -278,8 +306,8 @@ static int bridge(int master, int *slave, int input, int control,
             int result = read_frame(control, &control_frame, *slave, master,
                                     NULL, &interrupt, &queue);
             if (result < 0) {
-                fprintf(stderr, "Unix PTY control read or command failed: %s\n",
-                        strerror(errno));
+                int saved_errno = errno;
+                report_control_error(result, saved_errno);
                 return 125;
             }
         }
@@ -312,8 +340,10 @@ static int bridge(int master, int *slave, int input, int control,
             int result = read_frame(input, &input_frame, *slave, master,
                                     &queue, &interrupt, &queue);
             if (result < 0) {
-                if (result == -2)
+                if (result == FRAME_INVALID)
                     fprintf(stderr, "Unix PTY input frame was invalid\n");
+                else if (result == FRAME_CLOSED)
+                    fprintf(stderr, "Unix PTY input channel closed\n");
                 else
                     fprintf(stderr, "Unix PTY input read failed: %s\n",
                             strerror(errno));

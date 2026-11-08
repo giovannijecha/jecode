@@ -69,7 +69,52 @@ static ssize_t probe_write(int fd, const void *bytes, size_t length) {
     return write(fd, bytes, length);
 }
 
+static int probe_frame_errors(void) {
+    struct frame frame = { .have = 0, .need = 5 };
+    struct input_queue queue = {0};
+    struct interrupt_state interrupt = {0};
+    errno = 0;
+    int read_result = read_frame(-1, &frame, -1, -1,
+                                 NULL, &interrupt, &queue);
+    int read_errno = errno;
+    report_control_error(read_result, read_errno);
+
+    int sockets[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) < 0) return 1;
+    unsigned char resize[] = {2, 4, 0, 0, 0, 80, 0, 24, 0};
+    if (write_all(sockets[1], resize, sizeof(resize)) < 0) return 2;
+    frame.have = 0;
+    frame.need = 5;
+    int resize_result = read_frame(sockets[0], &frame, -1, -1,
+                                   NULL, &interrupt, &queue);
+    if (resize_result == 0)
+        resize_result = read_frame(sockets[0], &frame, -1, -1,
+                                   NULL, &interrupt, &queue);
+    int resize_errno = errno;
+    report_control_error(resize_result, resize_errno);
+
+    unsigned char invalid[] = {9, 0, 0, 0, 0};
+    if (write_all(sockets[1], invalid, sizeof(invalid)) < 0) return 3;
+    frame.have = 0;
+    frame.need = 5;
+    int invalid_result = read_frame(sockets[0], &frame, -1, -1,
+                                    NULL, &interrupt, &queue);
+    report_control_error(invalid_result, errno);
+    close(sockets[1]);
+    frame.have = 0;
+    frame.need = 5;
+    int closed_result = read_frame(sockets[0], &frame, -1, -1,
+                                   NULL, &interrupt, &queue);
+    report_control_error(closed_result, errno);
+    close(sockets[0]);
+    return read_result == FRAME_READ_FAILED && read_errno == EBADF &&
+        resize_result == FRAME_RESIZE_FAILED && resize_errno == EBADF &&
+        invalid_result == FRAME_INVALID && closed_result == FRAME_CLOSED ? 0 : 4;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "frame-errors") == 0)
+        return probe_frame_errors();
     if (pipe(status_gate) < 0 ||
         fcntl(status_gate[0], F_SETFD, FD_CLOEXEC) < 0 ||
         fcntl(status_gate[1], F_SETFD, FD_CLOEXEC) < 0) return 125;
@@ -233,4 +278,22 @@ fn closed_pty_input_waits_for_authoritative_child_and_cleanup_status() {
     run(&probe, "eio", 7, 7);
     run(&probe, "eio_cleanup", 0, 125);
     run(&probe, "other_error", 0, 125);
+}
+
+#[test]
+fn control_errors_identify_the_failed_operation() {
+    let probe = Probe::compile();
+    let output = Command::new(&probe.executable)
+        .arg("frame-errors")
+        .output()
+        .unwrap();
+    let diagnostics = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{diagnostics}");
+    assert_eq!(
+        diagnostics,
+        "Unix PTY control read failed: Bad file descriptor\n\
+         Unix PTY resize failed: Bad file descriptor\n\
+         Unix PTY control frame was invalid\n\
+         Unix PTY control channel closed\n"
+    );
 }

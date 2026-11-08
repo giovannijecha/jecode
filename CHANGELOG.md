@@ -7,6 +7,8 @@
   remain for when records and previews cannot make room.
 - Claude prompt caches default to five minutes; one-hour retention remains
   available for breaks.
+- Unix terminal errors identify a failed control read, resize or interrupt,
+  and distinguish malformed frames and closed channels from system errors.
 - Commands remain visible and controllable during their initial wait, and long
   commands return control without stopping the process.
 - `/process` replaces `/terminal`, with running and recent commands, saved output
