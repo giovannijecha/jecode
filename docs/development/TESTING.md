@@ -76,6 +76,14 @@ Check the reported count: a command that matched no tests verified nothing. Use
 Keep credentials, logs, screenshots and temporary drivers out of tracked files;
 use the ignored `.tmp/` or `target` directories.
 
+## Offline long-context checks
+
+[Context checks](CONTEXT_CHECKS.md) describes two opt-in, provider-free probes:
+360 synthetic turns of record growth and read-only replay of saved session
+checkpoints. They validate context serialization and projection before spending
+live model calls. They do not establish model quality, provider cache behavior
+or ten-hour live performance.
+
 ## Native terminal fixtures
 
 These drive the real renderer through a pseudo-terminal and check input,

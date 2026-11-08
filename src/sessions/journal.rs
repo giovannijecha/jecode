@@ -266,3 +266,6 @@ fn preserve_tail(path: &Path, length: u64) -> Result<(), String> {
         })
         .map_err(|error| format!("Could not repair incomplete checkpoint: {error}"))
 }
+
+#[cfg(test)]
+mod replay_tests;

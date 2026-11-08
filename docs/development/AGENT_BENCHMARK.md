@@ -228,3 +228,32 @@ observing these results.
 The long sessions show lower weighted-token use on this fixture, with the
 quality limits above. Together with the tight-budget GPT result, they leave the
 requested general 25% reduction at equal quality **unconfirmed**.
+
+### Diagnosing the GPT gap without new model calls
+
+The same 16 short runs above were decomposed from their original usage records,
+eight per budget condition. With the fixed GPT weights, tight-budget Jecode's
+553,090 mean comprises 305,650 fresh input, 94,013 weighted cache reads and
+153,428 weighted output, against Codex's 239,329, 204,390 and 188,556. Neither
+reported cache writes in these runs. Reaching 25% below Codex would require at
+most 474,207: another 78,884 weighted tokens per Jecode run.
+
+By recorded turn windows, refactoring is the only tight turn where Jecode costs
+more: 313,008 against 264,050. Matching that turn alone would still leave about
+29,925 to remove. Turn assignment uses Jecode request starts and Codex usage-event
+timestamps; costs around a boundary are therefore less directly comparable than
+the reconciled full-run totals. Provider usage cannot reliably attribute these
+tokens to individual tool-result bytes, rereads or prompt sections, so this
+decomposition does not establish a particular optimization's cause or benefit.
+
+The saved GPT checkpoints before the period-lock and obsolete-flag edits retain
+the current user requests in the live window, without summary or preview. At
+the later edit the earlier lock request also fits in its native record in full.
+The saved actions include tests asserting the overly strict lock and documentation
+explicitly naming the removed flag. This supports no finding of lost requirements
+from compaction. Reconstructed projection does not prove the complete historical
+wire request or how the provider attended to it; those bodies were not saved.
+
+For cheaper screening, [offline context checks](CONTEXT_CHECKS.md) exercise saved
+context checkpoints and sustained record growth without provider calls. Their results
+remain separate from live quality, cache and weighted-token comparisons.
