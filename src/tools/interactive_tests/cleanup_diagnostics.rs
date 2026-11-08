@@ -9,6 +9,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+const PS_DEADLINE: Duration = Duration::from_secs(5);
+
 fn pid(path: &Path) -> Option<u32> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
@@ -36,7 +38,9 @@ fn process_snapshot(
         Ok(child) => child,
         Err(error) => return format!("ps spawn failed: {error}"),
     };
-    let deadline = Instant::now() + Duration::from_secs(1);
+    // Bounded, yet generous: a full `ps -A` can take over a second on a loaded
+    // CI host, and this runs only after a cleanup assertion has already failed.
+    let deadline = Instant::now() + PS_DEADLINE;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
@@ -44,7 +48,7 @@ fn process_snapshot(
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return "ps timed out after 1 s (killed)".into();
+                return format!("ps timed out after {} s (killed)", PS_DEADLINE.as_secs());
             }
             Err(error) => break Err(error),
         }
