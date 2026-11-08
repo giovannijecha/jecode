@@ -1,6 +1,7 @@
 # Jecode vs Codex and Claude Code
 
-For the current context work, see the [November 8 results](#selected-native-build-2026-11-08)
+For the current context work, see the [final tight GPT check](#final-tight-gpt-check-2026-11-08),
+the [normal-budget results](#selected-native-build-2026-11-08)
 and [forty-turn quality scores](#forty-turn-confirmation). The requested general
 25% reduction at equal quality remains unconfirmed. The five-turn results below
 are historical.
@@ -226,9 +227,51 @@ The retained control still missed 25% in this fresh block: the required maximum
 was 535,972, leaving 35,618 weighted tokens per run. This result supplements the
 earlier -12.5% tight block; neither block establishes the requested general floor.
 
+### Final tight GPT check, 2026-11-08
+
+The prepared 0.4.5 Windows executable retained the measured system prompt,
+context policy and provider adapters. Three isolated prompt variants were
+screened beforehand: a simple-design sentence, removal of duplicated tool
+instructions, and general guidance on preserving valid behavior and reconciling
+changed artifacts. None showed a consistent quality improvement across the
+prepared late-session cases; no prompt change was adopted. These one-turn
+screens are described in [context checks](CONTEXT_CHECKS.md).
+
+Four retained-build runs and four fresh Codex controls then used the same
+six-turn fixture and a budget near 60k, from 12:18 to 12:49 UTC. Two matched
+waves each started two runs per harness alongside one another. Primary models
+were GPT-6.1 Sol/high; Codex CLI 0.167.0 ran three GPT-6 Sol/high descendants,
+whose usage is included. Global, project and fixture instruction hashes and
+modification times stayed fixed. The actual Codex rollout instructions and
+model/effort pairs were audited, and native usage reconciled with the scalars.
+Sessions shared the Windows host and network; local verification and CI also ran.
+
+| Harness, 4 runs each | Weighted tokens, mean (run range) | Active seconds, mean | Hidden checks | Recall / 6 |
+| --- | ---: | ---: | ---: | ---: |
+| Jecode 0.4.5 | 614,370 (563,951-657,638) | 673.5 | 21/21 each | 6 each |
+| Codex | 593,661 (407,009-808,406) | 864.3 | 21/21 each | 3-5 |
+
+Jecode used **3.49% more weighted tokens** and **22.07% less active time** in
+this block. Tokens cover T1-T6; active time covers T1-T5. All eight no-tools
+probes were verifiable and made zero calls. Fixed weights remain fresh input
+1, cache read 0.1 and GPT-family output 8. No acceptance criterion, generated
+workspace or raw usage total was adjusted.
+
+Jecode's mean comprises 357,153 fresh input, 99,741 weighted cache reads and
+157,476 weighted output, against Codex's 240,532, 180,883 and 172,246. Two early
+Jecode requests reported zero cached tokens after the previous request had
+reported 8,704. Their cause is unestablished; the raw totals include them.
+
+The 25% ceiling was 445,246, leaving 169,123 weighted tokens per Jecode run to
+remove. Earlier tight blocks measured -12.5% and -20.0%; this latest block
+supersedes them as the current comparison, while all original results remain
+above. The variation and latest miss leave the general token floor open.
+
 ### Forty-turn confirmation
 
-The same retained executable completed two 40-turn sessions per primary model.
+The retained executable completed two 40-turn sessions per primary model.
+It reported version 0.3.5. The 0.4.5 preparation preserves that Windows
+model-facing runtime; Unix PTY changes have separate native regression checks.
 The following cost/time comparisons use older rival runs from November 7, not
 same-hour controls. Claude Code stopped at 28 and 30 turns, so its comparison
 ends at the common turn 25. Token counters are cut at that turn's end, before any
