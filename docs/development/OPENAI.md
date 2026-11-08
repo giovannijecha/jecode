@@ -17,7 +17,10 @@ no ChatGPT `session-id` header. Responses use `store: false`; Jecode keeps its
 own recoverable conversation.
 
 The API-key route honors an explicit internal output-token allowance with
-`max_output_tokens`; the subscription route continues to omit that field.
+`max_output_tokens`; the subscription route continues to omit that field. For
+models with documented limits the allowance is the maximum output, reduced so
+the estimated input plus output fits the context window. Other models send no
+allowance.
 
 The catalog's order is unspecified, so the selector lists models newest first by
 their `created` time. It omits established embedding, image, moderation, audio,

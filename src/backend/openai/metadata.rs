@@ -56,7 +56,7 @@ pub(super) fn parse(response: &Value) -> Result<Catalog, String> {
 }
 
 /// The public Models API supplies IDs and creation times but no context or
-/// reasoning capability data. Exact documented model limits fill that gap;
+/// reasoning capability data. Exact documented models fill that gap;
 /// unrecognized IDs remain unknown. Its order is unspecified, so newest come first.
 pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
     let rows = response
@@ -73,7 +73,9 @@ pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
         if validate_model(id).is_err() || other_api_endpoint(id) || !seen.insert(id.to_owned()) {
             continue;
         }
-        if let Some(limit) = documented_api_limits(id) {
+        let mut efforts = vec![Effort::Default];
+        if let Some((documented, limit)) = documented_api_model(id) {
+            efforts.extend_from_slice(documented);
             limits.insert(id.into(), limit);
         }
         let created = row.get("created").and_then(Value::as_usize).unwrap_or(0);
@@ -84,7 +86,7 @@ pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
                 name: id.into(),
                 prompt_price: None,
                 completion_price: None,
-                efforts: api_efforts(id),
+                efforts,
             },
         ));
     }
@@ -95,18 +97,34 @@ pub(super) fn parse_api(response: &Value) -> Result<Catalog, String> {
     })
 }
 
-/// Current exact API model IDs from developers.openai.com/api/docs/models.
-/// Subscription windows come from account metadata and can differ from these.
-fn documented_api_limits(id: &str) -> Option<Limits> {
-    match id {
-        "gpt-6-astra" | "gpt-6.1-sol" | "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-terra" => {
-            Some(Limits {
-                context: 1_050_000,
-                output: Some(128_000),
-            })
-        }
-        _ => None,
-    }
+/// Explicit reasoning levels and limits for exact model IDs documented on their
+/// current pages at developers.openai.com/api/docs/models. The public Models API
+/// has neither; there is no family or snapshot match. Subscription windows come
+/// from account metadata and can differ from these.
+fn documented_api_model(id: &str) -> Option<(&'static [Effort], Limits)> {
+    const LIMITS: Limits = Limits {
+        context: 1_050_000,
+        output: Some(128_000),
+    };
+    let efforts: &'static [Effort] = match id {
+        "gpt-6-astra" | "gpt-6.1-sol" => &[
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
+        "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-terra" => &[
+            Effort::None,
+            Effort::Low,
+            Effort::Medium,
+            Effort::High,
+            Effort::Xhigh,
+            Effort::Max,
+        ],
+        _ => return None,
+    };
+    Some((efforts, LIMITS))
 }
 
 /// The public catalog mixes endpoints. Omit established non-Responses families;
@@ -136,32 +154,6 @@ fn other_api_endpoint(id: &str) -> bool {
     ]
     .iter()
     .any(|prefix| id.starts_with(prefix))
-}
-
-/// The public Models API has no effort metadata. Keep only exact model IDs
-/// whose levels are documented on their current OpenAI API model pages.
-fn api_efforts(id: &str) -> Vec<Effort> {
-    let documented: &[Effort] = match id {
-        "gpt-6-astra" | "gpt-6.1-sol" => &[
-            Effort::Low,
-            Effort::Medium,
-            Effort::High,
-            Effort::Xhigh,
-            Effort::Max,
-        ],
-        "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-terra" => &[
-            Effort::None,
-            Effort::Low,
-            Effort::Medium,
-            Effort::High,
-            Effort::Xhigh,
-            Effort::Max,
-        ],
-        _ => &[],
-    };
-    let mut efforts = vec![Effort::Default];
-    efforts.extend_from_slice(documented);
-    efforts
 }
 
 fn efforts(row: &Value) -> Vec<Effort> {

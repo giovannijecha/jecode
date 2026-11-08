@@ -8,9 +8,10 @@ Changes since 0.3.5.
 
 ### Long work and context
 
-- The context meter uses documented limits for recognized OpenAI API models,
-  including `gpt-6.1-sol`. Subscription limits remain account-specific; unknown
-  models keep an unknown window.
+- Recognized OpenAI API models, including `gpt-6.1-sol`, use their documented
+  context and output limits for the context meter, automatic reduction and the
+  output allowance. Subscription limits remain account-specific; unknown models
+  keep an unknown window.
 - Long conversations use deterministic native records of earlier work without a
   model request, with references to the original conversation. Model summaries
   remain for when records and previews cannot make room.

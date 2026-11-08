@@ -68,4 +68,12 @@ fn openai_api_key_usage_has_a_documented_window_after_catalog_discovery() {
     let requests = fixture.finish();
     assert!(requests[0].headers[0].starts_with("GET /models "));
     assert!(requests[1].headers[0].starts_with("POST /responses "));
+    // The documented output limit becomes the request's allowance.
+    assert_eq!(
+        requests[1]
+            .body
+            .get("max_output_tokens")
+            .and_then(Value::as_usize),
+        Some(128_000)
+    );
 }

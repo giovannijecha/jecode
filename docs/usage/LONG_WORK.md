@@ -88,7 +88,10 @@ minimal summary do not fit, the turn stops with an error naming the budget:
 raise **Auto-compact at** or choose a model with a larger window, then continue.
 A failed or interrupted summary leaves the previous context in place.
 
-The context window comes from the provider's catalog. Your account may offer
+The context window comes from the provider's catalog. The OpenAI API model list
+reports none, so Jecode uses the documented window of recognized API models;
+with other API models the window stays unknown, and Jecode reduces the context
+only after the provider rejects a request as too long. Your account may offer
 less than a model's public specification.
 
 ## Input you take back
