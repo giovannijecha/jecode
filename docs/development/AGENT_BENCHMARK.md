@@ -191,11 +191,13 @@ the allowance was unchanged. The hypothesis was fewer subsequent rereads; it
 still needed to offset sending a larger live tail.
 
 Four frozen control runs, four candidate runs and four fresh Codex runs used the
-same six-turn fixture, GPT-6.1 Sol/high and a budget near 60k on Windows. The block
+same six-turn fixture and a budget near 60k on Windows. Primary conversations
+used GPT-6.1 Sol/high. The block
 ran from 09:22 to 09:48 UTC in two matched waves, each starting two runs per
 group together. Several sessions shared the machine and network; local verification
-also ran during the block. Descendant usage is included with the fixed GPT
-weights. Token totals cover T1-T6; active time covers T1-T5.
+also ran during the block. Codex ran seven GPT-6 Sol/high descendants; their
+usage is included with the fixed GPT weights. The model match is on the primary
+conversation. Token totals cover T1-T6; active time covers T1-T5.
 
 | Build, 4 runs each | Weighted tokens, mean (run range) | Against Codex | Active seconds, mean | Recall / 6 |
 | --- | ---: | ---: | ---: | ---: |
