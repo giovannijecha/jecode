@@ -79,9 +79,10 @@ default cache lasts five minutes after its last use: after a longer break, the
 next request writes what is in the window to the cache again.
 
 `/settings` → **Context** → **Prompt cache** chooses **5 minutes**, the default,
-or **1 hour**. One hour keeps a prefix eligible for reuse across longer breaks,
-but cache writes cost more (twice the input price instead of 1.25 times, at
-[Anthropic's API list prices](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)).
+or **1 hour**. The default changed from one hour in 0.3.5; choose **1 hour** to
+keep the earlier behavior. One hour keeps a prefix eligible for reuse across
+longer breaks, but cache writes cost more: twice the input price instead of
+1.25 times at [Anthropic's API list prices](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
 Records reduce what must be rewritten after a break; the tradeoff depends on
 pauses, the active window and provider cache hits. The choice applies from the next
 request, in the current conversation and its collaborators, for Claude on

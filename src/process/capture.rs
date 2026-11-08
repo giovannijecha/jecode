@@ -4,6 +4,8 @@ use std::io::Read;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+#[cfg(all(test, unix))]
+use std::time::Instant;
 
 #[derive(Default)]
 pub(super) struct Capture {
@@ -11,6 +13,20 @@ pub(super) struct Capture {
     pub(super) truncated: bool,
     pub(super) error: Option<String>,
     pub(super) total_bytes: usize,
+    #[cfg(all(test, unix))]
+    eof_at: Option<Instant>,
+}
+
+#[cfg(all(test, unix))]
+pub(crate) struct Probe(pub(super) [Arc<Mutex<Capture>>; 2]);
+
+#[cfg(all(test, unix))]
+impl Probe {
+    pub(crate) fn eof_at(&self) -> [Option<Instant>; 2] {
+        self.0
+            .each_ref()
+            .map(|stream| stream.lock().unwrap().eof_at)
+    }
 }
 
 /// What a capture thread reports to the supervising loop, which waits on
@@ -101,6 +117,10 @@ pub(super) fn capture(
                         && let Err(error) = spool.finish()
                     {
                         output.lock().unwrap().error = Some(error.to_string());
+                    }
+                    #[cfg(all(test, unix))]
+                    {
+                        output.lock().unwrap().eof_at = Some(Instant::now());
                     }
                     break;
                 }

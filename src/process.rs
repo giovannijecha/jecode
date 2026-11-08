@@ -13,6 +13,8 @@ mod windows;
 
 mod capture;
 pub(crate) mod duplex;
+#[cfg(all(test, unix))]
+pub(crate) use capture::Probe as CaptureProbe;
 use capture::{Capture, Events, capture};
 #[cfg(unix)]
 pub(crate) use unix::sandbox_policy;
@@ -217,6 +219,13 @@ pub struct Started {
     owner: unix::Owner,
     started: Instant,
     idle: Option<Duration>,
+}
+
+#[cfg(all(test, unix))]
+impl Started {
+    pub(crate) fn capture_probe(&self) -> CaptureProbe {
+        CaptureProbe([Arc::clone(&self.stdout), Arc::clone(&self.stderr)])
+    }
 }
 
 fn start(

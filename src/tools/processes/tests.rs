@@ -463,6 +463,8 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
         }),
         changed: Condvar::new(),
         monitor: Mutex::new(None),
+        #[cfg(all(test, unix))]
+        capture_probe: None,
         started: Instant::now(),
         scope: Weak::new(),
     };

@@ -312,3 +312,150 @@ fn inherited_shell_tracing_cannot_print_target_arguments() {
     assert_eq!(output.stdout, b"fixture-private-value");
     assert!(output.stderr.is_empty(), "Shell tracing reached stderr");
 }
+
+const LATE_CAPTURE_EOF: &str = "process::unix::tests::late_capture_eof_fixture";
+
+fn read_gate_byte(stream: &mut std::os::unix::net::UnixStream) -> std::io::Result<u8> {
+    use std::io::{Error, ErrorKind, Read};
+    stream.set_nonblocking(true)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut byte = [0];
+    loop {
+        match stream.read(&mut byte) {
+            Ok(1) => return Ok(byte[0]),
+            Ok(0) => return Err(Error::from(ErrorKind::UnexpectedEof)),
+            Ok(_) => unreachable!(),
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == ErrorKind::WouldBlock && Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                return Err(Error::from(ErrorKind::TimedOut));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[test]
+fn late_capture_eof_fixture() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::os::unix::process::CommandExt;
+
+    let Some(mode) = std::env::var_os("JECODE_LATE_CAPTURE_EOF_MODE") else {
+        return;
+    };
+    let gate = std::env::var_os("JECODE_LATE_CAPTURE_EOF_GATE").unwrap();
+    if mode == "holder" {
+        let mut stream = UnixStream::connect(gate).unwrap();
+        stream.write_all(b"r").unwrap();
+        read_gate_byte(&mut stream).unwrap();
+        std::io::stdout()
+            .write_all(b"LATE_CAPTURE_OUTPUT\n")
+            .unwrap();
+        return;
+    }
+    let mut holder = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", LATE_CAPTURE_EOF])
+        .env("JECODE_LATE_CAPTURE_EOF_MODE", "holder")
+        .env("JECODE_LATE_CAPTURE_EOF_GATE", gate)
+        .process_group(0)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::io::stdout().write_all(b"ROOT_READY\n").unwrap();
+    holder.wait().unwrap();
+}
+
+#[test]
+fn capture_probe_records_eof_after_unknown_cleanup() {
+    use crate::{output, redact::Redactor};
+    use std::io::Write;
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::sync::mpsc;
+
+    struct Gate {
+        path: std::path::PathBuf,
+        release: Option<UnixStream>,
+    }
+    impl Drop for Gate {
+        fn drop(&mut self) {
+            if let Some(mut stream) = self.release.take() {
+                let _ = stream.write_all(b"x");
+            }
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+    let directory = Directory::new();
+    let mut gate = Gate {
+        path: std::path::PathBuf::from(format!("/tmp/jceof-{}", crate::sessions::identifier())),
+        release: None,
+    };
+    let listener = UnixListener::bind(&gate.path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let cancellation = Cancellation::default();
+    let signal = cancellation.clone();
+    let (sender, receiver) = mpsc::channel();
+    let acceptor = thread::spawn(move || {
+        let result = (|| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            read_gate_byte(&mut stream)?;
+            Ok::<_, std::io::Error>(stream)
+        })();
+        signal.cancel();
+        let _ = sender.send(result);
+    });
+    let store = output::Store::new(directory.path().join("output"), Redactor::empty());
+    let logs = store.create().unwrap();
+    let stdout = store.resolve(&logs.stdout_ref).unwrap();
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", LATE_CAPTURE_EOF])
+        .env("JECODE_LATE_CAPTURE_EOF_MODE", "root")
+        .env("JECODE_LATE_CAPTURE_EOF_GATE", &gate.path);
+    let started =
+        process::start_logged(&mut command, &cancellation, [logs.stdout, logs.stderr]).unwrap();
+    let probe = started.capture_probe();
+    let result = started.supervise(None, &cancellation, &mut |_| Ok(()));
+    let error = result.err().unwrap().message;
+    assert!(error.contains("output capture remains active"), "{error}");
+    assert_eq!(probe.eof_at()[0], None, "stdout EOF was already observed");
+    let unknown_at = Instant::now();
+    gate.release = Some(
+        receiver
+            .recv_timeout(Duration::from_secs(6))
+            .unwrap()
+            .unwrap(),
+    );
+    gate.release.as_mut().unwrap().write_all(b"x").unwrap();
+    acceptor.join().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let eof_at = loop {
+        if let Some(eof_at) = probe.eof_at()[0] {
+            break eof_at;
+        }
+        assert!(Instant::now() < deadline, "late stdout EOF missing");
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(eof_at > unknown_at, "EOF did not follow unknown cleanup");
+    assert!(
+        std::fs::read_to_string(stdout)
+            .unwrap()
+            .contains("LATE_CAPTURE_OUTPUT"),
+        "late capture output missing"
+    );
+}

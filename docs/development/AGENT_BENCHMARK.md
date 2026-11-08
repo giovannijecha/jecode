@@ -1,5 +1,10 @@
 # Jecode vs Codex and Claude Code
 
+For the current context work, see the [November 8 results](#selected-native-build-2026-11-08)
+and [forty-turn quality scores](#forty-turn-confirmation). The requested general
+25% reduction at equal quality remains unconfirmed. The five-turn results below
+are historical.
+
 Jecode used fewer cost-weighted tokens than both first-party harnesses on the
 maintainer's five-turn coding benchmark. With Claude it also finished sooner;
 with GPT, Codex finished sooner. Every run passed all 21 hidden acceptance tests

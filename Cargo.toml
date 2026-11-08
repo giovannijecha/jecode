@@ -1,6 +1,6 @@
 [package]
 name = "jecode"
-version = "0.3.5"
+version = "0.4.5"
 edition = "2024"
 rust-version = "1.95"
 description = "A fast, efficient terminal coding agent in Rust"

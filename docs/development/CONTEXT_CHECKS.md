@@ -98,10 +98,27 @@ times, not agent-task speedups or a ten-hour quality result.
 4. Reserve full-duration runs for questions that require them. A test-only or
    documentation change does not justify rerunning an unchanged model session.
 
-Late-context probes can evaluate a particular prepared context with fewer live
-calls than rebuilding its entire history. They still need a controlled fixture,
-an authentic request and independent quality checks, and establish only that
-local condition. They are not an implemented shortcut to a ten-hour trajectory.
+For a known late-session failure, screen the next decision in isolation before
+repeating the full trajectory. The maintainer's fixture now supports this method:
+
+1. Select the last complete native checkpoint before the target request, with
+   no pending tools or partially returned results. Preserve the original journal.
+2. Restore the corresponding project snapshot in a fresh directory and allocate
+   a new native session identity and temporary area. Verify the source path set
+   and hashes; relocate only session-owned paths. Keep scorer metadata outside
+   the model-visible project.
+3. Validate the seed with offline replay, then resume it with local commands
+   only. Confirm that no provider request was made and the source stayed intact.
+4. Freeze the candidate binary, model, effort and settings. Send the original
+   next request once, then run the unchanged hidden and project suites. Compare
+   earlier failures with the precondition so inherited failures stay visible.
+
+This sends one live task turn per prepared case instead of regenerating its
+earlier turns. It measures that decision in the prepared context. Source hashes
+do not independently establish historical documentation or scratch contents;
+relocated state also changes the wire prefix and cache behavior. Keep these
+quality screens separate from full-session quality and weighted-token results.
+The fixture preparation is maintainer tooling, not a new Jecode CLI command.
 Never copy plan OAuth records to seed an isolated home; use an independently
 authenticated home or an approved API-key backend.
 

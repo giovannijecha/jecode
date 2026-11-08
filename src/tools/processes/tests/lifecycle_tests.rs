@@ -211,6 +211,8 @@ fn numbering_waits_for_a_reader_already_scanning_the_list() {
         state: Mutex::new(State::default()),
         changed: Condvar::new(),
         monitor: Mutex::new(None),
+        #[cfg(all(test, unix))]
+        capture_probe: None,
         started: Instant::now(),
         scope: Arc::downgrade(&scope),
     });
@@ -247,6 +249,8 @@ fn a_report_that_cannot_read_its_output_still_owes_the_outcome() {
         }),
         changed: Condvar::new(),
         monitor: Mutex::new(None),
+        #[cfg(all(test, unix))]
+        capture_probe: None,
         started: Instant::now(),
         scope: Arc::downgrade(&scope),
     };
