@@ -26,14 +26,23 @@ pub(super) fn marker(retention: CacheRetention) -> Value {
 
 pub(super) fn mark_recent(messages: &mut [Value], marker: &Value) {
     let mut marked = 0;
+    // The end of the native records keeps its slot: that prefix outlives compactions.
+    let anchor = messages
+        .iter()
+        .rposition(|message| message.get(crate::context::digest::ANCHOR).is_some());
+    if let Some(index) = anchor
+        && mark(&mut messages[index], marker)
+    {
+        marked += 1;
+    }
     let mut inside_tool_batch = false;
-    for message in messages.iter_mut().rev() {
+    for (index, message) in messages.iter_mut().enumerate().rev() {
         let tool = message.get("role").and_then(Value::as_str) == Some("tool");
         if tool && inside_tool_batch {
             continue;
         }
         inside_tool_batch = tool;
-        if mark(message, marker) {
+        if Some(index) != anchor && mark(message, marker) {
             marked += 1;
             if marked == 4 {
                 break;
@@ -79,5 +88,35 @@ fn mark(message: &mut Value, marker: &Value) -> bool {
             true
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(text: &str) -> Value {
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string(text)),
+        ])
+    }
+
+    fn marked(message: &Value) -> bool {
+        message.encode().contains("cache_control")
+    }
+
+    #[test]
+    fn the_end_of_the_records_keeps_a_breakpoint_within_the_limit_of_four() {
+        let mut messages = (0..8)
+            .map(|index| message(&format!("message {index}")))
+            .collect::<Vec<_>>();
+        if let Value::Object(fields) = &mut messages[1] {
+            fields.insert(crate::context::digest::ANCHOR.into(), Value::Bool(true));
+        }
+        mark_recent(&mut messages, &marker(CacheRetention::Short));
+        assert!(marked(&messages[1]), "the anchor outlives recent messages");
+        assert_eq!(messages.iter().filter(|message| marked(message)).count(), 4);
+        assert!(messages[5..].iter().all(marked), "the latest three follow");
     }
 }

@@ -11,7 +11,8 @@ changes prepared for 0.3.5, not a new benchmark of the 0.3.5 release.
 
 ## Results
 
-Arithmetic means, rounded. Each comparison uses the same model and high effort.
+Arithmetic means, rounded. Each comparison matches the primary model and high
+effort; descendant model choices are noted where verified.
 Token ranges show the lowest and highest run; `k` means 1,000 weighted tokens.
 
 | Model | Harness | Runs | Weighted tokens, mean (range) | Model requests, mean | Active time, mean |
@@ -116,3 +117,114 @@ establish universal superiority, a plan-usage multiplier, API-key performance,
 or results on Linux and macOS. The later native HTTP and WebSocket work has
 separate [before/after measurements](PERFORMANCE.md#provider-transports);
 those results must not be added to this comparison to predict a new lead.
+
+## Exact records, development branch, 2026-11-07
+
+A later evening measured the exact native records described in
+[Architecture](ARCHITECTURE.md) against Claude Code 2.1.319 and Codex 0.167, on
+the same Windows machine, primary models, effort and weights as above. Each Jecode row is
+one build of the `context-engine` branch. Unless noted, the rival ran in the same
+hour. Every six-turn run passed all 21 hidden tests; the forty-turn scores are
+reported separately below. These figures are not in the CSV.
+
+| Workload | Model | Jecode, mean | Rival, mean | Tokens | Time |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Six turns, no pauses, 3 runs each | Sonnet 5.5 | 566–682k · 292 s | Claude Code 1,013k · 379 s | −44%..−33% | −23% |
+| Six turns, no pauses, 4 runs each | GPT-6.1 Sol | 431k · 456 s | Codex 522k · 489 s | −17% | −7% |
+| Six turns, budget near 60–70k, 3 runs each | Sonnet 5.5 | 634–804k · 299 s | Claude Code 1,090k · 635 s¹ | −42%..−26% | −53% |
+| Six turns, budget near 60k, 3 runs each | GPT-6.1 Sol | 557k · 476 s | Codex 528k · 641 s | +5% | −26% |
+| Six turns, budget near 100k, 3 runs each | GPT-6.1 Sol | 443k · 486 s | Codex 702k · 512 s | −37% | −5% |
+| Forty turns, 2 runs each² | GPT-6.1 Sol | 4,716k · 78 min | Codex 9,557k · 113 min | −51% | −31% |
+
+The Sonnet token intervals reflect unknown cache-write lifetimes, not run
+variation or a confidence interval. Those Jecode journals recorded aggregate
+writes while requests mixed a one-hour shared prefix with five-minute blocks.
+The lower bound prices every unknown write at 1.25× and the upper bound at 2×.
+Claude Code's transcripts reported both buckets. The normal Sonnet pair began in
+the same minute.
+
+¹ Claude Code ran about six hours earlier the same day; at a 10% threshold its context peaked at
+73k. ² An earlier build of the branch, before the fixes found in review. Its hidden
+tests passed 168–169 of 171 against Codex's 169–171; its recall probes scored
+56–57 of 57 against 54–55.
+
+Codex's runs vary widely with its subagents (405–716k in the first GPT row and
+378–912k in the last), so the GPT margins are the least certain. On the paused
+five-turn benchmark above, the branch build's five-minute configuration spans
+624–771k weighted tokens from the same uncertainty; the one-hour configuration
+averaged 696k, inferred from its known setting (3 runs each, same evening). These
+historical counters do not establish a cost advantage for either lifetime.
+
+### Selected native build, 2026-11-08
+
+The retained build includes the record and failure fixes plus provider-reported
+cache-write lifetimes. Two fresh GPT comparisons used four runs per harness,
+with Codex starting alongside Jecode in each block. All runs passed the 21 hidden
+tests. Jecode scored 6/6 recall points in every run; the no-tools probes made zero
+tool calls in both harnesses.
+
+| Workload | Jecode weighted tokens, mean (run range) | Codex weighted tokens, mean (run range) | Tokens | Active time, Jecode / Codex |
+| --- | ---: | ---: | ---: | ---: |
+| Six turns, normal budget | 420k (400–448k) | 627k (437–887k) | −33% | 431 / 462 s |
+| Six turns, budget near 60k | 553k (458–694k) | 632k (427–724k) | −12.5% | 466 / 731 s |
+
+Both used GPT-6.1 Sol at high effort for the primary conversation on Windows,
+fresh copies of the same fixture and no deliberate pauses. Codex additionally
+ran three GPT-6 Sol/high descendant rollouts in the normal block and four in the
+tight block. Their usage is included at the same fixed GPT-family weights;
+the model match is on the primary conversation. Weighted tokens include all six
+turns; active time includes only the five work turns. The fixed weights above
+include descendant usage and exclude session titles and separate helper models. Several
+sessions shared the machine and network. Lever selection used this same fixture.
+
+The normal-budget mean exceeds the 25% target in this block, while the tight
+budget misses it. Codex's broad run ranges remain material. These results do not
+establish a 25% minimum on arbitrary tasks or across all backends.
+
+### Forty-turn confirmation
+
+The same retained executable completed two 40-turn sessions per primary model.
+The following cost/time comparisons use older rival runs from November 7, not
+same-hour controls. Claude Code stopped at 28 and 30 turns, so its comparison
+ends at the common turn 25. Token counters are cut at that turn's end, before any
+following turn; pauses are excluded from active time.
+
+| Comparison, 2 runs each | Jecode weighted tokens, mean (run range) | Rival weighted tokens, mean (run range) | Tokens | Active time, Jecode / rival |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-6.1 Sol, 40 turns | 4.637M (4.469–4.805M) | Codex 9.556M (7.401–11.712M) | −51.5% | 74.9 / 113.0 min |
+| Sonnet 5.5, through turn 25 | 3.024M (2.994–3.053M) | Claude Code 12.330M (11.065–13.596M) | −75.5% | 24.7 / 56.8 min |
+
+The complete Sonnet sessions averaged 5.820M weighted tokens and 47.3 minutes
+over all 40 turns. Both reported the cache-write lifetime buckets, with no
+unknown writes. These totals use their actual five-minute and one-hour counts.
+
+Quality was scored independently after completion, on each final workspace:
+
+| Run | Hidden assertions | Project suite, passed / total | Recall points | Standing rules |
+| --- | ---: | ---: | ---: | ---: |
+| GPT 1 | 168/171 | 486/486 | 57/57 | 5/6 |
+| GPT 2 | 168/171 | 538/538 | 56/57 | 5/6 |
+| Sonnet 1 | 171/171 | 348/349 | 56/57 | 6/6 |
+| Sonnet 2 | 170/171 | 355/357 | 55/57 | 5/6 |
+
+The project suites had zero hard failures; Sonnet's remaining one and two cases
+were marked TODO. All 20 no-tools probes made zero tool calls, with no
+unverifiable probes. Recall and standing-rule scores use the fixture's automated
+rubrics, separately from acceptance tests and tool compliance.
+
+Each GPT run failed two period-lock assertions: it refused a reversal even when
+given a later open date. One documentation assertion also failed because a
+removal note still mentioned the obsolete flag. The older Codex runs scored
+169/171 and 171/171. These results therefore do not establish equal acceptance
+quality for GPT. The same lock defect occurred in one Codex run; the measurements
+do not isolate a compaction cause.
+
+Sonnet 2's single hidden miss is a lexical checker limitation: the test name
+describes a root aggregation symptom, while the checker requires one of three
+other words. The original automated score is retained above. No generated
+workspace was repaired manually, and no acceptance criterion was changed after
+observing these results.
+
+The long sessions show lower weighted-token use on this fixture, with the
+quality limits above. Together with the tight-budget GPT result, they leave the
+requested general 25% reduction at equal quality **unconfirmed**.

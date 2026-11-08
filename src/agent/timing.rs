@@ -75,6 +75,14 @@ impl RequestTiming {
                 "cache_write_tokens",
                 tokens(|usage| usage.cache_write_tokens),
             ),
+            (
+                "cache_write_5m_tokens",
+                tokens(|usage| usage.cache_write_5m_tokens),
+            ),
+            (
+                "cache_write_1h_tokens",
+                tokens(|usage| usage.cache_write_1h_tokens),
+            ),
             ("reasoning_tokens", tokens(|usage| usage.reasoning_tokens)),
             (
                 "preparation_ms",

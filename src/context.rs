@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 
 pub use crate::conversation::portable;
 
+pub(crate) mod digest;
 pub(crate) mod measurement;
 pub(crate) mod provider;
 pub(crate) mod source;
@@ -99,6 +100,8 @@ pub struct Context {
     pub request_limit: usize,
     /// Runtime state updates in source order, each at the position first sent.
     pub states: Vec<RequestState>,
+    /// Exact native records of the messages before `from`, oldest first.
+    pub digests: Vec<digest::Epoch>,
 }
 impl Default for Context {
     fn default() -> Self {
@@ -122,6 +125,7 @@ impl Default for Context {
             preview_limit: 0,
             request_limit: 0,
             states: Vec::new(),
+            digests: Vec::new(),
         }
     }
 }
@@ -173,6 +177,10 @@ impl Context {
             ("preview_limit", Value::number(self.preview_limit)),
             ("request_limit", Value::number(self.request_limit)),
             ("request_states", state::value(&self.states)),
+            (
+                "digests",
+                Value::Array(self.digests.iter().map(digest::Epoch::value).collect()),
+            ),
         ])
     }
     pub fn parse(value: Option<&Value>) -> Result<Self, String> {
@@ -269,6 +277,7 @@ impl Context {
                     .ok_or("Invalid saved context request limit")
             })?,
             states: state::parse(value.get("request_states"))?,
+            digests: digest::parse(value.get("digests"))?,
         })
     }
     pub fn validate(&self, messages: &[Value]) -> Result<(), String> {
@@ -279,7 +288,8 @@ impl Context {
                 .output_message
                 .is_some_and(|index| index < self.measured_end || index >= messages.len())
             || self.measured_bytes == Some(0)
-            || (self.from > 1 && self.summary.trim().is_empty())
+            || (self.records_start() > 1 && self.summary.trim().is_empty())
+            || !digest::valid(&self.digests, self.from, messages.len())
             || self.ceiling == Some(0)
             || self
                 .calibration
@@ -323,9 +333,12 @@ impl Context {
         if let Some(system) = messages.first() {
             result.push(system.clone());
         }
-        if let Some(requests) =
-            view::requests(messages, self.from, self.request_budget(), &self.returned)
-        {
+        if let Some(requests) = view::requests(
+            messages,
+            self.records_start(),
+            self.request_budget(),
+            &self.returned,
+        ) {
             result.push(requests);
         }
         if !self.summary.is_empty() {
@@ -335,11 +348,15 @@ impl Context {
                     "content",
                     Value::string(format!(
                         "{SUMMARY_PREFIX} It covers the conversation before history:{}; messages from that boundary onward remain in the transcript below. Read history:N for any original message and history:requests for every user request.\n\n{}{}",
-                        self.from, self.summary,
+                        self.records_start(), self.summary,
                         if self.skill_references.is_empty() { String::new() } else { format!("\n\n{}", self.skill_references) }
                     )),
                 ),
             ]));
+        }
+        for (index, epoch) in self.digests.iter().enumerate() {
+            let last = index + 1 == self.digests.len();
+            result.push(epoch.message(messages, &self.returned, last));
         }
         let mut states = self.visible_states().peekable();
         for (index, message) in messages.iter().enumerate().skip(self.from) {

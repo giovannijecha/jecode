@@ -194,43 +194,61 @@ impl Agent {
                 .capacity(Some(limits))
                 .unwrap_or(limits.context)
         );
-        if !forced && estimate < input_budget {
+        // Exact records come first: they cost no model output and no waiting,
+        // and leave a summary for when they alone cannot make room.
+        let turn = self.turn_start(&original);
+        if !forced && turn.is_none() && estimate < self.digest_window(&original, input_budget) {
             return Ok(false);
         }
-        if forced || estimate >= input_budget {
+        if let Some(next) = self.prepared_digest(
+            &environment,
+            &original,
+            estimate,
+            input_budget,
+            forced,
+            turn,
+        ) {
             let before = self.context_bytes(&self.projected_context(&self.context, &original));
-            let mut preview = self.context.clone();
-            preview.preview_until = original.len();
-            preview.preview_limit = (input_budget / 12).clamp(512, 2048);
-            preview.clear_measurement();
-            let after = self.context_bytes(&self.projected_context(&preview, &original));
-            if after < before
-                && self.context_estimate_for(&preview, &environment, &original) < input_budget
-            {
-                // Keep every conversation group and its proof. A native preview
-                // can remove oversized tool payloads without a model summary.
-                drop(original);
-                let previous = std::mem::replace(&mut self.context, preview);
-                let event = self.local_details_event(
+            let after = self.context_bytes(&self.projected_context(&next, &original));
+            let count = next.from - self.context.from;
+            drop(original);
+            let previous = std::mem::replace(&mut self.context, next);
+            let (command, description, text) = if count > 0 {
+                (
+                    "Context digest",
+                    "Earlier messages kept as exact native records",
+                    format!(
+                        "Context digested · {count} messages kept as exact records · original conversation kept"
+                    ),
+                )
+            } else {
+                (
                     "Context previews",
                     "Reduced large tool payloads without summarizing conversation",
-                    "notice",
-                    &[
-                        ("before_bytes".into(), before.to_string()),
-                        ("after_bytes".into(), after.to_string()),
-                    ],
-                );
-                self.events.lock().unwrap().push(event.clone());
-                if let Err(error) = self.checkpoint(Stage::Compaction) {
-                    self.context = previous;
-                    self.withdraw_event(&event);
-                    return Err(error);
-                }
-                events.emit(Event::ContextCompacted {
-                    text: "Large tool results shown as context previews · full original results remain readable in history".into(),
-                })?;
-                return Ok(forced);
+                    "Large tool results shown as context previews · full original results remain readable in history".to_owned(),
+                )
+            };
+            let event = self.local_details_event(
+                command,
+                description,
+                "notice",
+                &[
+                    ("before_bytes".into(), before.to_string()),
+                    ("after_bytes".into(), after.to_string()),
+                    ("messages".into(), count.to_string()),
+                ],
+            );
+            self.events.lock().unwrap().push(event.clone());
+            if let Err(error) = self.checkpoint(Stage::Compaction) {
+                self.context = previous;
+                self.withdraw_event(&event);
+                return Err(error);
             }
+            events.emit(Event::ContextCompacted { text })?;
+            return Ok(forced);
+        }
+        if !forced && estimate < input_budget {
+            return Ok(false);
         }
         if self.context.from >= original.len() {
             return Ok(false);
@@ -240,6 +258,8 @@ impl Agent {
         let mut next = self.context.clone();
         next.clear_measurement();
         next.from = end;
+        // The summary folds the records in, so they stop being sent.
+        next.digests.clear();
         // State before the boundary is summarized away; current state is sent again.
         next.states.retain(|state| state.before >= end);
         next.skill_references = self.redact(&self.skill_checkpoint_instructions());
@@ -276,6 +296,15 @@ impl Agent {
                 )
             })
             .collect::<Vec<_>>();
+        for epoch in self.context.digests.iter().rev() {
+            transcript.insert(
+                0,
+                (
+                    epoch.from,
+                    epoch.text(&original, &self.context.returned).to_owned(),
+                ),
+            );
+        }
         // Portion summaries read records, and an outcome reported in state
         // leaves the window here without being sent again.
         for state in self.context.states.iter().filter(|s| s.before < end) {
@@ -342,7 +371,7 @@ impl Agent {
         Ok(true)
     }
 
-    fn recent_boundary(&self, messages: &[Value], budget: usize) -> usize {
+    pub(super) fn recent_boundary(&self, messages: &[Value], budget: usize) -> usize {
         let mut boundary = messages.len();
         let mut bytes = 0usize;
         let mut measured = 0usize;
@@ -403,6 +432,13 @@ pub(super) fn generated(usage: &crate::backend::Usage) -> Option<Event> {
     })
 }
 
+mod records;
+pub(super) use records::records_by_default;
+#[cfg(test)]
+pub(super) use records::test_fallback_tiers;
+
+#[cfg(test)]
+mod digest_tests;
 #[cfg(test)]
 mod in_place_tests;
 #[cfg(test)]

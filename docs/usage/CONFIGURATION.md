@@ -54,11 +54,12 @@ model receives the portable history.
 
 ## Automatic compaction
 
-Long conversations eventually exceed the model's context window. Before each
-model request, Jecode checks whether the request would exceed a share of the
-window, set by **Auto-compact at** (default 80%). When it would, Jecode first
-shortens large tool results and then, if needed, asks the model to summarize
-earlier work. The original history stays saved and readable. See
+Long conversations cost more with every request, well before they exceed the
+model's context window. Jecode keeps them small with exact records of earlier
+work, drawn from the original history without a model request. If a request
+would still exceed a share of the window, set by **Auto-compact at** (default
+80%), Jecode shortens large tool results and then, if needed, asks the model to
+summarize earlier work. The original history stays saved and readable. See
 [Long-running work](LONG_WORK.md#context-and-compaction) for what is kept.
 
 Set the threshold in `/settings` → **Context** → **Auto-compact at** as a whole
@@ -72,19 +73,17 @@ choose a model with a larger context window, then continue.
 
 ## Prompt cache
 
-Claude models reuse the unchanged start of each request from the provider's
+Claude models can reuse the unchanged start of each request from the provider's
 prompt cache, which is much cheaper than sending it again. The provider's
 default cache lasts five minutes after its last use: after a longer break, the
-next request writes the whole conversation to the cache again.
+next request writes what is in the window to the cache again.
 
-`/settings` → **Context** → **Prompt cache** chooses **1 hour**, the default,
-or **5 minutes**. With one hour, a request after a break reads the
-conversation from the cache instead, but every cache write costs more (twice
-the input price instead of 1.25 times, at Anthropic's list prices). In a
-measured working session with two breaks of six and a half minutes, five
-minutes rewrote 24,000 and 112,000 tokens after the breaks and one hour about
-1,700 in total; one hour came out cheaper overall. Five minutes is cheaper
-only when requests follow each other without breaks. The choice applies from the next
+`/settings` → **Context** → **Prompt cache** chooses **5 minutes**, the default,
+or **1 hour**. One hour keeps a prefix eligible for reuse across longer breaks,
+but cache writes cost more (twice the input price instead of 1.25 times, at
+[Anthropic's API list prices](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)).
+Records reduce what must be rewritten after a break; the tradeoff depends on
+pauses, the active window and provider cache hits. The choice applies from the next
 request, in the current conversation and its collaborators, for Claude on
 Anthropic, the Claude plan and OpenRouter. Other models keep their provider's
 automatic caching. Jecode's own instructions and tools, shared by every
@@ -158,7 +157,7 @@ the default:
     "effort": "default",
     "routing": { "provider/model-id": { "mode": "auto" } }
   },
-  "context": { "auto_compact_percent": 80, "prompt_cache": "1h" },
+  "context": { "auto_compact_percent": 80, "prompt_cache": "5m" },
   "appearance": { "theme": "auto" },
   "permissions": { "default": "workspace" }
 }
@@ -172,7 +171,7 @@ the default:
 | `backends.<id>.routing` | Saved routing per model ID. |
 | `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
-| `context.prompt_cache` | How long Claude prompt caches last: `1h` or `5m`. Default `1h`. |
+| `context.prompt_cache` | How long Claude prompt caches last: `5m` or `1h`. Default `5m`. |
 | `appearance.theme` | `auto`, `dark` or `light`. Default `auto`. |
 | `permissions.default` | `read`, `workspace` or `full`. Default `workspace`. |
 

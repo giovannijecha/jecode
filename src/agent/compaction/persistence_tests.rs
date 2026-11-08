@@ -3,6 +3,7 @@ use crate::test_support::{Directory, HttpFixture, completion};
 
 #[test]
 fn failed_compaction_checkpoint_cannot_be_saved_later() {
+    crate::agent::compaction::test_fallback_tiers();
     check_failed_checkpoint(false);
 }
 

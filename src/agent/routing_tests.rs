@@ -164,6 +164,7 @@ fn a_collaborator_sends_the_main_conversation_id() {
 
 #[test]
 fn a_pin_reaches_summary_requests_and_its_failures_say_how_to_change_it() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     // Leave summary room after a rejection of the native prompt and tool contract.
     let prompt = "original objective ".repeat(1500);

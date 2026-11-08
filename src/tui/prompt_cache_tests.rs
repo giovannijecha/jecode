@@ -35,13 +35,13 @@ fn purpose(app: &App) -> &selector::Purpose {
 }
 
 #[test]
-fn five_minute_prompt_cache_saves_under_context_and_reaches_the_running_worker() {
+fn one_hour_prompt_cache_saves_under_context_and_reaches_the_running_worker() {
     let directory = Directory::new();
     let mut app = app(&directory);
     let agent = app.hold();
     app.dispatch("/settings".into()).unwrap();
-    // One hour is the default.
-    assert!(rows(&app).contains("80% · 1 hour"), "{}", rows(&app));
+    // Five minutes is the default.
+    assert!(rows(&app).contains("80% · 5 minutes"), "{}", rows(&app));
     app.input(Decoded::Text("5".into())).unwrap();
     assert!(matches!(purpose(&app), selector::Purpose::Context));
     let shown = rows(&app);
@@ -49,27 +49,27 @@ fn five_minute_prompt_cache_saves_under_context_and_reaches_the_running_worker()
     app.input(Decoded::Text("2".into())).unwrap();
     let menu = app.state.selector.as_ref().unwrap();
     assert!(matches!(menu.purpose, selector::Purpose::PromptCache));
-    assert_eq!((menu.parent, menu.selected), (Some("Context"), 1));
+    assert_eq!((menu.parent, menu.selected), (Some("Context"), 0));
     let shown = rows(&app);
     assert!(shown.contains("Claude models"), "{shown}");
     assert!(shown.contains("Survives breaks"), "{shown}");
-    app.input(Decoded::Text("1".into())).unwrap();
-    assert_eq!(agent.cache_retention(), CacheRetention::Short);
-    assert_eq!(app.config.settings.cache_retention, CacheRetention::Short);
+    app.input(Decoded::Text("2".into())).unwrap();
+    assert_eq!(agent.cache_retention(), CacheRetention::Long);
+    assert_eq!(app.config.settings.cache_retention, CacheRetention::Long);
     assert_eq!(
         app.config.store.load().unwrap().unwrap().cache_retention,
-        CacheRetention::Short
+        CacheRetention::Long
     );
     let notice = app.state.notice.as_ref().unwrap();
-    assert!(notice.text.contains("Prompt cache: 1 hour → 5 minutes"));
+    assert!(notice.text.contains("Prompt cache: 5 minutes → 1 hour"));
     assert!(notice.change);
     assert!(matches!(purpose(&app), selector::Purpose::Context));
     assert_eq!(app.state.selector.as_ref().unwrap().selected, 1);
-    assert!(rows(&app).contains("5 minutes"));
+    assert!(rows(&app).contains("1 hour"));
     app.close_selector();
     assert!(matches!(purpose(&app), selector::Purpose::Settings));
     assert_eq!(app.state.selector.as_ref().unwrap().selected, 4);
-    assert!(rows(&app).contains("80% · 5 minutes"));
+    assert!(rows(&app).contains("80% · 1 hour"));
     app.agent = Some(agent);
 }
 
@@ -83,7 +83,7 @@ fn choosing_the_current_prompt_cache_returns_without_a_notice_or_a_write() {
     app.input(Decoded::Text("5".into())).unwrap();
     app.input(Decoded::Text("2".into())).unwrap();
     app.state.notice = None;
-    app.input(Decoded::Text("2".into())).unwrap();
+    app.input(Decoded::Text("1".into())).unwrap();
     assert!(app.state.notice.is_none());
     assert!(matches!(purpose(&app), selector::Purpose::Context));
     assert_eq!(std::fs::read(&path).unwrap(), original);

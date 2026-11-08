@@ -3,6 +3,31 @@ use crate::test_support::{Directory, HttpFixture, Response};
 use std::time::Duration;
 
 #[test]
+fn request_timing_exports_anthropic_cache_creation_breakdown() {
+    let usage = crate::backend::Usage {
+        cache_write_tokens: Some(30),
+        cache_write_5m_tokens: Some(10),
+        cache_write_1h_tokens: Some(20),
+        ..Default::default()
+    };
+    let event = super::timing::RequestTiming::start().event(
+        "turn",
+        ("anthropic", "fixture", crate::effort::Effort::Default),
+        1,
+        "complete",
+        Some(usage),
+        0,
+    );
+    for (name, expected) in [
+        ("cache_write_tokens", 30),
+        ("cache_write_5m_tokens", 10),
+        ("cache_write_1h_tokens", 20),
+    ] {
+        assert_eq!(event.get(name).and_then(Value::as_usize), Some(expected));
+    }
+}
+
+#[test]
 fn dispatch_notification_wait_is_separate_from_local_and_remote_work() {
     let fixture = HttpFixture::new(vec![(
         200,

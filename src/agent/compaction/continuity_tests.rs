@@ -47,6 +47,7 @@ fn history(agent: &mut Agent, older: &str) -> Vec<Value> {
 
 #[test]
 fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![(
@@ -118,6 +119,7 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
 
 #[test]
 fn repeated_model_summaries_carry_prior_work_across_resume_without_changing_history() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![
@@ -277,6 +279,7 @@ fn expired_tool_view_does_not_shrink_the_recent_tail() {
 
 #[test]
 fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Partial summary only.", vec![])),
@@ -319,6 +322,7 @@ fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals
 
 #[test]
 fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
+    crate::agent::compaction::test_fallback_tiers();
     let home = Directory::new();
     let project = Directory::new();
     let package = home.path().join("skills/audit");

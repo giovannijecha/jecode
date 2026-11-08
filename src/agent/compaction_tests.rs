@@ -55,6 +55,7 @@ fn calibrated_growth_avoids_a_summary_and_keeps_original_history_in_the_request(
 
 #[test]
 fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (
@@ -138,6 +139,7 @@ fn a_rejected_calibrated_growth_request_recovers_with_native_compaction() {
 
 #[test]
 fn a_provider_context_rejection_compacts_and_retries_without_losing_the_prompt() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     // Leave summary room after a rejection of the native prompt and tool contract.
     let prompt = "original objective ".repeat(1500);
@@ -306,6 +308,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
 
 #[test]
 fn carried_memory_can_exceed_eight_kib_while_fitting_the_active_context() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let constraint = format!("Preserve the complete requirement: {}", "c".repeat(9000));
     let memory = Value::object([

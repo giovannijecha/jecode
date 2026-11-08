@@ -11,14 +11,14 @@ pub const MARKER: &str = "jecode_cache_retention";
 
 /// Saved as `context.prompt_cache`. Adapters with explicit cache lifetimes
 /// (Claude models) apply it; others keep their provider's automatic caching.
-/// One hour is the default: a long-session benchmark measured each break
-/// over five minutes rewriting the whole conversation into the cache.
+/// Five minutes is the default: one-hour writes cost 2× against 1.25×, and a new
+/// turn's digest leaves little to rewrite after a break.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CacheRetention {
     /// The provider default: five minutes, renewed by every request.
+    #[default]
     Short,
     /// One hour: the cache survives breaks; writes cost more.
-    #[default]
     Long,
 }
 
@@ -51,6 +51,15 @@ impl CacheRetention {
             .into_iter()
             .find(|retention| retention.id() == id)
             .ok_or_else(|| "Prompt cache must be \"5m\" or \"1h\"".to_string())
+    }
+
+    /// What a cache write costs against uncached input, for adapters that charge
+    /// by lifetime. Decides how soon rewriting the window pays for itself.
+    pub fn write_premium(self) -> f64 {
+        match self {
+            Self::Short => 1.25,
+            Self::Long => 2.0,
+        }
     }
 
     /// The retention a request asks for, read from its system messages.

@@ -437,7 +437,7 @@ fn prompt_cache_defaults_to_one_hour_persists_and_rejects_unknown_values() {
     let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#;
     fs::write(store.path(), legacy).unwrap();
     let mut saved = store.load().unwrap().unwrap();
-    assert_eq!(saved.cache_retention, CacheRetention::Long);
+    assert_eq!(saved.cache_retention, CacheRetention::Short);
     saved.cache_retention = CacheRetention::Short;
     store.save(&saved).unwrap();
     let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();

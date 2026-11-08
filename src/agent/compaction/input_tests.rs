@@ -19,6 +19,7 @@ fn send(inbox: &Inbox, text: &str) {
 
 #[test]
 fn input_during_a_tool_preview_joins_the_immediately_following_request() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion("Finished.", vec![]))]);
     let limits = Limits {
@@ -93,6 +94,7 @@ fn input_during_a_tool_preview_joins_the_immediately_following_request() {
 
 #[test]
 fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let workspace = directory
         .path()

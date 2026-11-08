@@ -34,6 +34,7 @@ fn historical_notes(agent: &Agent) {
 
 #[test]
 fn a_large_window_requests_a_compact_handoff_with_room_to_recover_truncation() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion(&candidate(), vec![]))]);
     let mut agent = Agent::new(
@@ -74,6 +75,7 @@ fn a_large_window_requests_a_compact_handoff_with_room_to_recover_truncation() {
 
 #[test]
 fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
+    crate::agent::compaction::test_fallback_tiers();
     let charged = |mut response: Value, cost: f64| {
         let Value::Object(fields) = &mut response else {
             unreachable!()
@@ -122,6 +124,7 @@ fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
 
 #[test]
 fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![

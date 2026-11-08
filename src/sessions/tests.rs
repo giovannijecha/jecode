@@ -452,3 +452,27 @@ fn opening_a_session_redacts_saved_skill_references() {
         "skill:[redacted]"
     );
 }
+
+#[test]
+fn opening_a_session_redacts_saved_record_notes() {
+    let home = Directory::new();
+    let directory = Directory::new();
+    let store = store(&home, &directory);
+    let mut doc = document(&directory);
+    doc.context.from = 2;
+    doc.context.digests = vec![crate::context::digest::Epoch::new(
+        1,
+        2,
+        1,
+        "skill:fixture-key".into(),
+    )];
+    let id = doc.id.clone();
+    let lease = store.acquire(&id).unwrap();
+    lease.save(&doc).unwrap();
+    drop(lease);
+    let (handle, _) = Handle::open(store, &id, Redactor::new("fixture-key".into())).unwrap();
+    assert_eq!(
+        handle.snapshot().context.digests[0].notes,
+        "skill:[redacted]"
+    );
+}

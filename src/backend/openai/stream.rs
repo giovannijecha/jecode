@@ -324,6 +324,8 @@ fn parse_usage(value: &Value) -> Option<Usage> {
             .get("input_tokens_details")
             .and_then(|details| details.get("cache_write_tokens"))
             .and_then(Value::as_usize),
+        cache_write_5m_tokens: None,
+        cache_write_1h_tokens: None,
         reasoning_tokens: value
             .get("output_tokens_details")
             .and_then(|details| details.get("reasoning_tokens"))

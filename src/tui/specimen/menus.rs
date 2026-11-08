@@ -355,7 +355,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             "Context",
             selecting(
                 columns,
-                Selector::context_settings(80, crate::backend::CacheRetention::Long),
+                Selector::context_settings(80, crate::backend::CacheRetention::Short),
             ),
         ),
         (
@@ -366,7 +366,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             "Prompt cache",
             selecting(
                 columns,
-                Selector::prompt_cache(crate::backend::CacheRetention::Long),
+                Selector::prompt_cache(crate::backend::CacheRetention::Short),
             ),
         ),
         ("OpenRouter key", selecting(columns, key)),

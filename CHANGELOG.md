@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Long conversations use deterministic native records of earlier work without a
+  model request, with references to the original conversation. Model summaries
+  remain for when records and previews cannot make room.
+- Claude prompt caches default to five minutes; one-hour retention remains
+  available for breaks.
 - Commands remain visible and controllable during their initial wait, and long
   commands return control without stopping the process.
 - `/process` replaces `/terminal`, with running and recent commands, saved output

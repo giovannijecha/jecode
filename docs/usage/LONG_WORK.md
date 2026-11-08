@@ -40,8 +40,19 @@ window is unknown. The figure includes cached input. It is not your plan's
 usage or remaining quota. The `↑` and `↓` counts in the status row are the
 turn's input tokens sent and generated output, not context.
 
-Before each model request, Jecode estimates whether the request would exceed the
-threshold. If it would:
+Well before that threshold, Jecode keeps the request small with exact records.
+When recording earlier work would free about 30,000 tokens at a new turn, or work
+under way passes a window of about 120,000 tokens plus existing records, earlier
+messages become one line per tool call with its outcome, next to excerpts of your
+requests and the model's answers. Each names the original as `history:N`. This
+takes no model request; records are derived from the saved conversation rather
+than from an earlier paraphrase. The thresholds adjust for cache write costs and
+the configured context limit. Work under way keeps its latest results verbatim.
+Very long conversations condense the oldest records further, to
+a paragraph per turn and then to an index of turns. Your context meter drops when
+this happens, and a notice says how many messages became records.
+
+If a request would still exceed the threshold:
 
 1. Large tool results, such as long file reads, are replaced by previews that
    point to the original.

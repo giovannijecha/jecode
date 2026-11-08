@@ -93,7 +93,15 @@ impl Agent {
         let messages = self.messages.lock().unwrap();
         let mut source = None;
         let text = if path == "history:memory" {
-            self.context.summary.clone()
+            let mut memory = vec![self.context.summary.clone()];
+            memory.extend(
+                self.context
+                    .digests
+                    .iter()
+                    .map(|epoch| epoch.text(&messages, &self.context.returned).to_owned()),
+            );
+            memory.retain(|text| !text.is_empty());
+            memory.join("\n\n")
         } else if path == "history:processes" {
             self.events
                 .lock()

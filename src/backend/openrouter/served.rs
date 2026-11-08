@@ -33,6 +33,8 @@ pub(super) fn usage(value: Option<&Value>) -> Option<crate::backend::Usage> {
         total_tokens,
         cached_tokens,
         cache_write_tokens,
+        cache_write_5m_tokens: None,
+        cache_write_1h_tokens: None,
         reasoning_tokens,
     })
 }

@@ -65,6 +65,7 @@ fn last_text(request: &crate::test_support::Request) -> String {
 
 #[test]
 fn proactive_compaction_summarizes_over_the_cached_conversation() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
@@ -100,6 +101,7 @@ fn proactive_compaction_summarizes_over_the_cached_conversation() {
 
 #[test]
 fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (
@@ -138,6 +140,7 @@ fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
 
 #[test]
 fn repeated_empty_replies_fall_back_to_portions() {
+    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![])),

@@ -182,7 +182,7 @@ fn one_hour_prompt_cache_reaches_claude_breakpoints_from_the_next_request() {
     let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
     assert_eq!(
         agent.cache_retention(),
-        crate::backend::CacheRetention::Long
+        crate::backend::CacheRetention::Short
     );
     agent.set_cache_retention(crate::backend::CacheRetention::Short);
     agent.run_turn("First request", &mut |_| Ok(())).unwrap();
