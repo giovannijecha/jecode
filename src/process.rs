@@ -217,8 +217,17 @@ pub struct Started {
     target_pid: u32,
     #[cfg(unix)]
     owner: unix::Owner,
+    #[cfg(unix)]
+    pty_cleanup_receipt: Option<std::fs::File>,
     started: Instant,
     idle: Option<Duration>,
+}
+
+#[cfg(unix)]
+impl Started {
+    pub(crate) fn expect_pty_cleanup_receipt(&mut self, receipt: std::fs::File) {
+        self.pty_cleanup_receipt = Some(receipt);
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -304,6 +313,8 @@ fn start(
         target_pid,
         #[cfg(unix)]
         owner,
+        #[cfg(unix)]
+        pty_cleanup_receipt: None,
         started,
         idle: options.idle,
     })
@@ -337,6 +348,8 @@ impl Started {
                 target_pid: _,
             #[cfg(unix)]
                 owner: _owner,
+            #[cfg(unix)]
+            pty_cleanup_receipt,
             started,
             idle,
         } = self;
@@ -422,7 +435,11 @@ impl Started {
                     status = child.try_wait().ok().flatten().or(status);
                 }
                 // An inherited pipe must not make an already timed-out command block forever.
-                let drain_limit = if confirmed {
+                #[cfg(unix)]
+                let pty_owned = pty_cleanup_receipt.is_some();
+                #[cfg(windows)]
+                let pty_owned = false;
+                let drain_limit = if confirmed || pty_owned {
                     Duration::from_secs(5)
                 } else {
                     Duration::from_millis(250)
@@ -440,6 +457,12 @@ impl Started {
                         "Process cleanup could not be confirmed: output capture remains active"
                             .into()
                     });
+                }
+                #[cfg(unix)]
+                if let Some(mut receipt) = pty_cleanup_receipt
+                    && let Err(error) = unix::cleanup_receipt(&mut receipt, deadline)
+                {
+                    cleanup_error.get_or_insert(error);
                 }
                 break;
             }

@@ -99,6 +99,8 @@ pub(crate) fn start(
     let mut bridge =
         platform::command(command, &endpoint.name, size.0, size.1, cancellation).map_err(before)?;
     let started = process::start_logged(&mut bridge, cancellation, spools)?;
+    #[cfg(unix)]
+    let mut started = started;
     #[cfg(windows)]
     let connection = platform::connect(&endpoint.name, started.bridge_pid(), cancellation)
         .and_then(|input| {
@@ -107,7 +109,12 @@ pub(crate) fn start(
         });
     #[cfg(unix)]
     let connection = platform::connect(&endpoint.name, cancellation).and_then(|input| {
-        platform::connect_control(&endpoint.name, cancellation).map(|control| (input, control))
+        platform::connect_control(&endpoint.name, cancellation).and_then(|control| {
+            let receipt = control
+                .try_clone()
+                .map_err(|error| format!("Could not retain Unix PTY cleanup receipt: {error}"))?;
+            Ok((input, control, receipt))
+        })
     });
     let files = match connection {
         Ok(files) => files,
@@ -128,16 +135,22 @@ pub(crate) fn start(
             });
         }
     };
+    #[cfg(unix)]
+    let (input, control, receipt) = files;
+    #[cfg(windows)]
+    let (input, control) = files;
+    #[cfg(unix)]
+    started.expect_pty_cleanup_receipt(receipt);
     let (sender, receiver) = mpsc::sync_channel::<Message>(16);
     let (controls, control_receiver) = mpsc::sync_channel::<Message>(16);
     let failure = Arc::new(Mutex::new(None));
     let closed = Arc::new(AtomicBool::new(false));
     let failed = Arc::clone(&failure);
     let shutdown = Arc::clone(&closed);
-    thread::spawn(move || writer(files.0, receiver, failed, shutdown));
+    thread::spawn(move || writer(input, receiver, failed, shutdown));
     let failed = Arc::clone(&failure);
     let shutdown = Arc::clone(&closed);
-    thread::spawn(move || writer(files.1, control_receiver, failed, shutdown));
+    thread::spawn(move || writer(control, control_receiver, failed, shutdown));
     Ok((
         started,
         Arc::new(Control {

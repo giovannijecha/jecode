@@ -110,6 +110,19 @@ static int eio_mode(const char *mode) {
 static ssize_t probe_write(int fd, const void *bytes, size_t length) {
     const char *mode = getenv("JECODE_PTY_TEST_INJECT");
     const unsigned char *cursor = bytes;
+    if (mode && !strncmp(mode, "receipt_", 8) && length == 1 &&
+        fd > STDERR_FILENO) {
+        int kind;
+        socklen_t kind_length = sizeof(kind);
+        int saved_errno = errno;
+        int is_socket = getsockopt(fd, SOL_SOCKET, SO_TYPE,
+                                   &kind, &kind_length) == 0;
+        errno = saved_errno;
+        if (is_socket) {
+            if (probe_event('C', cursor[0], 0, 1) < 0) _exit(125);
+            if (!strcmp(mode, "receipt_missing")) return 1;
+        }
+    }
     if (mode && !strcmp(mode, "exit_resize_epipe") && length == 1 &&
         cursor[0] == WATCHER_QUERY && fd > STDERR_FILENO && !isatty(fd)) {
         errno = EPIPE;
@@ -245,9 +258,21 @@ impl Probe {
             crate::sessions::identifier()
         ));
         fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("unix.c"), SOURCE).unwrap();
+        let header = include_str!("unix_session.h");
+        let after_sweep = "        if (!active) return 0;";
+        assert_eq!(header.matches(after_sweep).count(), 1);
+        let injected = header.replacen(
+            after_sweep,
+            "        if (!active) {\n            const char *mode = getenv(\"JECODE_PTY_TEST_INJECT\");\n            if (mode && !strcmp(mode, \"receipt_fail\")) return -1;\n            return 0;\n        }",
+            1,
+        );
+        fs::write(directory.join("unix_session.h"), injected).unwrap();
         let executable = directory.join("bridge-probe");
         let mut compiler = Command::new("cc")
             .args(["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror"])
+            .arg("-I")
+            .arg(&directory)
             .arg("-I")
             .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/pty"))
             .args(["-x", "c", "-", "-o"])
@@ -278,6 +303,8 @@ impl Probe {
 impl Drop for Probe {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.executable);
+        let _ = fs::remove_file(self.directory.join("unix.c"));
+        let _ = fs::remove_file(self.directory.join("unix_session.h"));
         let _ = fs::remove_dir(&self.directory);
     }
 }
@@ -408,3 +435,6 @@ fn control_errors_identify_the_failed_operation() {
 
 #[path = "unix_exit_resize_contract_tests.rs"]
 mod exit_resize;
+
+#[path = "unix_cleanup_receipt_tests.rs"]
+mod cleanup_receipt;

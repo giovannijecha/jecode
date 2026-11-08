@@ -136,7 +136,6 @@ static void watch_child(int master, int slave, int owner_read,
                         int input, int control, char **argv) {
     close(master);
     close(input);
-    close(control);
     close(owner_write);
     close(status_read);
     /* The bridge may be SIGKILLed before this watcher finishes its session
@@ -161,6 +160,7 @@ static void watch_child(int master, int slave, int owner_read,
     signal(SIGPIPE, SIG_IGN);
 
     int status = 0;
+    int cleanup_confirmed = 0;
     int query = 0;
     for (;;) {
         siginfo_t info;
@@ -171,8 +171,10 @@ static void watch_child(int master, int slave, int owner_read,
             (void)write_all(status_write, &exited, sizeof(exited));
             /* Keep the leader's PID reserved until its whole group is killed. */
             int cleaned = stop_session(child);
-            while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
-            if (cleaned < 0) status = -1;
+            pid_t reaped;
+            do { reaped = waitpid(child, &status, 0); } while (reaped < 0 && errno == EINTR);
+            cleanup_confirmed = cleaned == 0 && reaped == child;
+            if (!cleanup_confirmed) status = -1;
             (void)write_all(status_write, &status, sizeof(status));
             break;
         }
@@ -191,13 +193,20 @@ static void watch_child(int master, int slave, int owner_read,
             unsigned char byte;
             ssize_t count = read(owner_read, &byte, 1);
             if (count == 0 || (count < 0 && errno != EINTR)) {
-                (void)stop_session(child);
-                while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+                int cleaned = stop_session(child);
+                pid_t reaped;
+                do { reaped = waitpid(child, &status, 0); } while (reaped < 0 && errno == EINTR);
+                cleanup_confirmed = cleaned == 0 && reaped == child;
                 break;
             }
             if (count == 1 && byte == WATCHER_QUERY) query = 1;
         }
     }
+    /* The control socket is full-duplex. The bridge only reads it, while
+       Jecode keeps a read handle for this watcher's cleanup receipt. */
+    unsigned char receipt = cleanup_confirmed ? 1 : 0;
+    (void)write_all(control, &receipt, 1);
+    close(control);
     close(owner_read);
     close(status_write);
     close(barrier);

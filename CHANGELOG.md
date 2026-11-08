@@ -30,6 +30,8 @@ Changes since 0.3.5.
   commands return control without stopping the process.
 - `/process` replaces `/terminal`, with running and recent commands, saved output
   and a control to move a waiting call into the background without restarting it.
+- Stopping a Unix terminal waits for the native cleanup result and final output.
+  Failed or unconfirmed cleanup remains an unknown outcome.
 - Finished processes report their outcome to the model and conversation. The TUI
   can continue automatically; plain chat continues after the next entered line.
 
