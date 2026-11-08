@@ -47,6 +47,7 @@ impl Drop for Bridge {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = fs::remove_file(self.directory.join("gate"));
         let _ = fs::remove_file(self.directory.join("control"));
         let _ = fs::remove_dir(&self.directory);
     }

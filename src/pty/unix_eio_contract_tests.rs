@@ -4,15 +4,86 @@ use super::*;
 // before the pending PTY input receives an injected kernel EIO.
 const HARNESS: &str = r#"
 #define _XOPEN_SOURCE 600
+#include <stdint.h>
+#include <signal.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 static int status_gate[2] = { -1, -1 };
 static ssize_t probe_write(int fd, const void *bytes, size_t length);
+static int probe_waitid(idtype_t type, id_t id, siginfo_t *info, int options);
+static int probe_ioctl(int fd, unsigned long request, uintptr_t argument);
 #define write probe_write
+#define waitid probe_waitid
+#define ioctl(fd, request, argument) probe_ioctl(fd, request, (uintptr_t)(argument))
 #define main bridge_entry
 #include "unix.c"
 #undef main
 #undef write
+#undef waitid
+#undef ioctl
+
+static int exit_resize_mode(void) {
+    const char *mode = getenv("JECODE_PTY_TEST_INJECT");
+    return mode && strcmp(mode, "exit_resize") == 0;
+}
+
+/* A bounded, test-only event channel to the Rust fixture. S is held until the
+   fixture releases watcher status; E and R are observations. */
+static int probe_event(unsigned char kind, unsigned char result, int error,
+                       int hold) {
+    const char *path = getenv("JECODE_PTY_STATUS_GATE");
+    if (!path) return -1;
+    int socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (socket_fd < 0) return -1;
+    struct sockaddr_un endpoint;
+    memset(&endpoint, 0, sizeof(endpoint));
+    endpoint.sun_family = AF_UNIX;
+    if (strlen(path) >= sizeof(endpoint.sun_path)) {
+        close(socket_fd);
+        return -1;
+    }
+    strcpy(endpoint.sun_path, path);
+    struct timeval limit = { 5, 0 };
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &limit, sizeof(limit)) < 0 ||
+        connect(socket_fd, (struct sockaddr *)&endpoint, sizeof(endpoint)) < 0) {
+        close(socket_fd);
+        return -1;
+    }
+    unsigned char event[3] = { kind, result, (unsigned char)error };
+    int sent = send(socket_fd, event, sizeof(event), 0) == (ssize_t)sizeof(event);
+    if (sent && hold) {
+        unsigned char release;
+        sent = recv(socket_fd, &release, 1, 0) == 1 && release == 'g';
+    }
+    close(socket_fd);
+    return sent ? 0 : -1;
+}
+
+static int probe_waitid(idtype_t type, id_t id, siginfo_t *info, int options) {
+    int result = waitid(type, id, info, options);
+    int saved_errno = errno;
+    if (exit_resize_mode() && result == 0 && info && info->si_pid != 0 &&
+        probe_event('E', 0, 0, 0) < 0)
+        fprintf(stderr, "PROBE_EXIT_EVENT_FAILED\n");
+    errno = saved_errno;
+    return result;
+}
+
+static int probe_ioctl(int fd, unsigned long request, uintptr_t argument) {
+    int result = ioctl(fd, request, (void *)argument);
+    int saved_errno = errno;
+    if (exit_resize_mode() && request == TIOCSWINSZ && argument) {
+        struct winsize *size = (struct winsize *)argument;
+        if (size->ws_col == 81 && size->ws_row == 25 &&
+            probe_event('R', result < 0, result < 0 ? saved_errno : 0, 0) < 0)
+            _exit(125);
+    }
+    errno = saved_errno;
+    return result;
+}
 
 static int saw_end;
 static int injected;
@@ -20,6 +91,12 @@ static int injected;
 static ssize_t probe_write(int fd, const void *bytes, size_t length) {
     const char *mode = getenv("JECODE_PTY_TEST_INJECT");
     const unsigned char *cursor = bytes;
+    if (exit_resize_mode() && length == sizeof(int) && fd > STDERR_FILENO &&
+        !isatty(fd)) {
+        int status;
+        memcpy(&status, bytes, sizeof(status));
+        if (probe_event('S', status == -1, 0, 1) < 0) _exit(125);
+    }
     if (fd == STDOUT_FILENO) {
         static size_t matched;
         const char marker[] = ":END";
@@ -32,7 +109,8 @@ static ssize_t probe_write(int fd, const void *bytes, size_t length) {
             }
         }
     }
-    if (mode && length == sizeof(int) && fd > STDERR_FILENO && !isatty(fd)) {
+    if (mode && strcmp(mode, "exit_resize") != 0 &&
+        length == sizeof(int) && fd > STDERR_FILENO && !isatty(fd)) {
         struct pollfd gate = { status_gate[0], POLLIN, 0 };
         unsigned char marker;
         if (poll(&gate, 1, 1000) != 1 ||
@@ -295,5 +373,96 @@ fn control_errors_identify_the_failed_operation() {
          Unix PTY resize failed: Bad file descriptor\n\
          Unix PTY control frame was invalid\n\
          Unix PTY control channel closed\n"
+    );
+}
+
+fn next_gate_event(
+    listener: &std::os::unix::net::UnixListener,
+) -> ([u8; 3], std::os::unix::net::UnixStream) {
+    let started = std::time::Instant::now();
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut event = [0; 3];
+                stream.read_exact(&mut event).unwrap();
+                return (event, stream);
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(5),
+                    "watcher/resize gate did not report within five seconds"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => panic!("watcher/resize gate failed: {error}"),
+        }
+    }
+}
+
+#[test]
+fn resize_after_target_exit_before_watcher_status() {
+    use std::os::unix::net::UnixListener;
+    use std::os::unix::{ffi::OsStrExt, fs::DirBuilderExt};
+    let probe = Probe::compile();
+    let directory =
+        std::path::PathBuf::from("/tmp").join(format!("jc-pty-{}", crate::sessions::identifier()));
+    let gate = directory.join("gate");
+    assert!(gate.as_os_str().as_bytes().len() < 96);
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .unwrap();
+    let listener = UnixListener::bind(&gate).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = directory.join("control");
+    let mut command = Command::new(&probe.executable);
+    command
+        .arg(&endpoint)
+        .args(["80", "24", "/bin/sh", "-c", "exit 0"])
+        .env("JECODE_PTY_TEST_INJECT", "exit_resize")
+        .env("JECODE_PTY_STATUS_GATE", &gate)
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut bridge = Bridge {
+        child: command.spawn().unwrap(),
+        directory,
+    };
+    let endpoint = endpoint.to_str().unwrap();
+    let cancellation = Cancellation::default();
+    let _input = connect(endpoint, &cancellation).unwrap();
+    let mut control = connect_control(endpoint, &cancellation).unwrap();
+
+    let (exit, _) = next_gate_event(&listener);
+    assert_eq!(exit, [b'E', 0, 0], "target exit was not observed");
+    let (cleaned, mut status_gate) = next_gate_event(&listener);
+    assert_eq!(cleaned, [b'S', 0, 0], "watcher cleanup did not finish");
+    control
+        .write_all(&crate::pty::frame(2, &[81, 0, 25, 0]))
+        .unwrap();
+    let (resize, _) = next_gate_event(&listener);
+    assert_eq!(resize[0], b'R', "resize ioctl was not reached");
+    status_gate.write_all(b"g").unwrap();
+    let status = finished(&mut bridge.child);
+    let mut diagnostics = String::new();
+    bridge
+        .child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut diagnostics)
+        .unwrap();
+    assert_eq!(
+        resize[1], 0,
+        "post-exit resize ioctl failed with errno {}: {diagnostics}",
+        resize[2]
+    );
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "bridge exited after resize: {diagnostics}"
     );
 }
