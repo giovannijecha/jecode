@@ -24,19 +24,19 @@ their `created` time. It omits established embedding, image, moderation, audio,
 transcription and realtime model families that use other endpoints, as listed in
 the [OpenAI model reference](https://developers.openai.com/api/docs/models).
 Unrecognized IDs remain available, and `/model ID` still accepts explicit IDs.
-Catalog entries do not supply context or effort metadata.
-Context stays unknown;
-`metadata.rs` supplies reasoning levels for exact model IDs documented by OpenAI
-(checked 2026-11-02):
+Catalog entries do not supply context or effort metadata. `metadata.rs` supplies
+documented API context windows, output limits and reasoning levels for these
+exact model IDs (limits checked 2026-11-08):
 
-| API model | Explicit reasoning levels, in addition to `default` |
-| --- | --- |
-| [`gpt-6.1-sol`](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [`gpt-6-astra`](https://developers.openai.com/api/docs/models/gpt-6-astra) | `low`, `medium`, `high`, `xhigh`, `max` |
-| [`gpt-6-sol`](https://developers.openai.com/api/docs/models/gpt-6-sol), [`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna), [`gpt-6.1-terra`](https://developers.openai.com/api/docs/models/gpt-6.1-terra) | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
+| API model | Context window | Maximum output | Explicit reasoning levels, in addition to `default` |
+| --- | ---: | ---: | --- |
+| [`gpt-6.1-sol`](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [`gpt-6-astra`](https://developers.openai.com/api/docs/models/gpt-6-astra) | 1,050,000 | 128,000 | `low`, `medium`, `high`, `xhigh`, `max` |
+| [`gpt-6-sol`](https://developers.openai.com/api/docs/models/gpt-6-sol), [`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna), [`gpt-6.1-terra`](https://developers.openai.com/api/docs/models/gpt-6.1-terra) | 1,050,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
 
-There is no guessed family or snapshot-name match. Other IDs keep `default` in
-the selector, and explicit `/effort NAME` remains available without local
-capability rejection. Automatic title/compaction requests use an explicit effort
+Subscription windows still come from account metadata and may differ. There is
+no guessed family or snapshot-name match. Other IDs keep an unknown window and
+`default` in the selector, and explicit `/effort NAME` remains available without
+local capability rejection. Automatic title/compaction requests use an explicit effort
 only when supported by known metadata; unknown models keep the provider default.
 
 Keys have separate hashed identities for provider-owned history

@@ -1,4 +1,4 @@
-//! Loud and calm notices, saved row time and the observer of a resumed question.
+//! Completion visibility, saved row time and the observer of a resumed question.
 
 use super::*;
 
@@ -46,7 +46,7 @@ fn a_resumed_question_leaves_the_process_panel_on_its_own_conversation() {
 }
 
 #[test]
-fn a_failed_process_is_loud_on_its_row_and_the_status_row() {
+fn a_failed_process_keeps_its_result_without_hiding_the_turn_status() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (
@@ -70,21 +70,22 @@ fn a_failed_process_is_loud_on_its_row_and_the_status_row() {
     wait_until(&mut app, |app| completion_rows(app) == 1);
     let transcript = rows(&app);
     assert!(transcript.contains("Exit 3"), "{transcript}");
-    let notice = app.state.notice.as_ref().unwrap();
     assert!(
-        notice.text.starts_with("Process · exit 3 · "),
-        "{}",
-        notice.text
+        app.state.notice.is_none(),
+        "completion must not create a notice"
     );
-    assert!(matches!(notice.kind, Kind::Warning));
     wait_until(&mut app, |app| {
         app.worker.is_none() && rows(app).contains("It failed.")
     });
-    assert_eq!(fixture.finish().len(), 3);
+    let status = frame(&app).join("\n");
+    assert!(status.contains("Done"), "{status}");
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 3);
+    assert!(delivered(&requests[2].body));
 }
 
 #[test]
-fn a_process_that_succeeded_or_was_stopped_stays_calm() {
+fn a_successful_process_keeps_the_turn_ending_visible() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![bash("start", GATED, true)])),
@@ -96,15 +97,15 @@ fn a_process_that_succeeded_or_was_stopped_stays_calm() {
     wait_until(&mut app, |app| app.worker.is_none());
     create(&directory, "go");
     wait_until(&mut app, |app| completion_rows(app) == 1);
-    let notice = app.state.notice.as_ref().unwrap();
     assert!(
-        notice.text.starts_with("Process · exit 0 · "),
-        "{}",
-        notice.text
+        app.state.notice.is_none(),
+        "completion must not create a notice"
     );
-    assert!(matches!(notice.kind, Kind::Notice));
     wait_until(&mut app, |app| app.worker.is_none());
-    fixture.finish();
+    let status = frame(&app).join("\n");
+    assert!(status.contains("Done"), "{status}");
+    let requests = fixture.finish();
+    assert!(delivered(&requests[2].body));
 }
 
 #[test]

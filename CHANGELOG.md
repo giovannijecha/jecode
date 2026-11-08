@@ -8,6 +8,9 @@ Changes since 0.3.5.
 
 ### Long work and context
 
+- The context meter uses documented limits for recognized OpenAI API models,
+  including `gpt-6.1-sol`. Subscription limits remain account-specific; unknown
+  models keep an unknown window.
 - Long conversations use deterministic native records of earlier work without a
   model request, with references to the original conversation. Model summaries
   remain for when records and previews cannot make room.
@@ -38,6 +41,8 @@ Changes since 0.3.5.
   Failed or unconfirmed cleanup remains an unknown outcome.
 - Finished processes report their outcome to the model and conversation. The TUI
   can continue automatically; plain chat continues after the next entered line.
+- Process completions no longer create status-row notices, so the current
+  activity and the turn's final statistics stay visible.
 
 ### Development
 
