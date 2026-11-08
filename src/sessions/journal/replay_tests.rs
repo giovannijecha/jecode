@@ -110,8 +110,7 @@ fn replay(path: &Path) -> Result<Replay, String> {
         messages.extend_from_slice(super::array(&checkpoint, "messages")?);
         events.extend_from_slice(super::array(&checkpoint, "events")?);
         let patch = super::required(&checkpoint, "state")?;
-        state::merge(&mut saved, patch);
-        state::clear_legacy_draft_attachments(&mut saved, patch);
+        state::apply(&mut saved, patch);
         state::apply_partial(&mut partial, super::required(&checkpoint, "partial")?)?;
         let next = Document::parse_state(
             &state::with_partial(saved.clone(), &partial)?,
@@ -147,6 +146,160 @@ fn message(role: &str, text: &str) -> Value {
         ("role", Value::string(role)),
         ("content", Value::string(text)),
     ])
+}
+
+#[test]
+fn legacy_compaction_clears_inherited_records_but_explicit_invalid_records_fail() {
+    use crate::{context::digest::Epoch, effort::Effort, test_support::Directory};
+    use std::io::Write;
+
+    let directory = Directory::new();
+    let mut doc = Document::new(
+        directory.path().into(),
+        "fixture/model".into(),
+        Effort::Default,
+    )
+    .unwrap();
+    doc.messages = vec![
+        message("system", "Fixture"),
+        message("user", "First"),
+        message("assistant", "First answer"),
+        message("user", "Second"),
+        message("assistant", "Second answer"),
+        message("user", "Third"),
+        message("assistant", "Third answer"),
+        message("user", "Fourth"),
+    ];
+    doc.context.from = 5;
+    doc.context.summary = "Summary of the first exchange".into();
+    doc.context.digests = vec![Epoch::new(3, 5, 1, String::new())];
+
+    let append_checkpoint = |path: &Path, from: usize, explicit: bool| {
+        let mut position = None;
+        super::append(path, &super::Tail::whole(&doc), &mut position).unwrap();
+        let mut context = Value::object([
+            ("from", Value::number(from)),
+            (
+                "summary",
+                Value::string("Summary through the third exchange"),
+            ),
+        ]);
+        if explicit && let Value::Object(fields) = &mut context {
+            fields.insert(
+                "digests".into(),
+                doc.context.value().get("digests").unwrap().clone(),
+            );
+        }
+        let checkpoint = Value::object([
+            ("format", Value::string("jecode.session.journal")),
+            ("format_version", Value::number(3)),
+            ("sequence", Value::number(1)),
+            ("messages_from", Value::number(doc.messages.len())),
+            ("events_from", Value::number(0)),
+            ("messages", Value::Array(vec![])),
+            ("events", Value::Array(vec![])),
+            ("state", Value::object([("context", context)])),
+            (
+                "partial",
+                Value::object([
+                    ("keep_bytes", Value::number(0)),
+                    ("text", Value::string("")),
+                ]),
+            ),
+        ]);
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        writeln!(file, "{}", checkpoint.encode()).unwrap();
+    };
+
+    let legacy = directory.path().join("legacy.jsonl");
+    append_checkpoint(&legacy, 7, false);
+    let super::Read::Saved(saved) = super::read(&legacy, &doc.id, &doc.directory).unwrap() else {
+        panic!("missing saved checkpoint");
+    };
+    assert_eq!(saved.document.context.from, 7);
+    assert!(saved.document.context.digests.is_empty());
+    assert_eq!(
+        saved.document.context.summary,
+        "Summary through the third exchange"
+    );
+    assert_eq!(saved.document.messages, doc.messages);
+    assert_eq!(replay(&legacy).unwrap().checkpoints, 2);
+    let mut stale = doc.state_value();
+    let old_patch = Value::object([(
+        "context",
+        Value::object([
+            ("from", Value::number(7)),
+            (
+                "summary",
+                Value::string("Summary through the third exchange"),
+            ),
+        ]),
+    )]);
+    state::merge(&mut stale, &old_patch);
+    let stale = Context::parse(stale.get("context")).unwrap();
+    assert!(
+        stale.validate(&doc.messages).is_err(),
+        "the former object merge retains a digest ending before the new boundary"
+    );
+
+    let unchanged = directory.path().join("unchanged.jsonl");
+    append_checkpoint(&unchanged, 5, false);
+    let super::Read::Saved(saved) = super::read(&unchanged, &doc.id, &doc.directory).unwrap()
+    else {
+        panic!("missing saved checkpoint");
+    };
+    assert_eq!(saved.document.context.digests.len(), 1);
+
+    let invalid = directory.path().join("invalid.jsonl");
+    append_checkpoint(&invalid, 7, true);
+    assert!(
+        super::read(&invalid, &doc.id, &doc.directory)
+            .err()
+            .unwrap()
+            .contains("Invalid saved context boundary")
+    );
+    assert!(replay(&invalid).is_err());
+}
+
+#[test]
+fn legacy_summary_without_records_opens_in_the_new_reader() {
+    use crate::{effort::Effort, test_support::Directory};
+
+    let directory = Directory::new();
+    let path = directory.path().join("legacy-summary.jsonl");
+    let mut doc = Document::new(
+        directory.path().into(),
+        "fixture/model".into(),
+        Effort::Default,
+    )
+    .unwrap();
+    doc.messages = vec![
+        message("system", "Fixture"),
+        message("user", "First"),
+        message("assistant", "First answer"),
+        message("user", "Second"),
+    ];
+    doc.context.from = 3;
+    doc.context.summary = "First exchange completed".into();
+    let mut position = None;
+    super::append(&path, &super::Tail::whole(&doc), &mut position).unwrap();
+    let mut checkpoint = crate::json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let Value::Object(fields) = &mut checkpoint else {
+        unreachable!()
+    };
+    let Some(Value::Object(state)) = fields.get_mut("state") else {
+        unreachable!()
+    };
+    let Some(Value::Object(context)) = state.get_mut("context") else {
+        unreachable!()
+    };
+    context.remove("digests");
+    std::fs::write(&path, format!("{}\n", checkpoint.encode())).unwrap();
+    let super::Read::Saved(saved) = super::read(&path, &doc.id, &doc.directory).unwrap() else {
+        panic!("missing saved checkpoint");
+    };
+    assert!(saved.document.context.digests.is_empty());
+    assert_eq!(saved.document.context.project(&doc.messages, 0).len(), 4);
 }
 
 #[test]

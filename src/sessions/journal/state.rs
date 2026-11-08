@@ -36,6 +36,28 @@ pub(super) fn merge(previous: &mut Value, patch: &Value) {
     }
 }
 
+/// A pre-records writer can advance the context boundary without knowing about
+/// digests. Its new summary replaces the records, but object patches cannot
+/// remove the old field on their own.
+pub(super) fn apply(previous: &mut Value, patch: &Value) {
+    let old_from = previous
+        .get("context")
+        .and_then(|context| context.get("from"));
+    let context_patch = patch.get("context");
+    let legacy_compaction = context_patch
+        .and_then(|context| context.get("from"))
+        .is_some_and(|from| Some(from) != old_from)
+        && context_patch.is_some_and(|context| context.get("digests").is_none());
+    merge(previous, patch);
+    if legacy_compaction
+        && let Value::Object(fields) = previous
+        && let Some(Value::Object(context)) = fields.get_mut("context")
+    {
+        context.insert("digests".into(), Value::Array(Vec::new()));
+    }
+    clear_legacy_draft_attachments(previous, patch);
+}
+
 /// Older v3 writers omitted an empty attachment list. A marker-free text edit
 /// without that field cleared the draft's attachments; keep explicit lists and
 /// edits that still contain attachment markers intact.

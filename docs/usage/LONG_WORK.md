@@ -77,6 +77,11 @@ the [Tool reference](TOOL_REFERENCE.md#read). Skills the model had read are
 remembered so it can read them again. Compaction happens inside the current
 turn: it does not send your draft or rerun a completed tool call.
 
+Reopen sessions with native records in 0.4.5 or later. Version 0.3.5 cannot
+project those records, so a turn run there may lack earlier work even though
+the full original history remains saved. A later Jecode can reopen a session
+that 0.3.5 compacted, but it cannot restore context that older model never saw.
+
 If a provider rejects a request as too large, Jecode lowers its estimate of the
 window and compacts earlier. If even the instructions, your requests and a
 minimal summary do not fit, the turn stops with an error naming the budget:

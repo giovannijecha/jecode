@@ -11,6 +11,9 @@ Changes since 0.3.5.
 - Long conversations use deterministic native records of earlier work without a
   model request, with references to the original conversation. Model summaries
   remain for when records and previews cannot make room.
+- Sessions remain readable if an older version compacts them after a downgrade:
+  the new summary replaces stale records. Older versions cannot project native
+  records; continue those sessions in 0.4.5 or later.
 - Claude prompt caches default to five minutes; one-hour retention remains
   available for breaks. Configurations saved by 0.3.5 already record its
   one-hour default and keep it: choose **5 minutes** in `/settings` →
@@ -40,9 +43,10 @@ Changes since 0.3.5.
 
 - On macOS, resizing a PTY after its target exits now checks the watcher's exit
   state and waits for confirmed cleanup before returning the child's status.
-  Resize failures while the target is running still report an error. A closed
-  PTY also stops being polled until final cleanup, avoiding a reproduced busy
-  loop while preserving output and exit codes.
+  The watcher rechecks exit after one polling interval before reporting a live
+  resize failure. Resize failures while the target is running still report an
+  error. A closed PTY also stops being polled until final cleanup, avoiding a
+  reproduced busy loop while preserving output and exit codes.
 - Unix terminal errors identify a failed control read, resize or interrupt,
   and distinguish malformed frames and closed channels from system errors.
 - GitHub Actions dependencies were updated. Offline context checks screen saved

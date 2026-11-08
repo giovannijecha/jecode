@@ -77,8 +77,7 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
         if !matches!(patch, Value::Object(_)) {
             return Err("Invalid journal state patch".into());
         }
-        state::merge(&mut next_state, patch);
-        state::clear_legacy_draft_attachments(&mut next_state, patch);
+        state::apply(&mut next_state, patch);
         state::apply_partial(&mut position.partial, required(&value, "partial")?)?;
         let next = Document::parse_state(
             &state::with_partial(next_state.clone(), &position.partial)?,

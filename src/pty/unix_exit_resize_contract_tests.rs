@@ -143,6 +143,46 @@ fn lost_query_write_uses_authoritative_watcher_status() {
 }
 
 #[test]
+fn query_rechecks_exit_after_an_empty_waitid_sample() {
+    let probe = Probe::compile();
+    let directory = probe_directory();
+    let endpoint = directory.join("control");
+    let mut command = Command::new(&probe.executable);
+    command
+        .arg(&endpoint)
+        .args(["80", "24", "/bin/sh", "-c", "printf READY; sleep 30"])
+        .env("JECODE_PTY_TEST_INJECT", "query_exit_race")
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut bridge = Bridge {
+        child: command.spawn().unwrap(),
+        directory,
+    };
+    let endpoint = endpoint.to_str().unwrap();
+    let cancellation = Cancellation::default();
+    let _input = connect(endpoint, &cancellation).unwrap();
+    let mut control = connect_control(endpoint, &cancellation).unwrap();
+    let (receiver, reader) = output_events(&mut bridge);
+    let mut seen = Vec::new();
+    until(&receiver, &mut seen, b"READY");
+    control
+        .write_all(&crate::pty::frame(2, &[81, 0, 25, 0]))
+        .unwrap();
+    let status = finished(&mut bridge.child);
+    let mut diagnostics = String::new();
+    bridge
+        .child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut diagnostics)
+        .unwrap();
+    reader.join().unwrap();
+    assert_eq!(status.code(), Some(137), "{diagnostics}");
+}
+
+#[test]
 fn resize_failure_while_target_runs_remains_fatal() {
     let probe = Probe::compile();
     let directory = probe_directory();

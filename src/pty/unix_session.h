@@ -167,6 +167,7 @@ static void watch_child(int master, int slave, int owner_read,
     int status = 0;
     int cleanup_confirmed = 0;
     int query = 0;
+    int query_grace_elapsed = 0;
     for (;;) {
         siginfo_t info;
         memset(&info, 0, sizeof(info));
@@ -187,13 +188,16 @@ static void watch_child(int master, int slave, int owner_read,
             (void)stop_session(child);
             break;
         }
-        if (query && observed == 0) {
+        /* A revoked slave can precede waitid observing the target's exit.
+           Recheck after one full watcher poll before reporting it as live. */
+        if (query && observed == 0 && query_grace_elapsed) {
             int running = WATCHER_RUNNING;
             (void)write_all(status_write, &running, sizeof(running));
             query = 0;
         }
         struct pollfd owner = { owner_read, POLLIN | POLLHUP, 0 };
         int ready = poll(&owner, 1, 50);
+        if (query && ready == 0) query_grace_elapsed = 1;
         if (ready > 0 && owner.revents) {
             unsigned char byte;
             ssize_t count = read(owner_read, &byte, 1);
@@ -204,7 +208,10 @@ static void watch_child(int master, int slave, int owner_read,
                 cleanup_confirmed = cleaned == 0 && reaped == child;
                 break;
             }
-            if (count == 1 && byte == WATCHER_QUERY) query = 1;
+            if (count == 1 && byte == WATCHER_QUERY) {
+                query = 1;
+                query_grace_elapsed = 0;
+            }
         }
     }
     /* The control socket is full-duplex. The bridge only reads it, while

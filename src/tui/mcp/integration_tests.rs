@@ -97,9 +97,10 @@ fn saved_sign_in_worker_preserves_a_challenge_arriving_after_authorization_start
     let result = Job::save(directory.path().to_path_buf(), signed, false, guard)
         .finish()
         .unwrap();
-    let ResultValue::Saved(Ok((saved, _))) = result else {
-        panic!("saved sign-in worker failed");
+    let ResultValue::Saved(saved) = result else {
+        panic!("saved sign-in worker returned an unexpected result");
     };
+    let (saved, _) = saved.unwrap_or_else(|error| panic!("saved sign-in worker failed: {error:?}"));
     assert_eq!(saved.pending_scope.as_deref(), Some("admin"));
     assert_eq!(
         store.list().unwrap()[0]

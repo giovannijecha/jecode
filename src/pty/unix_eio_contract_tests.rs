@@ -15,15 +15,28 @@ static int status_gate[2] = { -1, -1 };
 static ssize_t probe_write(int fd, const void *bytes, size_t length);
 static int probe_waitid(idtype_t type, id_t id, siginfo_t *info, int options);
 static int probe_ioctl(int fd, unsigned long request, uintptr_t argument);
+static ssize_t probe_read(int fd, void *bytes, size_t length);
 #define write probe_write
 #define waitid probe_waitid
 #define ioctl(fd, request, argument) probe_ioctl(fd, request, (uintptr_t)(argument))
+#define read probe_read
 #define main bridge_entry
 #include "unix.c"
 #undef main
 #undef write
 #undef waitid
 #undef ioctl
+#undef read
+
+static int query_seen;
+static ssize_t probe_read(int fd, void *bytes, size_t length) {
+    ssize_t result = read(fd, bytes, length);
+    const char *mode = getenv("JECODE_PTY_TEST_INJECT");
+    if (mode && !strcmp(mode, "query_exit_race") && result == 1 &&
+        length == 1 && *(unsigned char *)bytes == WATCHER_QUERY)
+        query_seen = 1;
+    return result;
+}
 
 static int exit_resize_mode(void) {
     const char *mode = getenv("JECODE_PTY_TEST_INJECT");
@@ -67,6 +80,16 @@ static int probe_event(unsigned char kind, unsigned char result, int error,
 static int probe_waitid(idtype_t type, id_t id, siginfo_t *info, int options) {
     int result = waitid(type, id, info, options);
     int saved_errno = errno;
+    const char *mode = getenv("JECODE_PTY_TEST_INJECT");
+    if (mode && !strcmp(mode, "query_exit_race") && query_seen &&
+        result == 0 && info && info->si_pid == 0) {
+        query_seen = 0;
+        if (kill((pid_t)id, SIGKILL) < 0) _exit(125);
+        siginfo_t exited;
+        memset(&exited, 0, sizeof(exited));
+        if (waitid(type, id, &exited, WEXITED | WNOWAIT) < 0 ||
+            exited.si_pid != (pid_t)id) _exit(125);
+    }
     if (exit_resize_mode() && result == 0 && info && info->si_pid != 0 &&
         probe_event('E', 0, 0, 0) < 0)
         fprintf(stderr, "PROBE_EXIT_EVENT_FAILED\n");
@@ -78,6 +101,7 @@ static int probe_ioctl(int fd, unsigned long request, uintptr_t argument) {
     const char *mode = getenv("JECODE_PTY_TEST_INJECT");
     struct winsize *size = (struct winsize *)argument;
     int forced_failure = mode && (!strcmp(mode, "live_resize_error") ||
+                                  !strcmp(mode, "query_exit_race") ||
                                   !strcmp(mode, "exit_resize_error") ||
                                   !strcmp(mode, "exit_resize_epipe")) &&
         request == TIOCSWINSZ && size && size->ws_col == 81 && size->ws_row == 25;
