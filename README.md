@@ -143,8 +143,8 @@ Jecode is usable and still evolving. Commands, settings and storage formats may
 change between releases; the [release notes](CHANGELOG.md) list what changed.
 This build resumes only conversations saved in its current format; it reports
 older ones and leaves their files unchanged, without migrating them. See
-[Sessions](docs/usage/SESSIONS.md) and the unreleased
-[upgrade notes](CHANGELOG.md#upgrading-from-045). The
+[Sessions](docs/usage/SESSIONS.md) and the
+[0.5.5 upgrade notes](CHANGELOG.md#upgrading-from-045). The
 [0.4.5 notes](CHANGELOG.md#upgrading-from-035) cover the Claude prompt-cache
 default.
 

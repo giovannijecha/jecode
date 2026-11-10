@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 0.5.5
 
 Changes since 0.4.5.
 
@@ -123,7 +123,7 @@ Changes since 0.3.5.
 
 ### Upgrading from 0.3.5
 
-- Continue sessions with native records in **0.4.5 or later**. Version 0.3.5
+- Continue sessions with native records in **0.4.5**. Version 0.3.5
   cannot project those records, so a turn there may lack earlier work even
   though the full history stays saved. If an older version compacts a session,
   0.4.5 reads its new summary in place of stale records.
