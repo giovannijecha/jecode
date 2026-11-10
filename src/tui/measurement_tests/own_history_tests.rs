@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn own_history_names_the_session_by_its_folder() {
+    let folder = std::path::Path::new("sessions")
+        .join("bucket")
+        .join("1-2-3");
+    assert_eq!(
+        measured_session(&folder.join("session.jsonl")).as_deref(),
+        Some("1-2-3")
+    );
+    assert_eq!(measured_session(&folder.join("1-2-3.jsonl")), None);
+    assert_eq!(
+        measured_session(std::path::Path::new("session.jsonl")),
+        None
+    );
+}
+
+#[test]
 fn own_history_requires_a_settled_document() {
     let project = Directory::new();
     let mut document = crate::sessions::Document::new(

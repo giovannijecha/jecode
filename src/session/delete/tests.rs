@@ -21,6 +21,24 @@ fn deletion_message_displays_retained_collaborator_location() {
     assert!(text.contains("close isolated workspaces"));
 }
 
+#[test]
+fn deletion_message_names_unrecognized_entries_left_in_the_session_folder() {
+    let folder = std::path::PathBuf::from("sessions")
+        .join("bucket")
+        .join("1-2-3");
+    let report = DeleteReport {
+        files: 2,
+        directories: 1,
+        retained_collaboration: None,
+        kept: vec![folder.join("notes"), folder.join("scratch.txt")],
+    };
+    let text = message("Old conversation", &report, false);
+    assert!(text.ends_with(&format!(
+        "; Unrecognized entries kept in {}: notes, scratch.txt",
+        folder.display()
+    )));
+}
+
 fn fixture() -> (Directory, Agent, SessionConfig) {
     let directory = Directory::new();
     let mut agent = Agent::new(

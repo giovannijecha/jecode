@@ -252,13 +252,14 @@ the measurement. It prints only timings and byte counts; it does not continue
 agent work or call a provider:
 
 ```text
-JECODE_MEASURE_JOURNAL=<path to a session .jsonl>
+JECODE_MEASURE_JOURNAL=<path to a session folder's session.jsonl>
 JECODE_MEASURE_DIRECTORY=<the folder the session belongs to>
 cargo test --locked --offline --release tui::measurement_tests::own_history_scroll -- --exact --ignored --nocapture --test-threads=1
 ```
 
-Journals are under the Jecode home's `sessions/` directory; the folder is the
-one where the conversation was started.
+Journals are at `sessions/<project>/<session>/session.jsonl` in the Jecode
+home; the session folder's name identifies the conversation, and
+`JECODE_MEASURE_DIRECTORY` is the folder where it was started.
 
 ### Model stream and file edits
 
