@@ -13,7 +13,7 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
 ![Jecode running in Windows Terminal, with its startup screen, composer and model status](docs/images/jecode-startup.png)
 
-*Jecode 0.4.5 in Windows Terminal, with GPT-6.1 Sol selected.*
+*Jecode 0.5.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Long conversations and processes
 
