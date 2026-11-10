@@ -47,11 +47,13 @@ function fixture(t) {
 
 function run({directory, bin, script}) {
   const command = windows ? 'powershell.exe' : 'sh';
-  const args = windows ? ['-NoProfile', '-NonInteractive', '-File', path.join(directory, script)] :
+  const args = windows ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(directory, script)] :
     [path.join(directory, script)];
   return spawnSync(command, args, {
     cwd: directory, encoding: 'utf8', timeout: 30_000,
-    env: {...process.env, CARGO_TARGET_DIR: '', PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`},
+    env: {...process.env, CARGO_TARGET_DIR: '',
+      ...(windows ? {PSExecutionPolicyPreference: 'Restricted'} : {}),
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`},
   });
 }
 
