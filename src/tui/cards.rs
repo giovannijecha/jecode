@@ -15,7 +15,6 @@ mod edit_fallback;
 mod edits;
 mod failure;
 mod lsp;
-mod map;
 mod mcp;
 mod presentation;
 mod rhythm;
@@ -211,12 +210,12 @@ fn file_card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let expanded = tool.presentation.expanded;
     // Diff limits leave only the supplied replacements; file coordinates
     // cannot be recovered from those snippets.
-    let legacy = (tool.change.is_none() && tool.name == "edit" && status == Status::Done)
+    let snippet_change = (tool.change.is_none() && tool.name == "edit" && status == Status::Done)
         .then(|| edit_fallback::single_change(tool.arguments))
         .flatten();
     let change = tool
         .change
-        .or(legacy.as_ref())
+        .or(snippet_change.as_ref())
         .filter(|_| status == Status::Done);
     let (name, target) = heading(&tool);
     let mut rows = title::rows(name, &target, status, columns, expanded);
@@ -301,8 +300,8 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
     };
     let target = match tool.name {
         "bash" => field(tool.arguments, "command").into(),
-        "list" | "search" | "map" | "exec" | "process" | "checkpoint" | "web" | "browser"
-        | "agent" | "mcp" | "lsp" | "steps" => crate::events::target(tool.name, tool.arguments),
+        "list" | "search" | "exec" | "process" | "web" | "browser" | "agent" | "mcp" | "lsp"
+        | "steps" => crate::events::target(tool.name, tool.arguments),
         "read" if tool.arguments.get("paths").is_some() => summary::paths(tool.arguments),
         _ => skill.unwrap_or(field(tool.arguments, "path")).into(),
     };
@@ -314,13 +313,11 @@ fn title_name(tool: &str) -> &str {
         "read" => "Read",
         "list" => "List",
         "search" => "Search",
-        "map" => "Map",
         "write" => "Write",
         "edit" => "Update",
         "bash" => "Bash",
         "exec" => "Exec",
         "process" => "Process",
-        "checkpoint" => "Save",
         "web" => "Web",
         "browser" => "Browser",
         "agent" => "Agents",
@@ -425,8 +422,6 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
 #[cfg(test)]
 mod chapter_tests;
 #[cfg(test)]
-mod checkpoint_tests;
-#[cfg(test)]
 mod discovery_tests;
 #[cfg(test)]
 mod edit_fallback_tests;
@@ -434,8 +429,6 @@ mod edit_fallback_tests;
 pub(super) mod failure_tests;
 #[cfg(test)]
 mod files_tests;
-#[cfg(test)]
-mod map_tests;
 #[cfg(test)]
 mod rhythm_tests;
 #[cfg(test)]

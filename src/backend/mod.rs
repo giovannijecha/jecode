@@ -309,10 +309,6 @@ pub trait Backend: Send {
     /// Collaborators retain working tools but never receive delegation tools.
     fn set_delegation(&mut self, _enabled: bool) {}
     fn inputs(&self) -> Inputs;
-    /// What a cache write costs against uncached input, for reduction decisions.
-    fn cache_write_premium(&self, _retention: CacheRetention) -> f64 {
-        1.0
-    }
     fn limits(&mut self) -> Result<Option<Limits>, Failure>;
     fn known_limits(&self) -> Option<Limits>;
     /// Report usage through `Update::Usage` when the provider supplies it;

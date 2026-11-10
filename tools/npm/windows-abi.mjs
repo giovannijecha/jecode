@@ -15,7 +15,7 @@ export const reviewedPInvokes = {
     'CreateJobObject', 'CreatePipe', 'CreateProcessW', 'CreatePseudoConsole',
     'DeleteProcThreadAttributeList', 'DuplicateHandle', 'FreeEnvironmentStringsW', 'GetConsoleMode',
     'GetConsoleOutputCP', 'GetConsoleScreenBufferInfo', 'GetConsoleScreenBufferInfoEx', 'GetCurrentProcess',
-    'GetDiskFreeSpaceExW', 'GetEnvironmentStringsW', 'GetExitCodeProcess', 'GetNamedPipeServerProcessId',
+    'GetEnvironmentStringsW', 'GetExitCodeProcess', 'GetNamedPipeServerProcessId',
     'GetNumberOfConsoleInputEvents', 'GetQueuedCompletionStatus', 'GetStdHandle',
     'InitializeProcThreadAttributeList', 'QueryInformationJobObject', 'ReadConsoleInputW',
     'ResizePseudoConsole', 'ResumeThread', 'SetConsoleMode', 'SetConsoleOutputCP', 'SetHandleInformation',
@@ -98,7 +98,7 @@ export function auditWindows(binary, mainBytes, build) {
   const files = embeddedFiles(binary, mainBytes, bytes => bytes.toString('latin1', 0, 2) === 'MZ');
   requireFiles(files, [
     'jecode-shell.exe', 'jecode-supervisor.exe', 'jecode-pty.exe', 'jecode-terminal.exe',
-    'jecode-checkpoint_space.exe', 'jecode-openai_crypto.exe', 'jecode-http.exe',
+    'jecode-openai_crypto.exe', 'jecode-http.exe',
   ], 'Windows');
   files.set('jecode.exe', binary);
   for (const [name, file] of files) checkImage(peImage(fs.readFileSync(file), name), build, name);

@@ -180,24 +180,23 @@ impl Input {
 
     pub(super) fn parse(value: &Value) -> Result<Self, String> {
         let queued = prompt_list(value, "queued", 8)?;
-        let paused = match value.get("paused") {
-            None | Some(Value::Null) => None,
-            Some(value) => Some(Draft::parse(value)?),
+        let paused = match required(value, "paused")? {
+            Value::Null => None,
+            value => Some(Draft::parse(value)?),
         };
         let history = prompt_list(value, "history", 50)?;
         Ok(Self {
             draft: Draft::parse(required(value, "draft")?)?,
-            question: match value.get("question") {
-                None | Some(Value::Null) => None,
-                Some(value) => Some(crate::ask::Draft::parse(value)?),
+            question: match required(value, "question")? {
+                Value::Null => None,
+                value => Some(crate::ask::Draft::parse(value)?),
             },
-            staged: match value.get("staged") {
-                None => Vec::new(),
-                Some(Value::Array(values)) => values
+            staged: match required(value, "staged")? {
+                Value::Array(values) => values
                     .iter()
                     .map(Attachment::parse)
                     .collect::<Result<Vec<_>, _>>()?,
-                Some(_) => return Err("Invalid saved staged attachments".into()),
+                _ => return Err("Invalid saved staged attachments".into()),
             },
             queued,
             paused,

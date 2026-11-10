@@ -53,7 +53,7 @@ pub(super) fn load(store: &Store, id: &str, stamp: &Stamp) -> Option<Summary> {
     }
     let value = json::parse(&text).ok()?;
     if value.get("format").and_then(Value::as_str) != Some("jecode.session.summary")
-        || value.get("format_version") != Some(&Value::number(1))
+        || value.get("format_version") != Some(&Value::number(2))
         || string(&value, "id").ok()? != id
         || integer(&value, "journal_bytes").ok()? != stamp.bytes
         || string(&value, "journal_modified").ok()? != stamp.modified
@@ -65,10 +65,7 @@ pub(super) fn load(store: &Store, id: &str, stamp: &Stamp) -> Option<Summary> {
         return None;
     }
     let title = string(&value, "title").ok()?;
-    let backend = value
-        .get("backend")
-        .map(Value::as_str)
-        .unwrap_or(Some("openrouter"))?;
+    let backend = value.get("backend")?.as_str()?;
     let model = super::document::parse_model(&value).ok()?;
     if title.chars().count() > 100 || crate::backend::validate_id(backend).is_err() {
         return None;
@@ -93,7 +90,7 @@ pub(super) fn save(
     }
     let value = Value::object([
         ("format", Value::string("jecode.session.summary")),
-        ("format_version", Value::number(1)),
+        ("format_version", Value::number(2)),
         ("id", Value::string(&document.id)),
         (
             "working_directory",

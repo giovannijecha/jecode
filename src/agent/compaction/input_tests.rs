@@ -1,14 +1,8 @@
 use super::*;
 use crate::backend::openrouter::OpenRouter;
 use crate::inbox::Inbox;
-use crate::test_support::{Directory, HttpFixture, completion, tool_call};
+use crate::test_support::{Directory, HttpFixture, completion};
 use crate::tools::Tools;
-
-fn agent(directory: &Directory, fixture: &HttpFixture, limits: Limits) -> Agent {
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(limits.context, limits.output);
-    Agent::new(client, Tools::new(directory.path()).unwrap())
-}
 
 fn send(inbox: &Inbox, text: &str) {
     inbox.with(|entries| {
@@ -18,83 +12,7 @@ fn send(inbox: &Inbox, text: &str) {
 }
 
 #[test]
-fn input_during_a_tool_preview_joins_the_immediately_following_request() {
-    crate::agent::compaction::test_fallback_tiers();
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![(200, completion("Finished.", vec![]))]);
-    let limits = Limits {
-        context: 24000,
-        output: None,
-    };
-    let mut agent = agent(&directory, &fixture, limits);
-    agent.prepare_turn("Inspect once and report.").unwrap();
-    agent.messages.lock().unwrap().extend([
-        Value::object([
-            ("role", Value::string("assistant")),
-            (
-                "tool_calls",
-                Value::Array(vec![tool_call(
-                    "once",
-                    "bash",
-                    Value::object([("command", Value::string("inspect-once"))]),
-                )]),
-            ),
-        ]),
-        Value::object([
-            ("role", Value::string("tool")),
-            ("tool_call_id", Value::string("once")),
-            (
-                "content",
-                Value::string(
-                    Value::object([
-                        ("exit_code", Value::number(0)),
-                        ("stdout", Value::string("x".repeat(80000))),
-                        ("stderr", Value::string("")),
-                    ])
-                    .encode(),
-                ),
-            ),
-        ]),
-    ]);
-    agent.context.observe(
-        Some(&crate::backend::Usage {
-            input_tokens: Some(6000),
-            ..Default::default()
-        }),
-        2,
-    );
-    agent.context.calibrate(36000);
-    let inbox = agent.inbox();
-    let mut sent = false;
-    agent
-        .next_completion(Some(limits), &mut |event| {
-            if matches!(&event, Event::ContextCompacted { text } if text.starts_with("Large tool results"))
-            {
-                send(&inbox, "Keep the original inspection scope.");
-                sent = true;
-            }
-            Ok(())
-        })
-        .unwrap();
-    let requests = fixture.finish();
-    assert!(sent);
-    assert_eq!(requests.len(), 1);
-    assert!(requests[0].body.get("tools").is_some());
-    let messages = crate::test_support::request_messages(&requests[0].body);
-    assert_eq!(
-        messages
-            .last()
-            .unwrap()
-            .get("content")
-            .and_then(Value::as_str),
-        Some("Keep the original inspection scope.")
-    );
-    assert_eq!(agent.context.from, 1);
-}
-
-#[test]
 fn input_during_a_summary_is_compacted_again_before_generation_when_needed() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let workspace = directory
         .path()

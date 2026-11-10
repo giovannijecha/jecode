@@ -54,7 +54,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
 
     let done = with(columns, Feedback::ending(Ending::Done, "48s · 6 tools"));
 
-    let mut both = noticed(columns, Kind::Notice, "Checkpoint saved · rc-12");
+    let mut both = noticed(columns, Kind::Notice, "Exported conversation · notes.md");
     both.copy_notice = Some(Feedback::result(
         Kind::Notice,
         "Copied Response 3 to clipboard",
@@ -101,7 +101,7 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
     vec![
         (
             "Result",
-            noticed(columns, Kind::Notice, "Checkpoint saved · rc-12"),
+            noticed(columns, Kind::Notice, "Exported conversation · notes.md"),
         ),
         ("Done", done),
         (

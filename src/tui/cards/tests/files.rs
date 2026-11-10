@@ -132,11 +132,16 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
 }
 
 #[test]
-fn old_sessions_keep_snippet_diffs_without_fake_file_coordinates_or_eof() {
+fn single_edits_keep_snippet_diffs_without_fake_file_coordinates_or_eof() {
     let arguments = Value::object([
-        ("path", Value::string("legacy.rs")),
-        ("old_text", Value::string("same\nold")),
-        ("new_text", Value::string("same\nnew")),
+        ("path", Value::string("source.rs")),
+        (
+            "edits",
+            Value::Array(vec![Value::object([
+                ("old_text", Value::string("same\nold")),
+                ("new_text", Value::string("same\nnew")),
+            ])]),
+        ),
     ]);
     let rows = draw(
         "edit",

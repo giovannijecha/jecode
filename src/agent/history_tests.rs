@@ -187,8 +187,13 @@ fn history_is_read_only_and_bad_references_never_fall_back_to_filesystem_access(
             arguments: Value::object([
                 ("path", Value::string("history:0")),
                 ("content", Value::string("change")),
-                ("old_text", Value::string("Agent")),
-                ("new_text", Value::string("change")),
+                (
+                    "edits",
+                    Value::Array(vec![Value::object([
+                        ("old_text", Value::string("Agent")),
+                        ("new_text", Value::string("change")),
+                    ])]),
+                ),
             ])
             .encode(),
         };
@@ -219,7 +224,7 @@ fn explicit_history_reads_preserve_native_metadata_and_mask_configured_credentia
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![crate::test_support::tool_call(
+                Value::Array(vec![crate::test_support::stored_tool_call(
                     "masked",
                     "isolated-fixture-key",
                     Value::object([]),
@@ -256,7 +261,7 @@ fn a_write_receipt_links_to_the_original_request_with_exact_file_contents() {
         ("role", Value::string("assistant")),
         (
             "tool_calls",
-            Value::Array(vec![crate::test_support::tool_call(
+            Value::Array(vec![crate::test_support::stored_tool_call(
                 "write",
                 "write",
                 arguments.clone(),
@@ -283,8 +288,6 @@ fn a_write_receipt_links_to_the_original_request_with_exact_file_contents() {
     let message =
         crate::json::parse(request.get("content").and_then(Value::as_str).unwrap()).unwrap();
     let arguments = message.get("tool_calls").unwrap().as_array().unwrap()[0]
-        .get("function")
-        .unwrap()
         .get("arguments")
         .and_then(Value::as_str)
         .unwrap();

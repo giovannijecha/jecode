@@ -375,22 +375,6 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
             },
         ),
         "search" => labelled("Searching", short(field("query"))),
-        "map" => match field("action") {
-            "remember" => labelled("Remembering", short(field("title"))),
-            "forget" => labelled("Forgetting", short(field("id"))),
-            _ => labelled(
-                "Mapping",
-                if field("query").is_empty() {
-                    if field("path").is_empty() {
-                        ".".into()
-                    } else {
-                        file("path")
-                    }
-                } else {
-                    short(field("query"))
-                },
-            ),
-        },
         "read" if arguments.get("paths").is_some() => {
             match arguments
                 .get("paths")
@@ -442,7 +426,6 @@ pub(super) fn tool_label(name: &str, arguments: &Value) -> String {
         "web" => "Searching the web".into(),
         "browser" if !field("url").is_empty() => labelled("Browsing", host(field("url"))),
         "browser" => "Browsing".into(),
-        "checkpoint" => "Saving a checkpoint".into(),
         other => labelled("Running", short(other)),
     }
 }

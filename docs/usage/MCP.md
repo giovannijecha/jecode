@@ -86,7 +86,7 @@ Suspending or removing a connection blocks future calls globally. It does not
 cancel an operation already accepted by the service. Remote permissions follow
 the enabled connection and the service's grants, independently of local Read,
 Workspace and Full. Server annotations do not grant permission or prove that a
-tool is read-only. Local checkpoints cannot undo remote changes.
+tool is read-only.
 
 [OAuth](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 uses protected-resource and authorization-server metadata, an OAuth client,

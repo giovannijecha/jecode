@@ -2,7 +2,7 @@
 //! when the interface happens to see them, and the same after resume.
 
 use super::*;
-use crate::test_support::tool_call;
+use crate::test_support::stored_tool_call;
 
 fn started(id: &str, name: &str, arguments: Value) -> Event {
     Event::ToolStarted {
@@ -159,7 +159,7 @@ fn resumed_events_take_the_places_they_had_live() {
             ("content", Value::string("")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(id, "read", read(id, work))]),
+                Value::Array(vec![stored_tool_call(id, "read", read(id, work))]),
             ),
         ])
     };

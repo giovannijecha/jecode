@@ -78,8 +78,9 @@ If the initial save fails, Jecode does not contact the provider or run tools.
 Fix the storage problem and send the work again. A damaged final save is
 recovered from the previous complete one, with the incomplete bytes kept
 separately. Damaged earlier records, unsupported formats and conversations from
-another directory are reported and left unchanged. Conversations saved by
-versions before the current storage format (version 3) cannot be opened.
+another directory are reported and left unchanged. The current journal format
+is version 4, with version 2 session state. Experimental versions do not migrate
+older saved formats; those conversations cannot be resumed by this build.
 
 ## Delete a conversation
 

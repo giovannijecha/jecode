@@ -1,5 +1,5 @@
 //! Answers in progress, saved with the session input apart from the main
-//! draft. An earlier draft held one text, caret and choice.
+//! draft.
 
 use super::{MAX_OPTIONS, MAX_QUESTIONS, TEXT_LIMIT};
 use crate::{json::Value, redact::Redactor};
@@ -43,14 +43,9 @@ impl Draft {
             .and_then(Value::as_str)
             .filter(|id| !id.is_empty())
             .ok_or("Invalid question draft ID")?;
-        let Some(answers) = value.get("answers") else {
-            return Ok(Self {
-                id: id.into(),
-                step: 0,
-                answers: vec![AnswerDraft::legacy(value)?],
-            });
-        };
-        let answers = answers
+        let answers = value
+            .get("answers")
+            .ok_or("Invalid question draft answers")?
             .as_array()
             .filter(|answers| answers.len() <= MAX_QUESTIONS)
             .ok_or("Invalid question draft answers")?
@@ -135,7 +130,7 @@ impl AnswerDraft {
             .and_then(Value::as_usize)
             .filter(|row| *row <= MAX_OPTIONS)
             .ok_or("Invalid question draft row")?;
-        let (text, caret) = text(value, "caret")?;
+        let (text, caret) = text(value)?;
         Ok(Self {
             choices,
             other,
@@ -144,32 +139,15 @@ impl AnswerDraft {
             row,
         })
     }
-
-    /// `{id, text, cursor, choice}` from before several questions.
-    fn legacy(value: &Value) -> Result<Self, String> {
-        let (text, caret) = text(value, "cursor")?;
-        let choices = match value.get("choice") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::String(choice)) => vec![choice.clone()],
-            _ => return Err("Invalid question draft choice".into()),
-        };
-        Ok(Self {
-            other: choices.is_empty() && !text.trim().is_empty(),
-            choices,
-            text,
-            caret,
-            row: 0,
-        })
-    }
 }
 
-fn text(value: &Value, caret: &str) -> Result<(String, usize), String> {
+fn text(value: &Value) -> Result<(String, usize), String> {
     let text = value
         .get("text")
         .and_then(Value::as_str)
         .ok_or("Invalid question draft text")?;
     let caret = value
-        .get(caret)
+        .get("caret")
         .and_then(Value::as_usize)
         .ok_or("Invalid question draft cursor")?;
     if text.len() > TEXT_LIMIT || caret > text.len() || !text.is_char_boundary(caret) {

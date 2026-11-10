@@ -72,7 +72,7 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
     }
     let skill = object([("path", "skill:review/SKILL.md")]);
     assert!(!chapter::groupable(&tool("read", &skill, None, &shown)));
-    for name in ["write", "edit", "checkpoint"] {
+    for name in ["write", "edit"] {
         assert!(!chapter::groupable(&tool(name, &missing, None, &shown)));
     }
 }
@@ -443,38 +443,27 @@ fn facts_omit_repeated_uniform_states_but_keep_mixed_outcomes() {
 fn compact_commands_keep_notices_as_receipts_when_content_height_needs_them() {
     let args = object([("command", "cargo test")]);
     let shown = Presentation::default();
-    for status in ["partial", "none"] {
-        let result = Value::object([
-            ("exit_code", Value::number(0)),
-            (
-                "checkpoint",
-                object([("status", status), ("reason", "Untracked files")]),
-            ),
-            ("stdout_truncated", Value::Bool(true)),
-            ("stdout_bytes", Value::number(2048)),
-            ("output_limit_bytes", Value::number(1024)),
-        ]);
-        let call = tool("bash", &args, Some(&result), &shown);
-        let rows = chapter::exception(&call, 80);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].plain(), "  ⎿ BASH cargo test");
-        let receipts = chapter::receipts(&call, 80);
-        let text = receipts
-            .iter()
-            .map(Line::plain)
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert_eq!(
-            text.contains(&format!("Checkpoint {status} · Untracked files")),
-            status == "partial",
-            "{text}"
-        );
-        assert!(
-            text.contains("stdout capture kept 1 KiB of 2 KiB"),
-            "{text}"
-        );
-        assert!(text.contains("exit 0"), "{text}");
-    }
+    let result = Value::object([
+        ("exit_code", Value::number(0)),
+        ("stdout_truncated", Value::Bool(true)),
+        ("stdout_bytes", Value::number(2048)),
+        ("output_limit_bytes", Value::number(1024)),
+    ]);
+    let call = tool("bash", &args, Some(&result), &shown);
+    let rows = chapter::exception(&call, 80);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].plain(), "  ⎿ BASH cargo test");
+    let receipts = chapter::receipts(&call, 80);
+    let text = receipts
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("stdout capture kept 1 KiB of 2 KiB"),
+        "{text}"
+    );
+    assert!(text.contains("exit 0"), "{text}");
 }
 
 #[test]

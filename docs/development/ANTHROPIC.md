@@ -100,10 +100,8 @@ counted; access errors and a corrupt selected account remain explicit errors.
   writes. Reported cache counters are kept, and no subscription charge is
   invented.
 - **Caching.** Requests opt in to prompt caching at the stable system boundary,
-  two history breakpoints and the automatic top-level breakpoint, which covers
-  the end of the request. When exact records are present, their end takes one
-  history breakpoint, since that prefix outlives later compactions; recent
-  durable user-message ends take the rest. Runtime session state is
+  two history breakpoints on recent durable user-message ends and the automatic
+  top-level breakpoint, which covers the end of the request. Runtime session state is
   anchored where it was first sent and added again only when it changes, so it
   stays in the cacheable history; only state sent for the first time at the end
   is covered by the automatic breakpoint alone. On the Claude plan, for models

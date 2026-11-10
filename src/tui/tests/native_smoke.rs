@@ -52,8 +52,13 @@ fn interactive_windows_smoke() {
                             "edit",
                             Value::object([
                                 ("path", Value::string("generated.rs")),
-                                ("old_text", Value::string("before")),
-                                ("new_text", Value::string("after")),
+                                (
+                                    "edits",
+                                    Value::Array(vec![Value::object([
+                                        ("old_text", Value::string("before")),
+                                        ("new_text", Value::string("after")),
+                                    ])]),
+                                ),
                             ]),
                         ),
                     ],

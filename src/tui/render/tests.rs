@@ -201,6 +201,7 @@ fn full_width_rows_and_the_bottom_right_cell_never_scroll_or_leak_into_shell_his
     }
 }
 
+mod active_tests;
 mod composer_tests;
 mod delete_tests;
 mod feedback_tests;

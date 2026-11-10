@@ -15,8 +15,8 @@ pub struct ToolDetails {
 }
 
 impl ToolDetails {
-    /// Returns the items affected by every unseen revision. When a layout is
-    /// older than the bounded history, its caller rebuilds all rows.
+    /// Returns the items affected by every unseen revision. Old records merge
+    /// instead of expiring; a layout older than all of them rebuilds all rows.
     pub(in crate::tui) fn changed_since(&self, revisions: u64) -> Option<Range<usize>> {
         let mut remaining = revisions;
         let mut changed: Option<Range<usize>> = None;
@@ -68,8 +68,14 @@ impl State {
             *count = count.saturating_add(1);
             return;
         }
-        if self.tool_details.changes.len() == RECENT_TOOL_CHANGES {
-            self.tool_details.changes.pop_front();
+        // The oldest records merge, so a layout that fell behind still redraws
+        // only the items that changed rather than the whole conversation.
+        if self.tool_details.changes.len() == RECENT_TOOL_CHANGES
+            && let Some((oldest, count)) = self.tool_details.changes.pop_front()
+            && let Some((next, next_count)) = self.tool_details.changes.front_mut()
+        {
+            *next = oldest.start.min(next.start)..oldest.end.max(next.end);
+            *next_count = next_count.saturating_add(count);
         }
         self.tool_details.changes.push_back((items, 1));
     }

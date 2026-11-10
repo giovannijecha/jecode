@@ -69,10 +69,6 @@ impl Store {
             if name == format!("{id}.jsonl") {
                 inspect_file(&path)?;
                 durable = Some(path);
-            } else if name == format!("{id}.json") || name == format!("{id}.json.bak") {
-                inspect_file(&path)?;
-                inspect_original(&path, document)?;
-                ancillary.push(path);
             } else if sidecar(&name, id) {
                 inspect_file(&path)?;
                 ancillary.push(path);
@@ -269,35 +265,12 @@ fn sidecar(name: &str, id: &str) -> bool {
         return true;
     }
     [
-        format!("{id}.json.damaged-"),
         format!("{id}.jsonl.damaged-"),
         format!("{id}.summary.tmp-"),
         format!("{id}.tmp-"),
     ]
     .iter()
     .any(|prefix| name.strip_prefix(prefix).is_some_and(generated_id))
-}
-
-/// Migration kept these originals beside the current journal. Deletion must
-/// release their conversation data without restoring the old resume path.
-fn inspect_original(path: &Path, document: &Document) -> Result<(), String> {
-    use crate::json::{self, Value};
-    let value = fs::read_to_string(path)
-        .map_err(|error| error.to_string())
-        .and_then(|text| json::parse(&text))
-        .map_err(|error| format!("Could not verify original session copy: {error}"))?;
-    let directory = value
-        .get("working_directory")
-        .and_then(Value::as_str)
-        .map(Path::new);
-    if value.get("format").and_then(Value::as_str) != Some("jecode.session")
-        || value.get("format_version") != Some(&Value::number(1))
-        || value.get("id").and_then(Value::as_str) != Some(document.id.as_str())
-        || !directory.is_some_and(|path| same_directory(path, &document.directory))
-    {
-        return Err("Original session copy belongs to another identity or folder; files were left unchanged".into());
-    }
-    Ok(())
 }
 
 fn generated_id(value: &str) -> bool {

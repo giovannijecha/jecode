@@ -45,18 +45,10 @@ impl Tools {
         self.collaborators = collaborators;
     }
     pub fn include_credentials(&mut self, redactor: crate::redact::Redactor) {
-        self.project_map.include_credentials(redactor.clone());
         self.lsp_redactor.include(redactor.clone());
         self.lsp_runtime
             .include_credentials(self.lsp_redactor.clone());
         self.outputs.include(redactor);
-    }
-
-    pub fn configure_project_map(&mut self, home: &Path) {
-        self.project_map.configure(home);
-    }
-    pub fn share_project_map_notes(&mut self, home: &Path, project_root: &Path) {
-        self.project_map.share_notes(home, project_root);
     }
 
     pub fn configure_attachments(&mut self, pool: crate::attachments::Pool) {

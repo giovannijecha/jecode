@@ -104,78 +104,7 @@ fn unknown_capacity_stays_unknown_and_a_model_switch_forgets_the_previous_window
 }
 
 #[test]
-fn preview_only_reduction_shows_its_estimate_without_a_provider_reading() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![(200, completion("Reported.", vec![]))]);
-    let mut client = OpenRouter::fixture(fixture.endpoint.clone());
-    client.fixture_limits(24000, None);
-    let mut agent = Agent::new(client, Tools::new(directory.path()).unwrap());
-    agent.prepare_turn("Inspect once and report.").unwrap();
-    let output = format!("HEAD\n{}\nTAIL", "x".repeat(80000));
-    agent.messages.lock().unwrap().extend([
-        Value::object([
-            ("role", Value::string("assistant")),
-            (
-                "tool_calls",
-                Value::Array(vec![tool_call(
-                    "once",
-                    "bash",
-                    Value::object([("command", Value::string("inspect-once"))]),
-                )]),
-            ),
-        ]),
-        Value::object([
-            ("role", Value::string("tool")),
-            ("tool_call_id", Value::string("once")),
-            (
-                "content",
-                Value::string(
-                    Value::object([
-                        ("exit_code", Value::number(0)),
-                        ("stdout", Value::string(&output)),
-                        ("stderr", Value::string("")),
-                    ])
-                    .encode(),
-                ),
-            ),
-        ]),
-    ]);
-    let original = agent.messages.lock().unwrap().clone();
-    agent.context.observe(
-        Some(&crate::backend::Usage {
-            input_tokens: Some(6000),
-            ..Default::default()
-        }),
-        2,
-    );
-    agent.context.calibrate(36000);
-    let budget = threshold(24000, AUTO_COMPACT_DEFAULT);
-    assert!(agent.locked_estimate() >= budget);
-    let (result, trace) = trace(&mut agent, "Inspect once and report.");
-    result.unwrap();
-    let (_, before) = trace[0];
-    assert_eq!(before.capacity, Some(24000));
-    assert_eq!(before.tokens, None);
-    assert_eq!(before.percent(), None);
-    let reduced = trace
-        .iter()
-        .skip_while(|(label, _)| *label != "compacted")
-        .find(|(label, _)| *label == "context")
-        .unwrap()
-        .1;
-    // No provider reading yet: the meter shows the reduced request's estimate.
-    assert_eq!(reduced.tokens, None);
-    assert!(reduced.pending.is_some());
-    assert!(reduced.percent().unwrap() < usize::from(AUTO_COMPACT_DEFAULT));
-    assert!(agent.locked_estimate() < budget);
-    assert!(trace.iter().all(|(label, _)| *label != "maintenance"));
-    assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(fixture.finish().len(), 1);
-}
-
-#[test]
 fn a_summary_shows_its_estimate_without_ordinary_usage() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
@@ -222,7 +151,6 @@ fn a_summary_shows_its_estimate_without_ordinary_usage() {
 
 #[test]
 fn provider_recovery_keeps_the_meter_unknown_when_catalog_capacity_was_unknown() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let prompt = "original objective ".repeat(1500);
     let fixture = HttpFixture::new(vec![

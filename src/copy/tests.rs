@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 fn archive(messages: Vec<Value>) -> Archive {
     Archive {
         backend: "fixture".into(),
-        legacy_origin: None,
         model: "fixture/model".into(),
         directory: "fixture".into(),
         messages: Arc::new(Mutex::new(messages)),

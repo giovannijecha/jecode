@@ -15,6 +15,19 @@ fn arguments(entries: &[(&str, &str)]) -> Value {
     )
 }
 
+fn edit_arguments(path: &str, old: &str, new: &str) -> Value {
+    Value::object([
+        ("path", Value::string(path)),
+        (
+            "edits",
+            Value::Array(vec![Value::object([
+                ("old_text", Value::string(old)),
+                ("new_text", Value::string(new)),
+            ])]),
+        ),
+    ])
+}
+
 #[test]
 fn cancellation_preserves_files_before_write_or_edit_installation() {
     let directory = Directory::new();
@@ -25,17 +38,11 @@ fn cancellation_preserves_files_before_write_or_edit_installation() {
     let write = write_with_change(
         &root,
         &arguments(&[("path", "source.txt"), ("content", "replacement")]),
-        None,
         &cancellation,
     );
     let edit = edit_with_change(
         &root,
-        &arguments(&[
-            ("path", "source.txt"),
-            ("old_text", "original"),
-            ("new_text", "replacement"),
-        ]),
-        None,
+        &edit_arguments("source.txt", "original", "replacement"),
         &cancellation,
     );
     assert!(write.unwrap_err().contains("cancelled"));
@@ -54,7 +61,6 @@ fn file_change_is_captured_only_after_successful_text_modification() {
     let (result, created) = write_with_change(
         &root,
         &arguments(&[("path", "source.txt"), ("content", "one\ntwo\n")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -64,12 +70,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
     assert_eq!((created.added, created.removed), (2, 0));
     let (_, edit_change) = edit_with_change(
         &root,
-        &arguments(&[
-            ("path", "source.txt"),
-            ("old_text", "two"),
-            ("new_text", "three"),
-        ]),
-        None,
+        &edit_arguments("source.txt", "two", "three"),
         &Cancellation::default(),
     )
     .unwrap();
@@ -77,12 +78,7 @@ fn file_change_is_captured_only_after_successful_text_modification() {
     assert_eq!((edit_change.added, edit_change.removed), (1, 1));
     let (mismatch, change) = edit_with_change(
         &root,
-        &arguments(&[
-            ("path", "source.txt"),
-            ("old_text", "missing"),
-            ("new_text", "x"),
-        ]),
-        None,
+        &edit_arguments("source.txt", "missing", "x"),
         &Cancellation::default(),
     )
     .unwrap();
@@ -98,7 +94,6 @@ fn replacing_binary_content_keeps_write_available_without_claiming_a_creation() 
     let (result, change) = write_with_change(
         &root,
         &arguments(&[("path", "binary"), ("content", "text\n")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -115,7 +110,6 @@ fn oversized_previous_text_does_not_prevent_a_write_or_claim_a_diff() {
     let (result, change) = write_with_change(
         &root,
         &arguments(&[("path", "large.txt"), ("content", "replacement\n")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -135,12 +129,7 @@ fn editing_large_text_preserves_exact_content_without_a_diff_payload() {
     fs::write(root.join("large.txt"), &original).unwrap();
     let (result, change) = edit_with_change(
         &root,
-        &arguments(&[
-            ("path", "large.txt"),
-            ("old_text", "old"),
-            ("new_text", "new"),
-        ]),
-        None,
+        &edit_arguments("large.txt", "old", "new"),
         &Cancellation::default(),
     )
     .unwrap();
@@ -183,11 +172,7 @@ fn reads_ranges_with_original_line_endings_and_replaces_atomically() {
     assert_eq!(result.get("next_offset").unwrap().as_usize(), Some(3));
     edit(
         &root,
-        &arguments(&[
-            ("path", "source.txt"),
-            ("old_text", "first\r\nsecond"),
-            ("new_text", "updated"),
-        ]),
+        &edit_arguments("source.txt", "first\r\nsecond", "updated"),
     )
     .unwrap();
     assert_eq!(
@@ -212,14 +197,7 @@ fn ambiguous_and_missing_edits_preserve_the_original_file() {
     let root = fs::canonicalize(directory.path()).unwrap();
     fs::write(root.join("source.txt"), "aaaa").unwrap();
     for old in ["aa", "missing", ""] {
-        let failure = edit(
-            &root,
-            &arguments(&[
-                ("path", "source.txt"),
-                ("old_text", old),
-                ("new_text", "changed"),
-            ]),
-        );
+        let failure = edit(&root, &edit_arguments("source.txt", old, "changed"));
         assert!(failure.is_err() || failure.as_ref().unwrap().get("error").is_some());
         if let Ok(result) = failure {
             assert_eq!(
@@ -242,15 +220,7 @@ fn rejected_edits_return_bounded_literal_utf8_context_without_touching_the_file(
     let root = fs::canonicalize(directory.path()).unwrap();
     let original = format!("HEAD\r\n{}\r\nTAIL", "Ω-日本\"\\".repeat(3000));
     fs::write(root.join("source.txt"), &original).unwrap();
-    let result = edit(
-        &root,
-        &arguments(&[
-            ("path", "source.txt"),
-            ("old_text", "missing"),
-            ("new_text", "changed"),
-        ]),
-    )
-    .unwrap();
+    let result = edit(&root, &edit_arguments("source.txt", "missing", "changed")).unwrap();
     assert!(result.get("error").is_some());
     assert_eq!(result.get("context_complete"), Some(&Value::Bool(false)));
     let head = result
@@ -287,17 +257,7 @@ fn file_tools_cannot_traverse_outside_the_root() {
     for path in ["../outside.txt", outside.as_str()] {
         assert!(read(&root, &arguments(&[("path", path)])).is_err());
         assert!(write(&root, &arguments(&[("path", path), ("content", "changed")])).is_err());
-        assert!(
-            edit(
-                &root,
-                &arguments(&[
-                    ("path", path),
-                    ("old_text", "untouched"),
-                    ("new_text", "changed")
-                ])
-            )
-            .is_err()
-        );
+        assert!(edit(&root, &edit_arguments(path, "untouched", "changed")).is_err());
     }
     assert!(
         write(
@@ -367,11 +327,7 @@ fn invalid_text_is_rejected_and_large_files_are_paged_without_losing_long_lines(
     .unwrap();
     edit(
         &root,
-        &arguments(&[
-            ("path", "large-edit"),
-            ("old_text", "unique-tail"),
-            ("new_text", "updated-tail"),
-        ]),
+        &edit_arguments("large-edit", "unique-tail", "updated-tail"),
     )
     .unwrap();
     assert!(

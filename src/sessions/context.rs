@@ -183,10 +183,16 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
                     return Err("Invalid collaborator receipt kind".into());
                 }
                 integer(event, "sequence")?;
-                event
+                let records = event
                     .get("records")
                     .and_then(Value::as_array)
                     .ok_or("Invalid collaborator records")?;
+                if records
+                    .iter()
+                    .any(|record| record.get("log").and_then(Value::as_array).is_none())
+                {
+                    return Err("Unsupported collaborator log format; file left unchanged".into());
+                }
             }
             "turn_start" => {
                 let index = integer(event, "after_message")? as usize;
@@ -247,7 +253,7 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
                     event.get("change").ok_or("Missing file change")?,
                 )?;
             }
-            // Retired event types stay in old journals; nothing reads them.
+            // Other display and model-selection events do not change validation state.
             _ => {}
         }
     }
@@ -372,7 +378,7 @@ impl Document {
                                     });
                                 match mcp_call {
                                     Some(true) => {
-                                        "Tool outcome is unknown: Jecode closed after the remote call may have started. Check the service before deciding whether to run it again; local checkpoints cannot undo remote changes."
+                                        "Tool outcome is unknown: Jecode closed after the remote call may have started. Check the service before deciding whether to run it again; Jecode cannot undo remote changes."
                                     }
                                     Some(false) => {
                                         "Tool outcome is unknown: Jecode closed during a read-only MCP request. Run it again if the result is still needed."

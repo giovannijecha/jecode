@@ -126,8 +126,14 @@ those results must not be added to this comparison to predict a new lead.
 
 ## Exact records, development branch, 2026-11-07
 
-A later evening measured the exact native records described in
-[Architecture](ARCHITECTURE.md) against Claude Code 2.1.319 and Codex 0.167, on
+This section is historical. It measured the model-free native records of the
+0.4.5 context design, which Jecode has since retired; requests now append until
+a model summary is needed, as [Architecture](ARCHITECTURE.md) describes. These
+figures do not measure the current context path, and the commands and settings
+they name may no longer exist.
+
+A later evening measured those exact native records
+against Claude Code 2.1.319 and Codex 0.167, on
 the same Windows machine, primary models, effort and weights as above. Each Jecode row is
 one build of the `context-engine` branch. Unless noted, the rival ran in the same
 hour. Every six-turn run passed all 21 hidden tests; the forty-turn scores are
@@ -344,6 +350,6 @@ explicitly naming the removed flag. This supports no finding of lost requirement
 from compaction. Reconstructed projection does not prove the complete historical
 wire request or how the provider attended to it; those bodies were not saved.
 
-For cheaper screening, [offline context checks](CONTEXT_CHECKS.md) exercise saved
-context checkpoints and sustained record growth without provider calls. Their results
+For cheaper screening, [offline context checks](CONTEXT_CHECKS.md) replay saved
+context checkpoints without provider calls. Their results
 remain separate from live quality, cache and weighted-token comparisons.

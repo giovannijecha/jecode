@@ -56,10 +56,17 @@ instructions, and Jecode's tool rules always apply.
 Each new turn takes one snapshot of all instruction files, and the snapshot
 stays fixed for the rest of the turn, including after compaction. Edits,
 additions and deletions, even ones made by the agent during a turn, apply from
-the next turn. Restoring an `AGENTS.md` from a checkpoint applies before the next
-model request. After `/resume`, the next turn reads the current files.
+the next turn. After `/resume`, the next turn reads the current files.
 
 Instructions enter the model's context without changing the saved conversation.
+They travel in an instruction snapshot, together with the skill list, at the
+end of the first request that needs them. A snapshot is complete: a later one replaces
+it, and one that lists no instructions withdraws the earlier rules. An unchanged
+snapshot is not sent again, so a change adds one snapshot instead of altering
+the start of every later request, and the earlier conversation stays reusable
+from the provider's prompt cache. After compaction or `/resume`, the current
+snapshot is sent again when needed, so a summary cannot carry removed rules
+forward.
 
 ## Requirements and errors
 

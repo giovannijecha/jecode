@@ -111,6 +111,15 @@ fn failed_checks_are_bad_and_unknown_outcomes_are_warnings() {
         "checks",
         Value::Array(vec![Value::string("bash: history_groups_by_day failed")]),
     );
+    set(
+        &mut failed,
+        "tools",
+        Value::Array(vec![Value::object([
+            ("name", Value::string("bash")),
+            ("text", Value::string("history_groups_by_day failed")),
+            ("result", Value::object([("exit_code", Value::number(1))])),
+        ])]),
+    );
     let mut state = State {
         width: 100,
         ..State::default()

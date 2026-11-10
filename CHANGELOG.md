@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+Changes since 0.4.5.
+
+### Long work and context
+
+- Jecode has one context path. Each request adds to the previous one, so earlier
+  messages are sent unchanged and can come from the provider's prompt cache.
+  When a request would pass **Auto-compact at** (default **80%**), or the
+  provider rejects it as too long, the same model summarizes earlier work and
+  the recent messages stay verbatim. The original history stays saved and
+  readable with `history:N`. See [Long-running work](docs/usage/LONG_WORK.md).
+- Project instructions and the skill list travel in one complete instruction
+  snapshot instead of the start of every request. A change adds one snapshot; a
+  snapshot that lists no instructions withdraws the earlier rules. The current
+  snapshot is sent again after compaction or `/resume` when needed. See
+  [Project instructions](docs/usage/PROJECT_INSTRUCTIONS.md#when-changes-take-effect).
+
+### Removed
+
+- Model-free records of earlier work and persistent tool-result previews.
+  Long conversations are reduced only by the model summary described above.
+- Checkpoints and restore: the `/checkpoints` command, the `checkpoint` tool and
+  the `protect` argument of `bash`, `exec` and `process`. File changes are no
+  longer saved for restoring; use your version control.
+- The project map: the `map` tool and its saved notes.
+- The `edit` tool's top-level `old_text` and `new_text` arguments; it takes
+  `edits` or `files`.
+- The root-level `openrouter` block in `config.json` is no longer read. Jecode
+  uses `selection` and `backends`; see
+  [Configuration](docs/usage/CONFIGURATION.md).
+
+### Upgrading from 0.4.5
+
+- Saved conversations use journal format **4** with session state **2**.
+  Earlier journal or session-state formats **cannot be resumed**: Jecode reports
+  them as unsupported and leaves their files unchanged. The published 0.4.5
+  release writes journal format 3 with session state 1; there is no migration.
+  Finish or export important conversations with the version that saved them
+  before updating. See [Sessions](docs/usage/SESSIONS.md#after-an-interruption).
+- Existing checkpoint archives under `checkpoints/` and project-map notes in
+  `projects/<project>/map.json` in the Jecode home are neither read nor removed.
+  Delete them yourself when you no longer need them.
+- Explicitly saved settings are kept, including **Auto-compact at** and the
+  Claude prompt-cache retention. New configurations default to 80% and five
+  minutes.
+
+### Development
+
+- npm packaging no longer requires the retired Windows checkpoint helper or
+  its disk-space API in the reviewed ABI list.
+- Standalone packages omit private harness reports and require a fresh output
+  directory, so removed documentation cannot remain from an earlier build.
+- Resuming a conversation reapplies known-credential masking to saved
+  instruction snapshots and runtime state as well as the summary.
+- The offline context check is the read-only replay of current-format session
+  journals; the synthetic record-growth probe was retired with the records.
+
 ## 0.4.5
 
 Changes since 0.3.5.

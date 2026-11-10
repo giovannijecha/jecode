@@ -42,11 +42,21 @@ fn failed_message_display_keeps_the_provider_message_and_cancels_its_tools() {
     let messages = document.get("messages").unwrap().as_array().unwrap();
     assert_eq!(
         crate::conversation::portable(&messages[2]),
-        crate::conversation::portable(
-            first.get("choices").unwrap().as_array().unwrap()[0]
-                .get("message")
-                .unwrap()
-        )
+        Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::string("Received but not displayed.")),
+            (
+                "tool_calls",
+                Value::Array(vec![crate::test_support::stored_tool_call(
+                    "pending",
+                    "write",
+                    Value::object([
+                        ("path", Value::string("must-not-exist")),
+                        ("content", Value::string("pending")),
+                    ]),
+                )]),
+            ),
+        ])
     );
     assert!(crate::conversation::has_origin(&messages[2]));
     assert_eq!(
@@ -89,8 +99,13 @@ fn completes_all_four_tools_and_keeps_context_for_the_next_turn() {
                         "edit",
                         Value::object([
                             ("path", Value::string("source.txt")),
-                            ("old_text", Value::string("before")),
-                            ("new_text", Value::string("after")),
+                            (
+                                "edits",
+                                Value::Array(vec![Value::object([
+                                    ("old_text", Value::string("before")),
+                                    ("new_text", Value::string("after")),
+                                ])]),
+                            ),
                         ]),
                     ),
                     call(

@@ -12,7 +12,6 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -174,13 +173,6 @@ int main(int argc, char **argv) {
         long group = strtol(argv[2], &end, 10);
         if (*end || group <= 1 || group > INT_MAX) return 2;
         return kill(-(pid_t)group, SIGKILL) == 0 || errno == ESRCH ? 0 : 1;
-    }
-    if (argc == 3 && !strcmp(argv[1], "space")) {
-        struct statvfs volume;
-        if (statvfs(argv[2], &volume) < 0) return 1;
-        unsigned long long free_bytes = (unsigned long long)volume.f_bavail * volume.f_frsize;
-        printf("%llu\n", free_bytes);
-        return 0;
     }
     return 2;
 }

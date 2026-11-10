@@ -155,7 +155,7 @@ npm uninstall -g @giovannijecha/jecode
 ```
 
 npm uninstall removes the npm package and command shim. It does not remove
-Jecode's configuration, credentials, conversations, or checkpoints under
-`~/.jecode/`. The separate standalone installer may have added another
+Jecode's configuration, credentials or conversations under `~/.jecode/`.
+The separate standalone installer may have added another
 `jecode` earlier on `PATH`; check `Get-Command jecode` on Windows or
 `command -v jecode` on Unix before and after migration.

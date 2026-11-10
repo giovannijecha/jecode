@@ -18,10 +18,9 @@ pub(super) fn request(mut messages: Vec<Value>) -> Result<Vec<Value>, String> {
             (&native, fields.get("tool_calls"))
             && native.len() == calls.len()
             && native.iter().zip(calls).all(|(native, call)| {
-                ToolCall::parse(native)
+                ToolCall::parse(call)
                     .ok()
-                    .zip(ToolCall::parse(call).ok())
-                    .is_some_and(|(native, call)| native == call)
+                    .is_some_and(|call| matches_native(native, &call))
             })
         {
             fields.insert("tool_calls".into(), Value::Array(native.clone()));
@@ -32,12 +31,25 @@ pub(super) fn request(mut messages: Vec<Value>) -> Result<Vec<Value>, String> {
         };
         for call in calls {
             let parsed = ToolCall::parse(call)?;
-            if call.get("function").is_none() {
-                *call = wire(&parsed);
-            }
+            *call = wire(&parsed);
         }
     }
     Ok(messages)
+}
+
+fn matches_native(native: &Value, call: &ToolCall) -> bool {
+    native.get("id").and_then(Value::as_str) == Some(call.id.as_str())
+        && native.get("type").and_then(Value::as_str) == Some("function")
+        && native
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            == Some(call.name.as_str())
+        && native
+            .get("function")
+            .and_then(|function| function.get("arguments"))
+            .and_then(Value::as_str)
+            == Some(call.arguments.as_str())
 }
 
 pub(super) fn response(message: &mut Value, calls: &[ToolCall]) {
@@ -118,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_function_calls_remain_replayable() {
+    fn stored_function_wrappers_are_rejected() {
         let legacy = Value::object([
             ("role", Value::string("assistant")),
             (
@@ -130,17 +142,7 @@ mod tests {
                 })]),
             ),
         ]);
-        let projected = request(vec![legacy]).unwrap();
-        assert_eq!(
-            projected[0]
-                .get("tool_calls")
-                .and_then(Value::as_array)
-                .unwrap()[0]
-                .get("function")
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str),
-            Some("shell")
-        );
+        assert!(request(vec![legacy]).is_err());
     }
 
     #[test]

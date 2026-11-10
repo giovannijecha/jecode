@@ -47,7 +47,7 @@ tests and measurements described below.
 Pass a test-name filter after the Cargo options:
 
 ```text
-cargo test --locked --offline checkpoint
+cargo test --locked --offline tools::files
 cargo test --locked --offline tools::discovery
 cargo test --locked --offline agent::backend_tests::
 ```
@@ -66,10 +66,8 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
 | Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
 | Processes and terminals | `tools::processes` (lifecycle, yielding, completions), `agent::process_delivery_tests` (delivery and idle continuation), `session::processes`, `tui::processes`, `tools::exec`, `tools::interactive`, `process`. |
-| Project map | `project_map`, `agent::map_tests`. |
 | Collaboration | `agent::collaboration`, `collaboration::workspace`, `session::agents`, `tui::agents`. |
 | Sessions and attachments | `sessions`, `attachments`. |
-| Checkpoints | `checkpoint` matches the store and its agent, session, tool and TUI integration tests. |
 | TUI | State, layout and VT screen tests under `tui`, plus the native terminal fixture for your platform. |
 | Browser | `browser` uses loopback DevTools fixtures; installed-browser checks are below. |
 
@@ -78,11 +76,11 @@ use the ignored `.tmp/` or `target` directories.
 
 ## Offline long-context checks
 
-[Context checks](CONTEXT_CHECKS.md) describes two opt-in, provider-free probes:
-360 synthetic turns of record growth and read-only replay of saved session
-checkpoints. They validate context serialization and projection before spending
-live model calls. They do not establish model quality, provider cache behavior
-or ten-hour live performance.
+[Context checks](CONTEXT_CHECKS.md) describes one opt-in, provider-free probe:
+read-only replay of the saves in current-format session journals. It validates
+context serialization and projection before spending live model calls. It does
+not establish model quality, provider cache behavior or ten-hour live
+performance.
 
 ## Native terminal fixtures
 
@@ -100,11 +98,12 @@ cargo test --locked --offline tui::terminal::windows::native_tests::native_windo
 cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_lsp::native_windows_lsp_panels -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_processes::native_windows_process_panels -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::windows::native_tests::native_active_history::native_windows_escape_during_active_long_history -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 ```
 
-The first four need Windows 10 or later with ConPTY; the Linux fixture needs the
+The Windows fixtures need Windows 10 or later with ConPTY; the Linux fixture needs the
 util-linux `script` tool; the macOS fixture needs the system `script` and `tty`
 utilities. Do not run the private `native_pty_fixture` child directly. Other
 Windows fixtures cover permission requests
@@ -125,6 +124,11 @@ cargo test --locked --offline tui::terminal::unix::native_tests::scenarios::nati
 The tool card, authentication, MCP and LSP panels have no Unix fixture of their own.
 Their Windows fixtures read cells back from the console to check ConPTY's translation,
 which Unix terminals do not have; the shared rendering tests cover their content.
+
+The active-history fixture resumes synthetic history, executes a local read and
+holds a loopback model stream open. It exercises typing, resizing and Esc through
+ConPTY, then verifies that the draft survives and the terminal is restored. It
+uses isolated configuration and no provider account or external model request.
 
 The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
 the list, add, form and Advanced panels (including unchecked and signed-out
@@ -283,8 +287,7 @@ cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_run
 
 `agent::compaction::live_tests::live_summary_and_resumed_readback_preserve_critical_work`
 makes two Claude requests to check that a compaction summary keeps critical
-task facts across a resume. It turns exact records off, so the model summary
-runs as it does when records cannot make room. Results are recorded in
+task facts across a resume. Results are recorded in
 [Performance](PERFORMANCE.md#subscription-context-reuse).
 
 ## Manual checks
@@ -334,6 +337,10 @@ $package = Get-ChildItem target\package -Directory | Select-Object -First 1
 
 On Linux or macOS, run `sh PACKAGE.sh`, then
 `sh target/package/jecode-<platform>-<arch>/INSTALL.sh /absolute/test/root`.
+
+To check the package scripts without building or installing, run
+`node --test tools/package.test.mjs`. It uses an isolated source tree with stub
+build commands and verifies the document exclusions and existing-output refusal.
 
 ## npm distribution checks
 
@@ -401,8 +408,8 @@ run anything: only macOS CI establishes those.
 
 [`CI.yml`](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml)
 runs formatting, the offline build, all-target Clippy and the test suite, then
-the platform's native checks: the fullscreen, direct-input and LSP panel fixtures
-on Windows, the PTY fixture and native conversations on Linux and macOS, and the
+the platform's native checks: fullscreen, active-history Esc, direct-input, process and LSP
+panel fixtures on Windows, the PTY fixture and native conversations on Linux and macOS, and the
 native TLS check on macOS. It also builds a release executable, tests npm packaging and the
 install/update/uninstall lifecycle, and runs the opt-in native terminal fixture
 through the npm launcher. The required checks are

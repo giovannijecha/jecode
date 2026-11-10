@@ -108,8 +108,13 @@ fn native_ctrl_o_waits_for_the_whole_turn_preserves_drafts_and_resets_on_accepte
                         "edit",
                         Value::object([
                             ("path", Value::string("source.txt")),
-                            ("old_text", Value::string("before")),
-                            ("new_text", Value::string("after")),
+                            (
+                                "edits",
+                                Value::Array(vec![Value::object([
+                                    ("old_text", Value::string("before")),
+                                    ("new_text", Value::string("after")),
+                                ])]),
+                            ),
                         ]),
                     ),
                 ],

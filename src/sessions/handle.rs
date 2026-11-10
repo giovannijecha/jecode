@@ -111,8 +111,8 @@ impl Handle {
         document.pending.partial = redactor.text(&document.pending.partial);
         document.context.summary = redactor.text(&document.context.summary);
         document.context.skill_references = redactor.text(&document.context.skill_references);
-        for epoch in &mut document.context.digests {
-            epoch.notes = redactor.text(&epoch.notes);
+        for state in &mut document.context.states {
+            state.text = redactor.text(&state.text);
         }
         document.pending.tool = document.pending.tool.map(|id| redactor.text(&id));
         document.pending.reads = document
@@ -254,7 +254,6 @@ impl Handle {
         drop(messages);
         live.document.model = has_model.then(|| live.redactor.text(&archive.model));
         live.document.backend = archive.backend.clone();
-        live.document.legacy_origin = archive.legacy_origin.clone();
         if let Stage::Accept(queued) = &stage {
             // Accepted messages leave the queue in the same save that adds them.
             live.document.input.queued = queued.clone();

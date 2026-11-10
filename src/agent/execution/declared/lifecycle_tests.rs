@@ -12,10 +12,6 @@ fn fixture_agent(project: &Directory, home: &Directory, fixture: &HttpFixture) -
         Tools::new(project.path()).unwrap(),
     );
     agent.enable_sessions(home.path()).unwrap();
-    agent.use_checkpoints(crate::checkpoints::session::Session::offline(
-        home.path(),
-        project.path(),
-    ));
     agent
 }
 
@@ -68,8 +64,13 @@ fn one_operation_failure_does_not_undo_or_cancel_an_independent_success() {
                         "edit",
                         Value::object([
                             ("path", Value::string("absent.txt")),
-                            ("old_text", Value::string("old")),
-                            ("new_text", Value::string("new")),
+                            (
+                                "edits",
+                                Value::Array(vec![Value::object([
+                                    ("old_text", Value::string("old")),
+                                    ("new_text", Value::string("new")),
+                                ])]),
+                            ),
                             ("parallel", Value::Bool(true)),
                         ]),
                     ),
@@ -177,12 +178,10 @@ fn cancellation_keeps_a_durable_fast_result_and_never_starts_the_dependent_call(
                 super::tests::command(
                     "slow",
                     "printf started > ready-slow; sleep 3; printf too-late > slow.txt",
-                    "slow.txt",
                 ),
                 super::tests::command(
                     "fast",
                     "for ((n=0;n<200;n++)); do if test -e ready-slow; then printf completed > fast.txt; exit 0; fi; sleep 0.01; done; exit 73",
-                    "fast.txt",
                 ),
                 tool_call(
                     "later",

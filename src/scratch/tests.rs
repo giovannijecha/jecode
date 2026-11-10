@@ -95,15 +95,21 @@ fn all_four_tools_share_the_session_area_without_changing_the_project_cwd() {
             ("content", "printf 'before\\n'\n"),
         ],
     );
-    call(
-        &tools,
+    let edited = tools.execute(
         "edit",
-        &[
-            ("path", "tmp:probes/check.sh"),
-            ("old_text", "before"),
-            ("new_text", "after"),
-        ],
+        &Value::object([
+            ("path", Value::string("tmp:probes/check.sh")),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("before")),
+                    ("new_text", Value::string("after")),
+                ])]),
+            ),
+        ])
+        .encode(),
     );
+    assert!(edited.get("error").is_none(), "{edited:?}");
     let read = call(&tools, "read", &[("path", "tmp:probes/check.sh")]);
     assert!(
         read.get("content")

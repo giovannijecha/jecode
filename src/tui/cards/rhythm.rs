@@ -93,9 +93,7 @@ pub(super) fn limited(
 fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, &'static str) {
     let (name, target) = heading(tool);
     let command_tool = matches!(tool.name, "bash" | "exec" | "process");
-    let discovery_note = (matches!(tool.name, "list" | "search")
-        || tool.name == "map" && !matches!(field(tool.arguments, "action"), "remember" | "forget"))
-        && !description(tool).is_empty();
+    let discovery_note = matches!(tool.name, "list" | "search") && !description(tool).is_empty();
     // Actions without a payload, such as snapshot or stop, have no command row.
     let command = if discovery_note {
         true
@@ -198,19 +196,12 @@ fn collapsed_card(
         };
     }
     let hidden = body.as_ref().is_some_and(|body| body.hidden > 0)
-        || matches!(tool.name, "list" | "search" | "map") && tool.result.is_some();
+        || matches!(tool.name, "list" | "search") && tool.result.is_some();
     let mut suffix = Vec::new();
     if let Some(body) = &body
         && body.hidden > 0
     {
         suffix.push(format!("+{} {}", body.hidden, super::plural(body.hidden)));
-    }
-    if tool
-        .result
-        .and_then(|result| result.get("checkpoint"))
-        .is_some_and(|checkpoint| field(checkpoint, "status") == "none")
-    {
-        suffix.push("no checkpoint".into());
     }
     if !suffix.is_empty() {
         let suffix = Line::new(&format!("  {}", suffix.join(" · ")), DIM);

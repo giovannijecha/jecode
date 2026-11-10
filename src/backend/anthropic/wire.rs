@@ -84,8 +84,6 @@ fn build_request(
     let active_start = attachments::active_view_start(messages);
     let mut views = Vec::new();
     let mut latest_state = None;
-    // Where the native records end: the prefix that survives a compaction.
-    let mut anchor = None;
     // The system block every conversation shares, cached on its own.
     let mut shared = None;
     // With one-hour retention every breakpoint lasts an hour, so a break
@@ -138,9 +136,6 @@ fn build_request(
                 if request_state {
                     latest_state = Some(wire.len());
                 }
-                if message.get(crate::context::digest::ANCHOR).is_some() {
-                    anchor = Some(wire.len());
-                }
                 wire.push(mapped);
             }
             Some("assistant") => wire.push(assistant(message)?),
@@ -180,20 +175,13 @@ fn build_request(
     } else {
         wire.len()
     };
-    let mut slots = 2;
-    if let Some(index) = anchor
-        && cache_breakpoint(&mut wire[index], &control)
-    {
-        slots -= 1;
-    }
     let mut marked = 0;
-    for (index, message) in wire[..marked_end].iter_mut().enumerate().rev() {
-        if Some(index) != anchor
-            && message.get("role").and_then(Value::as_str) == Some("user")
+    for message in wire[..marked_end].iter_mut().rev() {
+        if message.get("role").and_then(Value::as_str) == Some("user")
             && cache_breakpoint(message, &control)
         {
             marked += 1;
-            if marked == slots {
+            if marked == 2 {
                 break;
             }
         }

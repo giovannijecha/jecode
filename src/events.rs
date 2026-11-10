@@ -71,7 +71,7 @@ pub enum Event {
         id: String,
         change: crate::file_change::Change,
     },
-    /// Context for a running call, such as the checkpoint before a command.
+    /// Context for a running call, such as the permission decision.
     ToolNote {
         id: String,
         text: String,
@@ -94,65 +94,7 @@ impl<F: FnMut(Event) -> Result<(), String>> EventSink for F {
 }
 
 pub fn tool_summary(name: &str, result: &Value) -> String {
-    checkpoint_warning(result)
-        .into_iter()
-        .chain(batch::warnings(result))
-        .fold(outcome_summary(name, result), |summary, warning| {
-            format!("{summary}; {warning}")
-        })
-}
-
-/// A checkpoint problem that people should see next to a tool result.
-pub fn checkpoint_warning(result: &Value) -> Option<String> {
-    let checkpoint = result.get("checkpoint")?;
-    let text = |key| checkpoint.get(key).and_then(Value::as_str);
-    let detail = text("reason");
-    match text("status") {
-        Some("partial" | "none") => Some(match detail {
-            Some(detail) => format!("checkpoint {}: {detail}", text("status").unwrap_or("")),
-            None => format!("checkpoint {}", text("status").unwrap_or("")),
-        }),
-        _ => detail.map(|detail| format!("checkpoint: {detail}")),
-    }
-}
-
-fn checkpoint_summary(result: &Value) -> String {
-    let count = |key: &str| {
-        result
-            .get(key)
-            .and_then(Value::as_array)
-            .map(<[Value]>::len)
-    };
-    let total = |key: &str, fallback: &str| {
-        result
-            .get(key)
-            .and_then(Value::as_usize)
-            .or_else(|| count(fallback))
-    };
-    let text = |key| result.get(key).and_then(Value::as_str).unwrap_or("");
-    let mut summary = if result.get("preview") == Some(&Value::Bool(true)) {
-        let planned = total("planned_count", "planned").unwrap_or(0);
-        format!("preview: {} would change", counted(planned, "path"))
-    } else if let Some(restored) = total("restored_count", "restored") {
-        format!(
-            "restored {} from {}",
-            counted(restored, "path"),
-            text("ref")
-        )
-    } else if let Some(calls) = count("calls") {
-        counted(calls, "call")
-    } else if let Some(paths) = total("path_count", "paths") {
-        format!("inspected {} in {}", counted(paths, "path"), text("ref"))
-    } else {
-        "complete".into()
-    };
-    if let Some(conflicts) = total("conflict_count", "conflicts").filter(|count| *count > 0) {
-        summary.push_str(&format!("; {}", counted(conflicts, "conflict")));
-    }
-    if let Some(failed) = total("failed_count", "failed").filter(|count| *count > 0) {
-        summary.push_str(&format!("; {} failed", counted(failed, "path")));
-    }
-    summary
+    outcome_summary(name, result)
 }
 
 fn counted(count: usize, noun: &str) -> String {
@@ -201,61 +143,6 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             format!("{} · revision {revision}", counted(count, "task"))
         };
     }
-    if name == "map" {
-        match result.get("action").and_then(Value::as_str) {
-            Some("remember") => return "Note saved".into(),
-            Some("forget") => {
-                return if result.get("removed") == Some(&Value::Bool(true)) {
-                    "Note forgotten".into()
-                } else {
-                    "Note not found".into()
-                };
-            }
-            _ => {}
-        }
-        let count = result
-            .get("entries_returned")
-            .and_then(Value::as_usize)
-            .or_else(|| {
-                result
-                    .get("entries")
-                    .and_then(Value::as_array)
-                    .map(<[Value]>::len)
-            })
-            .unwrap_or(0);
-        let mut summary = format!("{count} {}", if count == 1 { "entry" } else { "entries" });
-        if let Some(files) = result.get("files").and_then(Value::as_usize) {
-            summary.push_str(&format!(" in {}", counted(files, "file")));
-        }
-        if let Some(notes) = result
-            .get("notes_count")
-            .and_then(Value::as_usize)
-            .filter(|n| *n > 0)
-        {
-            summary.push_str(&format!("; {}", counted(notes, "note")));
-        }
-        let errors = result
-            .get("errors_count")
-            .and_then(Value::as_usize)
-            .or_else(|| {
-                result
-                    .get("errors")
-                    .and_then(Value::as_array)
-                    .map(<[Value]>::len)
-            })
-            .unwrap_or(0);
-        if errors > 0 {
-            summary.push_str(&format!("; {}", counted(errors, "error")));
-        }
-        if let Some(next) = result.get("next_offset").and_then(Value::as_usize) {
-            summary.push_str(&format!("; more from {next}"));
-        } else if result.get("complete") == Some(&Value::Bool(false))
-            || result.get("inventory_truncated") == Some(&Value::Bool(true))
-        {
-            summary.push_str("; partial");
-        }
-        return summary;
-    }
     if matches!(name, "list" | "search") {
         let count_key = if name == "list" {
             "entries_returned"
@@ -302,9 +189,6 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             summary.push_str("; partial");
         }
         return summary;
-    }
-    if name == "checkpoint" {
-        return checkpoint_summary(result);
     }
     if name == "browser" {
         if let Some(path) = result.get("screenshot_path").and_then(Value::as_str) {

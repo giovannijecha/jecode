@@ -53,7 +53,7 @@ pub(super) fn steps(tools: &[Value]) -> Value {
         (
             "description",
             Value::string(
-                "Run several tools in order with one call, whenever you can already write the next calls without seeing earlier results: edit then bash to verify, several edits, todo_list then read, or read plus search. Every separate call sends the whole conversation again, so prefer this over consecutive calls. Each step keeps its own permission check, checkpoint and card. Results return in order. The first failed or refused step, including a command with a non-zero exit, stops the rest, which report not_run. ask_user and steps cannot be steps; media files need a read of their own.",
+                "Run several tools in order with one call, whenever you can already write the next calls without seeing earlier results: edit then bash to verify, several edits, todo_list then read, or read plus search. Every separate call sends the whole conversation again, so prefer this over consecutive calls. Each step keeps its own permission check and card. Results return in order. The first failed or refused step, including a command with a non-zero exit, stops the rest, which report not_run. ask_user and steps cannot be steps; media files need a read of their own.",
             ),
         ),
         (

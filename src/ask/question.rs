@@ -1,6 +1,4 @@
-//! The questions of one `ask_user` call. Calls and journal events saved before
-//! several questions existed hold one question without an ID; they load as a
-//! single question with the ID `LEGACY_ID`.
+//! The questions of one `ask_user` call.
 
 use crate::json::Value;
 
@@ -8,9 +6,6 @@ use crate::json::Value;
 pub const MAX_QUESTIONS: usize = 4;
 /// At most this many options belong to one question, besides `Other`.
 pub const MAX_OPTIONS: usize = 6;
-/// The ID given to the single question of an earlier call.
-pub const LEGACY_ID: &str = "q1";
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Choice {
     pub id: String,
@@ -36,17 +31,13 @@ pub struct Request {
 }
 
 impl Request {
-    /// The call's questions from its arguments, `{"questions": [...]}`, or
-    /// from the single question of an earlier call.
+    /// The call's questions from its arguments, `{"questions": [...]}`.
     pub fn parse(id: &str, arguments: &Value) -> Result<Self, String> {
         let questions = match arguments.get("questions") {
             Some(Value::Array(items)) if (1..=MAX_QUESTIONS).contains(&items.len()) => items
                 .iter()
-                .map(|item| Question::parse(item, None))
+                .map(Question::parse)
                 .collect::<Result<Vec<_>, _>>()?,
-            None if arguments.get("question").is_some() => {
-                vec![Question::parse(arguments, Some(LEGACY_ID))?]
-            }
             _ => return Err("questions must contain one to four questions".into()),
         };
         for (index, question) in questions.iter().enumerate() {
@@ -63,16 +54,13 @@ impl Request {
         })
     }
 
-    /// A saved `user_question` event: `questions`, or an earlier `question`.
+    /// A saved `user_question` event with `questions`.
     pub(crate) fn from_event(event: &Value) -> Result<Self, String> {
         let id = event
             .get("tool_call_id")
             .and_then(Value::as_str)
             .ok_or("Missing question call ID")?;
-        match event.get("question") {
-            Some(question) if event.get("questions").is_none() => Self::parse(id, question),
-            _ => Self::parse(id, event),
-        }
+        Self::parse(id, event)
     }
 
     /// The questions as call arguments and as the journal's `questions` field.
@@ -93,13 +81,9 @@ impl Request {
 }
 
 impl Question {
-    /// Without `id`, the question must carry its own.
-    fn parse(value: &Value, id: Option<&str>) -> Result<Self, String> {
+    fn parse(value: &Value) -> Result<Self, String> {
         let get = |key| value.get(key).and_then(Value::as_str);
-        let id = match id {
-            Some(id) => id,
-            None => get("id").ok_or("question id must be a string")?,
-        };
+        let id = get("id").ok_or("question id must be a string")?;
         let title = get("title").ok_or("title must be a string")?;
         let question = get("question").ok_or("question must be a string")?;
         let context = optional_text(value, "context")?;

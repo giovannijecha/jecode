@@ -94,7 +94,7 @@ fn the_key_opens_a_sheet_over_the_draft_and_esc_returns_it_untouched() {
     assert!(rows[kept].starts_with(&format!("› {DRAFT}")), "{rows:#?}");
     // The kept draft, the status row, the title and the field, in that order.
     assert_eq!((title, field), (kept + 2, kept + 3), "{rows:#?}");
-    assert!(rows[title].contains("21 commands"));
+    assert!(rows[title].contains("20 commands"));
     // The composer is gone and the field holds the only caret.
     assert_eq!(rows.iter().filter(|row| row.starts_with("› ")).count(), 2);
     let frame = view::frame(&app.state, "fixture/model", "fixture");
@@ -132,7 +132,7 @@ fn the_list_shares_its_groups_and_order_with_the_slash_menu_until_a_filter_drops
     text(&mut app, "mod");
     let rows = live(&app.state);
     assert!(
-        rows.iter().any(|row| row.contains("1 of 21 commands")),
+        rows.iter().any(|row| row.contains("1 of 20 commands")),
         "{rows:#?}"
     );
     assert!(

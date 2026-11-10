@@ -47,7 +47,6 @@ impl Agent {
         let mut retries = super::recovery::Retries::default();
         loop {
             events.emit(Event::Preparing)?;
-            self.reload_restored_instructions();
             self.accept_input(events)?;
             // Show the window automatic compaction is about to judge.
             events.emit(Event::Context(
@@ -55,13 +54,10 @@ impl Agent {
             ))?;
             self.compact_if_needed(limits, false, events)?;
             if self.accept_input(events)? {
-                // Input arriving during summaries or tool previews can change the budget.
+                // Input arriving during a summary can change the budget.
                 continue;
             }
             let timing = super::timing::RequestTiming::start();
-            // Summarization and event delivery can take time. Include restores
-            // observed during that work before constructing the next request.
-            self.reload_restored_instructions();
             let seen = self.collaboration.latest_return_sequence();
             let request = self.transport_request();
             events.emit(Event::Context(
@@ -103,8 +99,8 @@ impl Agent {
                 }
                 events.emit(event)
             };
-            // Rebuild after every retry wait so newly observed restores and
-            // submitted messages reach the next provider request as well.
+            // Rebuild after every retry wait so newly submitted messages
+            // reach the next provider request as well.
             let result = self.complete_attempt(
                 messages,
                 super::recovery::Purpose::Conversation,
@@ -118,7 +114,7 @@ impl Agent {
                 Ok(Some(completion)) => {
                     self.context
                         .record_request(completion.usage.as_ref(), request.measurement);
-                    if let Some((before, state)) = request.state {
+                    for (before, state) in request.states {
                         self.context.anchor_state(before, state);
                     }
                     self.deliver_completions(request.completions, &mut emit)?;
@@ -194,59 +190,8 @@ impl Agent {
                 .capacity(Some(limits))
                 .unwrap_or(limits.context)
         );
-        // Exact records come first: they cost no model output and no waiting,
-        // and leave a summary for when they alone cannot make room.
-        let turn = self.turn_start(&original);
-        if !forced && turn.is_none() && estimate < self.digest_window(&original, input_budget) {
-            return Ok(false);
-        }
-        if let Some(next) = self.prepared_digest(
-            &environment,
-            &original,
-            estimate,
-            input_budget,
-            forced,
-            turn,
-        ) {
-            let before = self.context_bytes(&self.projected_context(&self.context, &original));
-            let after = self.context_bytes(&self.projected_context(&next, &original));
-            let count = next.from - self.context.from;
-            drop(original);
-            let previous = std::mem::replace(&mut self.context, next);
-            let (command, description, text) = if count > 0 {
-                (
-                    "Context digest",
-                    "Earlier messages kept as exact native records",
-                    format!(
-                        "Context digested · {count} messages kept as exact records · original conversation kept"
-                    ),
-                )
-            } else {
-                (
-                    "Context previews",
-                    "Reduced large tool payloads without summarizing conversation",
-                    "Large tool results shown as context previews · full original results remain readable in history".to_owned(),
-                )
-            };
-            let event = self.local_details_event(
-                command,
-                description,
-                "notice",
-                &[
-                    ("before_bytes".into(), before.to_string()),
-                    ("after_bytes".into(), after.to_string()),
-                    ("messages".into(), count.to_string()),
-                ],
-            );
-            self.events.lock().unwrap().push(event.clone());
-            if let Err(error) = self.checkpoint(Stage::Compaction) {
-                self.context = previous;
-                self.withdraw_event(&event);
-                return Err(error);
-            }
-            events.emit(Event::ContextCompacted { text })?;
-            return Ok(forced);
-        }
+        // One mechanism: at the budget, or on a provider rejection, the same
+        // model summarizes the older prefix. Until then requests only append.
         if !forced && estimate < input_budget {
             return Ok(false);
         }
@@ -258,13 +203,21 @@ impl Agent {
         let mut next = self.context.clone();
         next.clear_measurement();
         next.from = end;
-        // The summary folds the records in, so they stop being sent.
-        next.digests.clear();
-        // State before the boundary is summarized away; current state is sent again.
+        // State before the boundary is summarized away; current state is sent
+        // again. The last summarized instruction snapshot stays as a record
+        // outside the window, so the next request restates current
+        // instructions even when none apply.
+        let summarized = next
+            .states
+            .iter()
+            .rfind(|state| state.before < end && state.is_snapshot())
+            .cloned();
         next.states.retain(|state| state.before >= end);
+        if next.latest_state(true).is_none() {
+            next.states.splice(0..0, summarized);
+        }
         next.skill_references = self.redact(&self.skill_checkpoint_instructions());
-        next.preview_until = end;
-        next.preview_limit = (input_budget / 12).clamp(512, 2048);
+        let preview_limit = (input_budget / 12).clamp(512, 2048);
         next.request_limit = (input_budget / 4).max(1024);
         next.summary = " ".into();
         let fixed = self
@@ -285,36 +238,30 @@ impl Agent {
             .enumerate()
             .filter(|(index, _)| !self.context.returned.contains(&(self.context.from + index)))
             .map(|(index, message)| {
-                (
-                    self.context.from + index,
-                    context::portable(&next.project_message(
-                        message,
-                        self.context.from + index,
-                        self.compatible_from,
-                    ))
-                    .encode(),
-                )
+                let at = self.context.from + index;
+                let projected = if message.get("role").and_then(Value::as_str) == Some("tool") {
+                    context::preview(message, at, preview_limit)
+                } else {
+                    next.project_message(message, at, self.compatible_from)
+                };
+                (at, context::portable(&projected).encode())
             })
             .collect::<Vec<_>>();
-        for epoch in self.context.digests.iter().rev() {
-            transcript.insert(
-                0,
-                (
-                    epoch.from,
-                    epoch.text(&original, &self.context.returned).to_owned(),
-                ),
-            );
-        }
-        // Portion summaries read records, and an outcome reported in state
-        // leaves the window here without being sent again.
-        for state in self.context.states.iter().filter(|s| s.before < end) {
+        // Outcomes reported only in runtime state leave the window here
+        // without being sent again, so portion summaries read them in place.
+        for state in self
+            .context
+            .states
+            .iter()
+            .filter(|s| s.before < end && !s.is_snapshot())
+        {
             if let Some(section) = super::projection::process_section(&state.text) {
                 let at = transcript.partition_point(|(index, _)| *index < state.before);
                 transcript.insert(at, (state.before, section.to_owned()));
             }
         }
         let requests = next.user_requests(&original);
-        let before_bytes = self.context_bytes(&self.projected_context(&self.context, &original));
+        let before_bytes = self.context_bytes(&self.instructed_context(&self.context, &original));
         drop(original);
         events.emit(Event::Maintenance {
             text: format!(
@@ -343,7 +290,7 @@ impl Agent {
                 "The summary and original user requests do not fit {budget_text}; the previous context and original session are preserved. Raise Auto-compact at in /settings or choose a model with more context."
             ));
         }
-        let after_bytes = self.context_bytes(&self.projected_context(&next, &original));
+        let after_bytes = self.context_bytes(&self.instructed_context(&next, &original));
         drop(original);
         if after_bytes >= before_bytes {
             return Err("Context compaction did not reduce the request. The original conversation and context are preserved; choose a model with more context or retry.".into());
@@ -432,13 +379,6 @@ pub(super) fn generated(usage: &crate::backend::Usage) -> Option<Event> {
     })
 }
 
-mod records;
-pub(super) use records::records_by_default;
-#[cfg(test)]
-pub(super) use records::test_fallback_tiers;
-
-#[cfg(test)]
-mod digest_tests;
 #[cfg(test)]
 mod in_place_tests;
 #[cfg(test)]
@@ -454,5 +394,3 @@ mod tests;
 mod continuity_tests;
 #[cfg(all(test, windows))]
 mod persistence_tests;
-#[cfg(test)]
-mod preview_tests;

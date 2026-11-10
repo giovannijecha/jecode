@@ -1,10 +1,8 @@
 use super::*;
-use crate::checkpoints::session::Session;
 use crate::output::Store;
 use crate::redact::Redactor;
 use crate::test_support::Directory;
-use crate::tools::{Tools, processes::Registry};
-use std::io::Read;
+use crate::tools::processes::Registry;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -22,9 +20,6 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input).unwrap();
-    if args.first().map(String::as_str) == Some("--write") {
-        std::fs::write("notes.txt", args.get(1).unwrap()).unwrap();
-    }
     println!("args={args:?}");
     println!("stdin={input:?}");
     println!("cwd={}", std::env::current_dir().unwrap().display());
@@ -380,52 +375,4 @@ fn persistent_exec_receives_stdin_until_eof_and_preserves_saved_output() {
             .unwrap_or("")
     );
     assert!(stderr.contains("fixture stderr"), "{stderr}");
-}
-
-#[test]
-fn each_exec_protect_receipt_captures_the_prelaunch_file() {
-    let root = Directory::new();
-    let home = Directory::new();
-    let path = root.path().join("notes.txt");
-    std::fs::write(&path, "first").unwrap();
-    let mut tools = Tools::new(root.path()).unwrap();
-    tools.configure_output(home.path().join("logs"), Redactor::empty());
-    let session = Session::offline(home.path(), tools.root());
-    session.begin("exec-protect-fixture");
-    tools.configure_checkpoints(session);
-    for (before, after) in [("first", "second"), ("second", "third")] {
-        let result = tools.execute(
-            "exec",
-            &Value::object([
-                ("executable", Value::string(fixture().to_string_lossy())),
-                (
-                    "args",
-                    Value::Array(vec![Value::string("--write"), Value::string(after)]),
-                ),
-                ("protect", Value::Array(vec![Value::string("notes.txt")])),
-            ])
-            .encode(),
-        );
-        assert_eq!(
-            result.get("exit_code").and_then(Value::as_usize),
-            Some(0),
-            "{result:?}"
-        );
-        let checkpoint = result.get("checkpoint").unwrap();
-        assert_eq!(
-            checkpoint.get("status").and_then(Value::as_str),
-            Some("saved")
-        );
-        let reference = checkpoint.get("ref").and_then(Value::as_str).unwrap();
-        let store = tools.checkpoints().unwrap().store().unwrap();
-        let loaded = store.load(reference, &Cancellation::default()).unwrap();
-        let mut saved = String::new();
-        loaded
-            .reader(loaded.snapshot.entries.get("notes.txt").unwrap())
-            .unwrap()
-            .read_to_string(&mut saved)
-            .unwrap();
-        assert_eq!(saved, before);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
-    }
 }

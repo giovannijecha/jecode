@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     effort::Effort,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 
 fn message(role: &str, content: &str) -> Value {
@@ -75,12 +75,7 @@ fn records_keep_event_order_at_each_boundary_and_match_reused_tool_ids() {
     doc.messages.push(message("system", "Fixture"));
     doc.messages.push(message("user", "Request"));
     for name in ["read", "write"] {
-        let legacy = tool_call("reused", name, Value::object([]));
-        let call = if name == "write" {
-            ToolCall::parse(&legacy).unwrap().value()
-        } else {
-            legacy
-        };
+        let call = stored_tool_call("reused", name, Value::object([]));
         doc.messages.push(Value::object([
             ("role", Value::string("assistant")),
             ("tool_calls", Value::Array(vec![call])),
@@ -155,7 +150,7 @@ fn resumed_agent_calls_keep_the_number_saved_with_their_collaborator() {
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     call_id,
                     "agent",
                     Value::object([("action", Value::string("wait")), ("id", Value::string(id))]),
@@ -216,7 +211,7 @@ fn a_resumed_agent_step_keeps_its_number_too() {
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     "chain",
                     "steps",
                     Value::object([("steps", Value::Array(vec![step]))]),

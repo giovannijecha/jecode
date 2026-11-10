@@ -88,16 +88,6 @@ impl Hasher {
     }
 }
 
-/// A 64-bit checksum for framed records.
-pub fn checksum(parts: &[&[u8]]) -> u64 {
-    let mut value = 0x6a09_e667_f3bc_c908u64;
-    for part in parts {
-        let lane = digest(part);
-        value = finish(value ^ lane.0[0]).wrapping_add(lane.0[1]);
-    }
-    finish(value)
-}
-
 fn word(bytes: &[u8]) -> u64 {
     u64::from_le_bytes(bytes.try_into().unwrap_or_default())
 }
@@ -170,6 +160,5 @@ mod tests {
         assert!(seen.insert(digest(&base[..4095])));
         assert!(seen.insert(digest(&[])));
         assert!(seen.insert(digest(&[0])));
-        assert_ne!(checksum(&[b"ab", b"c"]), checksum(&[b"a", b"bc"]));
     }
 }

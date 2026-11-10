@@ -97,23 +97,13 @@ fn parallel_operations_exclude_state_changes_and_shared_cursors() {
         name: name.into(),
         arguments: arguments.encode(),
     };
-    for (name, action) in [
-        ("map", "overview"),
-        ("checkpoint", "list"),
-        ("checkpoint", "inspect"),
-        ("process", "list"),
-        ("web", "fetch"),
-        ("web", "download"),
-    ] {
+    for (name, action) in [("process", "list"), ("web", "fetch"), ("web", "download")] {
         assert!(parallel_call(&call(
             name,
             Value::object([("action", Value::string(action))])
         )));
     }
     for (name, action) in [
-        ("map", "remember"),
-        ("map", "forget"),
-        ("checkpoint", "restore"),
         ("process", "poll"),
         ("process", "stop"),
         ("process", "write"),

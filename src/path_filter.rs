@@ -1,33 +1,25 @@
 //! Shared Git-style path filtering, read without running Git.
-//! Checkpoints test directories only; discovery can also filter individual files.
 //! Rules come from `.gitignore` files and the repository's `info/exclude`;
 //! the user's global excludes file is not read.
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-#[derive(Clone, Debug, Default)]
-pub struct IgnoreRules {
-    pub local: BTreeMap<String, String>,
-    pub outer: Vec<(String, String)>,
-}
-
 #[derive(Default)]
 struct RuleFile {
-    text: String,
     rules: Vec<Rule>,
 }
 
 impl RuleFile {
-    fn parse(text: String) -> Self {
-        let rules = text.lines().filter_map(rule).collect();
-        Self { text, rules }
+    fn parse(text: &str) -> Self {
+        Self {
+            rules: text.lines().filter_map(rule).collect(),
+        }
     }
 }
 
 pub struct Ignore {
-    /// Present during capture; restored rules never read the live files.
-    root: Option<PathBuf>,
+    root: PathBuf,
     /// `.gitignore` rules of workspace directories, read on first use.
     local: HashMap<String, RuleFile>,
     /// Repository rules outside the workspace, nearest first, each with the
@@ -62,63 +54,16 @@ impl Ignore {
             directory.pop();
         }
         Self {
-            root: Some(root.to_path_buf()),
+            root: root.to_path_buf(),
             local: HashMap::new(),
             outer,
         }
     }
 
-    pub fn saved(rules: &IgnoreRules) -> Self {
-        Self {
-            root: None,
-            local: rules
-                .local
-                .iter()
-                .map(|(path, text)| (path.clone(), RuleFile::parse(text.clone())))
-                .collect(),
-            outer: rules
-                .outer
-                .iter()
-                .map(|(prefix, text)| (prefix.clone(), RuleFile::parse(text.clone())))
-                .collect(),
-        }
-    }
-
     fn local(&mut self, directory: &str) -> &RuleFile {
-        self.local.entry(directory.to_owned()).or_insert_with(|| {
-            self.root.as_ref().map_or_else(RuleFile::default, |root| {
-                load(&root.join(directory).join(".gitignore"))
-            })
-        })
-    }
-
-    /// Keep the rule sources, including ancestors of an explicitly selected
-    /// or absent directory. They define eligibility after the live rules change.
-    pub fn snapshot(mut self, roots: &BTreeSet<String>) -> IgnoreRules {
-        for root in roots {
-            let mut directory = root.as_str();
-            loop {
-                self.local(directory);
-                if directory.is_empty() {
-                    break;
-                }
-                directory = directory.rfind('/').map_or("", |at| &directory[..at]);
-            }
-        }
-        IgnoreRules {
-            local: self
-                .local
-                .into_iter()
-                .filter(|(_, file)| !file.rules.is_empty())
-                .map(|(path, file)| (path, file.text))
-                .collect(),
-            outer: self
-                .outer
-                .into_iter()
-                .filter(|(_, file)| !file.rules.is_empty())
-                .map(|(prefix, file)| (prefix, file.text))
-                .collect(),
-        }
+        self.local
+            .entry(directory.to_owned())
+            .or_insert_with(|| load(&self.root.join(directory).join(".gitignore")))
     }
 
     /// Records whether a walked directory holds a `.gitignore`, sparing a
@@ -134,6 +79,7 @@ impl Ignore {
     /// Whether Git ignores this workspace-relative directory, assuming its
     /// ancestors were traversed. The nearest rule file decides first, and
     /// within one file the last matching rule wins.
+    #[cfg(test)]
     pub fn ignored(&mut self, path: &str) -> bool {
         self.ignored_entry(path, true)
     }
@@ -164,23 +110,6 @@ impl Ignore {
             };
             decide_entry(&rules.rules, &below, name, directory)
         }) == Some(true)
-    }
-
-    /// An explicit scope bypasses ignore rules for itself and its ancestors,
-    /// while its implicit descendants still follow the captured rules.
-    pub fn ignored_beneath(&mut self, path: &str, scope: &str, directory: bool) -> bool {
-        let mut ancestor = if directory {
-            path
-        } else {
-            path.rfind('/').map_or("", |at| &path[..at])
-        };
-        while ancestor.len() > scope.len() {
-            if self.ignored(ancestor) {
-                return true;
-            }
-            ancestor = ancestor.rfind('/').map_or("", |at| &ancestor[..at]);
-        }
-        false
     }
 }
 
@@ -220,7 +149,7 @@ fn join(base: &Path, relative: &str) -> PathBuf {
 
 fn load(path: &Path) -> RuleFile {
     fs::read(path)
-        .map(|bytes| RuleFile::parse(String::from_utf8_lossy(&bytes).into_owned()))
+        .map(|bytes| RuleFile::parse(&String::from_utf8_lossy(&bytes)))
         .unwrap_or_default()
 }
 

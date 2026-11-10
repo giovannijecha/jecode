@@ -1,10 +1,16 @@
 //! Runtime state at fixed positions. Each update stays where it was first
 //! sent, so a later one replaces it in meaning while every earlier request
 //! remains an identical, reusable prefix for provider prompt caches.
+//! Instruction snapshots and ordinary session state are two independent
+//! kinds: each update replaces only the latest one of its own kind.
 
 use super::{Context, Value};
 
 const STATE_PREFIX: &str = "Jecode session state, current until a later session state update. This is runtime context, not a new user task. Continue the existing task using the current state below.";
+
+/// Opens every instruction snapshot, the complete project instructions and
+/// skill catalog. Saved states keep their text, so the header is their kind.
+pub const SNAPSHOT_HEADER: &str = "Jecode instruction snapshot. It replaces every earlier instruction snapshot and stays current until a later one; session state updates do not change it. Each project instruction source applies only to its stated directory scope, and more specific directory instructions take precedence on conflicts. Explicit user requests take precedence over project instructions and skills; Jecode's tool contracts still apply.";
 
 /// Runtime state the model saw at a fixed point: before source message `before`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,15 +19,25 @@ pub struct RequestState {
     pub text: String,
 }
 
-/// The request-only message that carries runtime state.
+impl RequestState {
+    /// Whether this carries instructions rather than ordinary session state.
+    pub fn is_snapshot(&self) -> bool {
+        self.text.starts_with(SNAPSHOT_HEADER)
+    }
+}
+
+/// The request-only message that carries runtime state. An instruction
+/// snapshot already opens with its own header.
 pub fn state_message(text: &str) -> Value {
+    let content = if text.starts_with(SNAPSHOT_HEADER) {
+        text.to_owned()
+    } else {
+        format!("{STATE_PREFIX}\n\n{text}")
+    };
     Value::object([
         ("role", Value::string("user")),
         ("jecode_request_state", Value::Bool(true)),
-        (
-            "content",
-            Value::string(format!("{STATE_PREFIX}\n\n{text}")),
-        ),
+        ("content", Value::string(content)),
     ])
 }
 
@@ -39,11 +55,8 @@ pub(super) fn value(states: &[RequestState]) -> Value {
     )
 }
 
-/// Sessions saved before anchored state send it again once, at the end.
 pub(super) fn parse(value: Option<&Value>) -> Result<Vec<RequestState>, String> {
-    let Some(states) = value else {
-        return Ok(Vec::new());
-    };
+    let states = value.ok_or("Missing saved request states")?;
     states
         .as_array()
         .ok_or("Invalid saved request states")?
@@ -66,15 +79,18 @@ impl Context {
             .filter(move |state| state.before >= self.from)
     }
 
-    /// Records state first sent before source message `before`. Unchanged
-    /// state is already visible, so it is not repeated.
-    pub fn anchor_state(&mut self, before: usize, text: String) {
-        if self
-            .visible_states()
+    /// The latest visible instruction snapshot, or ordinary session state.
+    pub fn latest_state(&self, snapshot: bool) -> Option<&RequestState> {
+        self.visible_states()
+            .filter(|state| state.is_snapshot() == snapshot)
             .last()
-            .map(|state| state.text.as_str())
-            != Some(text.as_str())
-        {
+    }
+
+    /// Records state first sent before source message `before`. Unchanged
+    /// state of the same kind is already visible, so it is not repeated.
+    pub fn anchor_state(&mut self, before: usize, text: String) {
+        let snapshot = text.starts_with(SNAPSHOT_HEADER);
+        if self.latest_state(snapshot).map(|state| state.text.as_str()) != Some(text.as_str()) {
             self.states.retain(|state| state.before <= before);
             self.states.push(RequestState { before, text });
         }

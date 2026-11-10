@@ -56,6 +56,21 @@ fn own_history_poll_does_not_continue_a_returned_collaborator() {
         ("workspace", Value::string("shared")),
         ("workspace_info", workspace.value()),
         ("sent_version", Value::number(1)),
+        ("received_version", Value::number(1)),
+        (
+            "log",
+            Value::Array(vec![
+                Value::object([
+                    ("kind", Value::string("assignment")),
+                    ("version", Value::number(1)),
+                    ("instructions", Value::string("")),
+                ]),
+                Value::object([
+                    ("kind", Value::string("returned")),
+                    ("version", Value::number(1)),
+                ]),
+            ]),
+        ),
         (
             "report",
             Value::object([

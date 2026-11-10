@@ -306,8 +306,7 @@ fn install(workspace: &Workspace, entry: &Entry) -> Result<(), String> {
                     fs::remove_dir(&destination).map_err(|error| error.to_string())?;
                 }
                 files::Fingerprint::File { .. } | files::Fingerprint::Absent => {
-                    crate::checkpoints::files::remove(&destination)
-                        .map_err(|error| error.to_string())?;
+                    super::install::remove(&destination).map_err(|error| error.to_string())?;
                 }
                 files::Fingerprint::Link { .. } => {
                     return Err("Deletion of a link requires coordinator handling".into());
@@ -326,15 +325,7 @@ fn install(workspace: &Workspace, entry: &Entry) -> Result<(), String> {
             let destination = files::path(&workspace.project, name)?;
             create_parents(&workspace.project, name)?;
             let input = fs::File::open(&source).map_err(|error| error.to_string())?;
-            #[cfg(unix)]
-            let mode = crate::checkpoints::files::Mode(*mode);
-            #[cfg(not(unix))]
-            let mode = crate::checkpoints::files::Mode(if *mode != 0 {
-                crate::checkpoints::files::Mode::READONLY
-            } else {
-                0
-            });
-            let staged = crate::checkpoints::files::stage_reader(&destination, input, mode)
+            let staged = super::install::stage(&destination, input, *mode)
                 .map_err(|error| format!("Could not stage {name}: {error}"))?;
             if files::observe(&workspace.root, name)? != entry.child
                 || files::observe(&workspace.project, name)? != entry.current
@@ -342,7 +333,7 @@ fn install(workspace: &Workspace, entry: &Entry) -> Result<(), String> {
                 return Err("File changed before installation".into());
             }
             staged
-                .install_deferred()
+                .install()
                 .map_err(|error| format!("Could not install {name}: {error}"))
         }
     }

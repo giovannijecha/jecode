@@ -1,5 +1,7 @@
 use super::*;
-use crate::test_support::{Directory, HttpFixture, Response, completion, tool_call};
+use crate::test_support::{
+    Directory, HttpFixture, Response, completion, stored_tool_call, tool_call,
+};
 use std::time::{Duration, Instant};
 
 fn failure(code: usize, message: &str) -> Value {
@@ -10,19 +12,6 @@ fn failure(code: usize, message: &str) -> Value {
             ("message", Value::string(message)),
         ]),
     )])
-}
-
-fn used(mut reply: Value, input: usize) -> Value {
-    if let Value::Object(fields) = &mut reply {
-        fields.insert(
-            "usage".into(),
-            Value::object([
-                ("prompt_tokens", Value::number(input)),
-                ("completion_tokens", Value::number(50)),
-            ]),
-        );
-    }
-    reply
 }
 
 fn fixture_agent(
@@ -267,97 +256,7 @@ fn an_interrupted_stream_is_archived_and_its_incomplete_tool_call_never_executes
 }
 
 #[test]
-fn repeated_previews_keep_original_history_and_save_context_before_continuing() {
-    crate::agent::compaction::test_fallback_tiers();
-    let directory = Directory::new();
-    let home = Directory::new();
-    let original = "source evidence\n".repeat(1600);
-    std::fs::write(directory.path().join("source"), &original).unwrap();
-    // Budget-relative synthetic usage keeps each compaction at the post-read boundary.
-    let read = |id| {
-        used(
-            completion(
-                "",
-                vec![tool_call(
-                    id,
-                    "read",
-                    Value::object([
-                        ("path", Value::string("source")),
-                        ("limit", Value::number(2000)),
-                    ]),
-                )],
-            ),
-            crate::context::Context::default().estimate_bytes(6000 + crate::tools::encoded_size()),
-        )
-    };
-    let fixture = HttpFixture::new(vec![
-        (200, read("first")),
-        (200, read("second")),
-        (200, completion("Inspection complete.", vec![])),
-    ]);
-    let mut agent = compacting_agent(&directory, &home, &fixture.endpoint);
-    let handle = agent.sessions().unwrap();
-    let mut previews = 0;
-    agent
-        .run_turn("Inspect the source and report evidence", &mut |event| {
-            if matches!(event, Event::ContextCompacted { ref text } if text.starts_with("Large tool results")) {
-                previews += 1;
-                let saved = handle.store().fixture_load(&handle.id()).unwrap();
-                assert!(saved.context.preview_until >= 4);
-                assert!(saved.pending.active);
-            }
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(previews, 2);
-    let requests = fixture.finish();
-    for request in &requests {
-        assert!(request.body.get("tools").is_some());
-        assert_eq!(
-            request.body.get("model").and_then(Value::as_str),
-            Some("fixture/model")
-        );
-    }
-    assert_eq!(requests.len(), 3);
-    assert!(requests[1].body.encode().contains("history:3"));
-    assert!(requests[2].body.encode().contains("history:5"));
-    let doc = handle.store().fixture_load(&handle.id()).unwrap();
-    assert_eq!(doc.messages.len(), 7);
-    let saved_from = doc.context.from;
-    assert_eq!(saved_from, 1);
-    assert_eq!(doc.context.preview_until, 6);
-    assert!(
-        doc.messages[3]
-            .get("content")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .contains("source evidence")
-    );
-    let id = handle.id();
-    drop(handle);
-    drop(agent);
-    let mut resumed = compacting_agent(&directory, &home, "http://127.0.0.1:1/chat/completions");
-    resumed.resume(&id).unwrap();
-    assert_eq!(resumed.context.from, saved_from);
-    assert!(
-        resumed
-            .transport_messages()
-            .iter()
-            .any(|message| message.encode().contains("history:5"))
-    );
-    assert!(
-        resumed
-            .archive()
-            .document()
-            .encode()
-            .contains("source evidence")
-    );
-}
-
-#[test]
 fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![]);
@@ -369,7 +268,7 @@ fn cancelling_compaction_keeps_the_previous_context_and_original_tool_results() 
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     "read",
                     "read",
                     Value::object([("path", Value::string("source"))]),

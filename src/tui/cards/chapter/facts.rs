@@ -49,7 +49,6 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
     let mut other_reads = 0;
     let mut listings = 0;
     let mut searches = 0;
-    let mut maps = 0;
     let mut web = 0;
     let mut screenshots = 0;
     let mut snapshots = 0;
@@ -95,7 +94,7 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             }
             "read" => {
                 let path = field(tool.arguments, "path");
-                if ["history:", "output:", "attachment:", "checkpoint:"]
+                if ["history:", "output:", "attachment:"]
                     .iter()
                     .any(|prefix| path.starts_with(*prefix))
                     || path.is_empty()
@@ -108,7 +107,6 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             "bash" | "exec" => commands += 1,
             "list" => listings += 1,
             "search" => searches += 1,
-            "map" => maps += 1,
             "process" => processes += 1,
             "mcp" => mcp_calls += 1,
             "lsp" => lsp_calls += 1,
@@ -138,7 +136,6 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
         (other_reads, "other read"),
         (listings, "listing"),
         (searches, "search"),
-        (maps, "map"),
         (web, "web call"),
         (screenshots, "screenshot"),
         (snapshots, "snapshot"),

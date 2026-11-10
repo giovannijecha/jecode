@@ -101,11 +101,11 @@ surface follows the theme, and its label with it.
 
 | Badge surface | Dark | Light | Use |
 | --- | --- | --- | --- |
-| `BADGE_READ` | `#4852A0` | `#4852A0` | Read, List, Search, Map, Skill, Web, Browser; the Read level chip. |
+| `BADGE_READ` | `#4852A0` | `#4852A0` | Read, List, Search, Skill, Web, Browser; the Read level chip. |
 | `BADGE_EDIT` | `#7F3C93` | `#7F3C93` | Update, Write; the Workspace level chip. |
 | `BADGE_SHELL` | `#036387` | `#036387` | Bash, Exec, Process; the Full level chip. |
 | `BADGE_COORD` | `#226558` | `#226558` | Agents, Todo, Ask user, `AGENT N` and `MAIN AGENT`. |
-| `BADGE_IDLE` | `#3A3B42` | `#D8DBE0` | Running and background badges, and the finished SAVE, MCP, LSP, WORK and other tools without a family (label in `STRONG`); attachment chips and the footer `AGENTS` badge. |
+| `BADGE_IDLE` | `#3A3B42` | `#D8DBE0` | Running and background badges, and the finished MCP, LSP, WORK and other tools without a family (label in `STRONG`); attachment chips and the footer `AGENTS` badge. |
 | `BADGE_BAD` | `#7A2E3A` | `#7A2E3A` | Failed calls. |
 | `BADGE_WARN` | `#6B5222` | `#6B5222` | Stopped or timed-out calls. |
 
@@ -195,7 +195,7 @@ its label in `DIM`.
 is the running call's `description` when given, else a verb and a short
 target: `Reading`, `Editing`, `Writing` a file; `Running` a command;
 `Starting` an `exec` program; `Fetching` or `Browsing` a host;
-`Loading skill`; `Saving a checkpoint`. Between calls it names the phase, such
+`Loading skill`. Between calls it names the phase, such
 as `Thinking` or `Working`; `Stopping` takes priority
 after cancellation. Compaction and attachment progress take the label while
 they run.
@@ -231,14 +231,13 @@ code starts when line numbers have two digits.
 There is no separate status dot: a finished call keeps its family colour, a
 running one shimmers on `BADGE_IDLE`, a background one shows a `LIT` name on
 `BADGE_IDLE`, a failed one turns `BADGE_BAD` and a stopped one `BADGE_WARN`.
-Finished badges with a family colour use `BADGE_TEXT`; the quiet ones (SAVE, MCP,
-LSP, WORK and tools without a family) use `STRONG`. The names are READ, SKILL (a
-`read` of a skill's `SKILL.md`), UPDATE, WRITE, BASH, EXEC, PROCESS, SAVE (the
-checkpoint tool), WEB, BROWSER, LIST, SEARCH, MAP and AGENTS, plus STEPS on a
-refused `steps` call. List, Search and
-Map use the read-family surface; an optional description keeps the concrete
-target on the following tree row. A permission request names the main agent as
-`MAIN AGENT`, on the coordination surface.
+Finished badges with a family colour use `BADGE_TEXT`; the quiet ones (MCP, LSP,
+WORK and tools without a family) use `STRONG`. The names are READ, SKILL (a
+`read` of a skill's `SKILL.md`), UPDATE, WRITE, BASH, EXEC, PROCESS, WEB, BROWSER,
+LIST, SEARCH and AGENTS, plus STEPS on a refused `steps` call. List and
+Search use the read-family surface; an optional description keeps the
+concrete target on the following tree row. A permission request names the main
+agent as `MAIN AGENT`, on the coordination surface.
 
 Successful writes to existing files show UPDATE when their retained change
 confirms the earlier file, including whole-file replacements. Captured new
@@ -275,14 +274,12 @@ and `DIM` while running:
 
 | Call | Result |
 | --- | --- |
-| Running | The elapsed time, after `Running` for routine calls, and any note, such as the [checkpoint](../usage/CHECKPOINTS.md) `checkpoint rc-ID` recorded before a Bash call. |
+| Running | The elapsed time, after `Running` for routine calls, and any note. |
 | Read | `9 lines · from line 33 of 212`, or `9 lines · from line 33 · more from 42` when the total is unknown. Narrow rows drop the start clause; split lines keep `continues at byte N`. Skill reads `Loaded skill · …`. |
 | List, Search | Entry or matching-line counts, searched files, errors and `more from N` when paged. Expanded cards show structured paths, source context and exclusions. |
-| Map | Overview counts entries, files, notes, errors and continuation; inventory truncation reads `partial`. Expanded cards show areas, landmarks, symbols, notes, source references, freshness and source inspection errors. Remember and forget show concise note receipts. |
-| Update (`edit` or a captured existing-file `write`) | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
+| Update (`edit` or an existing-file `write`) | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
 | New Write | `New file · N lines`, then the first six numbered source rows. |
-| Save | One quiet result with the hidden row count. |
-| Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines · no checkpoint` follows in `DIM`. |
+| Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines` follows in `DIM`. |
 | Failed command | `Exit N · diagnostic` in `BAD` on at most two rows, a muted position, up to two more `BAD` stderr rows. Recognized Node uncaught-exception headers give way to the actual error. |
 | Stopped command | `Cancelled after 6.0s` or `Timed out after …`, `· partial output` when some was captured, and the hidden line count. |
 | Background | `p3 running · latest line`; Process reports `stopping`, `stopped` or `status unknown`. A process list shows the total and the running count. |
@@ -295,29 +292,26 @@ result. Node exception logs render terminal controls as a readable transcript;
 Ctrl+O retains the complete diagnostic, including the runtime header. Saved
 output bytes and the program or wrapper's reported exit code remain intact.
 Capture limits stay visible as muted notes, such as `stdout trimmed to
-the last 64 KiB of 89 KiB · full output saved`. Checkpoint saves are quiet:
-partial coverage shows a warning; missing coverage joins a routine call's
-result, while file cards keep their warning.
+the last 64 KiB of 89 KiB · full output saved`.
 
 `Ctrl+O` expands every call of the latest finished turn into its full card:
 the full command and exact output, numbered source for Read, all diff hunks,
 and `exit N · duration` for commands. Stdout uses `CODE_TEXT`, successful
 stderr `MUTED`, and stream labels `DIM` when both streams exist. An expanded
 image Read shows an `Opened image` fact with dimensions and bytes; Web and
-Browser keep their raw results. Expansion adds a call's `Checkpoint rc-ID`
-reference. The last card of that turn with hidden content carries the key as
-text, `Ctrl+O` in bold `STRONG` and `expand` in `DIM`, ending two cells from the
-edge of the row reporting it, or on a row of its own when that row is full;
-expanded, the turn's first card names `collapse` on its title. Only the latest
-turn carries it. Tool cards keep the result reported when the call returned;
-`/process` shows the live process list.
+Browser keep their raw results. The last card of that turn with hidden
+content carries the key as text, `Ctrl+O` in bold `STRONG` and `expand` in
+`DIM`, ending two cells from the edge of the row reporting it, or on a row of
+its own when that row is full; expanded, the turn's first card names `collapse`
+on its title. Only the latest turn carries it. Tool cards keep the result
+reported when the call returned; `/process` shows the live process list.
 
 ### Work chapters
 
-Two or more adjacent Read, List, Search, Map overview, Bash, Exec, Process, Web, Browser, MCP and LSP
+Two or more adjacent Read, List, Search, Bash, Exec, Process, Web, Browser, MCP and LSP
 calls, collaboration events and agent list, inspect, wait and diff calls share a
 Work chapter when their normalized `work` labels and execution turn match.
-Skill reads, Map remember/forget, assistant text and other tools break the chapter; a single call
+Skill reads, assistant text and other tools break the chapter; a single call
 keeps its normal card. A missing label displays as **Activity**; the label is
 collapsed to one line and ellipsized to 60 cells for display only.
 
@@ -328,19 +322,19 @@ stop. When the chapter carries the turn's `Ctrl+O` key, it sits at the
 title's right edge and the title clips before it.
 
 One tree runs from the title to the chapter's last row. The first row counts
-successful work: unique files read, listings, searches, maps, other reads, web calls, screenshots,
+successful work: unique files read, listings, searches, other reads, web calls, screenshots,
 snapshots, browser actions, commands and process calls, plus running,
 background and stopped calls; it reads `0 completed` when it has nothing else.
 Each command keeps one row with its family-coloured name and description or
 command, with running time or a failed `exit N` inline. Other failed or
 unusual calls keep a row and bounded errors. Up to four latest completed
-ordinary Read, List, Search, Map, Web or Browser calls stay at the foot in
+ordinary Read, List, Search, Web or Browser calls stay at the foot in
 source order, with their times frozen when done. Running ordinary calls take
 these rows while active. A chapter that replaced a single card keeps at least
 that card's height. Expanded, the title's tree closes on its facts, every call
 follows as its full card, and the foot rows are dropped.
 
-While several calls run together, each running Read, List, Search, Map, Web or
+While several calls run together, each running Read, List, Search, Web or
 Browser member keeps a compact target and elapsed-time row in source order.
 The chapter facts count running calls; the latest completed ordinary call
 remains last. As results arrive, the corresponding running rows become
@@ -428,8 +422,8 @@ While you read older output, the gap row above the dock shows
 `↓ N rows below`, with `· new output` in `LIT` once output arrived after you
 scrolled away; the arrow is `ACCENT` then, `DIM` otherwise. The key
 `Alt+End back to bottom`, as text, ends two cells from the edge; it drops first
-when narrow. While a resize reflows
-the conversation, the gap row may show `Reflowing conversation…`.
+when narrow. Layout rebuilds add no activity label in the gap row; the dock's
+single status row continues to describe the agent's work.
 
 After the alternate screen closes, the normal screen keeps the terminal's own
 colours. The exit summary uses only ANSI magenta for `>_`, bold for `jecode`,

@@ -2,7 +2,7 @@
 //! resolve as the tools resolve them; a path the tool will reject anyway is
 //! treated as inside, so the tool reports its own error.
 
-use super::{Tools, attachment, edit, exec, files, show};
+use super::{Tools, attachment, edit, exec, files};
 use crate::json::{self, Value};
 use crate::permissions::{Access, Kind, plain};
 use std::fs;
@@ -25,10 +25,6 @@ impl Tools {
             "list" | "search" => self.file_access(Kind::Reads, text("path").unwrap_or("."), true),
             "edit" if edit::several(&arguments) => self.edits_access(&arguments),
             "write" | "edit" => self.file_access(Kind::Edits, text("path")?, false),
-            "checkpoint" if text("action") == Some("restore") => Some(self.inside(
-                Kind::Edits,
-                format!("checkpoint {}", text("id").unwrap_or("restore")),
-            )),
             "agent" if text("action") == Some("integrate") => {
                 Some(self.inside(Kind::Edits, "collaborator integration".into()))
             }
@@ -171,7 +167,6 @@ impl Tools {
             || ["history:", "skill:"].iter().any(|p| path.starts_with(p))
             || attachment::is_reference(path)
             || crate::output::is_reference(path)
-            || show::is_reference(path)
         {
             return (kind == Kind::Reads).then(|| self.inside(kind, path.to_owned()));
         }

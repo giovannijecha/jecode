@@ -6,9 +6,6 @@ mod backend;
 mod bootstrap;
 mod browser;
 mod cancel;
-#[cfg(test)]
-mod checkpoint_bench;
-mod checkpoints;
 mod cli;
 mod clipboard;
 mod collaboration;
@@ -34,7 +31,6 @@ mod output;
 mod path_filter;
 mod permissions;
 mod process;
-mod project_map;
 mod pty;
 mod redact;
 mod sandbox;
@@ -89,7 +85,6 @@ fn main() -> ExitCode {
             attachments,
             plain,
         } => bootstrap::run(model, prompt, attachments, plain),
-        Action::Checkpoints(words) => bootstrap::checkpoints(&words),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

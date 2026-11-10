@@ -41,6 +41,9 @@ mod native_permissions;
 #[path = "native_background.rs"]
 mod native_background;
 
+#[path = "native_active_history.rs"]
+mod native_active_history;
+
 #[path = "native_auth_panels.rs"]
 mod native_auth_panels;
 
@@ -74,6 +77,10 @@ fn native_pty_source() -> String {
     )
     .replace("JECODE_LIGHT_BODY", &light_body)
     .replace("JECODE_LIGHT_PLACEHOLDER", &light_placeholder)
+    .replace(
+        "JECODE_COMMAND_COUNT",
+        &crate::session::commands::COMMANDS.len().to_string(),
+    )
     .replace(
         "JECODE_SPLASH_ACCENT",
         &format!("\\x1b[{}m", crate::tui::theme::ACCENT),
@@ -162,9 +169,7 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
 #[test]
 #[ignore = "requires Windows ConPTY; explicit native input-to-VT latency measurement"]
 fn native_windows_input_to_vt_latency() {
-    for scenario in ["latency-idle", "latency-active"] {
-        measure(scenario, native_pty_source(), "Run");
-    }
+    measure("latency-idle", native_pty_source(), "Run");
 }
 
 #[test]
@@ -274,6 +279,12 @@ fn native_console_fixture() {
         restored(&path);
         return;
     }
+    if scenario == "active-long-history" {
+        native_active_history::console(&path);
+        restored(&path);
+        println!("NATIVE_ACTIVE_HISTORY_RESTORED");
+        return;
+    }
     if scenario == "permissions" {
         fixtures::permissions(&path);
         restored(&path);
@@ -315,8 +326,8 @@ fn native_console_fixture() {
         println!("NATIVE_LATENCY_RESTORED");
         return;
     }
-    if scenario == "latency-idle" || scenario == "latency-active" {
-        super::measurement_tests::fixture(&path, scenario == "latency-active");
+    if scenario == "latency-idle" {
+        super::measurement_tests::fixture(&path);
         restored(&path);
         println!("NATIVE_LATENCY_RESTORED");
         return;

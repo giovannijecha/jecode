@@ -36,26 +36,6 @@ pub fn resume(id: Option<String>, plain: bool) -> Result<(), String> {
     launch(None, None, Vec::new(), plain, Some(id))
 }
 
-/// `jecode checkpoints ...`: reads no provider settings and needs no Bash.
-pub fn checkpoints(words: &[String]) -> Result<(), String> {
-    let store = Store::discover()?;
-    let home = store.path().parent().expect("configuration directory");
-    let root =
-        std::env::current_dir().map_err(|error| format!("Invalid working directory: {error}"))?;
-    let mut stdout = io::stdout().lock();
-    if crate::checkpoints::command::stream_show(home, &root, words, &mut stdout)? {
-        return stdout.flush().map_err(|error| error.to_string());
-    }
-    let output = crate::checkpoints::command::offline(home, &root, words)?;
-    let written = match &output.raw {
-        Some(raw) => stdout.write_all(raw.as_bytes()),
-        None => writeln!(stdout, "{}", output.text()),
-    };
-    written
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("Could not print checkpoints: {error}"))
-}
-
 fn launch(
     model_override: Option<String>,
     prompt: Option<String>,
@@ -140,7 +120,6 @@ fn launch(
     }
     agent.enable_sessions(config_home)?;
     agent.name_sessions();
-    agent.enable_checkpoints(config_home);
     let attachments = agent.import_attachments(
         &attachments
             .iter()

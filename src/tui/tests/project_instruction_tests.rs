@@ -27,10 +27,7 @@ fn tui_submission_keeps_a_failed_draft_and_loads_rules_when_retried() {
         .as_array()
         .unwrap();
     assert!(
-        messages[0]
-            .get("content")
-            .unwrap()
-            .as_str()
+        crate::test_support::latest_snapshot(&requests[0].body)
             .unwrap()
             .contains("TUI project rules")
     );

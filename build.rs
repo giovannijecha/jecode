@@ -133,7 +133,6 @@ fn windows(out: &Path, assets: &mut Vec<(String, PathBuf)>) {
         &["src/tui/terminal.cs", "src/native/terminal_entry.cs"],
         &[],
     );
-    compile("checkpoint_space", &["src/checkpoints/space.cs"], &[]);
     compile("openai_crypto", &["src/auth/openai/native.cs"], &[]);
     compile(
         "http",

@@ -96,8 +96,7 @@ impl Agent {
                 level,
             } => (
                 Some(
-                    self.tools
-                        .begin_cancellable(&call.name, &call.arguments, &self.cancellation)
+                    Begun::default()
                         .with_base(base)
                         .with_permission(level, access),
                 ),
@@ -105,16 +104,6 @@ impl Agent {
             ),
             Gate::Done(result) => (None, Some(result)),
         };
-        if let Some(note) = begun.as_ref().and_then(Begun::note)
-            && let Err(error) = events.emit(Event::ToolNote {
-                id: self.redact(&call.id),
-                text: self.redact(&note),
-            })
-        {
-            self.cancel_calls(std::slice::from_ref(call));
-            self.cancel_calls(remaining);
-            return Err(error);
-        }
         let executing = Instant::now();
         let outcome = if let Some(result) = refused {
             Execution {

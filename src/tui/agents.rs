@@ -48,10 +48,8 @@ pub(super) fn label(record: &Value) -> String {
     format!("AGENT {}", number(record, "number"))
 }
 
-/// The first failed command check. Current records carry structured tool
-/// results; older snapshots may only have the command summaries in `checks`.
+/// The first failed command check from structured tool results.
 pub(super) fn failed_check(record: &Value) -> Option<&str> {
-    let mut structured = false;
     for tool in list(record, "tools") {
         if !matches!(value(tool, "name"), "bash" | "exec") {
             continue;
@@ -59,7 +57,6 @@ pub(super) fn failed_check(record: &Value) -> Option<&str> {
         let Some(result) = tool.get("result") else {
             continue;
         };
-        structured = true;
         if failed_command(result) {
             return Some(value(tool, "text"))
                 .filter(|summary| !summary.is_empty())
@@ -67,29 +64,7 @@ pub(super) fn failed_check(record: &Value) -> Option<&str> {
                 .or(Some("Command failed"));
         }
     }
-    if structured {
-        return None;
-    }
-    list(record, "checks")
-        .into_iter()
-        .filter_map(Value::as_str)
-        .find(|check| {
-            let summary = check
-                .split_once(": ")
-                .map_or(*check, |(_, summary)| summary);
-            summary
-                .strip_prefix("exit ")
-                .and_then(|code| {
-                    code.split(|ch: char| ch.is_whitespace() || ch == ';')
-                        .next()
-                })
-                .and_then(|code| code.parse::<i32>().ok())
-                .is_some_and(|code| code != 0)
-                || summary.contains("timed out")
-                || summary.contains("cancelled")
-                || summary.to_ascii_lowercase().contains("fail")
-        })
-        .map(|check| check.split_once(": ").map_or(check, |(_, summary)| summary))
+    None
 }
 
 fn failed_command(result: &Value) -> bool {

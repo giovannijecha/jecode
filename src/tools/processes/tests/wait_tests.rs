@@ -135,36 +135,6 @@ fn release_between_registration_and_wait_is_not_lost_or_replayed() {
 }
 
 #[test]
-fn a_yielding_command_keeps_its_prelaunch_checkpoint_receipt() {
-    use crate::checkpoints::session::Session;
-
-    let home = Directory::new();
-    let root = Directory::new();
-    let session = Session::open(home.path(), root.path());
-    session.begin("model");
-    let mut tools = tools(&root, Redactor::empty());
-    tools.configure_checkpoints(std::sync::Arc::clone(&session));
-    fast_yield(&tools);
-    let started = bash(
-        &tools,
-        &gate("go"),
-        &[("protect", Value::Array(vec![Value::string("generated/")]))],
-    );
-    assert_eq!(
-        started.get("yielded"),
-        Some(&Value::Bool(true)),
-        "{started:?}"
-    );
-    let checkpoint = started.get("checkpoint").unwrap();
-    assert_eq!(
-        checkpoint.get("status").and_then(Value::as_str),
-        Some("saved")
-    );
-    release(&root, "go");
-    wait_for(|| tools.process_completion_waiting());
-}
-
-#[test]
 fn a_short_command_returns_its_final_result_with_no_process_id() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::empty());

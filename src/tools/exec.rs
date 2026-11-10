@@ -14,7 +14,6 @@ pub(super) fn execute(
     arguments: &Value,
     cancellation: &Cancellation,
 ) -> Result<Value, String> {
-    let _ = shell::protect_paths(arguments)?;
     let (command, input, label) = command(context.root, context.temporary, arguments)?;
     shell::execute_command(context, arguments, cancellation, command, input, &label)
 }

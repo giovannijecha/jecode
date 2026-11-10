@@ -269,18 +269,6 @@ fn jecode_areas_and_ungoverned_tools_need_no_level() {
     ] {
         assert!(tools.access(name, "{}").is_none(), "{name}");
     }
-    assert!(
-        tools
-            .access("checkpoint", &arguments(&[("action", "list")]))
-            .is_none()
-    );
-    assert_eq!(
-        tools
-            .access("checkpoint", &arguments(&[("action", "restore")]))
-            .unwrap()
-            .kind,
-        Kind::Edits
-    );
 }
 
 #[test]

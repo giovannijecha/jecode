@@ -3,7 +3,7 @@ use crate::{
     effort::Effort,
     json::{self, Value},
     redact::Redactor,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 
 fn document(directory: &Directory) -> Document {
@@ -43,17 +43,17 @@ fn interrupted_read_batch_recovers_each_started_read_and_preserves_order() {
         (
             "tool_calls",
             Value::Array(vec![
-                tool_call(
+                stored_tool_call(
                     "read-a",
                     "read",
                     Value::object([("path", Value::string("a"))]),
                 ),
-                tool_call(
+                stored_tool_call(
                     "read-b",
                     "read",
                     Value::object([("path", Value::string("b"))]),
                 ),
-                tool_call(
+                stored_tool_call(
                     "later",
                     "write",
                     Value::object([
@@ -101,7 +101,7 @@ fn interrupted_read_batch_recovers_each_started_read_and_preserves_order() {
 }
 
 #[test]
-fn saved_sessions_without_pending_reads_remain_loadable() {
+fn saved_sessions_require_pending_reads_field() {
     let directory = Directory::new();
     let mut value = document(&directory).value();
     if let Value::Object(fields) = &mut value
@@ -109,6 +109,5 @@ fn saved_sessions_without_pending_reads_remain_loadable() {
     {
         pending.remove("reads");
     }
-    let parsed = Document::parse(&value).unwrap();
-    assert!(parsed.pending.reads.is_empty());
+    assert!(Document::parse(&value).is_err());
 }

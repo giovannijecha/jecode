@@ -3,7 +3,7 @@ use crate::{
     effort::Effort,
     json::{self, Value},
     redact::Redactor,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 use std::fs;
 
@@ -121,7 +121,7 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
         (
             "tool_calls",
             Value::Array(vec![
-                tool_call(
+                stored_tool_call(
                     "started",
                     "write",
                     Value::object([
@@ -129,7 +129,7 @@ fn interrupted_tool_is_unknown_unstarted_calls_are_not_executed_and_partial_is_d
                         ("content", Value::string("must not execute")),
                     ]),
                 ),
-                tool_call(
+                stored_tool_call(
                     "unstarted",
                     "bash",
                     Value::object([("command", Value::string("must not execute"))]),
@@ -270,7 +270,7 @@ fn a_saved_paused_draft_round_trips_and_recovery_joins_pending_input() {
     let Value::Object(input) = saved.get_mut("input").unwrap() else {
         unreachable!()
     };
-    input.remove("paused");
+    input.insert("paused".into(), Value::Null);
     let mut parsed = Document::parse(&Value::Object(saved)).unwrap();
     assert!(parsed.input.paused.is_none());
     parsed.input.queued = vec!["same 🙂".into(), "same 🙂".into()];
@@ -342,7 +342,8 @@ fn invalid_context_cursor_scope_and_future_format_are_rejected() {
     let directory = Directory::new();
     let doc = document(&directory);
     for (field, value) in [
-        ("format_version", Value::number(2)),
+        ("format_version", Value::number(1)),
+        ("format_version", Value::number(3)),
         ("compatible_from", Value::number(999)),
         ("id", Value::string("../bad")),
     ] {
@@ -436,43 +437,47 @@ fn input_redaction_keeps_utf8_cursor_valid_and_never_stores_the_key() {
 }
 
 #[test]
-fn opening_a_session_redacts_saved_skill_references() {
+fn opening_a_session_redacts_saved_context_text() {
     let home = Directory::new();
     let directory = Directory::new();
     let store = store(&home, &directory);
     let mut doc = document(&directory);
+    doc.context.summary = "Continue fixture-key work".into();
     doc.context.skill_references = "skill:fixture-key".into();
+    doc.context.states = vec![
+        crate::context::RequestState {
+            before: 2,
+            text: format!(
+                "{}\n\nProject rule: fixture-key",
+                crate::context::SNAPSHOT_HEADER
+            ),
+        },
+        crate::context::RequestState {
+            before: 2,
+            text: "Working reference: fixture-key".into(),
+        },
+    ];
     let id = doc.id.clone();
     let lease = store.acquire(&id).unwrap();
     lease.save(&doc).unwrap();
     drop(lease);
-    let (handle, _) = Handle::open(store, &id, Redactor::new("fixture-key".into())).unwrap();
-    assert_eq!(
-        handle.snapshot().context.skill_references,
-        "skill:[redacted]"
+    let (handle, _) =
+        Handle::open(store.clone(), &id, Redactor::new("fixture-key".into())).unwrap();
+    let saved = handle.snapshot();
+    assert_eq!(saved.context.summary, "Continue [redacted] work");
+    assert_eq!(saved.context.skill_references, "skill:[redacted]");
+    for state in &saved.context.states {
+        assert!(!state.text.contains("fixture-key"));
+        assert!(state.text.contains("[redacted]"));
+    }
+    assert!(
+        saved
+            .context
+            .project(&saved.messages, saved.compatible_from)
+            .iter()
+            .all(|message| !message.encode().contains("fixture-key"))
     );
-}
-
-#[test]
-fn opening_a_session_redacts_saved_record_notes() {
-    let home = Directory::new();
-    let directory = Directory::new();
-    let store = store(&home, &directory);
-    let mut doc = document(&directory);
-    doc.context.from = 2;
-    doc.context.digests = vec![crate::context::digest::Epoch::new(
-        1,
-        2,
-        1,
-        "skill:fixture-key".into(),
-    )];
-    let id = doc.id.clone();
-    let lease = store.acquire(&id).unwrap();
-    lease.save(&doc).unwrap();
-    drop(lease);
-    let (handle, _) = Handle::open(store, &id, Redactor::new("fixture-key".into())).unwrap();
-    assert_eq!(
-        handle.snapshot().context.digests[0].notes,
-        "skill:[redacted]"
-    );
+    drop(handle);
+    let resumed = store.fixture_load(&id).unwrap();
+    assert_eq!(resumed.context.states, saved.context.states);
 }

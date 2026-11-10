@@ -136,7 +136,6 @@ fn unchanged(path: &Path, file: &fs::File, expected: &fs::Metadata) -> Result<()
 pub(super) fn edit(
     path: &Path,
     edits: &[(&str, &str)],
-    mut guard: Option<FileGuard<'_>>,
     cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     check_cancelled(cancellation)?;
@@ -196,7 +195,7 @@ pub(super) fn edit(
         changed = true;
     }
     if !changed {
-        return Ok((edited(0, None, false), None));
+        return Ok((edited(0, false), None));
     }
     // All matching and sequential composition is complete before any staging
     // write. Materialize the final view once, independent of the edit count.
@@ -216,20 +215,16 @@ pub(super) fn edit(
     })();
     drop(output);
     staged.map_err(|error| format!("Could not stage file: {error}"))?;
-    if let Some(guard) = &mut guard {
-        guard.capture();
-    }
     let result = (|| -> Result<(), String> {
-        check_guard(guard.as_ref(), cancellation)?;
+        check_cancelled(cancellation)?;
         unchanged(path, &original, &metadata)?;
         drop(original);
-        check_guard(guard.as_ref(), cancellation)?;
+        check_cancelled(cancellation)?;
         fs::rename(&temporary.0, path).map_err(|error| format!("Could not replace file: {error}"))
     })();
-    let checkpoint = guard.map(|guard| guard.finish());
     match result {
-        Ok(()) => Ok((edited(view.len(), checkpoint, true), None)),
-        Err(error) => Ok((failed(error, checkpoint), None)),
+        Ok(()) => Ok((edited(view.len(), true), None)),
+        Err(error) => Ok((failed(error), None)),
     }
 }
 

@@ -74,8 +74,8 @@ generated. The counts appear while no tool progress is shown. The composer stays
   `/help` open immediately; what they change for this conversation applies from
   the next turn. `/copy`, `/process`, `/agents`, `/ask`, `/todo`, `/permissions`,
   `/mcp` and `/lsp` also run immediately. Commands that start work or replace the
-  conversation, such as `/init`, `/new`, `/resume`, `/export`, `/tmp`,
-  `/checkpoints` and `/exit`, wait until the turn completes and any open menu
+  conversation, such as `/init`, `/new`, `/resume`, `/export`, `/tmp`
+  and `/exit`, wait until the turn completes and any open menu
   closes; if the turn stops or fails, they return as a draft and do not run.
   With slash completion open, Enter accepts the selected full command before
   queueing it. Commands with arguments keep their typed text. Ctrl+G lists
@@ -196,9 +196,19 @@ scrolling shortcuts take precedence over Jecode's.
 
 When you resize the terminal, the composer and panels adapt at once and the
 conversation reflows after a short pause, without interrupting typing or the
-agent. If you were reading older content, the view stays anchored to the same
-text. The row above the status row may show `Reflowing conversation…` meanwhile.
-Below two rows or columns, drawing pauses until the terminal grows again.
+agent. Until each block is wrapped again it stays on the page, shortened to the
+new width; rewrapping starts from the end of the conversation. If you were
+reading older content, the view stays anchored to the same text.
+
+Other layout rebuilds, such as a tool card changing or the `Ctrl+O` key moving,
+keep the page live as well: blocks not yet drawn again stay as they were, while
+streaming text, tool cards and scrolling update every frame. Finished items
+still waiting for a block render with the live tail.
+
+Layout work adds no activity row: the status row continues to describe the
+agent's work. Long completed responses are laid out incrementally alongside
+new streaming output. Below two rows or columns, drawing pauses until the
+terminal grows again.
 
 ## Quit
 

@@ -155,8 +155,8 @@ fn headers_are_available_at_each_explicit_seed_origin() {
 }
 
 #[test]
-fn a_crawl_snapshot_without_request_options_resumes_with_default_get() {
-    let server = site(|_| Reply::page("legacy"));
+fn a_crawl_snapshot_without_request_options_is_rejected_unchanged() {
+    let server = site(|_| Reply::page("unused"));
     let (_home, _project, area) = area();
     let cancelled = Cancellation::default();
     cancelled.cancel();
@@ -178,16 +178,21 @@ fn a_crawl_snapshot_without_request_options_resumes_with_default_get() {
         panic!()
     };
     fields.remove("options");
-    std::fs::write(snapshot, document.encode()).unwrap();
-    run(
+    let saved = document.encode();
+    std::fs::write(&snapshot, &saved).unwrap();
+    let error = execute(
         &area,
-        vec![
+        &Value::object([
             ("action", Value::string("crawl")),
             ("crawl_id", Value::string(id)),
-        ],
+        ]),
+        &Cancellation::default(),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("Crawl state was not found or is invalid"),
+        "{error}"
     );
-    let requests = server.finish();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].method, "GET");
-    assert!(requests[0].body.is_empty());
+    assert_eq!(std::fs::read_to_string(snapshot).unwrap(), saved);
+    assert!(server.finish().is_empty());
 }

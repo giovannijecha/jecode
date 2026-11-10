@@ -73,8 +73,6 @@ fn readback_rejects_swapped_task_facts() {
 #[test]
 #[ignore = "uses two bounded synthetic Claude inference requests after a usage check"]
 fn live_summary_and_resumed_readback_preserve_critical_work() {
-    // Exact records would make room without the model summary this test measures.
-    crate::agent::compaction::test_fallback_tiers();
     let account_home = std::env::var_os("JECODE_HOME")
         .map(std::path::PathBuf::from)
         .filter(|path| path.is_absolute())

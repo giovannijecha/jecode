@@ -75,24 +75,6 @@ impl<'a> Walk<'a> {
         Self::construct(root, arguments, recursive, file_allowed, cancellation, None)
     }
 
-    pub(crate) fn new_bounded(
-        root: &'a Path,
-        arguments: &Value,
-        recursive: bool,
-        file_allowed: bool,
-        cancellation: &'a Cancellation,
-        candidates: usize,
-    ) -> Result<Self, String> {
-        Self::construct(
-            root,
-            arguments,
-            recursive,
-            file_allowed,
-            cancellation,
-            Some(candidates),
-        )
-    }
-
     fn construct(
         root: &'a Path,
         arguments: &Value,

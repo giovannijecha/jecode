@@ -8,7 +8,6 @@ use std::fs;
 
 mod integrations;
 mod interruption;
-mod restore;
 
 #[test]
 fn a_stopped_command_fails_its_step_and_a_requested_stop_does_not() {
@@ -400,20 +399,6 @@ fn a_partly_failed_edit_stops_the_rest_and_a_partial_read_does_not() {
         Some("not_run")
     );
     assert!(!project.path().join("after.txt").exists());
-}
-
-#[test]
-fn a_restore_that_left_paths_behind_counts_as_failed() {
-    let restore = |conflicts: usize, failures: usize| {
-        Value::object([
-            ("restored_count", Value::number(1)),
-            ("conflict_count", Value::number(conflicts)),
-            ("failed_count", Value::number(failures)),
-        ])
-    };
-    assert!(!failed("checkpoint", &restore(0, 0)));
-    assert!(failed("checkpoint", &restore(1, 0)));
-    assert!(failed("checkpoint", &restore(0, 1)));
 }
 
 #[test]

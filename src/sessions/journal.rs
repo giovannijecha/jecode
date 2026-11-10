@@ -57,7 +57,7 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
         let value =
             json::parse(std::str::from_utf8(&line).map_err(|_| "Invalid session journal UTF-8")?)?;
         if value.get("format").and_then(Value::as_str) != Some("jecode.session.journal")
-            || integer(&value, "format_version")? != 3
+            || integer(&value, "format_version")? != 4
         {
             return Err("Unsupported session format or version; file left unchanged".into());
         }
@@ -189,7 +189,7 @@ pub(super) fn append(
     let next_state = state::without_partial(document.state_value());
     let record = Value::object([
         ("format", Value::string("jecode.session.journal")),
-        ("format_version", Value::number(3)),
+        ("format_version", Value::number(4)),
         ("sequence", Value::number(current.sequence)),
         ("messages_from", Value::number(current.messages)),
         ("events_from", Value::number(current.events)),

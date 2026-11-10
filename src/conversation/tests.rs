@@ -197,7 +197,7 @@ fn history_shows_native_metadata_without_embedded_binary_bytes() {
 }
 
 #[test]
-fn tool_calls_are_flat_and_legacy_wrappers_project_portably() {
+fn tool_calls_are_flat_and_wrappers_are_rejected() {
     let call = ToolCall {
         id: "call-1".into(),
         name: "read".into(),
@@ -217,14 +217,14 @@ fn tool_calls_are_flat_and_legacy_wrappers_project_portably() {
             ]),
         ),
     ]);
-    assert_eq!(ToolCall::parse(&legacy).unwrap(), call);
+    assert!(ToolCall::parse(&legacy).is_err());
     let archived = Value::object([
         ("role", Value::string("assistant")),
         ("content", Value::Null),
         ("tool_calls", Value::Array(vec![legacy.clone()])),
     ]);
     let projected = portable(&archived);
-    assert_eq!(projected.get("tool_calls"), Some(&Value::Array(vec![flat])));
+    assert!(projected.get("tool_calls").is_none());
     assert_eq!(
         archived.get("tool_calls"),
         Some(&Value::Array(vec![legacy]))

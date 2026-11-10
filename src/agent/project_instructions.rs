@@ -24,8 +24,8 @@ impl Agent {
         }
         if instructions != self.project_instructions {
             self.project_instructions = instructions;
-            // The measured prompt contained a different system projection.
-            // Keep its conservative density and learned context ceiling.
+            // The measured request carried different instructions. Keep its
+            // conservative density and learned context ceiling.
             self.context.clear_measurement();
         }
         Ok(())
@@ -213,3 +213,9 @@ mod link_tests;
 
 #[cfg(test)]
 mod dependency_tests;
+
+#[cfg(test)]
+mod snapshot_tests;
+
+#[cfg(test)]
+mod provider_tests;

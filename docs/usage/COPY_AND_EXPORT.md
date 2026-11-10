@@ -53,7 +53,7 @@ files are never overwritten. An export is a snapshot for inspection or sharing;
 `jecode resume` cannot open it.
 
 The file is JSON with `"format": "jecode.conversation"` and
-`"format_version": 1`. It contains:
+`"format_version": 2`. It contains:
 
 - the Jecode version and a `build` object identifying the executable (OS,
   architecture, `debug` or `release`, and an FNV-1a fingerprint of its bytes,

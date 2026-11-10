@@ -14,6 +14,9 @@ use std::{
 };
 
 const LAYOUT_BLOCKS: usize = 64;
+/// Settled items the live tail may still draw while their blocks wait. A
+/// longer backlog, such as opening a long conversation, holds the last page.
+const LIVE_BACKLOG: usize = 16;
 
 pub(super) struct Display {
     renderer: Renderer,
@@ -177,19 +180,25 @@ impl Display {
         if !dragging {
             self.layout.prepare(state, columns, LAYOUT_BLOCKS);
             self.working = !self.layout.ready(state);
-            if !self.working {
+            // A rebuild in place keeps a whole page: blocks not yet drawn again
+            // stay, and the tail stays live, so streaming, cards and scrolling
+            // never wait for the whole conversation.
+            let held = self.layout.backlog(state) > LIVE_BACKLOG;
+            if !held {
                 self.remap_collapsed_chapter(state);
                 self.layout.prepare_pending(state, 256);
-                self.working = !self.layout.pending_ready(state);
-                let slice =
-                    self.viewport
-                        .view(&self.layout.blocks, self.layout.pending_blocks(), capacity);
+                self.working |= !self.layout.pending_ready(state);
+                let slice = self.viewport.view(
+                    self.layout.settled_blocks(),
+                    self.layout.pending_blocks(),
+                    capacity,
+                );
                 self.visible = slice.lines;
                 reading = slice.reading;
                 (self.below, self.fresh) = (slice.below, slice.fresh);
             }
         }
-        // Keep the current reading page during reflow. Layout runs between input
+        // Keep the current page while it is held. Layout runs between input
         // polls, and resize never clears the caller's native scrollback.
         let mut lines: Vec<_> = self
             .visible
@@ -208,11 +217,6 @@ impl Display {
             let gap = &mut frame.live[frame.composer - 1];
             if reading || !self.viewport.following() {
                 *gap = view::reading_row(columns, self.below, self.fresh);
-            } else if dragging || self.working {
-                *gap = Line::new(
-                    &super::text::ellipsize("Reflowing conversation…", columns),
-                    super::theme::MUTED,
-                );
             }
         }
         self.renderer.paint(&frame, state.width, state.height)

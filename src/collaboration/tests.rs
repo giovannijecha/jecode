@@ -57,6 +57,7 @@ fn visible_updates_and_recovered_snapshot_are_bounded() {
         ("workspace", Value::string("shared")),
         ("workspace_info", workspace.value()),
         ("directory", Value::string(project.path().to_string_lossy())),
+        ("log", Value::Array(vec![])),
     ]);
     let observer = Observer::default();
     observer
@@ -200,6 +201,7 @@ fn failed_closed_receipt_keeps_record_visible_for_retry() {
         ("state", Value::string("stopped")),
         ("workspace_closed", Value::Bool(true)),
         ("received_version", Value::number(3)),
+        ("log", Value::Array(vec![])),
     ]);
     observer
         .0
@@ -354,6 +356,7 @@ fn shared_seed(project: &Directory, storage: &Directory, fields: Vec<(&str, Valu
         ("workspace", Value::string("shared")),
         ("workspace_info", workspace.value()),
         ("directory", Value::string(project.path().to_string_lossy())),
+        ("log", Value::Array(vec![])),
     ];
     seed.extend(fields);
     Value::Object(
@@ -373,6 +376,14 @@ fn ordered_log_interleaves_messages_and_calls_and_survives_resume() {
             ("state", Value::string("running")),
             ("received_version", Value::number(1)),
             ("instructions", Value::string("Search")),
+            (
+                "log",
+                Value::Array(vec![Value::object([
+                    ("kind", Value::string("assignment")),
+                    ("version", Value::number(1)),
+                    ("instructions", Value::string("Search")),
+                ])]),
+            ),
         ],
     );
     let observer = Observer::default();
@@ -452,46 +463,20 @@ fn ordered_log_interleaves_messages_and_calls_and_survives_resume() {
 }
 
 #[test]
-fn records_saved_before_the_log_restore_calls_messages_and_outcome() {
+fn records_without_a_log_are_rejected() {
     let (project, storage) = (Directory::new(), Directory::new());
-    let tool = |id: &str| {
-        Value::object([
-            ("id", Value::string(id)),
-            ("name", Value::string("read")),
-            ("state", Value::string("done")),
-        ])
-    };
-    let saved = shared_seed(
+    let seed = shared_seed(
         &project,
         &storage,
-        vec![
-            ("state", Value::string("returned")),
-            ("received_version", Value::number(2)),
-            ("instructions", Value::string("Search again")),
-            ("tools", Value::Array(vec![tool("c1"), tool("c2")])),
-            (
-                "updates",
-                Value::Array(vec![Value::string("One"), Value::string("Two")]),
-            ),
-            (
-                "report",
-                Value::object([
-                    ("version", Value::number(2)),
-                    ("text", Value::string("Two")),
-                ]),
-            ),
-        ],
+        vec![("state", Value::string("returned"))],
     );
-    let restored = Record::from_value(&saved).unwrap().value();
+    let mut saved = Record::from_value(&seed).unwrap().value();
+    assert_eq!(Record::from_value(&saved).unwrap().value(), saved);
+    if let Value::Object(fields) = &mut saved {
+        fields.remove("log");
+    }
     assert_eq!(
-        log_entries(&restored),
-        [
-            "assignment 2",
-            "tool 0",
-            "tool 1",
-            "message 0",
-            "message 1",
-            "returned 2"
-        ]
+        Record::from_value(&saved).err().as_deref(),
+        Some("Unsupported collaborator log format; file left unchanged")
     );
 }

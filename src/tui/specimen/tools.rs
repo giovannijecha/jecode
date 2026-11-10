@@ -62,8 +62,13 @@ fn update() -> Call {
         "edit",
         Value::object([
             ("path", text("src/routes/auth.rs")),
-            ("old_text", text(old)),
-            ("new_text", text(new)),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", text(old)),
+                    ("new_text", text(new)),
+                ])]),
+            ),
         ]),
         Value::object([("bytes_written", Value::number(after.len()))]),
         4,

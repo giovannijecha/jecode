@@ -548,10 +548,16 @@ fn native_unix_startup_splash() {
     let commands = t.mark();
     t.send(b"burst draft\x07");
     t.wait_after("draft kept", commands);
-    t.wait_after("21 commands", commands);
+    t.wait_after(
+        &format!("{} commands", crate::session::commands::COMMANDS.len()),
+        commands,
+    );
     let filtered = t.mark();
     t.send(b"mod");
-    t.wait_after("1 of 21 commands", filtered);
+    t.wait_after(
+        &format!("1 of {} commands", crate::session::commands::COMMANDS.len()),
+        filtered,
+    );
     let returned = t.mark();
     t.send(b"\x1b");
     t.wait_after("Ctrl+G commands", returned);

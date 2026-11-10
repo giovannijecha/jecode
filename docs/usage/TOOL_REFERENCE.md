@@ -8,7 +8,7 @@ writing [skills](SKILLS.md).
 ## Arguments
 
 Every tool except `steps` accepts an optional boolean `parallel`. The routine tools `read`,
-`list`, `search`, `map`, `bash`, `exec`, `process`, `web`, `browser`, `mcp` and `lsp` also
+`list`, `search`, `bash`, `exec`, `process`, `web`, `browser`, `mcp` and `lsp` also
 accept two display-only strings: `work`, a short label that groups related calls
 into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
 `description`, a caption for the call's card. `agent` accepts `work` too.
@@ -18,14 +18,12 @@ Neither changes what the call does.
 | --- | --- | --- |
 | `read` | `path` or `paths` | `offset`, `limit`, `byte_offset` (with `path` only) |
 | `write` | `path`, `content` | — |
-| `edit` | `path` and `edits`, or `files` | Top-level `old_text` and `new_text` instead of `edits`, for compatibility |
+| `edit` | `path` and `edits`, or `files` | — |
 | `list` | — | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit` |
 | `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit` |
-| `map` | — | `action`, `path`, `query`, `pattern`, `offset`, `limit`, `include_hidden`, `include_ignored`, `id`, `title`, `summary`, `sources` |
-| `bash` | `command` | `protect`, `timeout_seconds`, `wait_ms`, `output_limit_bytes` |
-| `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `protect`, `wait_ms`, `timeout_seconds`, `output_limit_bytes` |
-| `process` | `action` | `process_id`, `text`, `key`, `cols`, `rows`, `protect`, `wait_ms`, `output_limit_bytes`, `output_mode` |
-| `checkpoint` | `action` | `ref`, `paths`, `expected`, `preview`, `limit` |
+| `bash` | `command` | `timeout_seconds`, `wait_ms`, `output_limit_bytes` |
+| `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `wait_ms`, `timeout_seconds`, `output_limit_bytes` |
+| `process` | `action` | `process_id`, `text`, `key`, `cols`, `rows`, `wait_ms`, `output_limit_bytes`, `output_mode` |
 | `web` | `action`; `url` for `fetch` and `download`; `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` |
 | `browser` | `action`; `url` for `navigate`; `key` for `press`; `text` for `fill`/`type`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `modifiers`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
 | `mcp` | `action`: `list`, `tools` or `call`; `connection` for `tools` and `call`; `tool` for `call` | `arguments` (JSON object), `query`, `offset`, `limit` |
@@ -40,19 +38,16 @@ Neither changes what the call does.
 `steps` runs prepared tools in order with one call, so the model does not pay a
 request between calls that do not need each other's results. Each entry has
 `tool` and `arguments`, the same arguments as that tool alone, and keeps its own
-permission check, checkpoint and card. There is no fixed entry-count limit.
+permission check and card. There is no fixed entry-count limit.
 The schema lists the tools available as steps. `ask_user` needs its own call;
 nested `steps`, unknown tools and empty arrays are refused before anything runs.
 
 The call has one result, a `steps` array in the same order. Each entry names its
 `tool` and has its `result`, or `outcome: "not_run"` after a failed step. A step
 fails on an `error`, a refused or unknown `outcome`, a timeout, a cancellation, a
-non-zero exit, a `checkpoint` restore with conflicting, failed or skipped paths
-or, for `edit`, any file that failed; a multi-file `read` reports each path and goes on.
-A successful MCP `completed` outcome continues. LSP
+non-zero exit or, for `edit`, any file that failed; a multi-file `read` reports
+each path and goes on. A successful MCP `completed` outcome continues. LSP
 statuses other than `ready` and background command timeouts stop the rest.
-A restore's reported skips also include partial-capture warnings; those stop
-the prepared sequence too, leaving the complete result for the model to assess.
 `ask_user` and `steps` cannot be steps. Media files need a `read` of their own,
 because the model is shown them only after a single read. If Jecode closes during
 the call, its outcome is unknown and the model is told to check before repeating
@@ -62,8 +57,8 @@ it.
 
 These calls run in parallel automatically when adjacent, up to four at a time:
 `list`, `search`, single-path `read` (except `history:` and `skill:` references),
-`map` overview, `checkpoint list` and `inspect`, `process list`, `mcp list` and
-`tools`, and `web fetch` or `download` using GET or HEAD without a body.
+`process list`, `mcp list` and `tools`, and `web fetch` or `download` using GET
+or HEAD without a body.
 
 `parallel: true` on adjacent calls declares them independent, including writes
 and commands; they run in waves of at most four. A call without it ends the
@@ -113,11 +108,10 @@ invalid UTF-8 fail.
 | `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | A command's complete saved stream, including one saved by the main agent or, for a main agent, by its collaborators. |
 | `history:N` | The original message at zero-based index `N`. |
 | `history:requests` | All your original requests, in order. |
-| `history:memory` | The current compaction summary, followed by the exact records that currently replace earlier messages. |
+| `history:memory` | The current compaction summary. |
 | `history:processes` | Recorded process outcomes, one JSON object per line, including results saved before the model received them. Reading them does not restart a process. |
 | `skill:NAME`, `skill:NAME/path` | A skill's `SKILL.md`, or a file inside the skill. |
 | `attachment:ID` | An attached file; images and PDFs are shown again. |
-| `checkpoint:rc-ID:path` | A file as saved before one modifying call. |
 
 History pages survive compaction and resume, exclude provider-specific
 reasoning, and mask known credentials. Input you took back into the composer is
@@ -127,9 +121,7 @@ excluded. Only `tmp:relative/path` can be written; the others are read-only.
 
 `write` creates or replaces a complete UTF-8 file and returns `bytes_written`.
 `edit` takes `edits: [{"old_text": "...", "new_text": "..."}, ...]`, applies
-them in order and installs the result once. A top-level `old_text` and
-`new_text` pair is also accepted for compatibility; supplying both forms with
-content is an error.
+them in order and installs the result once.
 
 To change several files in one call, send `files: [{"path": "...", "edits":
 [...]}, ...]` instead of `path` (up to 12 entries, each file once, not combined
@@ -154,8 +146,7 @@ was saved. For a missing match, read the required section before retrying.
 
 `edit` requires UTF-8 text without NUL bytes. `write` can replace an existing
 binary file with the supplied content. Both refuse read-only files and paths
-outside the allowed roots. Both return a `checkpoint` receipt; see
-[Checkpoints](CHECKPOINTS.md#what-is-saved).
+outside the allowed roots.
 
 Large edits keep the original file and the replacements as a virtual view, so
 memory stays bounded regardless of file size; only per-edit range metadata grows
@@ -190,36 +181,6 @@ Absolute paths inside the project are accepted.
   `errors`. `complete` is `false` when more results exist or errors prevented a
   full search, so an empty result proves absence only within the readable scope.
 
-## map
-
-`action` is `overview` (default), `remember` or `forget`.
-
-**overview** accepts `path`, `query` (case-insensitive literal text in paths,
-titles, summaries and roles), `pattern`, `include_hidden`, `include_ignored`,
-`offset` (default 1) and `limit` (default 100, at most 1,000). Entries are
-`area`, `landmark`, `symbol` or `note`, with an origin of `filesystem`,
-`source` or `model`. Collection stops at 100,000 candidate entries, keeps 2,000
-rows, reads up to 80 file headers of 8 KiB, and reads at most 4 MiB for a
-focused file outline. `inventory_truncated` means the path or query must be
-narrowed; paging cannot recover it.
-
-**remember** saves a note:
-
-```json
-{"action":"remember","title":"Configuration entry point","summary":"Setup reads the user-scoped config here.","sources":[{"path":"src/config.rs","line":1}]}
-```
-
-`title`, `summary` and at least one source are required; `line` is optional and
-1-based. The result returns an `id`; pass it to `remember` to update the note or
-to `{"action":"forget","id":"..."}` to remove it. A note holds up to 16 sources,
-a 200-byte title and an 8 KiB summary. A project holds up to 256 notes and
-8 MiB.
-
-Freshness is `current` (the cited files are unchanged), `changed`, `missing` or
-`unverified` (Jecode could not check, for example because the page's sources
-exceed the 64 MiB checking budget). Unchanged sources do not prove a note is
-still correct.
-
 ## bash and exec
 
 | Argument | Behavior |
@@ -227,7 +188,6 @@ still correct.
 | `timeout_seconds` | Positive integer measured from launch. Without it there is no timeout. |
 | `wait_ms` | Wait this many milliseconds, then return a `process_id` and the next output window, leaving the command running. `0` returns at once. Omitted, the call waits up to 10 seconds and returns the result below if the command ends in time. |
 | `output_limit_bytes` | Preview size per stream, default 16 KiB, at most 256 KiB. Larger values are clamped. |
-| `protect` | Files or directories to save in a checkpoint before launch. `"."` protects the whole eligible workspace. |
 
 A command that ends within an omitted `wait_ms` returns `exit_code`, `cancelled`,
 `timed_out`, byte counts and a preview of each stream; truncated previews keep the
@@ -312,8 +272,7 @@ deciding whether another command is needed.
 A `write` receipt confirms delivery to the terminal, not that the program
 processed it. On Unix, `interrupt` follows the terminal's current `ISIG`,
 `VINTR` and `NOFLSH` settings; in raw mode the program receives byte `0x03`. On
-Windows it sends Ctrl+C through ConPTY. `protect` on `write`, `resize` or
-`interrupt` saves the declared paths first. Interrupting a `poll` wait leaves the
+Windows it sends Ctrl+C through ConPTY. Interrupting a `poll` wait leaves the
 process running.
 
 ## web
@@ -414,7 +373,6 @@ and blob data are replaced by a placeholder with the MIME type and size. A
 result that still exceeds 64 KiB keeps a text preview and `truncated: true`;
 in both cases `result_file` is an `output:` reference to the full result,
 readable with `read`. A remote `isError` is a tool failure; `outcome: unknown`
-means the service may already have acted. Never infer rollback from local
-checkpoints. See [MCP](MCP.md).
+means the service may already have acted. See [MCP](MCP.md).
 An interruption before dispatch returns `outcome: not_executed` and is displayed
 as Cancelled; no remote call was sent.

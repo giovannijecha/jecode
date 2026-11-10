@@ -275,9 +275,6 @@ impl Registry {
             return Err("action must be list, poll, stop, write, resize or interrupt".into());
         }
         let id = required_string(arguments, "process_id")?;
-        if matches!(action, "write" | "resize" | "interrupt") {
-            let _ = super::shell::protect_paths(arguments)?;
-        }
         let output_limit = output_limit(arguments)?;
         let output_mode = OutputMode::parse(arguments)?;
         // Checked before acting: a rejected call must not have delivered input.

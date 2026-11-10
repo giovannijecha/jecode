@@ -77,14 +77,19 @@ fn main_agent_reads_a_file_one_collaborator_wrote_and_writes_its_own() {
     assert_reads(&parent, "tmp:a1:findings.md", "child findings");
 
     // Edits and writes stay in the main agent's own area.
-    let edited = call(
-        &parent,
+    let edited = parent.tools.execute(
         "edit",
-        &[
-            ("path", "tmp:findings.md"),
-            ("old_text", "child"),
-            ("new_text", "main"),
-        ],
+        &Value::object([
+            ("path", Value::string("tmp:findings.md")),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("child")),
+                    ("new_text", Value::string("main")),
+                ])]),
+            ),
+        ])
+        .encode(),
     );
     assert!(
         error(&edited).contains("Could not inspect temporary path"),

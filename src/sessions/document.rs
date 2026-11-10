@@ -11,8 +11,7 @@ pub use input::{Draft, Input};
 pub struct Pending {
     pub active: bool,
     pub tool: Option<String>,
-    /// Legacy journal field for parallel calls. Explicit batch IDs mirror here
-    /// so older readers still treat interrupted modifying calls as unknown.
+    /// IDs for a concurrent read batch, including interrupted calls.
     pub reads: Vec<String>,
     /// Calls launched together. Results may complete before earlier calls.
     pub batch: Vec<String>,
@@ -29,7 +28,6 @@ pub struct Document {
     pub directory: PathBuf,
     pub model: Option<String>,
     pub backend: String,
-    pub legacy_origin: Option<crate::conversation::Origin>,
     pub effort: Effort,
     pub compatible_from: usize,
     pub messages: Vec<Value>,
@@ -55,7 +53,6 @@ impl Document {
             directory,
             model: (!model.is_empty()).then_some(model),
             backend: "openrouter".into(),
-            legacy_origin: None,
             effort,
             compatible_from: 0,
             messages: vec![],
@@ -79,7 +76,6 @@ impl Document {
             directory: self.directory.clone(),
             model: self.model.clone(),
             backend: self.backend.clone(),
-            legacy_origin: self.legacy_origin.clone(),
             effort: self.effort,
             compatible_from: self.compatible_from,
             messages: Vec::new(),
@@ -146,7 +142,7 @@ impl Document {
     pub(super) fn state_value(&self) -> Value {
         Value::object([
             ("format", Value::string("jecode.session")),
-            ("format_version", Value::number(1)),
+            ("format_version", Value::number(2)),
             ("jecode_version", Value::string(env!("CARGO_PKG_VERSION"))),
             ("id", Value::string(&self.id)),
             ("created_at_unix_ms", Value::number(self.created)),
@@ -160,12 +156,6 @@ impl Document {
                 self.model.as_ref().map_or(Value::Null, Value::string),
             ),
             ("backend", Value::string(&self.backend)),
-            (
-                "legacy_origin",
-                self.legacy_origin
-                    .as_ref()
-                    .map_or(Value::Null, crate::conversation::Origin::value),
-            ),
             ("effort", Value::string(self.effort.name())),
             ("compatible_from", Value::number(self.compatible_from)),
             (
@@ -222,8 +212,8 @@ impl Document {
         messages: Vec<Value>,
         events: Vec<Value>,
     ) -> Result<Self, String> {
-        if string(value, "format")? != "jecode.session" || integer(value, "format_version")? != 1 {
-            return Err("Unsupported session format or version".into());
+        if string(value, "format")? != "jecode.session" || integer(value, "format_version")? != 2 {
+            return Err("Unsupported session format or version; file left unchanged".into());
         }
         let id = string(value, "id")?.to_string();
         if !valid_id(&id) {
@@ -234,34 +224,23 @@ impl Document {
             return Err("Session directory must be absolute".into());
         }
         let model = parse_model(value)?;
-        let backend = match value.get("backend") {
-            None => "openrouter".to_owned(),
-            Some(Value::String(id)) if !id.is_empty() && !id.chars().any(char::is_control) => {
-                id.clone()
-            }
+        let backend = match required(value, "backend")? {
+            Value::String(id) if !id.is_empty() && !id.chars().any(char::is_control) => id.clone(),
             _ => return Err("Invalid saved backend identifier".into()),
         };
         crate::backend::validate_id(&backend)?;
-        let legacy_origin = match value.get("legacy_origin") {
-            None => model
-                .as_ref()
-                .map(|model| crate::conversation::Origin::new(&backend, model)),
-            Some(Value::Null) => None,
-            Some(value) => Some(crate::conversation::Origin::parse(value)?),
-        };
         let pending = required(value, "pending")?;
         let active = match required(pending, "active")? {
             Value::Bool(active) => *active,
             _ => return Err("Invalid pending turn state".into()),
         };
-        let mut context = crate::context::Context::parse(value.get("context"))?;
+        let mut context = crate::context::Context::parse(Some(required(value, "context")?))?;
         context.restore_returned(&events, messages.len());
         let document = Self {
             id,
             directory,
             model,
             backend,
-            legacy_origin,
             created: integer(value, "created_at_unix_ms")?,
             updated: integer(value, "updated_at_unix_ms")?,
             effort: Effort::parse(string(value, "effort")?)?,
@@ -278,29 +257,27 @@ impl Document {
                 },
                 reads: pending_ids(pending, "reads")?,
                 batch: pending_ids(pending, "batch")?,
-                completed: match pending.get("completed") {
-                    None => Vec::new(),
-                    Some(Value::Array(completed)) => completed.clone(),
+                completed: match required(pending, "completed")? {
+                    Value::Array(completed) => completed.clone(),
                     _ => return Err("Invalid pending completed calls".into()),
                 },
                 partial: string(pending, "partial_text")?.into(),
             },
             input: Input::parse(required(value, "input")?)?,
             context,
-            // Sessions saved before routing existed, or with a mode this
-            // version does not know, keep sending no routing preferences.
-            routing: value
-                .get("routing")
-                .and_then(Routing::parse)
-                .unwrap_or(Routing::Default),
-            // Sessions saved before permissions start at the current default.
-            permissions: value
-                .get("permissions")
-                .and_then(Value::as_str)
-                .and_then(crate::permissions::Level::parse),
-            title: match value.get("title") {
-                None | Some(Value::Null) => None,
-                Some(Value::String(title))
+            routing: Routing::parse(required(value, "routing")?)
+                .ok_or("Invalid saved routing preference")?,
+            permissions: match required(value, "permissions")? {
+                Value::Null => None,
+                Value::String(level) => Some(
+                    crate::permissions::Level::parse(level)
+                        .ok_or("Invalid saved permission level")?,
+                ),
+                _ => return Err("Invalid saved permission level".into()),
+            },
+            title: match required(value, "title")? {
+                Value::Null => None,
+                Value::String(title)
                     if !title.is_empty()
                         && title.chars().count() <= 100
                         && !title.chars().any(char::is_control) =>
@@ -315,9 +292,8 @@ impl Document {
 }
 
 fn pending_ids(pending: &Value, key: &str) -> Result<Vec<String>, String> {
-    match pending.get(key) {
-        None => Ok(Vec::new()),
-        Some(Value::Array(ids)) => ids
+    match required(pending, key)? {
+        Value::Array(ids) => ids
             .iter()
             .map(|id| {
                 id.as_str()

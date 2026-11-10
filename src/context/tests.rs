@@ -45,7 +45,6 @@ fn latest_request_keeps_its_middle_when_earlier_requests_fill_the_preview() {
     let context = Context {
         from: messages.len(),
         summary: "Earlier feature work; next action: edit the implementation.".into(),
-        preview_limit: 2048,
         ..Context::default()
     };
     let original = messages.clone();

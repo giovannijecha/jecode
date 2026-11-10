@@ -29,16 +29,14 @@ of them. Exact arguments and limits are in the
 
 | Tool | What it does |
 | --- | --- |
-| `read` | Read a text file a page at a time, up to 12 files in one call, or show an image or PDF to the model. Also reads saved command output, earlier conversation history, skills, attachments and checkpoints. |
+| `read` | Read a text file a page at a time, up to 12 files in one call, or show an image or PDF to the model. Also reads saved command output, earlier conversation history, skills and attachments. |
 | `write` | Create or replace a whole text file. |
 | `edit` | Apply exact text replacements to one file, or to up to 12 files in one call. Each file changes all or nothing; with several files, one that fails does not stop or undo the others. |
 | `list` | List files and directories, optionally recursively and filtered by a pattern. |
 | `search` | Find literal text in project files, with line numbers and context. |
-| `map` | Summarize the project's structure and keep source-backed notes about it. |
 | `bash` | Run commands in Jecode's own [command language](SHELL.md). |
 | `exec` | Run a program directly with exact arguments, optionally in an interactive terminal. |
 | `process` | Check, control or stop commands left running in the background. |
-| `checkpoint` | List, inspect and restore files saved before a modifying call. |
 | `web` | Fetch, download or crawl web pages over HTTP(S). |
 | `browser` | Control an installed Chrome or Edge browser. |
 | `mcp` | Discover and call remote tools from globally configured [MCP connections](MCP.md). |
@@ -54,8 +52,7 @@ MCP connections have separate remote permissions. Enable and manage them in
 Settings → **MCP** in the TUI, or in `~/.jecode/mcp.json`; `/mcp` inspects the
 configured connections. Read, Workspace and Full do not govern MCP calls: an
 enabled connection follows the permissions granted at its service, including
-in Read. Collaborators use the same connections. Local checkpoints cannot undo
-remote changes.
+in Read. Collaborators use the same connections.
 
 LSP likewise follows the user's server enablement at all local levels. Its
 selected executable runs as the user, and a root is analysis context rather
@@ -71,10 +68,7 @@ copy, so a failed edit leaves the original intact. Text is UTF-8.
 `edit` applies its replacements in order to the result of the previous ones.
 Each one must match exactly once, including whitespace and line endings; a
 missing or ambiguous match leaves that file unchanged, and in a multi-file call the
-other files are still written. For files inside the project,
-`write` and `edit` attempt to save the previous state in a
-[checkpoint](CHECKPOINTS.md). The receipt reports what was captured; a save
-failure does not block the file change.
+other files are still written.
 
 When `read` opens an image or PDF in the project or the temporary area, Jecode
 stores a copy and shows it to the model on the next request, as it does for
@@ -88,19 +82,6 @@ and anything ignored by the project's `.gitignore` files or the repository's
 `info/exclude`. Your global Git excludes file is not read. Both can be asked to
 include hidden or ignored entries. `search` matches literal text; for regular
 expressions the model can run an installed program through `bash` or `exec`.
-
-### Project map
-
-`map` gives the model a quick overview of the project when it asks for one:
-directory areas, likely entry points and, for Rust and Markdown files, a lexical
-outline of declarations and headings. It is built on demand; Jecode never scans
-your project at startup or puts a map into every request.
-
-The model can also save notes about the project with `map`, each citing source
-files. Notes are kept per project in the Jecode home and shared by all
-conversations in that project. When a cited file changes, the next overview
-marks the note `changed`; a missing file marks it `missing`. Notes are the
-model's interpretation, not verified facts.
 
 ## Commands
 
@@ -117,11 +98,6 @@ Commands have no timeout unless the model sets one. A command that ends within
 its initial wait returns the exit code and a preview of stdout and stderr (16 KiB
 per stream by default); the complete output is saved and the model can read all
 of it.
-
-Commands do not create checkpoints automatically, because Jecode cannot know
-what a command will change. The model can list the files or directories a
-command may modify in its `protect` argument, and Jecode saves them before the
-command starts.
 
 In Workspace, commands run inside an operating-system confinement; see
 [Command confinement](PERMISSIONS.md#command-confinement).

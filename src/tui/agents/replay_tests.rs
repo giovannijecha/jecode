@@ -39,7 +39,7 @@ fn resumed_agent_workspace_cards_match_live_actions_and_keep_errors() {
         (
             "integrate-1",
             "integrate",
-            Value::object([("checkpoint", Value::string("abc123"))]),
+            Value::object([("review_token", Value::string("abc123"))]),
         ),
         (
             "review-1",
@@ -56,7 +56,9 @@ fn resumed_agent_workspace_cards_match_live_actions_and_keep_errors() {
             ("content", Value::string("")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(id, "agent", arguments)]),
+                Value::Array(vec![crate::test_support::stored_tool_call(
+                    id, "agent", arguments,
+                )]),
             ),
         ]));
         messages.push(Value::object([
@@ -98,7 +100,7 @@ fn resumed_agent_workspace_cards_match_live_actions_and_keep_errors() {
     assert_eq!(cards[0].0, "diff");
     assert_eq!(cards[1].0, "integrate");
     assert_eq!(
-        cards[1].1.get("checkpoint").and_then(Value::as_str),
+        cards[1].1.get("review_token").and_then(Value::as_str),
         Some("abc123")
     );
     assert!(resumed.state.items.iter().any(|item| matches!(item,
@@ -141,12 +143,14 @@ fn resumed_agent_events_join_the_chapter_of_the_call_that_caused_them() {
             ("content", Value::string("")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(id, name, arguments)]),
+                Value::Array(vec![crate::test_support::stored_tool_call(
+                    id, name, arguments,
+                )]),
             ),
         ]));
         if name == "agent" {
             // A returned record, so resuming adds no unknown outcome.
-            let mut created = receipt(vec![record(1, "returned")]);
+            let mut created = labelled(receipt(vec![record(1, "returned")]), "Split the work");
             set(&mut created, "after_message", Value::number(messages.len()));
             events.push(created);
         }

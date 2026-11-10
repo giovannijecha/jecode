@@ -278,7 +278,7 @@ impl App {
                 self.typed = None;
                 return self.submit();
             }
-            112 if self.checkpoint_job.is_none() && self.deletion_job.is_none() => self.help(),
+            112 if self.deletion_job.is_none() => self.help(),
             80 | 78 if key.ctrl() => {
                 self.state
                     .history

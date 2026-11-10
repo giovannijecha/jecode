@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     backend::openrouter::OpenRouter,
-    test_support::{Directory, HttpFixture, tool_call},
+    test_support::{Directory, HttpFixture, stored_tool_call},
     tools::Tools,
 };
 
@@ -38,7 +38,7 @@ fn record(agent: &mut Agent, call: &crate::backend::ToolCall) -> Value {
         ("role", Value::string("assistant")),
         (
             "tool_calls",
-            Value::Array(vec![tool_call(
+            Value::Array(vec![stored_tool_call(
                 &call.id,
                 &call.name,
                 crate::json::parse(&call.arguments).unwrap(),

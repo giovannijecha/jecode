@@ -40,35 +40,25 @@ window is unknown. The figure includes cached input. It is not your plan's
 usage or remaining quota. The `↑` and `↓` counts in the status row are the
 turn's input tokens sent and generated output, not context.
 
-Well before that threshold, Jecode keeps the request small with exact records.
-When recording earlier work would free about 30,000 tokens at a new turn, or work
-under way passes a window of about 120,000 tokens plus existing records, earlier
-messages become one line per tool call with its outcome, next to excerpts of your
-requests and the model's answers. Each names the original as `history:N`. This
-takes no model request; records are derived from the saved conversation rather
-than from an earlier paraphrase. The thresholds adjust for cache write costs and
-the configured context limit. Work under way keeps its latest results verbatim.
-Very long conversations condense the oldest records further, to
-a paragraph per turn and then to an index of turns. Your context meter drops when
-this happens, and a notice says how many messages became records.
+Until the request reaches that threshold, Jecode only adds to it: earlier
+messages are sent again unchanged, so the provider can serve them from its
+prompt cache.
 
-If a request would still exceed the threshold:
-
-1. Large tool results, such as long file reads, are replaced by previews that
-   point to the original.
-2. If that is not enough, the same model summarizes the work since the last
-   compaction into a plain-text handoff of at most about 16 KiB. It first asks
-   over the conversation's own request, with its tools and your selected effort,
-   so the provider's cache is reused. If that does not fit or fails, it
-   summarizes the work in portions at medium effort when the model supports it,
-   with tools disabled. The summary keeps goals,
-   constraints, decisions, completed work, errors and next steps. Your model and
-   effort for the task do not change.
+When a request would exceed the threshold, the same model summarizes the work
+since the last compaction into a plain-text handoff of at most about 16 KiB. It
+first asks over the conversation's own request, with its tools and your selected
+effort, so the provider's cache is reused. If that does not fit or fails, it
+summarizes the work in portions at medium effort when the model supports it,
+with tools disabled. The summary keeps goals, constraints, decisions, completed
+work, errors and next steps. Your model and effort for the task do not change.
+Your context meter drops when this happens, and a notice says how many messages
+were summarized.
 
 The next request then contains the instructions, an excerpt of your earlier
 requests (the first one and the latest that fit), the summary and the most
 recent messages verbatim. The recent part uses up to a quarter of the budget,
-and a tool call always stays together with its results.
+and a tool call always stays together with its results. The provider caches the
+new request from there.
 
 Compaction never deletes anything. The full original history stays in the saved
 conversation and export, and the model can read any part of it again with
@@ -77,10 +67,9 @@ the [Tool reference](TOOL_REFERENCE.md#read). Skills the model had read are
 remembered so it can read them again. Compaction happens inside the current
 turn: it does not send your draft or rerun a completed tool call.
 
-Reopen sessions with native records in 0.4.5 or later. Version 0.3.5 cannot
-project those records, so a turn run there may lack earlier work even though
-the full original history remains saved. A later Jecode can reopen a session
-that 0.3.5 compacted, but it cannot restore context that older model never saw.
+[Saved conversations](SESSIONS.md#after-an-interruption) must use the current
+storage format. Experimental versions do not migrate older formats, and leave
+unsupported files unchanged.
 
 If a provider rejects a request as too large, Jecode lowers its estimate of the
 window and compacts earlier. If even the instructions, your requests and a

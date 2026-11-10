@@ -77,7 +77,7 @@ fn worker_panic_after_an_effect_is_an_unknown_outcome_without_reexecution() {
     assert_eq!(results[0].get("outcome"), Some(&Value::string("unknown")));
 }
 
-pub(super) fn command(id: &str, command: &str, path: &str) -> Value {
+pub(super) fn command(id: &str, command: &str) -> Value {
     tool_call(
         id,
         "bash",
@@ -85,7 +85,6 @@ pub(super) fn command(id: &str, command: &str, path: &str) -> Value {
             ("command", Value::string(command)),
             ("parallel", Value::Bool(true)),
             ("timeout_seconds", Value::number(5)),
-            ("protect", Value::Array(vec![Value::string(path)])),
         ]),
     )
 }
@@ -105,12 +104,10 @@ fn independent_commands_overlap_and_a_dependent_read_waits_for_both() {
                     command(
                         "first",
                         "printf ready > ready-a; for ((n=0;n<200;n++)); do if test -e ready-b; then printf alpha > a.txt; exit 0; fi; sleep 0.01; done; exit 71",
-                        "a.txt",
                     ),
                     command(
                         "second",
                         "printf ready > ready-b; for ((n=0;n<200;n++)); do if test -e ready-a; then printf beta > b.txt; exit 0; fi; sleep 0.01; done; exit 72",
-                        "b.txt",
                     ),
                     tool_call(
                         "dependent",
@@ -134,10 +131,6 @@ fn independent_commands_overlap_and_a_dependent_read_waits_for_both() {
         .permissions()
         .set_level(crate::permissions::Level::Full)
         .unwrap();
-    agent.use_checkpoints(crate::checkpoints::session::Session::offline(
-        home.path(),
-        project.path(),
-    ));
     agent
         .run_turn(
             "Run independent jobs, then inspect their results",
@@ -168,7 +161,6 @@ fn independent_commands_overlap_and_a_dependent_read_waits_for_both() {
         let value =
             crate::json::parse(receipt.get("content").and_then(Value::as_str).unwrap()).unwrap();
         assert_eq!(value.get("exit_code"), Some(&Value::number(0)));
-        assert!(value.get("checkpoint").is_some());
     }
     assert!(
         receipts[2]

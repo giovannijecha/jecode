@@ -1,79 +1,6 @@
 use super::*;
 
 #[test]
-fn bash_summary_exposes_incomplete_checkpoint_status() {
-    for status in ["partial", "none"] {
-        let result = Value::object([
-            ("exit_code", Value::number(0)),
-            (
-                "checkpoint",
-                Value::object([("status", Value::string(status))]),
-            ),
-        ]);
-        let summary = tool_summary("bash", &result);
-        assert!(
-            summary.contains(status),
-            "{status} checkpoint was hidden from the tool card: {summary}"
-        );
-    }
-}
-
-#[test]
-fn checkpoint_summaries_use_actual_preview_and_full_counts() {
-    let restored = Value::object([
-        ("ref", Value::string("rc-one")),
-        ("preview", Value::Bool(false)),
-        ("planned", Value::Array(vec![Value::object([])])),
-        ("planned_count", Value::number(71)),
-        ("restored", Value::Array(vec![Value::object([])])),
-        ("restored_count", Value::number(60)),
-        ("conflicts", Value::Array(vec![])),
-        ("conflict_count", Value::number(0)),
-        ("failed", Value::Array(vec![])),
-        ("failed_count", Value::number(0)),
-    ]);
-    assert_eq!(
-        tool_summary("checkpoint", &restored),
-        "restored 60 paths from rc-one"
-    );
-    let mut preview = restored;
-    if let Value::Object(fields) = &mut preview {
-        fields.insert("preview".into(), Value::Bool(true));
-    }
-    assert_eq!(
-        tool_summary("checkpoint", &preview),
-        "preview: 71 paths would change"
-    );
-}
-
-#[test]
-fn checkpoint_summaries_distinguish_list_inspect_and_failures() {
-    let listed = Value::object([("calls", Value::Array(vec![Value::object([])]))]);
-    assert_eq!(tool_summary("checkpoint", &listed), "1 call");
-    let inspected = Value::object([
-        ("ref", Value::string("rc-one")),
-        ("paths", Value::Array(vec![Value::object([])])),
-        ("path_count", Value::number(80)),
-    ]);
-    assert_eq!(
-        tool_summary("checkpoint", &inspected),
-        "inspected 80 paths in rc-one"
-    );
-    let failed = Value::object([
-        ("ref", Value::string("rc-one")),
-        ("preview", Value::Bool(false)),
-        ("restored_count", Value::number(1)),
-        ("failed", Value::Array(vec![Value::object([])])),
-        ("failed_count", Value::number(3)),
-        ("conflict_count", Value::number(2)),
-    ]);
-    assert_eq!(
-        tool_summary("checkpoint", &failed),
-        "restored 1 path from rc-one; 2 conflicts; 3 paths failed"
-    );
-}
-
-#[test]
 fn local_web_and_browser_cards_show_actions_and_artifacts() {
     let fetch = Value::object([
         ("action", Value::string("fetch")),
@@ -157,12 +84,8 @@ fn multi_file_edits_name_their_files_and_count_outcomes() {
     }
 }
 
-fn member(path: &str, field: (&str, Value), checkpoint: Option<Value>) -> Value {
-    let mut member = Value::object([("path", Value::string(path)), field]);
-    if let (Value::Object(fields), Some(checkpoint)) = (&mut member, checkpoint) {
-        fields.insert("checkpoint".into(), checkpoint);
-    }
-    member
+fn member(path: &str, field: (&str, Value)) -> Value {
+    Value::object([("path", Value::string(path)), field])
 }
 
 fn batch(members: Vec<Value>) -> Value {
@@ -170,62 +93,9 @@ fn batch(members: Vec<Value>) -> Value {
 }
 
 #[test]
-fn multi_file_edits_warn_about_each_members_checkpoint() {
-    let receipt = |status: &str, reason: Option<&str>| match reason {
-        Some(reason) => Value::object([
-            ("status", Value::string(status)),
-            ("reason", Value::string(reason)),
-        ]),
-        None => Value::object([("status", Value::string(status))]),
-    };
-    let written = |path, checkpoint| member(path, ("bytes_written", Value::number(4)), checkpoint);
-    let full = || receipt("none", Some("disk full"));
-    for (members, expected) in [
-        (
-            vec![
-                written("a.rs", Some(receipt("saved", None))),
-                written("b.rs", None),
-            ],
-            "changed 2 files",
-        ),
-        (
-            vec![
-                written("a.rs", Some(receipt("saved", None))),
-                written("b.rs", Some(receipt("partial", None))),
-            ],
-            "changed 2 files; checkpoint partial (b.rs)",
-        ),
-        (
-            vec![
-                written("a.rs", Some(full())),
-                written("b.rs", Some(receipt("saved", None))),
-                written("c.rs", Some(full())),
-            ],
-            "changed 3 files; checkpoint none: disk full (a.rs, c.rs)",
-        ),
-        (
-            vec![
-                written("a.rs", Some(full())),
-                written("b.rs", Some(receipt("partial", Some("locked")))),
-                member("c.rs", ("error", Value::string("no match")), None),
-            ],
-            "changed 2 files; 1 failed; checkpoint none: disk full (a.rs); checkpoint partial: locked (b.rs)",
-        ),
-    ] {
-        assert_eq!(tool_summary("edit", &batch(members)), expected);
-    }
-    // One file keeps its own wording.
-    let single = Value::object([("bytes_written", Value::number(4)), ("checkpoint", full())]);
-    assert_eq!(
-        tool_summary("edit", &single),
-        "wrote 4 bytes; checkpoint none: disk full"
-    );
-}
-
-#[test]
 fn multi_path_reads_count_the_files_they_could_not_read() {
-    let read = |path| member(path, ("content", Value::string("1: a\n")), None);
-    let missed = |path| member(path, ("error", Value::string("not found")), None);
+    let read = |path| member(path, ("content", Value::string("1: a\n")));
+    let missed = |path| member(path, ("error", Value::string("not found")));
     for (members, expected) in [
         (vec![read("a.rs"), read("b.rs")], "read 2 files"),
         (
@@ -273,13 +143,11 @@ fn a_call_that_never_ran_says_why_instead_of_how_it_finished() {
 
 #[test]
 fn an_emptied_file_counts_as_changed_and_a_no_op_does_not() {
-    use crate::{cancel::Cancellation, checkpoints::session::Session, tools::Begun};
+    use crate::{cancel::Cancellation, tools::Begun};
     let root = crate::test_support::Directory::new();
-    let home = crate::test_support::Directory::new();
     std::fs::write(root.path().join("emptied.rs"), "all\n").unwrap();
     std::fs::write(root.path().join("same.rs"), "same\n").unwrap();
-    let mut tools = crate::tools::Tools::new(root.path()).unwrap();
-    tools.configure_checkpoints(Session::open(home.path(), tools.root()));
+    let tools = crate::tools::Tools::new(root.path()).unwrap();
     let file = |path: &str, old: &str, new: &str| {
         Value::object([
             ("path", Value::string(path)),
@@ -321,7 +189,7 @@ fn an_emptied_file_counts_as_changed_and_a_no_op_does_not() {
 }
 
 #[test]
-fn an_emptied_file_without_a_retained_diff_or_checkpoint_counts_as_changed() {
+fn an_emptied_file_without_a_retained_diff_counts_as_changed() {
     use crate::{cancel::Cancellation, tools::Begun};
     let root = crate::test_support::Directory::new();
     let source = "line\n".repeat(20_001);
@@ -331,8 +199,13 @@ fn an_emptied_file_without_a_retained_diff_or_checkpoint_counts_as_changed() {
     let file = |path: &str, old: &str, new: &str| {
         Value::object([
             ("path", Value::string(path)),
-            ("old_text", Value::string(old)),
-            ("new_text", Value::string(new)),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string(old)),
+                    ("new_text", Value::string(new)),
+                ])]),
+            ),
         ])
     };
     let arguments = Value::object([(

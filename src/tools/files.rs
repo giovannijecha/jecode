@@ -1,18 +1,17 @@
 use super::{edit::steps as edit_steps, required_string};
 use crate::cancel::Cancellation;
-use crate::checkpoints::session::{FileGuard, Session};
 use crate::{file_change::MAX_DIFF_BYTES, json::Value};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+mod locking;
 mod mismatch;
 mod page;
 #[cfg(test)]
 mod parent_tests;
 mod streaming;
 pub(super) use page::read_page;
-pub(crate) use page::read_source;
 pub(crate) use page::read_text_page;
 
 #[cfg(test)]
@@ -27,54 +26,46 @@ pub(super) fn read(
 
 #[cfg(test)]
 pub(super) fn write(root: &Path, arguments: &Value) -> Result<Value, String> {
-    write_with_change(root, arguments, None, &Cancellation::default()).map(|(result, _)| result)
+    write_with_change(root, arguments, &Cancellation::default()).map(|(result, _)| result)
 }
 
 pub(super) fn write_with_change(
     root: &Path,
     arguments: &Value,
-    checkpoints: Option<&Session>,
     cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     check_cancelled(cancellation)?;
     let path = writable_path(root, required_string(arguments, "path")?)?;
     let content = required_string(arguments, "content")?;
-    let mut guard =
-        checkpoints.map(|session| session.file_cancellable("write", &path, cancellation));
+    let _lock = locking::acquire(&path, cancellation)?;
     // A write may replace non-text data; inability to read it cannot reject
     // an operation that was previously allowed.
     let previous = previous_text(&path, content.len());
-    if let Some(guard) = &mut guard {
-        guard.capture();
-    }
-    check_guard(guard.as_ref(), cancellation)?;
-    let outcome = finish_replacement(guard, &path, content, cancellation);
-    if let Err(error) = outcome.result {
-        return Ok((failed(error, outcome.checkpoint), None));
+    check_cancelled(cancellation)?;
+    if let Err(error) = replace_file(&path, None, content, cancellation) {
+        return Ok((failed(error), None));
     }
     let change =
         previous.and_then(|old| crate::file_change::Change::between(old.as_deref(), content));
-    Ok((written(content.len() as u64, outcome.checkpoint), change))
+    Ok((written(content.len() as u64), change))
 }
 
 #[cfg(test)]
 pub(super) fn edit(root: &Path, arguments: &Value) -> Result<Value, String> {
-    edit_with_change(root, arguments, None, &Cancellation::default()).map(|(result, _)| result)
+    edit_with_change(root, arguments, &Cancellation::default()).map(|(result, _)| result)
 }
 
 pub(super) fn edit_with_change(
     root: &Path,
     arguments: &Value,
-    checkpoints: Option<&Session>,
     cancellation: &Cancellation,
 ) -> Result<(Value, Option<crate::file_change::Change>), String> {
     check_cancelled(cancellation)?;
     let path = existing_path(root, required_string(arguments, "path")?)?;
     let edits = edit_steps(arguments)?;
-    // Hold the path from reading to replacing so concurrent sessions take turns.
-    let guard = checkpoints.map(|session| session.file_cancellable("edit", &path, cancellation));
+    let _lock = locking::acquire(&path, cancellation)?;
     if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > MAX_DIFF_BYTES as u64) {
-        return streaming::edit(&path, &edits, guard, cancellation);
+        return streaming::edit(&path, &edits, cancellation);
     }
     let content = read_text(&path, cancellation)?;
     let mut updated = content.clone();
@@ -118,17 +109,13 @@ pub(super) fn edit_with_change(
         updated.replace_range(position..position + old.len(), new);
     }
     if updated == content {
-        return Ok((edited(0, None, false), None));
+        return Ok((edited(0, false), None));
     }
-    let outcome = replace_protected(guard, &path, &content, &updated, cancellation);
-    if let Err(error) = outcome.result {
-        return Ok((failed(error, outcome.checkpoint), None));
+    if let Err(error) = replace_file(&path, Some(&content), &updated, cancellation) {
+        return Ok((failed(error), None));
     }
     let change = crate::file_change::Change::between(Some(&content), &updated);
-    Ok((
-        edited(updated.len() as u64, outcome.checkpoint, true),
-        change,
-    ))
+    Ok((edited(updated.len() as u64, true), change))
 }
 
 fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> String {
@@ -142,94 +129,22 @@ fn edit_mismatch_error(index: usize, reason: &str, initial_advice: &str) -> Stri
     }
 }
 
-struct ReplacementOutcome {
-    result: Result<(), String>,
-    checkpoint: Option<Value>,
-}
-
-/// Saves the previous state before replacing the file. The replacement
-/// proceeds whether or not saving succeeded; the result says which.
-fn replace_protected(
-    guard: Option<FileGuard<'_>>,
-    path: &Path,
-    expected: &str,
-    content: &str,
-    cancellation: &Cancellation,
-) -> ReplacementOutcome {
-    let Some(mut guard) = guard else {
-        return finish_replacement(None, path, content, cancellation);
-    };
-    guard.capture();
-    if let Err(error) = check_guard(Some(&guard), cancellation) {
-        return ReplacementOutcome {
-            result: Err(error),
-            checkpoint: Some(guard.finish()),
-        };
-    }
-    // An external writer does not honor our lease. Check the exact source
-    // after capture, before installing the replacement derived from it.
-    match read_text(path, cancellation) {
-        Ok(current) if current == expected => {}
-        Ok(_) => {
-            return ReplacementOutcome {
-                result: Err(
-                    "The file changed while the edit was being prepared; read it and retry".into(),
-                ),
-                checkpoint: Some(guard.finish()),
-            };
-        }
-        Err(error) => {
-            return ReplacementOutcome {
-                result: Err(error),
-                checkpoint: Some(guard.finish()),
-            };
-        }
-    }
-    finish_replacement(Some(guard), path, content, cancellation)
-}
-
-fn finish_replacement(
-    guard: Option<FileGuard<'_>>,
-    path: &Path,
-    content: &str,
-    cancellation: &Cancellation,
-) -> ReplacementOutcome {
-    let Some(guard) = guard else {
-        return ReplacementOutcome {
-            result: replace_file(path, content, cancellation),
-            checkpoint: None,
-        };
-    };
-    let result = check_guard(Some(&guard), cancellation)
-        .and_then(|()| replace_file(path, content, cancellation));
-    let checkpoint = Some(guard.finish());
-    ReplacementOutcome { result, checkpoint }
-}
-
-fn written(bytes: u64, checkpoint: Option<Value>) -> Value {
-    let mut result = Value::object([("bytes_written", Value::number(bytes))]);
-    if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
-        fields.insert("checkpoint".into(), checkpoint);
-    }
-    result
+fn written(bytes: u64) -> Value {
+    Value::object([("bytes_written", Value::number(bytes))])
 }
 
 /// Edit receipts say whether a replacement happened, even when it emptied
 /// the file and wrote zero bytes. Write receipts retain their old shape.
-fn edited(bytes: u64, checkpoint: Option<Value>, changed: bool) -> Value {
-    let mut result = written(bytes, checkpoint);
+fn edited(bytes: u64, changed: bool) -> Value {
+    let mut result = written(bytes);
     if let Value::Object(fields) = &mut result {
         fields.insert("changed".into(), Value::Bool(changed));
     }
     result
 }
 
-fn failed(error: String, checkpoint: Option<Value>) -> Value {
-    let mut result = Value::object([("error", Value::string(error))]);
-    if let (Value::Object(fields), Some(checkpoint)) = (&mut result, checkpoint) {
-        fields.insert("checkpoint".into(), checkpoint);
-    }
-    result
+fn failed(error: String) -> Value {
+    Value::object([("error", Value::string(error))])
 }
 
 fn previous_text(path: &Path, updated_bytes: usize) -> Option<Option<String>> {
@@ -341,7 +256,12 @@ fn read_text(path: &Path, cancellation: &Cancellation) -> Result<String, String>
     Ok(text)
 }
 
-fn replace_file(path: &Path, content: &str, cancellation: &Cancellation) -> Result<(), String> {
+fn replace_file(
+    path: &Path,
+    expected: Option<&str>,
+    content: &str,
+    cancellation: &Cancellation,
+) -> Result<(), String> {
     check_cancelled(cancellation)?;
     if content.contains('\0') {
         return Err("File content must be UTF-8 text without NUL bytes".into());
@@ -383,6 +303,13 @@ fn replace_file(path: &Path, content: &str, cancellation: &Cancellation) -> Resu
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
         check_cancelled(cancellation)?;
+        if let Some(expected) = expected
+            && read_text(path, cancellation)? != expected
+        {
+            return Err(
+                "The file changed while the edit was being prepared; read it and retry".into(),
+            );
+        }
         fs::rename(&temporary, path).map_err(|error| error.to_string())
     })();
     if result.is_err() {
@@ -399,15 +326,9 @@ fn check_cancelled(cancellation: &Cancellation) -> Result<(), String> {
     }
 }
 
-fn check_guard(guard: Option<&FileGuard<'_>>, cancellation: &Cancellation) -> Result<(), String> {
-    check_cancelled(cancellation)?;
-    if let Some(guard) = guard {
-        guard.check_cancelled()?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod batch_tests;
+#[cfg(test)]
+mod concurrency_tests;
 #[cfg(test)]
 mod tests;

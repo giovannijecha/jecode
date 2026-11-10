@@ -63,20 +63,30 @@ fn cases() -> Vec<Case> {
         },
         Case {
             name: "edit",
-            arguments: object([
-                ("path", "src/parser.rs"),
-                ("old_text", "missing()"),
-                ("new_text", "ready()"),
+            arguments: Value::object([
+                ("path", Value::string("src/parser.rs")),
+                (
+                    "edits",
+                    Value::Array(vec![object([
+                        ("old_text", "missing()"),
+                        ("new_text", "ready()"),
+                    ])]),
+                ),
             ]),
             result: object([("error", "Expected one occurrence; found 0")]),
             change: None,
         },
         Case {
             name: "edit",
-            arguments: object([
-                ("path", "src/parser.rs"),
-                ("old_text", "ready()"),
-                ("new_text", "ready()"),
+            arguments: Value::object([
+                ("path", Value::string("src/parser.rs")),
+                (
+                    "edits",
+                    Value::Array(vec![object([
+                        ("old_text", "ready()"),
+                        ("new_text", "ready()"),
+                    ])]),
+                ),
             ]),
             result: object([]),
             change: Change::between(Some("ready()\n"), "ready()\n"),

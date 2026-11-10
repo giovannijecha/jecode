@@ -16,7 +16,7 @@ const BLOCK: usize = 8;
 /// The family surface: read, edit, shell, coordination, then the quiet one for the rest.
 fn family(name: &str) -> Surface {
     match name {
-        "Read" | "List" | "Search" | "Map" | "Skill" | "Web" | "Browser" => BADGE_READ,
+        "Read" | "List" | "Search" | "Skill" | "Web" | "Browser" => BADGE_READ,
         "Update" | "Write" => BADGE_EDIT,
         "Bash" | "Exec" | "Process" => BADGE_SHELL,
         "Agents" | "Todo" | "Ask user" => BADGE_COORD,
@@ -129,9 +129,8 @@ fn tree(row: &Line) -> bool {
 mod tests {
     use super::*;
 
-    const NAMES: [&str; 12] = [
-        "Web", "Map", "MCP", "LSP", "Read", "List", "Bash", "Save", "Write", "Search", "Update",
-        "Process",
+    const NAMES: [&str; 10] = [
+        "Web", "MCP", "LSP", "Read", "List", "Bash", "Write", "Search", "Update", "Process",
     ];
 
     /// The filled cells, and whatever follows them.
@@ -185,7 +184,7 @@ mod tests {
 
     #[test]
     fn quiet_surfaces_read_strong_and_family_surfaces_keep_their_label() {
-        for name in ["Save", "MCP", "LSP", "Work", "Unknown"] {
+        for name in ["MCP", "LSP", "Work", "Unknown"] {
             let line = badge(name, Status::Done);
             assert_eq!(line.spans[0].background, Some(BADGE_IDLE), "{name}");
             assert_eq!(line.spans[0].style, STRONG.bold(), "{name}");
@@ -204,7 +203,6 @@ mod tests {
             ("Bash", LIT),
             ("Agents", MUTED),
             ("AGENT 1", MUTED),
-            ("Save", MUTED),
             ("MCP", MUTED),
         ] {
             assert_eq!(ink(name), style, "{name}");

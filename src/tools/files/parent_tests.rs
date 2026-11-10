@@ -23,7 +23,6 @@ fn write_creates_the_missing_parents_of_a_new_file() {
     let (result, change) = write_with_change(
         &root,
         &arguments("src/core/todo.js", "one\n"),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -91,15 +90,7 @@ fn a_refused_write_creates_no_parents() {
     let root = workspace(&directory);
     let cancellation = Cancellation::default();
     cancellation.cancel();
-    assert!(
-        write_with_change(
-            &root,
-            &arguments("cancelled/new.txt", "x"),
-            None,
-            &cancellation
-        )
-        .is_err()
-    );
+    assert!(write_with_change(&root, &arguments("cancelled/new.txt", "x"), &cancellation).is_err());
     let binary = write(&root, &arguments("binary/new.txt", "\0")).unwrap();
     assert!(binary.get("error").is_some(), "{binary:?}");
     fs::write(root.join("source"), "text").unwrap();

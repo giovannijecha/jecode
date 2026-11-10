@@ -35,11 +35,8 @@ fn assert_dependency_rules_are_excluded(rules: &[u8]) {
         Tools::new(root).unwrap(),
     );
     agent.prepare_turn("Inspect the project").unwrap();
-    let system = agent.current_system_message();
-    let content = system
-        .get("content")
-        .and_then(crate::json::Value::as_str)
-        .unwrap();
+    let snapshot = agent.instruction_snapshot();
+    let content = snapshot.as_str();
     for text in [
         "Project rules",
         "Source rules",

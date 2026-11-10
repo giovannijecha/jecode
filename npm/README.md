@@ -52,7 +52,7 @@ Press Enter to send a task, Ctrl+G to open commands while keeping your draft,
 Esc to stop a turn, and Ctrl+Q to quit. `/help` or F1 lists commands and common
 shortcuts, and `jecode resume` continues saved work. Read the
 [terminal guide](https://github.com/giovannijecha/jecode/blob/main/docs/tui/INTERFACE.md)
-for themes, tool cards, checkpoints and shortcuts.
+for themes, tool cards and shortcuts.
 
 The default permission level, Workspace, confines the agent's commands to your
 project and asks before touching anything outside it; see
@@ -60,8 +60,8 @@ project and asks before touching anything outside it; see
 for what each system supports.
 
 Jecode sends your conversation, including file contents and command output the
-agent has read, to the provider you select. Your keys, account tokens,
-conversations and checkpoints are stored locally under `~/.jecode/`.
+agent has read, to the provider you select. Your keys, account tokens and
+conversations are stored locally under `~/.jecode/`.
 
 The harness is one native executable written in Rust without third-party Rust
 crates. It supports prompt caching, batched file tools and prepared tool
@@ -69,21 +69,23 @@ sequences in one request. Native HTTP connections persist between requests;
 OpenAI conversations use WebSocket with HTTP fallback. Separate
 [performance measurements](https://github.com/giovannijecha/jecode/blob/main/docs/development/PERFORMANCE.md)
 record lower first-update latency on Windows; the comparison above predates
-that work and the later native records for long conversations. The
+that work and the current context handling. The
 [benchmark report](https://github.com/giovannijecha/jecode/blob/main/docs/development/AGENT_BENCHMARK.md#exact-records-development-branch-2026-11-07)
-also records short and 40-turn context comparisons, including quality misses.
-They do not establish a general 25% token saving at equal quality. Separate
+also records short and 40-turn comparisons of an earlier, since-retired context
+design, including quality misses. None of these measures the current context
+path or establishes a general 25% token saving at equal quality. Separate
 [offline checks](https://github.com/giovannijecha/jecode/blob/main/docs/development/CONTEXT_CHECKS.md)
 screen long saved contexts without model calls; they do not establish a ten-hour
 live result.
 
 ## Long conversations and processes
 
-Earlier work becomes compact records of requests, answers and tool outcomes
-before Jecode needs a model summary. Recording requires no model request. The
-original conversation stays saved and available to the model by reference;
-summaries remain the fallback when records and tool-result previews cannot make
-room. Read [Long-running work](https://github.com/giovannijecha/jecode/blob/main/docs/usage/LONG_WORK.md).
+Each request adds to the previous one, so earlier messages are sent unchanged
+and the provider can serve them from its prompt cache. When a request would pass
+the **Auto-compact at** threshold (default 80% of the model's window), or the
+provider rejects it as too long, the same model writes one summary of the
+earlier work. The original conversation stays saved and available to the model
+by reference. Read [Long-running work](https://github.com/giovannijecha/jecode/blob/main/docs/usage/LONG_WORK.md).
 
 `/process` lists running and recent commands, with saved output and a control to
 move a waiting call into the background. Process completions reach the model and
@@ -92,8 +94,12 @@ statistics visible.
 
 ## Update or remove
 
-Updating from 0.3.5? Read the [0.4.5 upgrade notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md#upgrading-from-035)
-for saved-session compatibility and the Claude prompt-cache default.
+This build resumes only conversations saved in its current format; it reports
+older ones and leaves their files unchanged, without migrating them. Read the
+[release notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md)
+before updating; the
+[0.4.5 notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md#upgrading-from-035)
+cover the Claude prompt-cache default.
 
 Update the npm installation with:
 
@@ -107,8 +113,8 @@ Remove it with:
 npm uninstall -g @giovannijecha/jecode
 ```
 
-Removing the package keeps your settings, accounts, conversations, and
-checkpoints in `~/.jecode/` or your `JECODE_HOME` directory. If you previously
+Removing the package keeps your settings, accounts and conversations in
+`~/.jecode/` or your `JECODE_HOME` directory. If you previously
 installed Jecode from source, check which `jecode` command appears first on
 `PATH`; npm does not remove that separate installation.
 

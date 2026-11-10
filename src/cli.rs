@@ -14,8 +14,6 @@ pub enum Action {
         attachments: Vec<String>,
         plain: bool,
     },
-    /// `jecode checkpoints ...`, handled without a model provider.
-    Checkpoints(Vec<String>),
 }
 
 pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, String> {
@@ -34,12 +32,6 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Action, St
             "setup" => return Ok(Action::Setup),
             _ => {}
         }
-    }
-    if arguments
-        .first()
-        .is_some_and(|first| first == "checkpoints")
-    {
-        return Ok(Action::Checkpoints(arguments.into_iter().skip(1).collect()));
     }
     let mut arguments = arguments.into_iter();
     let mut model = None;
@@ -122,7 +114,7 @@ pub fn print_help() {
         .collect::<Vec<_>>()
         .join(", ");
     println!(
-        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode checkpoints [COMMAND]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nOpenRouter, OpenAI API and Anthropic API keys, default model and effort live in ~/.jecode/config.json.\nAPI key requests use the provider's API billing. Protected ChatGPT and Claude account credentials\nlive separately in ~/.jecode/accounts/.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\nPer-call checkpoints expire after 24 hours in ~/.jecode/checkpoints/; jecode checkpoints help lists\ncommands that work offline, without a key or backend.\n\nTools: {tools} (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory.",
+        "Jecode\n\nUsage: jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]\n       jecode [--plain] resume [SESSION_ID]\n       jecode setup\n       jecode --help\n       jecode --version\n\nStart from your project directory. First launch guides you through setup.\nOpenRouter, OpenAI API and Anthropic API keys, default model and effort live in ~/.jecode/config.json.\nAPI key requests use the provider's API billing. Protected ChatGPT and Claude account credentials\nlive separately in ~/.jecode/accounts/.\nConversations autosave in ~/.jecode/sessions/ and resume only in their original folder.\n--model overrides the model for this run without changing saved defaults.\n--attach adds a file to the first message; repeat it for more files.\n\n{interaction}\nOptions precede PROMPT; use -- before a prompt starting with '-'.\n\nTools: {tools} (direct execution).\n\n{}\n\n{requirements}\n\nAdvanced: OPENROUTER_API_KEY and OPENROUTER_MODEL apply when no config exists.\nJECODE_HOME overrides the config directory.",
         crate::session::commands::help(true),
     );
 }
@@ -237,20 +229,5 @@ mod tests {
             }
         ));
         assert!(parse(arguments(&["hello", "--plain"])).is_err());
-    }
-
-    #[test]
-    fn checkpoints_pass_their_words_through_unparsed() {
-        assert!(matches!(
-            parse(arguments(&["checkpoints", "restore", "rc-3", "a b.txt", "--preview"])).unwrap(),
-            Action::Checkpoints(words) if words == ["restore", "rc-3", "a b.txt", "--preview"]
-        ));
-        assert!(
-            matches!(parse(arguments(&["checkpoints"])).unwrap(), Action::Checkpoints(words) if words.is_empty())
-        );
-        assert!(matches!(
-            parse(arguments(&["--", "checkpoints"])).unwrap(),
-            Action::Run { prompt: Some(prompt), .. } if prompt == "checkpoints"
-        ));
     }
 }

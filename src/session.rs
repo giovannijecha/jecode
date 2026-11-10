@@ -1,7 +1,6 @@
 mod agents;
 mod ask;
 mod attach;
-mod checkpoints;
 pub mod commands;
 mod copy;
 pub(crate) mod delete;
@@ -173,7 +172,6 @@ fn chat_inner(
             ("/agents", _) => agents::print(agent, arguments, output),
             ("/todo", "") => todo::print(agent, output),
             ("/tmp", _) => temporary::print(agent, arguments, output),
-            ("/checkpoints", _) => checkpoints::print(agent, arguments, output),
             ("/resume", _) => {
                 let previous = agent.sessions();
                 persistence::resume(agent, config, Some(arguments), input, output, status)
@@ -374,8 +372,6 @@ fn mcp_overview(home: &std::path::Path) -> (String, String) {
 
 #[cfg(test)]
 mod ask_tests;
-#[cfg(test)]
-mod checkpoint_tests;
 #[cfg(test)]
 mod permission_tests;
 #[cfg(test)]

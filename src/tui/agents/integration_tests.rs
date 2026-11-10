@@ -395,7 +395,7 @@ fn inspection_and_integration_actions_keep_their_tool_cards() {
             id: id.into(),
             name: "agent".into(),
             summary: format!("{action} complete"),
-            result: Value::object([("checkpoint", Value::string("abc123"))]),
+            result: Value::object([("review_token", Value::string("abc123"))]),
         });
     }
     let cards = app
@@ -419,7 +419,7 @@ fn inspection_and_integration_actions_keep_their_tool_cards() {
         cards[1]
             .1
             .unwrap()
-            .get("checkpoint")
+            .get("review_token")
             .and_then(Value::as_str),
         Some("abc123")
     );
@@ -481,6 +481,14 @@ fn footer_distinguishes_runtime_failure_from_failed_check() {
         fields.insert(
             "checks".into(),
             Value::Array(vec![Value::string("cargo test failed")]),
+        );
+        fields.insert(
+            "tools".into(),
+            Value::Array(vec![Value::object([
+                ("name", Value::string("exec")),
+                ("text", Value::string("cargo test failed")),
+                ("result", Value::object([("exit_code", Value::number(1))])),
+            ])]),
         );
     }
     state.collaboration = vec![check];

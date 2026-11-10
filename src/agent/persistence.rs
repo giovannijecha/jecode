@@ -18,7 +18,6 @@ impl Agent {
         if self.persistence.is_none() {
             self.skills.configure(home);
             self.tools.configure_browser_profiles(home);
-            self.tools.configure_project_map(home);
             let mut store = Store::new(home.to_path_buf(), self.tools.root())?;
             if let Some(parent) = attachment_store {
                 store.share_attachments(parent);
@@ -53,7 +52,6 @@ impl Agent {
             self.questions
                 .bind(self.archive(), self.persistence.clone());
             self.bind_permissions();
-            self.begin_checkpoints();
             self.checkpoint(Stage::Preserve)?;
         }
         Ok(())

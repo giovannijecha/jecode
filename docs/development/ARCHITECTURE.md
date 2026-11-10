@@ -24,13 +24,11 @@ Paths are relative to `src/`.
 | Tools and their output | `tools/`, `file_change.rs`, `file_change/`, `output.rs`, `output/` |
 | Command language and processes | `shell.rs`, `shell/`, `process.rs`, `process/`, `pty.rs`, `pty/` |
 | File discovery and path filtering | `tools/discovery/`, `path_filter.rs`, `path_filter/` |
-| Project map | `project_map/` |
 | Web and browser | `http.rs`, `http/`, `web/`, `browser/` |
 | Remote MCP tools | `mcp/`, `agent/mcp.rs`, `tools/schema/mcp.rs`, `tui/mcp/` |
 | Language servers | `lsp/`, `process/duplex.rs`, `tools/lsp.rs`, `agent/lsp.rs`, `tui/lsp/` |
 | Personal skills | `skills.rs`, `skills/`, `agent/skills.rs` |
 | Saved conversations | `sessions/`, `agent/persistence.rs` |
-| Workspace checkpoints | `checkpoints/`, `agent/checkpoints.rs`, `session/checkpoints.rs` |
 | Temporary working files | `scratch/`, `agent/temporary.rs` |
 | Attachments, clipboard, copy and export | `attachments/`, `tools/attachment.rs`, `clipboard.rs`, `clipboard/`, `copy.rs`, `copy/`, `export.rs`, `export/` |
 | Model backends | `backend/`, `backend/openrouter/`, `backend/openai/`, `backend/anthropic/` |
@@ -66,8 +64,8 @@ repeated-command refusals or validation of model output.
 
 Up to four adjacent eligible reads run together automatically: `list`,
 `search`, a single-path `read` (except `history:` and `skill:` references),
-`map overview`, `checkpoint list` and `inspect`, `process list`, `mcp list` and
-`tools`, and `web fetch` or `download` using GET or HEAD without a body.
+`process list`, `mcp list` and `tools`, and `web fetch` or `download` using GET
+or HEAD without a body.
 
 A model can declare adjacent calls independent with `parallel: true`, including
 writes and commands. Declared groups run in waves of at most four. `parallel:
@@ -116,21 +114,6 @@ calls with the same normalized label and execution turn (`Presentation.turn_id`)
 `tui/cards/chapter.rs` derives the chapter's facts and status from its members.
 See [Tool activity](../tui/TOOL_ACTIVITY.md) for the user-visible result.
 
-### Project map
-
-`project_map/survey.rs` reuses discovery's filtered walker for directory areas
-and candidate landmarks. A focused Rust or Markdown file adds lexical
-declarations or headings with line references; this is not compiler or
-dependency analysis. Collection is bounded and reports omitted inventory.
-
-`map remember` stores model-written notes with source paths, optional line
-excerpts and full-file fingerprints. `project_map/sources.rs` compares the
-fingerprints for the requested page and reports `current`, `changed`, `missing`
-or `unverified`. Notes live at
-`~/.jecode/projects/<canonical-root-key>/map.json`, independent of sessions.
-Writes lock, reload and atomically replace that file. Neither startup nor the
-system message scans the project or injects the map.
-
 ### Context and compaction
 
 `context.rs` derives the input budget from the **Auto-compact at** percentage
@@ -138,41 +121,31 @@ and the effective model window, lowered when a provider rejection reveals a
 smaller ceiling. Prompt estimates calibrate from provider usage when it is
 available.
 
-`context/digest.rs` is the first reduction and usually the only one. It replaces
-earlier messages with exact native records: excerpts of user requests and
-assistant text, and one line per tool call with its outcome and failure text,
-each naming the original as `history:N`. Full payloads stay in history. Records
-take no model request and are rendered from original history, so they do not
-accumulate paraphrase errors. New spans append without rewriting earlier records;
-adapters with explicit breakpoints mark the last record (`jecode_cache_anchor`).
-Condensing older records later rewrites that part of the prefix, and cache reuse
-still depends on the provider. Each span saves its boundaries, level and runtime
-notes; its text is deterministic. `agent/compaction/records.rs` decides when. At
-the start of a turn it keeps only the new request, once that frees 30k tokens.
-During work it waits for a 120k window plus the records. It keeps the latest
-exchange whole, since its results may be unread even when a message arrived after
-them, and earlier exchanges within a quarter of that window. At the budget,
-records that fit and save context take precedence over a model summary. Previews
-wait for the budget. Both thresholds scale with the square root of the backend's
-cache write premium over a cached read: about ×1.13 for five-minute Claude
-writes, ×1.45 for one-hour writes and ×1 where writes cost no premium. The
-**Auto-compact at** budget always wins. Records that
-outgrow their share are condensed oldest first, to one paragraph per turn and then
-to an index.
+Between compactions every request only appends to the previous one: the system
+message, the archived-request message and the summary when there is one, then
+the original messages from the context boundary, with runtime state anchored
+where it was first sent. Native reasoning and signed thinking replay unchanged,
+so providers can reuse the whole earlier request as a cached prefix.
 
-When records cannot make room, `agent/compaction.rs` turns large tool payloads into
-previews while keeping the original results. If that is not enough,
-`agent/summary.rs` asks the same model for a plain-text handoff targeting at
-most 16 KiB, which folds the records in. Proactive compaction first appends the
-request to the conversation's own request, with its tool definitions and selected
-effort, so the provider's cached prefix is reused (`Purpose::CachedSummary`). If that
-request leaves no room, fails on context or length, or returns tool calls or
-no text, and for forced compaction, the transcript is folded into the previous
-summary in chronological portions, without tools and at medium effort when
-supported. A verbatim tail of recent messages
-is kept within a quarter of the input budget; a tool call and all its results
-stay on the same side of that boundary. Failed compaction leaves the previous
-context in place.
+There is one reduction. When the estimate of the next request reaches the
+budget, or a provider rejects a request as too large, `agent/compaction.rs`
+asks the same model, through `agent/summary.rs`, for a plain-text handoff
+targeting at most 16 KiB that folds in the previous summary. Proactive
+compaction first appends the request to the conversation's own request, with
+its tool definitions and selected effort, so the provider's cached prefix is
+reused (`Purpose::CachedSummary`). If that request leaves no room, fails on
+context or length, or returns tool calls or no text, and for forced compaction,
+the transcript is folded into the previous summary in chronological portions,
+without tools and at medium effort when supported; large tool results in those
+portions are shortened to previews that name their `history:N` original. A
+verbatim tail of recent messages is kept within a quarter of the input budget;
+a tool call and all its results stay on the same side of that boundary. Failed
+compaction leaves the previous context in place. Compaction rewrites the
+request prefix once; requests append again from there.
+
+Saved context from an earlier format, including the model-free records of
+0.4.5, is not migrated: the session reader rejects it and leaves the file
+unchanged.
 
 `context/view.rs` builds a stable archived-request prefix at each compaction,
 keeping the first and the latest user requests within its byte budget.
@@ -180,12 +153,18 @@ keeping the first and the latest user requests within its byte budget.
 `read history:N`.
 
 The built-in instructions live in `agent/PROMPT.md` and are compiled into the
-executable. Project instructions and the skill catalog form the stable system
-prefix. Permissions, temporary paths, plans and collaboration state form
-request-only session-state messages (`context/state.rs`). A state stays where it
-was first sent and is added again only when its text changes, so earlier
-requests remain an identical prefix for the provider's cache. Neither
-projection rewrites the saved system message.
+executable; with the environment they form the stable system prefix.
+Permissions, temporary paths, plans and collaboration state form request-only
+session-state messages (`context/state.rs`). Project instructions and the skill
+catalog form a separate kind, instruction snapshots, recognized by their fixed
+header; each kind is compared only with its own latest message, so a plan update
+never repeats or supersedes the snapshot. A state stays where it was first sent
+and is added again only when its text changes, so earlier requests remain an
+identical prefix for the provider's cache. A complete snapshot with explicit
+empty sections replaces the previous one. Compaction keeps the last summarized
+snapshot outside the window as a record, so the next request restates the
+current instructions after the summary. Neither projection rewrites the saved
+system message.
 
 Each request attempt records its operation, resolved effort, timing and the
 usage counters the provider reported, including separate five-minute and one-hour
@@ -295,10 +274,10 @@ Exclusive writer leases prevent two processes from updating the same session.
 Summary caches speed up listing without replacing journal validation.
 
 Session files are `SESSION_ID.jsonl` journals in the `jecode.session.journal`
-format, version 3. Each synced, newline-terminated transaction appends messages
+format, version 4, carrying session state version 2. Other versions are
+rejected and their files left unchanged. Each synced, newline-terminated transaction appends messages
 and events with any changed metadata and input. Streaming text uses UTF-8-safe
-prefix and suffix updates. The journal calls these saves checkpoints; they are
-unrelated to workspace checkpoints.
+prefix and suffix updates. The journal calls these saves checkpoints.
 
 Parallel tool batches record call IDs in `pending.reads` or `pending.batch` and
 save each completed result, timing and optional diff in `pending.completed`
@@ -319,36 +298,6 @@ An attachment draft created before any model was selected stores a null
 
 User contract: [Saved conversations](../usage/SESSIONS.md).
 
-## Workspace checkpoints
-
-`checkpoints/` saves the state before one modifying tool call under
-`~/.jecode/checkpoints/<project-name>-<canonical-root-id>/`. Each call writes one
-immutable `rc-ID.rcp` pack: a header, raw file bytes, checksummed metadata with
-offsets and a footer. `.internal/` holds `workspace.id`, `identity.lock` and
-path leases. There is no object graph, global replay, after-state payload, delta
-or compaction.
-
-| Part | Responsibility |
-| --- | --- |
-| `store.rs`, `format.rs`, `capture.rs` | Immutable packs, streamed preimages, checked metadata, durable publication, readers and expiry. |
-| `paths.rs`, `state.rs`, `files.rs` | Scope discovery, complete-directory proofs, path identity and confinement, staged installation. |
-| `restore.rs`, `restore/` | Stateless inspection tokens, current-byte checks and restore with per-path undo. |
-| `locks.rs`, `pressure.rs` | Cancellable path leases and advisory free-space admission. |
-| `session.rs`, `actions.rs`, `show.rs`, `command.rs`, `render.rs` | Tool receipts, the three model actions, saved reads and local commands. |
-
-File tools hold a lease from reading through installation. Commands capture
-their declared `protect` paths before launch and then release the lease; no
-work happens after the command finishes. Directory walks skip Git-ignored
-directories using an owned `.gitignore` reader and record the rules they used.
-
-Inspection hashes the selected current states into a stateless token. Restore
-requires that token or an explicit `latest`, verifies saved content, captures an
-undo and rechecks current bytes before each installation. Packs expire 24 hours
-after creation; a maintenance worker sweeps once a minute while Jecode runs, and
-offline commands sweep too.
-
-User contract: [Checkpoints](../usage/CHECKPOINTS.md).
-
 ## Native boundaries
 
 Rust launches owned native adapters through `std::process::Command`. The
@@ -366,7 +315,6 @@ They call OS APIs directly; the Rust code uses no `unsafe` and no FFI.
 | HTTPS and cryptography | Windows uses WinHTTP and .NET cryptography; macOS uses CFNetwork, Security and CommonCrypto; Linux uses sockets with the system libssl and libcrypto. Request bodies and tokens travel to the adapter on stdin, never in arguments or files. On Windows, account cryptography and owner-only ACL changes share one helper per process, which exits after 10 idle seconds. Requests support cancellation and a 15-second I/O deadline; an interrupted request discards the helper before another can use it. The HTTP adapter stays alive between requests, one process per request in flight, so all HTTP traffic skips process startup and reuses open connections; it exits after 5 idle minutes or with Jecode, and cancellation discards it. WinHTTP manages its connections; Linux and macOS share an owned HTTP parser and a cache of up to four connections, checked before reuse. Linux uses system OpenSSL, while macOS uses CFStream TLS over an owned socket, preserving OS certificate and hostname checks. macOS resolves system proxy routes, including PAC and SOCKS, before connecting. Only GET and HEAD may be resent transparently after a reused connection fails before response headers; POST failures are returned to the caller because the server may already have applied them. OpenAI conversations use one more adapter in socket mode: WinHTTP and `NSURLSessionWebSocketTask` handle the protocol on Windows and macOS, `native/linux_http_socket.h` on Linux. |
 | Terminal input | Windows reads `CONIN$` through a C# adapter; Unix uses `termios` and `/dev/tty` with a guardian that restores terminal modes. |
 | Clipboard and images | Windows PowerShell, macOS system commands, or the Linux X11/Wayland and GdkPixbuf adapter; see [Attachments](../usage/ATTACHMENTS.md#platform-requirements). |
-| Disk space | `GetDiskFreeSpaceExW` on Windows and `statvfs` on Unix. |
 
 For macOS Workspace commands, `sandbox/apple.rs` resolves the selected Xcode or
 Command Line Tools SDK through the filesystem and supplies `SDKROOT` if unset.
@@ -410,11 +358,9 @@ credential environment variables of every available backend before launch.
 
 Caching follows each provider's model. Anthropic requests cache the built-in
 prompt, shared by every conversation, for one hour on its own breakpoint, and
-mark the end of the exact records, when present, and recent durable
-user-message boundaries. Through OpenRouter, requests to models that accept
-explicit cache markers (`backend/openrouter/cache.rs`) mark up to four
-boundaries: the end of the records first, then recent durable user or
-tool-batch boundaries. The saved **Prompt cache** lifetime
+mark recent durable user-message boundaries. Through OpenRouter, requests to
+models that accept explicit cache markers (`backend/openrouter/cache.rs`) mark
+up to four recent durable user or tool-batch boundaries. The saved **Prompt cache** lifetime
 (`backend/retention.rs`) reaches adapters as a request-only field of the system
 message, read at every request, so Claude breakpoints on Anthropic and
 OpenRouter take the provider's five-minute TTL by default, or one hour when that

@@ -152,9 +152,13 @@ fn remembering_a_call_covers_its_outside_files_one_by_one() {
         "edit",
         Value::object([
             ("path", Value::string(&outside[0])),
-            ("old_text", Value::string("before")),
-            ("new_text", Value::string("after")),
-            ("replace_all", Value::Bool(true)),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("before")),
+                    ("new_text", Value::string("after")),
+                ])]),
+            ),
         ]),
     );
     let fixture = HttpFixture::new(vec![

@@ -1,8 +1,8 @@
 # Performance measurement
 
 Jecode includes opt-in probes for UI work, model-stream parsing, file edits,
-session storage, process startup and checkpoints. This page explains how to run
-them and records results that still describe the current design. Results were
+session storage and process startup. This page explains how to run them
+and records results that still describe the current design. Results were
 measured on Windows unless stated; CI on other platforms does not establish
 their performance.
 
@@ -31,23 +31,15 @@ Run each probe with
 | --- | --- |
 | `tui::measurement_tests::composer_stream_scroll_and_capture` | Typing in a large draft, appending formatted text, selecting and scrolling large histories, capturing input. Prints samples in microseconds. |
 | `tui::transcript::rebuild_tests::long_answer_tool_toggle_measurement` | Ctrl+O layout work after a very long answer. |
+| `tui::render::tests::active_tests::active_long_history_frames` | Frames of a 200- and 1000-turn history while it keeps streaming, finishing tool calls, scrolling and resizing: frame time percentiles, frames with layout still pending, and how many frames each new stream needs to become visible. |
 | `backend::openrouter::stream::tests::tool_argument_stream_bench` | Parsing and assembling a large tool argument split into many stream fragments. |
 | `tools::files::streaming::measurements::large_batch_edit_measurement` | A multi-edit batch on a 32 MiB file. |
 | `sessions::measurement_tests::session_history_and_listing` | Journal append, load, resume, context projection and listing. Writes CSV files under `target/measurements/`. |
-| `sessions::checkpoint_measurements::active_turn_checkpoints` | Conversation saves during an active turn. |
 | `sessions::measurement_tests::windows_command_supervisor` | Supervised versus direct process launch on Windows. Writes `target/measurements/windows-process.csv`. |
-| `checkpoint_bench::matched_tools` | Complete write, edit, Bash and restore workflows with checkpoints. Configured through the variables below. |
 | `tui::measurement_tests::mixed_history_scroll` | Wheel steps over a resumed history of settled turns with prose, code, tables, tool cards with large results and very long answers: the full application step, layout alone, input capture and loop polling. Prints microseconds and VT bytes. |
 | `tui::measurement_tests::own_history_scroll` | The same steps over a copy of one saved conversation, in an isolated home. Prints only timings and byte counts. See [Measuring your own conversation](#measuring-your-own-conversation). |
-| `tui::terminal::windows::native_tests::native_windows_input_to_vt_latency` | One key and a four-character batch through ConPTY to the TUI's VT output, with and without background checkpoint writes. Each sample follows the previous frame, so ConPTY frame pacing dominates single keys. |
+| `tui::terminal::windows::native_tests::native_windows_input_to_vt_latency` | One key and a four-character batch through ConPTY to the TUI's VT output. Each sample follows the previous frame, so ConPTY frame pacing dominates single keys. |
 | `tui::terminal::windows::native_tests::native_windows_scroll_latency` | Wheel notches and ten-notch flicks over a resumed mixed history through ConPTY at 80 x 24 and 160 x 50: when the reading counter changes, when output settles, and rows moved per notch. |
-
-`checkpoint_bench::matched_tools` reads `JECODE_BENCH_CASE` (`write4k`,
-`edit1m`, `bash1`, `bash100`, `bash1000`, `restore1`, `restore100`,
-`restore1000` or `large256m`) and `JECODE_BENCH_COUNT` (measured samples per
-block; two warmups precede them). `JECODE_BENCH_ENABLED=0` runs the write, edit
-and Bash cases without checkpoint capture as a control. Keep every `BENCH`,
-`FOOTPRINT` and `ARCHIVE` row of the output.
 
 The live cache and compaction checks in
 [Development and testing](TESTING.md#live-provider-checks) use real accounts and
@@ -239,8 +231,6 @@ Final-code release probes on 2026-11-01 passed with these results (one run,
 | Ten-notch flick to changed reading counter, 160 x 50, from last notch | 10.82 ms | 13.92 ms |
 | Four-character unbracketed batch, idle | 63.18 ms | 65.48 ms |
 | One key sent after the preceding frame, idle | 15.08 ms | 15.98 ms |
-| Four-character unbracketed batch, checkpoint writes active | 63.39 ms | 64.92 ms |
-| One key sent after the preceding frame, checkpoint writes active | 15.04 ms | 15.95 ms |
 
 Every notch moved exactly three rows; every ten-notch flick moved thirty.
 The last output byte after a notch arrived at a median 15.42 ms (80 x 24) or
@@ -277,8 +267,7 @@ fragments takes about 6 ms, down from 399–467 ms at `674eba6`.
 
 A batch of ten edits on a 32 MiB file now composes the replacements and writes
 the final content once: the pooled median fell from 778 ms to 327 ms against
-`97b4284`, with checkpoints disabled and warm caches. Matching still scans the
-file once per edit.
+`97b4284`, with warm caches. Matching still scans the file once per edit.
 
 ### Session history
 
@@ -292,24 +281,3 @@ Recorded 2026-10-01 with 128-byte messages, three samples per size.
 | List one cached session | 0.3–0.5 ms | 0.3–0.4 ms |
 | List one uncached session | 5.7–11.0 ms | 8.7–12.8 ms |
 | Journal size | 169 kB | 845 kB |
-
-### Checkpoints
-
-Recorded 2026-10-22 on NTFS with release builds, comparing the per-call engine
-(`76b214e`) with the earlier history-keeping engine (`6679d6c`).
-
-| Operation | Earlier median | Per-call median |
-| --- | ---: | ---: |
-| Write 4 KiB | 3.89 ms | 4.85 ms |
-| Edit 1 MiB | 34.73 ms | 33.22 ms |
-| Bash, protect 1,000 files | 712.88 ms | 382.27 ms |
-| Restore 1 file | 7.57 ms | 18.11 ms |
-| Restore 1,000 files | 3,310.25 ms | 2,944.20 ms |
-| Edit 256 MiB | 1,473.01 ms | 1,269.55 ms |
-
-Small operations show no consistent speedup, and single-file restore is slower.
-The per-call engine stores an independent full copy for every call and does not
-deduplicate: in a highly repetitive fixture, five 256 MiB edits used 1,280 MiB
-of archive against 3 MiB for the earlier engine. The 24-hour expiry bounds how
-long packs are kept, not how much space they use; see
-[Checkpoints](../usage/CHECKPOINTS.md#storage-and-expiry).

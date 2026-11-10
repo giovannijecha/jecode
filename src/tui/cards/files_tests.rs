@@ -99,16 +99,15 @@ fn expanded_streams_keep_blank_lines_styles_complete_command_and_closing_facts()
     assert_eq!(browser.rows.last().unwrap().plain(), "  └ 7.9s");
     let with_notice = Value::object([
         ("exit_code", Value::number(0)),
-        (
-            "checkpoint",
-            object([("status", "partial"), ("reason", "Untracked paths")]),
-        ),
+        ("stdout_truncated", Value::Bool(true)),
+        ("stdout_bytes", Value::number(2048)),
+        ("output_limit_bytes", Value::number(1024)),
     ]);
     let rows = card(tool("bash", &args, &with_notice, &shown), 40, false).rows;
     assert!(
         plain(&rows)
             .iter()
-            .any(|row| row.contains("Checkpoint partial"))
+            .any(|row| row.contains("stdout capture kept"))
     );
     assert_eq!(rows.last().unwrap().plain(), "  └ exit 0 · 7.9s");
 }

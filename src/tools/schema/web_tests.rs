@@ -4,7 +4,7 @@ use super::*;
 fn web_and_browser_advertise_local_actions_and_signed_scroll() {
     let tools = definitions();
     let functions = tools.as_array().unwrap();
-    assert_eq!(functions.len(), 18);
+    assert_eq!(functions.len(), 16);
     assert!(functions.iter().all(|tool| tool.get("function").is_none()));
     for (name, action) in [("web", "crawl"), ("browser", "cdp")] {
         let function = functions
@@ -32,7 +32,7 @@ fn web_and_browser_advertise_local_actions_and_signed_scroll() {
             Some(&Value::Bool(false))
         );
     }
-    let browser = &functions[7];
+    let browser = &functions[6];
     let scroll = browser
         .get("parameters")
         .unwrap()

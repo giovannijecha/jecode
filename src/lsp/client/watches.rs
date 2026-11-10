@@ -199,8 +199,37 @@ impl Client {
 /// Generated, dependency and scratch folders are left out of implicit descent;
 /// a watch base registered inside one is still scanned as its own root.
 fn skipped(name: &OsStr) -> bool {
+    const GENERATED: &[&str] = &[
+        ".tmp",
+        ".git",
+        ".hg",
+        ".svn",
+        ".jj",
+        ".bzr",
+        "_darcs",
+        ".jecode-output",
+        "target",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".gradle",
+        ".next",
+        ".nuxt",
+        ".turbo",
+        ".parcel-cache",
+        ".svelte-kit",
+        ".terraform",
+        ".cache",
+    ];
     name.to_str().is_some_and(|name| {
-        name.eq_ignore_ascii_case(".tmp") || crate::checkpoints::generated_name(name)
+        GENERATED
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(name))
+            || (name.starts_with(".jecode-") && name.ends_with(".tmp"))
     })
 }
 

@@ -26,23 +26,14 @@ pub(super) fn marker(retention: CacheRetention) -> Value {
 
 pub(super) fn mark_recent(messages: &mut [Value], marker: &Value) {
     let mut marked = 0;
-    // The end of the native records keeps its slot: that prefix outlives compactions.
-    let anchor = messages
-        .iter()
-        .rposition(|message| message.get(crate::context::digest::ANCHOR).is_some());
-    if let Some(index) = anchor
-        && mark(&mut messages[index], marker)
-    {
-        marked += 1;
-    }
     let mut inside_tool_batch = false;
-    for (index, message) in messages.iter_mut().enumerate().rev() {
+    for message in messages.iter_mut().rev() {
         let tool = message.get("role").and_then(Value::as_str) == Some("tool");
         if tool && inside_tool_batch {
             continue;
         }
         inside_tool_batch = tool;
-        if Some(index) != anchor && mark(message, marker) {
+        if mark(message, marker) {
             marked += 1;
             if marked == 4 {
                 break;
@@ -107,16 +98,12 @@ mod tests {
     }
 
     #[test]
-    fn the_end_of_the_records_keeps_a_breakpoint_within_the_limit_of_four() {
+    fn the_latest_four_messages_take_the_breakpoints() {
         let mut messages = (0..8)
             .map(|index| message(&format!("message {index}")))
             .collect::<Vec<_>>();
-        if let Value::Object(fields) = &mut messages[1] {
-            fields.insert(crate::context::digest::ANCHOR.into(), Value::Bool(true));
-        }
         mark_recent(&mut messages, &marker(CacheRetention::Short));
-        assert!(marked(&messages[1]), "the anchor outlives recent messages");
         assert_eq!(messages.iter().filter(|message| marked(message)).count(), 4);
-        assert!(messages[5..].iter().all(marked), "the latest three follow");
+        assert!(messages[4..].iter().all(marked));
     }
 }

@@ -261,36 +261,6 @@ mod tests {
         worker.join().unwrap();
         assert_eq!(fs::read(published).unwrap(), bytes);
     }
-
-    #[test]
-    fn bundled_adapter_runs_without_compilation() {
-        let name = if cfg!(windows) {
-            "checkpoint_space"
-        } else {
-            "process_unix"
-        };
-        let path = helper(name).unwrap();
-        let mut command = std::process::Command::new(path);
-        if cfg!(windows) {
-            command.arg(std::env::temp_dir());
-        } else {
-            command.args(["space", "/"]);
-        }
-        command.env("PATH", "");
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            String::from_utf8(output.stdout)
-                .unwrap()
-                .trim()
-                .parse::<u64>()
-                .is_ok()
-        );
-    }
 }
 
 #[cfg(test)]

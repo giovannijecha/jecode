@@ -248,7 +248,7 @@ impl Record {
             .map_or(0, |updates| {
                 updates.iter().filter_map(Value::as_str).count()
             });
-        let (log, messages) = log::restore(value, persisted, tools.len());
+        let (log, messages) = log::restore(value, persisted, tools.len())?;
         let workspace_info = value.get("workspace_info").cloned().unwrap_or(Value::Null);
         let workspace_closed = value.get("workspace_closed") == Some(&Value::Bool(true));
         let (workspace, workspace_error) = if workspace_closed {

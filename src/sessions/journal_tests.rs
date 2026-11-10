@@ -3,7 +3,7 @@ use crate::{
     effort::Effort,
     json::Value,
     redact::Redactor,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 use std::{fs, io::Write};
 
@@ -34,6 +34,105 @@ fn fixture() -> (Directory, Directory, Store, Document) {
 }
 
 #[test]
+fn current_session_versions_round_trip() {
+    let (_directory, _home, store, doc) = fixture();
+    let lease = store.create(&doc.id).unwrap();
+    lease.save(&doc).unwrap();
+    drop(lease);
+    let bytes = fs::read_to_string(store.journal_path(&doc.id)).unwrap();
+    let checkpoint = crate::json::parse(bytes.trim_end()).unwrap();
+    assert_eq!(checkpoint.get("format_version"), Some(&Value::number(4)));
+    assert_eq!(
+        checkpoint
+            .get("state")
+            .and_then(|state| state.get("format_version")),
+        Some(&Value::number(2))
+    );
+    assert_eq!(store.load(&doc.id).unwrap().0.messages, doc.messages);
+}
+
+#[test]
+fn a_current_journal_with_a_missing_collaborator_log_is_rejected_unchanged() {
+    let (_directory, _home, store, mut doc) = fixture();
+    doc.messages[1] = message("user", "fixture-secret");
+    doc.events.push(Value::object([
+        ("type", Value::string("collaboration")),
+        ("kind", Value::string("created")),
+        ("sequence", Value::number(1)),
+        ("after_message", Value::number(doc.messages.len())),
+        (
+            "records",
+            Value::Array(vec![Value::object([
+                ("id", Value::string("a1")),
+                ("number", Value::number(1)),
+                ("state", Value::string("returned")),
+                ("log", Value::Array(vec![])),
+            ])]),
+        ),
+    ]));
+    let lease = store.create(&doc.id).unwrap();
+    lease.save(&doc).unwrap();
+    drop(lease);
+    let path = store.journal_path(&doc.id);
+    let saved = fs::read_to_string(&path).unwrap();
+    let mut checkpoint = crate::json::parse(saved.trim_end()).unwrap();
+    let Value::Object(fields) = &mut checkpoint else {
+        unreachable!()
+    };
+    let Value::Array(events) = fields.get_mut("events").unwrap() else {
+        unreachable!()
+    };
+    let Value::Object(event) = &mut events[0] else {
+        unreachable!()
+    };
+    let Value::Array(records) = event.get_mut("records").unwrap() else {
+        unreachable!()
+    };
+    let Value::Object(record) = &mut records[0] else {
+        unreachable!()
+    };
+    record.remove("log");
+    let bytes = format!("{}\n", checkpoint.encode()).into_bytes();
+    fs::write(&path, &bytes).unwrap();
+    let error = match Handle::open(store, &doc.id, Redactor::new("fixture-secret".into())) {
+        Err(error) => error,
+        Ok(_) => panic!("collaborator without a log was accepted"),
+    };
+    assert!(
+        error.contains("Unsupported collaborator log format"),
+        "{error}"
+    );
+    assert_eq!(fs::read(path).unwrap(), bytes);
+}
+
+#[test]
+fn unsupported_flat_session_is_reported_and_left_unchanged() {
+    let (_directory, _home, store, doc) = fixture();
+    fs::create_dir_all(&store.bucket).unwrap();
+    let path = store.bucket.join(format!("{}.json", doc.id));
+    let bytes = b"previous session data";
+    fs::write(&path, bytes).unwrap();
+    let error = match store.load(&doc.id) {
+        Err(error) => error,
+        Ok(_) => panic!("previous session format was accepted"),
+    };
+    assert!(
+        error.contains("Unsupported session format or version"),
+        "{error}"
+    );
+    assert!(
+        store
+            .list()
+            .unwrap()
+            .warnings
+            .iter()
+            .any(|warning| warning.contains(&error))
+    );
+    assert!(store.create(&doc.id).is_err());
+    assert_eq!(fs::read(path).unwrap(), bytes);
+}
+
+#[test]
 fn tool_change_survives_journal_and_replays_without_entering_tool_result() {
     let (_directory, _home, store, mut doc) = fixture();
     let change = crate::file_change::Change::between(Some("old\n"), "new\n").unwrap();
@@ -41,7 +140,7 @@ fn tool_change_survives_journal_and_replays_without_entering_tool_result() {
         ("role", Value::string("assistant")),
         (
             "tool_calls",
-            Value::Array(vec![tool_call("call-1", "edit", Value::object([]))]),
+            Value::Array(vec![stored_tool_call("call-1", "edit", Value::object([]))]),
         ),
     ]));
     doc.messages.push(Value::object([
@@ -82,11 +181,9 @@ fn routine_labels_and_descriptions_survive_journal_resume_and_record_projection(
         ("description", Value::string("Run the parser tests")),
     ]);
     let calls = vec![
-        tool_call("read-labeled", "read", read.clone()),
-        crate::conversation::ToolCall::parse(&tool_call("bash-labeled", "bash", bash.clone()))
-            .unwrap()
-            .value(),
-        tool_call(
+        stored_tool_call("read-labeled", "read", read.clone()),
+        stored_tool_call("bash-labeled", "bash", bash.clone()),
+        stored_tool_call(
             "read-legacy",
             "read",
             Value::object([("path", Value::string("README.md"))]),
@@ -197,7 +294,7 @@ fn incomplete_invalid_or_unsupported_first_record_is_rejected_unchanged() {
             0 => Vec::new(),
             1 => b"{\"sequence\":0,unfinished".to_vec(),
             2 => b"not json\n".to_vec(),
-            3 => b"{\"format\":\"jecode.session.journal\",\"format_version\":4}\n".to_vec(),
+            3 => b"{\"format\":\"jecode.session.journal\",\"format_version\":5}\n".to_vec(),
             _ => {
                 let mut state = doc.state_value();
                 let Value::Object(fields) = &mut state else {
@@ -336,7 +433,7 @@ fn invalid_delta_boundaries_and_future_journals_are_left_unchanged() {
     drop(lease);
     let path = store.journal_path(&doc.id);
     let original = fs::read_to_string(&path).unwrap();
-    for (version, keep) in [(3, 1), (3, 99), (4, 0)] {
+    for (version, keep) in [(4, 1), (4, 99), (5, 0), (3, 0)] {
         let record = Value::object([
             ("format", Value::string("jecode.session.journal")),
             ("format_version", Value::number(version)),

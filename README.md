@@ -38,20 +38,20 @@ sequences in one request. Native HTTP connections persist between requests;
 OpenAI conversations use WebSocket with HTTP fallback. Separate
 [transport measurements](docs/development/PERFORMANCE.md#provider-transports)
 record lower first-update latency on Windows; the comparison above predates
-that work and the later native records for long conversations. The
+that work and the current context handling. The
 [benchmark report](docs/development/AGENT_BENCHMARK.md#exact-records-development-branch-2026-11-07)
-also records short and 40-turn context comparisons, including quality misses.
-They do not establish a general 25% token saving at equal quality. Separate
+also records short and 40-turn comparisons of an earlier, since-retired context
+design, including quality misses. None of these measures the current context
+path or establishes a general 25% token saving at equal quality. Separate
 [offline checks](docs/development/CONTEXT_CHECKS.md) screen long saved contexts
 without model calls; they do not establish a ten-hour live result.
 
 ## Long conversations and processes
 
-Earlier work becomes compact records of requests, answers and tool outcomes
-before Jecode needs a model summary. Recording requires no model request. The
+Requests only grow until they near the configured share of the context window;
+then the model summarizes earlier work and keeps recent messages verbatim. The
 full conversation stays saved, and the model can retrieve the originals by
-reference. If records and tool-result previews cannot make room, a model summary
-remains the fallback. See [Long-running work](docs/usage/LONG_WORK.md).
+reference. See [Long-running work](docs/usage/LONG_WORK.md).
 
 Use `/process` to inspect running and recent commands, read their saved output
 or move a waiting call into the background. Completed commands report their
@@ -70,8 +70,6 @@ then works through the task in the same window:
   step, or press Esc to stop it;
 - at the default permission level, it asks you before touching anything outside
   the project directory;
-- checkpoints let you inspect and restore captured file changes; each receipt
-  tells you what was saved;
 - `/` lists commands as you type, and Ctrl+G opens them without touching your
   draft;
 - Auto, Dark and Light themes keep your terminal's own background.
@@ -137,15 +135,18 @@ quit, and `/help` or F1 for commands and common shortcuts.
 - [Language servers](docs/usage/LSP.md): query definitions, references and diagnostics.
 - [Project instructions](docs/usage/PROJECT_INSTRUCTIONS.md): give the agent
   your project's rules with `AGENTS.md`.
-- [Checkpoints](docs/usage/CHECKPOINTS.md): undo changes made by a tool call.
 - [Documentation index](docs/README.md): every guide and reference.
 
 ## Status
 
 Jecode is usable and still evolving. Commands, settings and storage formats may
 change between releases; the [release notes](CHANGELOG.md) list what changed.
-When updating from 0.3.5, read the [0.4.5 upgrade notes](CHANGELOG.md#upgrading-from-035)
-for saved-session compatibility and the Claude prompt-cache default.
+This build resumes only conversations saved in its current format; it reports
+older ones and leaves their files unchanged, without migrating them. See
+[Sessions](docs/usage/SESSIONS.md) and the unreleased
+[upgrade notes](CHANGELOG.md#upgrading-from-045). The
+[0.4.5 notes](CHANGELOG.md#upgrading-from-035) cover the Claude prompt-cache
+default.
 
 - Windows x64, Linux x64, and macOS on Apple silicon and Intel have native
   builds and terminal fixtures in CI. Interactive use on macOS has not been
@@ -159,7 +160,7 @@ for saved-session compatibility and the Claude prompt-cache default.
 
 Jecode sends your conversation, including file contents and command output the
 agent has read, to the provider you select. Your API keys, account
-tokens, conversations and checkpoints are stored locally under `~/.jecode/`. See
+tokens and conversations are stored locally under `~/.jecode/`. See
 [SECURITY.md](SECURITY.md) for details and how to report a vulnerability.
 
 ## Contributing

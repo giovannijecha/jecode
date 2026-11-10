@@ -205,10 +205,6 @@ impl App {
                 self.collaboration_auto_resume = true;
                 self.process_auto_resume = true;
                 let mut turn_recorded = false;
-                // Older events carry no call label: those recorded since the
-                // last other record take the work label of an agent call
-                // saved after them.
-                let mut events = Vec::new();
                 // Events recorded while a call ran followed its row live, so
                 // they follow its record.
                 let mut running = Vec::new();
@@ -216,18 +212,10 @@ impl App {
                 // MCP names come from one read of the connections, on demand.
                 let mut connections: Option<Vec<crate::mcp::Connection>> = None;
                 for record in document.records() {
-                    if !matches!(record, Record::Collaboration { .. } | Record::Tool { .. }) {
-                        events.clear();
-                    }
                     let call_row = matches!(&record, Record::Tool { name, arguments, .. }
                         if name != "agent" || !super::agents::receipt_replaces_tool(arguments));
                     if !call_row && !matches!(record, Record::Collaboration { .. }) {
-                        resume_collaboration(
-                            &mut self.state,
-                            &mut running,
-                            turn_recorded,
-                            &mut events,
-                        );
+                        resume_collaboration(&mut self.state, &mut running, turn_recorded);
                     }
                     match record {
                         Record::TurnStart => {
@@ -285,12 +273,6 @@ impl App {
                                 );
                             }
                             if name == "agent" && super::agents::receipt_replaces_tool(&arguments) {
-                                let work = arguments
-                                    .get("work")
-                                    .and_then(crate::json::Value::as_str)
-                                    .unwrap_or("");
-                                self.state
-                                    .adopt_collaboration(&std::mem::take(&mut events), work);
                                 if result
                                     .get("error")
                                     .and_then(crate::json::Value::as_str)
@@ -300,7 +282,6 @@ impl App {
                                 }
                                 continue;
                             }
-                            events.clear();
                             if turn_recorded && !self.state.tool_details.active {
                                 // A continuation's calls after an event
                                 // recorded outside a turn.
@@ -338,12 +319,7 @@ impl App {
                                 }
                             }
                             waiting_processes = remaining;
-                            resume_collaboration(
-                                &mut self.state,
-                                &mut running,
-                                turn_recorded,
-                                &mut events,
-                            );
+                            resume_collaboration(&mut self.state, &mut running, turn_recorded);
                         }
                         Record::Local {
                             command,
@@ -391,7 +367,6 @@ impl App {
                                         &mut self.state,
                                         &mut running,
                                         turn_recorded,
-                                        &mut events,
                                     );
                                 }
                             }
@@ -401,7 +376,7 @@ impl App {
                 for (_, event) in waiting_processes {
                     self.state.process_completion(event);
                 }
-                resume_collaboration(&mut self.state, &mut running, turn_recorded, &mut events);
+                resume_collaboration(&mut self.state, &mut running, turn_recorded);
                 self.state.close_tools();
                 self.collaboration_observer = agent.collaboration();
                 self.collaboration_records.clear();
@@ -470,24 +445,14 @@ impl App {
     }
 }
 
-/// Places resumed events as they were placed live. Older events without a
-/// call label are kept for the agent call saved after them.
+/// Places resumed events as they were placed live.
 fn resume_collaboration(
     state: &mut super::state::State,
     running: &mut Vec<crate::json::Value>,
     turn_recorded: bool,
-    legacy: &mut Vec<usize>,
 ) {
     for event in running.drain(..) {
-        let labelled = event.get("in_turn").is_some();
         state.resumed_collaboration(event, turn_recorded);
-        if !labelled
-            && let Some(index) = state.items.iter().rposition(
-                |item| matches!(item, Item::Tool { name, .. } if name == "collaboration"),
-            )
-        {
-            legacy.push(index);
-        }
     }
 }
 

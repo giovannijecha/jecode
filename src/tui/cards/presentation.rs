@@ -10,7 +10,7 @@ pub struct Presentation {
     pub turn_id: u64,
     /// First item in this chapter; rebuilt when retained items are reindexed.
     pub chapter_start: Option<usize>,
-    /// Shown while the call runs, such as the checkpoint before a command.
+    /// Shown while the call runs, such as the permission decision.
     pub note: Option<String>,
 }
 

@@ -1,10 +1,15 @@
 use super::Agent;
 use crate::backend::{CacheRetention, retention};
+use crate::context::SNAPSHOT_HEADER;
 use crate::json::Value;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const PROMPT: &str = include_str!("PROMPT.md");
+pub(super) const NO_INSTRUCTIONS: &str =
+    "Project instructions from AGENTS.md: none apply now; earlier ones no longer apply.";
+const NO_SKILLS: &str =
+    "Personal skills: none are available now; earlier catalog entries no longer apply.";
 
 /// Request instructions, collaborator reports and finished processes, read
 /// before `messages` is locked.
@@ -65,26 +70,11 @@ impl Agent {
         ])
     }
 
+    /// The native prompt and environment. Project instructions and the skill
+    /// catalog change during a conversation, so they travel in an instruction
+    /// snapshot instead and leave this request prefix unchanged.
     pub(super) fn current_system_message(&self) -> Value {
         let mut message = self.system_message();
-        if !self.project_instructions.is_empty()
-            && let Value::Object(fields) = &mut message
-        {
-            let native = fields.get("content").and_then(Value::as_str).unwrap_or("");
-            let content = format!(
-                "{native}\n\nProject instructions from AGENTS.md:\nEach source below applies only to its stated directory scope. More specific directory instructions take precedence on conflicts. Explicit user requests take precedence over project instructions; Jecode's tool contracts still apply.\n\n{}",
-                self.redact(&self.project_instructions)
-            );
-            fields.insert("content".into(), Value::string(content));
-        }
-        let skills = self.skill_instructions();
-        if !skills.is_empty()
-            && let Value::Object(fields) = &mut message
-        {
-            let native = fields.get("content").and_then(Value::as_str).unwrap_or("");
-            let content = format!("{native}\n\n{}", self.redact(&skills));
-            fields.insert("content".into(), Value::string(content));
-        }
         // The prompt opens every conversation's instructions; adapters with
         // explicit cache breakpoints keep it apart from the folder's part.
         if let Value::Object(fields) = &mut message {
@@ -98,6 +88,31 @@ impl Agent {
             );
         }
         message
+    }
+
+    /// The complete current instructions. An empty section says so explicitly,
+    /// so a snapshot withdraws earlier rules rather than omitting them.
+    pub(super) fn instruction_snapshot(&self) -> String {
+        let instructions = if self.project_instructions.is_empty() {
+            NO_INSTRUCTIONS.to_owned()
+        } else {
+            format!(
+                "Project instructions from AGENTS.md:\n\n{}",
+                self.redact(&self.project_instructions)
+            )
+        };
+        let skills = self.skill_instructions();
+        let skills = if skills.is_empty() {
+            NO_SKILLS.to_owned()
+        } else {
+            self.redact(&skills)
+        };
+        format!("{SNAPSHOT_HEADER}\n\n{instructions}\n\n{skills}")
+    }
+
+    /// Whether any project instructions or catalog entries currently apply.
+    pub(super) fn has_instructions(&self) -> bool {
+        !self.project_instructions.is_empty() || !self.skill_instructions().is_empty()
     }
 
     /// A user preference read at every request, like auto-compact.
@@ -140,7 +155,6 @@ impl Agent {
             join([
                 self.permission_instructions(),
                 self.temporary_instructions(),
-                self.checkpoint_instructions(),
                 collaboration_instructions(&records),
             ]),
             collaboration_reports(&records),

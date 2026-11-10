@@ -104,7 +104,7 @@ fn large_batch_edit_measurement() {
         fs::copy(&original, &source).unwrap();
         let started = Instant::now();
         let (result, change) =
-            edit_with_change(&root, &arguments, None, &Cancellation::default()).unwrap();
+            edit_with_change(&root, &arguments, &Cancellation::default()).unwrap();
         let elapsed = started.elapsed();
         assert_eq!(
             result.get("bytes_written"),

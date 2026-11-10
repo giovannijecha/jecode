@@ -45,23 +45,33 @@ fn questions_are_bounded_unique_and_round_trip_as_arguments() {
 }
 
 #[test]
-fn an_earlier_single_question_loads_as_one_question() {
-    let legacy = request(r#"{"title":"Format","question":"Which format?"}"#).unwrap();
-    assert_eq!(legacy.questions[0].id, LEGACY_ID);
-    assert_eq!(legacy.subject(), "Format");
+fn one_question_and_its_draft_round_trip_in_the_current_format() {
+    let single =
+        request(r#"{"questions":[{"id":"format","title":"Format","question":"Which format?"}]}"#)
+            .unwrap();
+    assert_eq!(single.questions[0].id, "format");
+    assert_eq!(single.subject(), "Format");
     let event = json::parse(
-        r#"{"type":"user_question","tool_call_id":"call","question":{"title":"Format","question":"Which format?"}}"#,
+        r#"{"type":"user_question","tool_call_id":"call","questions":[{"id":"format","title":"Format","question":"Which format?"}]}"#,
     )
     .unwrap();
-    assert_eq!(Request::from_event(&event).unwrap(), legacy);
+    assert_eq!(Request::from_event(&event).unwrap(), single);
     let draft = Draft::parse(
-        &json::parse(r#"{"id":"call","text":"Keep dates","cursor":4,"choice":null}"#).unwrap(),
+        &json::parse(r#"{"id":"call","step":0,"answers":[{"choices":[],"other":true,"text":"Keep dates","caret":4,"row":0}]}"#).unwrap(),
     )
     .unwrap();
     assert_eq!(draft.step, 0);
     assert!(draft.answers[0].other);
     assert_eq!(draft.answers[0].caret, 4);
     assert_eq!(Draft::parse(&draft.value()).unwrap(), draft);
+    assert!(request(r#"{"title":"Format","question":"Which format?"}"#).is_err());
+    assert!(Request::from_event(&json::parse(r#"{"tool_call_id":"call","question":{"title":"Format","question":"Which format?"}}"#).unwrap()).is_err());
+    assert!(
+        Draft::parse(
+            &json::parse(r#"{"id":"call","text":"Keep dates","cursor":4,"choice":null}"#).unwrap()
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -84,4 +94,10 @@ fn every_question_needs_its_own_valid_answer_in_order() {
     }
     let result = Reply::Answered(valid.clone()).result();
     assert_eq!(Reply::parse(&result), Some(Reply::Answered(valid)));
+    assert!(
+        Reply::parse(
+            &json::parse(r#"{"outcome":"answered","choice":"visible","text":""}"#).unwrap()
+        )
+        .is_none()
+    );
 }

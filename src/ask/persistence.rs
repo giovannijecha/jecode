@@ -119,8 +119,9 @@ mod tests {
             ("tool_call_id", Value::string("reused")),
             ("after_message", Value::number(1)),
             (
-                "question",
-                Value::object([
+                "questions",
+                Value::Array(vec![Value::object([
+                    ("id", Value::string("scope")),
                     ("title", Value::string("Scope")),
                     ("question", Value::string("Which records?")),
                     (
@@ -130,7 +131,7 @@ mod tests {
                             ("label", Value::string("All")),
                         ])]),
                     ),
-                ]),
+                ])]),
             ),
         ])
     }
@@ -163,22 +164,28 @@ mod tests {
     }
 
     #[test]
-    fn an_earlier_single_question_and_answer_resume_as_one_question() {
+    fn one_question_and_answer_resume_in_the_current_format() {
         let saved = answer(Value::object([
             ("outcome", Value::string("answered")),
-            ("choice", Value::string("all")),
-            ("text", Value::string("")),
+            (
+                "answers",
+                Value::Array(vec![Value::object([
+                    ("id", Value::string("scope")),
+                    ("choices", Value::Array(vec![Value::string("all")])),
+                    ("text", Value::string("")),
+                ])]),
+            ),
         ]));
         let events = vec![question(), saved.clone()];
         validate_answer(&saved, &events).unwrap();
         let (request, reply) = recovery(&[call()], &events).unwrap();
         assert_eq!(request.questions.len(), 1);
-        assert_eq!(request.questions[0].id, crate::ask::LEGACY_ID);
+        assert_eq!(request.questions[0].id, "scope");
         assert_eq!(request.subject(), "Scope");
         assert_eq!(
             reply.unwrap(),
             Reply::Answered(vec![crate::ask::Answer {
-                id: crate::ask::LEGACY_ID.into(),
+                id: "scope".into(),
                 choices: vec!["all".into()],
                 text: String::new(),
             }])

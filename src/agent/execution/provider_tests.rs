@@ -5,7 +5,6 @@ use crate::{
         openai::{Api, OpenAi},
         openrouter::OpenRouter,
     },
-    checkpoints::session::Session as CheckpointSession,
     test_support::{Directory, HttpFixture, Response, completion, tool_call},
     tools::Tools,
 };
@@ -112,9 +111,8 @@ fn openai_agent(project: &Directory, endpoint: &str) -> Agent {
     Agent::with_backend(Box::new(backend), Tools::new(project.path()).unwrap())
 }
 
-fn prepare(agent: &mut Agent, home: &Directory, project: &Directory) {
+fn prepare(agent: &mut Agent, home: &Directory) {
     agent.enable_sessions(home.path()).unwrap();
-    agent.use_checkpoints(CheckpointSession::offline(home.path(), project.path()));
 }
 
 fn tool_results(messages: &[Value]) -> Vec<(&str, Value)> {
@@ -170,12 +168,6 @@ fn assert_completed(agent: &Agent, project: &Directory, events: &[String]) -> St
     );
     for (_, result) in &results[..2] {
         assert!(result.get("bytes_written").is_some(), "{result:?}");
-        let checkpoint = result.get("checkpoint").unwrap();
-        assert_eq!(
-            checkpoint.get("status").and_then(Value::as_str),
-            Some("saved")
-        );
-        assert!(checkpoint.get("ref").and_then(Value::as_str).is_some());
     }
     assert!(results[2].1.encode().contains("created content"));
     assert!(results[3].1.encode().contains("after"));
@@ -259,7 +251,7 @@ fn openrouter_parallel_arguments_keep_results_changes_and_resume_order() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(project.path()).unwrap(),
     );
-    prepare(&mut first, &home, &project);
+    prepare(&mut first, &home);
     let events = event_order(&mut first);
     let id = assert_completed(&first, &project, &events);
     first.sessions().unwrap().flush().unwrap();
@@ -318,7 +310,7 @@ fn openai_parallel_arguments_keep_results_changes_and_resume_order() {
         openai_completed(vec![openai_answer("Continued.")]),
     ]);
     let mut first = openai_agent(&project, &fixture.endpoint);
-    prepare(&mut first, &home, &project);
+    prepare(&mut first, &home);
     let events = event_order(&mut first);
     let id = assert_completed(&first, &project, &events);
     first.sessions().unwrap().flush().unwrap();
