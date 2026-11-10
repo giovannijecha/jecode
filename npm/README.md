@@ -97,7 +97,8 @@ statistics visible.
 This build resumes only conversations saved in its current format; it reports
 older ones and leaves their files unchanged, without migrating them. Read the
 [release notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md)
-before updating; the
+before updating, especially the
+[0.5.5 upgrade notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md#upgrading-from-045). The
 [0.4.5 notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md#upgrading-from-035)
 cover the Claude prompt-cache default.
 
