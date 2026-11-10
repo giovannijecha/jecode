@@ -1,5 +1,10 @@
 # Checking long contexts without replaying model calls
 
+The replay command below applies to current-format journals (version 4, session
+state 2). The dated format-3 and model-free-record results on this page are
+historical; they do not measure 0.5.5's append-only requests and model
+compaction, or establish a token or speed advantage.
+
 Use offline checks to screen context changes before paying for another model
 session. They exercise context serialization and projection with the owned
 Rust code. They instantiate no backend, contact no provider and read no account
@@ -107,7 +112,7 @@ remain unexecuted.
 
 ## Review and current-format checks, 2026-11-09
 
-The experimental build reads session state version 2 in journal version 4.
+The reviewed build reads session state version 2 in journal version 4.
 Older session formats are rejected without rewriting their files. Digest
 migration, persisted preview state and the conversation-level legacy origin
 adapter were removed. Backend/model switching still uses per-message origins.
@@ -133,8 +138,8 @@ Offline driver stubs also verified first-turn attempt limits, failure of the
 attempt counter, isolated-home rejection and resume identity checks. Limits
 count completed journaled requests, including summaries and titles; polling
 does not bound unreported in-flight work. No new provider call was made during
-this review. Normal-budget quality and the token-saving target remain live
-measurement questions.
+this review. Normal-budget quality and token use on the current context path
+remain live measurement questions.
 
 ## Spend live calls where they decide something
 

@@ -132,9 +132,9 @@ budget, or a provider rejects a request as too large, `agent/compaction.rs`
 asks the same model, through `agent/summary.rs`, for a plain-text handoff
 targeting at most 16 KiB that folds in the previous summary. Proactive
 compaction first appends the request to the conversation's own request, with
-its tool definitions and selected effort, so the provider's cached prefix is
-reused (`Purpose::CachedSummary`). If that request leaves no room, fails on
-context or length, or returns tool calls or no text, and for forced compaction,
+its tool definitions and selected effort, allowing the provider to reuse a
+cached prefix (`Purpose::CachedSummary`). If that request leaves no room, fails
+on context or length, or returns tool calls or no text, and for forced compaction,
 the transcript is folded into the previous summary in chronological portions,
 without tools and at medium effort when supported; large tool results in those
 portions are shortened to previews that name their `history:N` original. A

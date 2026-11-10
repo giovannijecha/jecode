@@ -1,29 +1,12 @@
 # Jecode
 
-Jecode is a fast, efficient coding agent for your terminal. Choose a model,
-describe a task, and let it read your project, edit files, run commands and check
+Jecode is a coding agent for your terminal. Choose a model, describe a task,
+and let it read your project, edit files, run commands and check
 the result. Tool cards and diffs show the work as it happens.
 
-![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/main/docs/images/jecode-startup.png)
+![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/8740ebd8c804ba010f5ea81e7371b356c6581a47/docs/images/jecode-startup.png)
 
-*Jecode 0.4.5 in Windows Terminal, with GPT-6.1 Sol selected.*
-
-## Measured efficiency
-
-On a historical five-turn coding benchmark, Jecode used **21% fewer cost-weighted tokens
-than Codex** with GPT-6.1 Sol and **36% fewer than Claude Code** with Claude
-Sonnet 5.5. All runs passed 21/21 hidden acceptance tests.
-
-| Same model, high effort | Weighted token use | Active time |
-| --- | ---: | ---: |
-| Jecode vs Codex 0.166, GPT-6.1 Sol | **21% less** | 11% longer |
-| Jecode vs Claude Code 2.1.318, Sonnet 5.5 | **36% less** | **30% shorter** |
-
-One Node project, Windows, 2026-11-04: 7 vs 6 GPT runs and 4 vs 3 Claude runs.
-Jecode used account sign-in; its API-key routes were not compared. Time excludes
-two deliberate 6.5-minute pauses. Weighted tokens are a cache-aware cost proxy,
-not raw totals, API bills or plan quota.
-See the [method, per-run data and limits](https://github.com/giovannijecha/jecode/blob/main/docs/development/AGENT_BENCHMARK.md).
+*Jecode 0.5.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Install
 
@@ -64,24 +47,12 @@ agent has read, to the provider you select. Your keys, account tokens and
 conversations are stored locally under `~/.jecode/`.
 
 The harness is one native executable written in Rust without third-party Rust
-crates. It supports prompt caching, batched file tools and prepared tool
-sequences in one request. Native HTTP connections persist between requests;
-OpenAI conversations use WebSocket with HTTP fallback. Separate
-[performance measurements](https://github.com/giovannijecha/jecode/blob/main/docs/development/PERFORMANCE.md)
-record lower first-update latency on Windows; the comparison above predates
-that work and the current context handling. The
-[benchmark report](https://github.com/giovannijecha/jecode/blob/main/docs/development/AGENT_BENCHMARK.md#exact-records-development-branch-2026-11-07)
-also records short and 40-turn comparisons of an earlier, since-retired context
-design, including quality misses. None of these measures the current context
-path or establishes a general 25% token saving at equal quality. Separate
-[offline checks](https://github.com/giovannijecha/jecode/blob/main/docs/development/CONTEXT_CHECKS.md)
-screen long saved contexts without model calls; they do not establish a ten-hour
-live result.
+crates. It supports batched file tools and prepared tool sequences in one request.
 
 ## Long conversations and processes
 
-Each request adds to the previous one, so earlier messages are sent unchanged
-and the provider can serve them from its prompt cache. When a request would pass
+Each request adds to the previous one, keeping earlier messages unchanged.
+When a request would pass
 the **Auto-compact at** threshold (default 80% of the model's window), or the
 provider rejects it as too long, the same model writes one summary of the
 earlier work. The original conversation stays saved and available to the model
