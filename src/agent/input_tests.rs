@@ -295,7 +295,7 @@ fn a_failed_save_keeps_accepted_input_pending_and_out_of_the_conversation() {
         .unwrap()
         .unwrap()
         .path();
-    let path = bucket.join(format!("{}.jsonl", handle.id()));
+    let path = bucket.join(handle.id()).join("session.jsonl");
     let original = std::fs::metadata(&path).unwrap().permissions();
     let inbox = agent.inbox();
     let result = agent.run_turn("start", &mut |event| {

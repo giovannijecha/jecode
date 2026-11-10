@@ -203,10 +203,9 @@ fn failed_live_session_deletion_preserves_its_processes() {
     let session = agent.sessions().unwrap();
     let session_id = session.id();
     // A directory where a session sidecar belongs blocks deletion.
-    let blocker = session
-        .store()
-        .bucket()
-        .join(format!("{session_id}.tmp-1-2-3"));
+    let folder = session.store().session_directory(&session_id);
+    std::fs::create_dir_all(&folder).unwrap();
+    let blocker = folder.join("summary.tmp-1-2-3");
     std::fs::create_dir(&blocker).unwrap();
 
     let error = agent

@@ -282,13 +282,7 @@ fn replacing_a_key_keeps_all_prior_credentials_redacted_in_archive_and_session()
     assert!(!exported.contains("replacement-fixture-key"));
     assert_eq!(agent.messages.lock().unwrap().len(), 2);
     let handle = agent.sessions().unwrap();
-    let journal = std::fs::read_to_string(
-        handle
-            .store()
-            .bucket()
-            .join(format!("{}.jsonl", handle.id())),
-    )
-    .unwrap();
+    let journal = std::fs::read_to_string(handle.store().fixture_journal(&handle.id())).unwrap();
     assert!(!journal.contains("isolated-fixture-key"));
     assert!(!journal.contains("replacement-fixture-key"));
 }

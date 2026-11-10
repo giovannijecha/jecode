@@ -3,6 +3,7 @@ mod delete;
 mod document;
 mod handle;
 mod journal;
+pub(crate) mod layout;
 mod records;
 mod storage;
 mod summary;
@@ -22,6 +23,9 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Why a saved session from another Jecode version cannot be opened.
 pub(crate) const UNSUPPORTED: &str = "Unsupported session format or version; file left unchanged";
+
+/// Why a session saved in the earlier flat storage layout cannot be opened.
+pub(crate) const LEGACY: &str = "Unsupported session storage layout from an earlier Jecode version; its files were left unchanged";
 
 pub(crate) fn now() -> u64 {
     SystemTime::now()
@@ -69,6 +73,8 @@ fn same_directory(a: &Path, b: &Path) -> bool {
 mod crash_tests;
 #[cfg(test)]
 mod journal_tests;
+#[cfg(test)]
+mod layout_tests;
 #[cfg(test)]
 mod mcp_tests;
 #[cfg(all(test, windows))]

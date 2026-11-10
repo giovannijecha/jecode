@@ -199,10 +199,7 @@ fn a_failed_preparation_or_save_preserves_the_active_and_persisted_selection() {
     assert_eq!(agent.context.input_tokens, Some(99));
     let handle = agent.sessions().unwrap();
     let before = agent.archive().document();
-    let path = handle
-        .store()
-        .bucket()
-        .join(format!("{}.jsonl", handle.id()));
+    let path = handle.store().fixture_journal(&handle.id());
     let permissions = fs::metadata(&path).unwrap().permissions();
     let mut readonly = permissions.clone();
     readonly.set_readonly(true);

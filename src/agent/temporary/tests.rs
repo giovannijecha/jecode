@@ -273,7 +273,7 @@ fn cleanup_waits_for_ready_state_and_durable_save_before_removing_any_file() {
         .unwrap()
         .unwrap()
         .path();
-    let journal = bucket.join(format!("{id}.jsonl"));
+    let journal = bucket.join(&id).join("session.jsonl");
     let original = fs::metadata(&journal).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_readonly(true);
@@ -315,4 +315,111 @@ fn an_unfinished_cleanup_record_survives_restart_and_warns_the_next_model_reques
             .contains("Cleanup started and may be incomplete")
     );
     assert_eq!(resumed.sessions().unwrap().snapshot().records().len(), 2);
+}
+
+fn write(agent: &Agent, path: &str, content: &str) {
+    let result = agent.tools.execute(
+        "write",
+        &Value::object([
+            ("path", Value::string(path)),
+            ("content", Value::string(content)),
+        ])
+        .encode(),
+    );
+    assert!(result.get("error").is_none(), "{result:?}");
+}
+
+fn listed(store: &crate::sessions::Store) -> Vec<String> {
+    let listing = store.list().unwrap();
+    assert!(listing.warnings.is_empty(), "{:?}", listing.warnings);
+    listing.sessions.into_iter().map(|entry| entry.id).collect()
+}
+
+#[test]
+fn each_session_folder_owns_its_area_across_new_cleanup_and_deletion() {
+    use crate::scratch::environment_path;
+    use std::path::Path;
+
+    let home = Directory::new();
+    let project = Directory::new();
+    let outside = Directory::new();
+    let endpoint = "http://127.0.0.1:1/chat/completions";
+    let mut first = agent(&home, &project, endpoint);
+    let other = agent(&home, &project, endpoint);
+    let store = first.sessions().unwrap().store();
+    // Opening conversations creates no session folder.
+    assert!(!store.bucket().exists());
+    saved_exchange(&first);
+    saved_exchange(&other);
+    let first_id = first.sessions().unwrap().id();
+    let other_id = other.sessions().unwrap().id();
+    write(&first, "tmp:old.txt", "first");
+    write(&other, "tmp:other.txt", "other");
+    let old = first.temporary_info().unwrap().path;
+    assert_eq!(
+        Path::new(&old),
+        environment_path(&store.session_directory(&first_id).join("tmp"))
+    );
+    fs::write(outside.path().join("note.txt"), "attached").unwrap();
+    let attachment = first
+        .import_attachments(&[outside.path().join("note.txt")])
+        .unwrap()
+        .remove(0);
+
+    // /new keeps the previous conversation's area and opens another one.
+    first
+        .start_new("fixture/model".into(), Effort::Default)
+        .unwrap();
+    let second_id = first.sessions().unwrap().id();
+    let fresh = first.temporary_info().unwrap();
+    assert_eq!(
+        Path::new(&fresh.path),
+        environment_path(&store.session_directory(&second_id).join("tmp"))
+    );
+    assert_eq!(fresh.files, 0);
+    assert_eq!(
+        fs::read_to_string(Path::new(&old).join("old.txt")).unwrap(),
+        "first"
+    );
+    // A fresh conversation's existing area does not make it resumable.
+    let saved = listed(&store);
+    assert!(!saved.contains(&second_id), "{saved:?}");
+    assert!(saved.contains(&first_id) && saved.contains(&other_id));
+
+    // Cleanup clears only the current agent's area.
+    write(&first, "tmp:new.txt", "second");
+    assert_eq!(first.clean_temporary().unwrap().files, 1);
+    assert!(Path::new(&old).join("old.txt").exists());
+    assert_eq!(other.temporary_info().unwrap().files, 1);
+    assert!(store.attachments().load(&attachment.id).is_ok());
+
+    // Deleting the first conversation removes its own area only.
+    first.resume(&first_id).unwrap();
+    let (report, replaced) = first
+        .delete_session(&first_id, "fixture/model".into(), Effort::Default)
+        .unwrap();
+    assert!(replaced);
+    assert!(report.kept.is_empty() && report.retained_collaboration.is_none());
+    assert!(!Path::new(&old).exists());
+    assert!(
+        store
+            .session_directory(&first_id)
+            .join("session.lock")
+            .is_file()
+    );
+    assert!(!listed(&store).contains(&first_id));
+
+    // The other live conversation keeps working in its own area.
+    let output = other.tools.execute(
+        "bash",
+        &Value::object([("command", Value::string("cat \"$JECODE_TMP/other.txt\""))]).encode(),
+    );
+    assert_eq!(
+        output.get("stdout").and_then(Value::as_str),
+        Some("other"),
+        "{output:?}"
+    );
+    other.save_session().unwrap();
+    assert!(store.read(&other_id).is_ok());
+    assert!(listed(&store).contains(&other_id));
 }

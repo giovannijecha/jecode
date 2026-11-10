@@ -214,11 +214,19 @@ fn cleanup_is_scoped_and_keeps_identity_logs_and_other_sessions() {
     let (_, other_file) = other.file("keep.txt", true).unwrap();
     fs::write(&other_file, "other session").unwrap();
     fs::write(project.path().join("source.txt"), "project source").unwrap();
-    let logs = Store::new(home.path().join("user data"), project.path())
-        .unwrap()
-        .output_directory();
-    fs::create_dir_all(&logs).unwrap();
-    fs::write(logs.join("evidence.log"), "saved output").unwrap();
+    // Saved command output lives beside the area, in the same session folder.
+    let store = Store::new(home.path().join("user data"), project.path()).unwrap();
+    let outputs = store
+        .outputs("123-3-0", crate::redact::Redactor::empty())
+        .unwrap();
+    let mut logs = outputs.create().unwrap();
+    logs.stdout.write(b"saved output").unwrap();
+    logs.stdout.finish().unwrap();
+    let reference = logs.stdout_ref.clone();
+    drop(logs);
+    let saved = outputs.resolve(&reference).unwrap();
+    assert!(saved.starts_with(store.session_directory("123-3-0").join("outputs")));
+    assert_eq!(first.path(), store.session_directory("123-3-0").join("tmp"));
     let removed = first.clean().unwrap();
     assert_eq!(removed.files, 1);
     assert_eq!(removed.directories, 1);
@@ -227,10 +235,7 @@ fn cleanup_is_scoped_and_keeps_identity_logs_and_other_sessions() {
     assert_eq!(first.info().unwrap().files, 0);
     assert!(first.path().join(MARKER).is_file());
     assert_eq!(fs::read_to_string(other_file).unwrap(), "other session");
-    assert_eq!(
-        fs::read_to_string(logs.join("evidence.log")).unwrap(),
-        "saved output"
-    );
+    assert_eq!(fs::read_to_string(saved).unwrap(), "saved output");
     assert!(project.path().join("source.txt").exists());
     let (_, again) = first.file("another.txt", true).unwrap();
     fs::write(again, "reused").unwrap();
@@ -258,6 +263,7 @@ fn invalid_aliases_and_foreign_ownership_preserve_existing_files() {
     }
     let other = Directory::new();
     let wrong_project = Area::new(
+        home.path(),
         temporary.path().into(),
         fs::canonicalize(other.path()).unwrap(),
         "123-4-0",
@@ -265,6 +271,7 @@ fn invalid_aliases_and_foreign_ownership_preserve_existing_files() {
     .unwrap();
     assert!(wrong_project.clean().is_err());
     let wrong_session = Area::new(
+        home.path(),
         temporary.path().into(),
         fs::canonicalize(project.path()).unwrap(),
         "123-4-1",
@@ -369,9 +376,14 @@ fn commands_get_temp_and_tmp_only_for_a_path_windows_accepts() {
     assert_eq!(exported(&path(261)), kept);
     assert_eq!(exported(&non_bmp(259)), all);
     assert_eq!(exported(&non_bmp(260)), kept);
-    let instructions = Area::new(long, PathBuf::from("/project"), "123-7-0")
-        .unwrap()
-        .instructions();
+    let instructions = Area::new(
+        long.ancestors().last().unwrap(),
+        long.clone(),
+        PathBuf::from("/project"),
+        "123-7-0",
+    )
+    .unwrap()
+    .instructions();
     assert_eq!(
         instructions.contains("\"TEMP\""),
         !cfg!(windows),

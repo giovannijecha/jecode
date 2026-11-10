@@ -440,7 +440,7 @@ fn a_save_failure_returns_the_message_to_the_composer() {
         .unwrap()
         .unwrap()
         .path();
-    let path = bucket.join(format!("{}.jsonl", handle.id()));
+    let path = bucket.join(handle.id()).join("session.jsonl");
     let original = std::fs::metadata(&path).unwrap().permissions();
     let mut permissions = original.clone();
     permissions.set_readonly(true);

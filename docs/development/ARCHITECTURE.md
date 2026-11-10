@@ -252,9 +252,11 @@ views match. A new return while the main agent is idle starts
 `Agent::continue_collaboration` without a synthetic user message; queued input
 wins, and an explicit stop suppresses the continuation.
 
-Storage lives under the project bucket's `collaboration/<session-id>/`. Child
-histories use a separate `child-home`, so the conversation picker cannot open
-them as main sessions. Running work interrupted by a crash restores as
+Storage lives in the parent session's own `collaboration/` folder: isolated
+workspaces (`a1/`, ...), retained `parent-N.json` records and `child-home`.
+Child sessions use the same session layout inside `child-home`, so the
+conversation picker cannot open them as main sessions; they share the parent
+project's attachment pool. Running work interrupted by a crash restores as
 `unknown` and is never replayed.
 
 Isolated work is copied into owned storage without Git
@@ -270,10 +272,37 @@ User contract: [Collaborating agents](../usage/COLLABORATION.md).
 
 `sessions/` stores conversations in buckets derived from the canonical project
 directory, and loading validates the directory recorded in the journal.
+`sessions/layout.rs` names the tree; `Store` builds every session-owned path:
+
+```text
+<home>/sessions/<project-hash>/
+  attachments/            shared by the project's sessions and their collaborators
+  <session-id>/
+    session.jsonl         journal; recovery copies sit beside it
+    session.lock          exclusive writer lease, never removed
+    summary.json          listing cache
+    outputs/              complete command output (output::Store)
+    tmp/                  temporary area (scratch::Area), bounded by the home
+    collaboration/        workspaces, retained records and child-home
+```
+
+A folder is a saved conversation only when it holds `session.jsonl`; folders
+created by a fresh session's temporary area or outputs, retained collaborator
+data and inert locks are not listed. Files of the earlier flat layout are
+reported as unsupported, refused by direct operations and left unchanged.
 Exclusive writer leases prevent two processes from updating the same session.
 Summary caches speed up listing without replacing journal validation.
 
-Session files are `SESSION_ID.jsonl` journals in the `jecode.session.journal`
+Deletion (`sessions/delete.rs`) inspects the folders from the home down to the
+session, every sidecar and the owned `outputs/` and `tmp/` trees before it
+removes anything. It saves and verifies a retained-collaboration record first,
+removes the journal last and keeps the lock, the `collaboration/` folder and any
+unrecognized entry, which the report names. Attachment collection reads every
+session journal, recovery file, retained record and child journal, including
+files of the earlier layout, before removing anything; `outputs/`, `tmp/` and
+workspaces are not records.
+
+Session files are `session.jsonl` journals in the `jecode.session.journal`
 format, version 4, carrying session state version 2. Other versions are
 rejected and their files left unchanged. Each synced, newline-terminated transaction appends messages
 and events with any changed metadata and input. Streaming text uses UTF-8-safe
@@ -292,6 +321,7 @@ executed and never replays a call.
 | Torn final transaction | Preserve the incomplete bytes separately and recover the previous complete save. |
 | Corrupt complete transaction | Report the error and leave the file unchanged. |
 | Earlier format | Report it as unsupported and leave the file unchanged. |
+| Earlier flat layout | Report it as an unsupported layout; refuse resume and deletion; leave its files unchanged. |
 
 An attachment draft created before any model was selected stores a null
 `model`. Builds that require a model string cannot open such drafts.

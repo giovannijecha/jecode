@@ -5,10 +5,15 @@ scripts, probes, logs, reports, screenshots and browser data. Using it keeps
 throwaway files out of your project.
 
 ```text
-~/.jecode/tmp/<project>/<session>/
+~/.jecode/sessions/<project>/<session>/tmp/
 ```
 
-The area is created on first use and moves with `JECODE_HOME`.
+The area belongs to the conversation, not to the running Jecode process. It is
+created on first use, inside the
+[conversation's folder](SESSIONS.md), and moves with `JECODE_HOME`. Complete
+command output is kept separately in the same folder's `outputs/`. A
+collaborator's area is in its own session folder, inside the main
+conversation's `collaboration/` folder.
 
 ## How the agent uses it
 
@@ -42,9 +47,11 @@ rejected. Images and PDFs read from the area are copied into
 | `/tmp clean` | Delete this conversation's temporary files. |
 
 Temporary files are never deleted automatically: they survive finished turns,
-interruptions and quitting, and `/new` simply starts a new area. To clean an
-older conversation's area, resume it and run `/tmp clean`. Deleting a
-conversation from `/resume` removes its area entirely.
+interruptions and quitting, and resume reconnects the conversation to the same
+area without running any tool again. `/new` starts a new conversation with a new
+area and keeps the previous one. To clean an older conversation's area, resume
+it and run `/tmp clean`. Deleting a conversation from `/resume` removes its area
+entirely. An area alone does not make a conversation resumable.
 
 `/tmp clean` first stops browsers the conversation is using. It never touches
 project files, saved conversations, complete command output or named browser

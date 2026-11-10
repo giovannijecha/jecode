@@ -234,13 +234,7 @@ impl Agent {
             .persistence
             .as_ref()
             .ok_or("Session storage is unavailable")?;
-        let home = handle
-            .store()
-            .bucket()
-            .parent()
-            .and_then(Path::parent)
-            .ok_or("Invalid session storage location")?
-            .to_path_buf();
+        let home = handle.store().home().to_path_buf();
         let child_home = handle.store().collaborator_home(&handle.id());
         crate::disk::ensure_private_directory(&child_home)
             .map_err(|error| format!("Could not prepare collaborator storage: {error}"))?;

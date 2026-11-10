@@ -338,8 +338,13 @@ fn compilers_and_git_work_with_the_temporary_area() {
     let home = Directory::new();
     let mut tools = fixture(root.path());
     tools.configure_temporary(
-        crate::scratch::Area::new(home.path().join("tmp"), root.path().to_path_buf(), "1-1-0")
-            .unwrap(),
+        crate::scratch::Area::new(
+            home.path(),
+            home.path().join("tmp"),
+            root.path().to_path_buf(),
+            "1-1-0",
+        )
+        .unwrap(),
     );
     let script = "printf 'int main(void){return 0;}' > probe.c && cc probe.c -o probe && ./probe \
         && git init -q . && git add probe.c && git status --short && printf ok > \"$TMPDIR/note\" \
@@ -363,8 +368,13 @@ fn installed_runtimes_work_inside_the_policy() {
     let home = Directory::new();
     let mut tools = fixture(root.path());
     tools.configure_temporary(
-        crate::scratch::Area::new(home.path().join("tmp"), root.path().to_path_buf(), "1-1-0")
-            .unwrap(),
+        crate::scratch::Area::new(
+            home.path(),
+            home.path().join("tmp"),
+            root.path().to_path_buf(),
+            "1-1-0",
+        )
+        .unwrap(),
     );
     for (name, script) in [
         (

@@ -14,6 +14,7 @@ fn area() -> (Directory, Directory, Area) {
     let home = Directory::new();
     let project = Directory::new();
     let area = Area::new(
+        home.path(),
         home.path().join("a/b/c"),
         project.path().to_path_buf(),
         "123-1-0",

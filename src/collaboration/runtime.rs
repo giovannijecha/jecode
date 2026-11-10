@@ -34,13 +34,7 @@ impl Observer {
                 .unwrap()
                 .as_ref()
                 .and_then(|(_, handle)| handle.as_ref())
-                .map(|handle| {
-                    handle
-                        .store()
-                        .bucket()
-                        .join("collaboration")
-                        .join(handle.id())
-                })
+                .map(|handle| handle.store().collaboration(&handle.id()))
                 .ok_or("Collaborators require session storage")?;
             state.last_number += 1;
             (format!("a{}", state.last_number), store)

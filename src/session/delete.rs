@@ -46,6 +46,19 @@ pub(crate) fn message(title: &str, report: &DeleteReport, current: bool) -> Stri
             path.display()
         ));
     }
+    if let Some(folder) = report.kept.first().and_then(|path| path.parent()) {
+        let names = report
+            .kept
+            .iter()
+            .filter_map(|path| path.file_name())
+            .map(|name| name.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(", ");
+        text.push_str(&format!(
+            "; Unrecognized entries kept in {}: {names}",
+            folder.display()
+        ));
+    }
     text
 }
 

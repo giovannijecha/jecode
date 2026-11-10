@@ -436,7 +436,7 @@ impl Handle {
         if live.deleted || live.document.pending.active {
             return Err("Session deletion requires an open, ready conversation".into());
         }
-        live.store.deletion_scope()?;
+        live.store.deletion_scope(&live.document.id)?;
         if live.lease.is_none() {
             live.lease = Some(Arc::new(live.store.acquire(&live.document.id)?));
         }

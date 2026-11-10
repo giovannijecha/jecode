@@ -33,14 +33,14 @@ fn collaborator_outputs_need_their_own_ownership_record() {
     let collaborators = home.path().join("child-home");
     let main = owned(&home.path().join("outputs"), project.path(), "1-1-1")
         .with_collaborators(collaborators.clone());
-    let child_root = collaborators.join("sessions/folder/outputs");
+    let child_root = collaborators.join("sessions/folder");
     let reference = saved(&owned(&child_root, project.path(), "2-2-2"), b"child");
     assert_eq!(
         fs::read(main.resolve(&reference).unwrap()).unwrap(),
         b"child"
     );
 
-    let marker = child_root.join("2-2-2/.jecode-output.json");
+    let marker = child_root.join("2-2-2/outputs/.jecode-output.json");
     let original = fs::read(&marker).unwrap();
     let foreign = Value::object([
         ("format", Value::string("jecode.output")),
@@ -67,7 +67,7 @@ fn links_in_the_conversation_tree_are_never_followed() {
 
     // A linked collaborator folder is skipped without being entered.
     let linked = saved(
-        &owned(&outside.path().join("a/outputs"), project.path(), "2-2-2"),
+        &owned(&outside.path().join("a"), project.path(), "2-2-2"),
         b"outside",
     );
     link_directory(
@@ -83,8 +83,8 @@ fn links_in_the_conversation_tree_are_never_followed() {
         b"outside",
     );
     link_directory(
-        &outside.path().join("b"),
-        &collaborators.join("sessions/folder/outputs"),
+        &outside.path().join("b/4-4-4"),
+        &collaborators.join("sessions/folder/4-4-4"),
     );
     let error = main.resolve(&deeper).unwrap_err();
     assert!(error.contains("link or junction"), "{error}");

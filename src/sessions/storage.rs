@@ -1,4 +1,4 @@
-use super::{Document, canonical, directory_key, same_directory, valid_id};
+use super::{Document, canonical, layout, same_directory, valid_id};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -6,10 +6,10 @@ use std::sync::Mutex;
 
 #[derive(Clone)]
 pub struct Store {
+    home: PathBuf,
     pub(super) directory: PathBuf,
     pub(super) bucket: PathBuf,
     attachment_bucket: PathBuf,
-    temporary: PathBuf,
 }
 
 pub struct Summary {
@@ -69,8 +69,10 @@ impl Drop for Lease {
 }
 
 impl Store {
-    pub fn output_directory(&self) -> PathBuf {
-        self.bucket.join("outputs")
+    /// The folder session `id` owns: its journal, lock, summary, saved
+    /// outputs, temporary area and collaborator storage.
+    pub(crate) fn session_directory(&self, id: &str) -> PathBuf {
+        self.bucket.join(id)
     }
 
     /// Saved tool outputs of session `id`, which also resolve the outputs of
@@ -81,7 +83,7 @@ impl Store {
         redactor: crate::redact::Redactor,
     ) -> Result<crate::output::Store, String> {
         Ok(crate::output::Store::for_session(
-            self.output_directory(),
+            self.bucket.clone(),
             self.directory.clone(),
             id,
             redactor,
@@ -89,17 +91,19 @@ impl Store {
         .with_collaborators(self.collaborator_home(id)))
     }
 
+    /// Where session `id` keeps its collaborators' workspaces and records.
+    pub fn collaboration(&self, id: &str) -> PathBuf {
+        self.session_directory(id).join(layout::COLLABORATION)
+    }
+
     /// Where the collaborators of session `id` keep their own sessions.
     pub fn collaborator_home(&self, id: &str) -> PathBuf {
-        self.bucket
-            .join("collaboration")
-            .join(id)
-            .join("child-home")
+        self.collaboration(id).join(layout::CHILD_HOME)
     }
 
     /// Session-owned copies of attached files, shared by this project's sessions.
     pub fn attachments(&self) -> crate::attachments::Pool {
-        crate::attachments::Pool::new(self.attachment_bucket.join("attachments"))
+        crate::attachments::Pool::new(self.attachment_bucket.join(layout::ATTACHMENTS))
     }
 
     /// The session tree that owns this store's shared attachment pool.
@@ -111,9 +115,14 @@ impl Store {
         self.attachment_bucket = parent.attachment_bucket.clone();
     }
 
-    /// Where this project's session documents and journals live.
+    /// Where this project's session folders live.
     pub fn bucket(&self) -> &Path {
         &self.bucket
+    }
+
+    /// The Jecode home, or a collaborator's own home, holding these sessions.
+    pub fn home(&self) -> &Path {
+        &self.home
     }
 
     /// The canonical project directory these sessions belong to.
@@ -122,7 +131,12 @@ impl Store {
     }
 
     pub fn temporary_area(&self, id: &str) -> Result<crate::scratch::Area, String> {
-        crate::scratch::Area::new(self.temporary.join(id), self.directory.clone(), id)
+        crate::scratch::Area::new(
+            &self.home,
+            self.session_directory(id).join(layout::TEMPORARY),
+            self.directory.clone(),
+            id,
+        )
     }
 
     /// Where a session journal belongs, for measurements of copied journals.
@@ -146,20 +160,19 @@ impl Store {
             return Err("Session configuration directory must be absolute".into());
         }
         let directory = canonical(directory)?;
-        // A stable owned bucket calculation avoids path-length dependent names.
-        // The canonical directory in each document is the authoritative scope.
-        let bucket = directory_key(&directory).bytes().fold(0u128, |key, byte| {
-            key.wrapping_mul(257).wrapping_add(u128::from(byte) + 1)
-        });
-        let attachment_bucket = home.join("sessions").join(format!("{bucket:032x}"));
+        let bucket = layout::bucket(&home, &directory);
         Ok(Self {
+            home,
             directory,
-            bucket: attachment_bucket.clone(),
-            attachment_bucket,
-            temporary: home.join("tmp").join(format!("{bucket:032x}")),
+            attachment_bucket: bucket.clone(),
+            bucket,
         })
     }
 
+    /// Saved conversations. A folder without a journal, such as a fresh
+    /// session's temporary area or a deleted one's retained collaborator
+    /// files, is not a conversation. Sessions of the earlier flat layout are
+    /// reported and left unchanged.
     pub fn list(&self) -> Result<Listing, String> {
         let entries = match fs::read_dir(&self.bucket) {
             Ok(entries) => entries,
@@ -169,26 +182,42 @@ impl Store {
             Err(error) => return Err(format!("Could not list sessions: {error}")),
         };
         let mut ids = BTreeSet::new();
-        let mut unsupported = BTreeSet::new();
+        let mut legacy = BTreeSet::new();
+        let mut warnings = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| format!("Could not list sessions: {error}"))?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            if let Some(id) = name.strip_suffix(".jsonl")
-                && valid_id(id)
-            {
-                ids.insert(id.to_string());
-            } else if let Some(id) = name.strip_suffix(".json")
-                && valid_id(id)
-            {
-                unsupported.insert(id.to_string());
+            if valid_id(&name) {
+                let path = entry.path();
+                match crate::disk::metadata_if_present(&path) {
+                    Ok(Some(metadata)) if crate::disk::ordinary_directory(&metadata) => {
+                        match crate::disk::metadata_if_present(&path.join(layout::JOURNAL)) {
+                            Ok(Some(_)) => {
+                                ids.insert(name);
+                            }
+                            Ok(None) => {}
+                            Err(error) => warnings.push(format!(
+                                "Session {name}: Could not inspect session journal: {error}"
+                            )),
+                        }
+                    }
+                    Ok(Some(metadata)) if crate::disk::linked(&metadata) => warnings.push(format!(
+                        "Session {name}: session folder is a link; it was left unchanged"
+                    )),
+                    Ok(_) => {}
+                    Err(error) => warnings.push(format!("Session {name}: {error}")),
+                }
+            } else if let Some(id) = legacy_id(&name) {
+                legacy.insert(id.to_string());
             }
         }
         let mut listing = Listing::default();
-        for id in unsupported.difference(&ids) {
+        for id in legacy.difference(&ids) {
             listing
                 .warnings
-                .push(format!("Session {id}: {}", super::UNSUPPORTED));
+                .push(format!("Session {id}: {}", super::LEGACY));
         }
+        listing.warnings.extend(warnings);
         for id in ids {
             let stamp = super::summary::stamp(self, &id);
             if let Some(summary) = stamp
@@ -221,14 +250,37 @@ impl Store {
         Ok(listing)
     }
 
+    /// Refuses an identifier that only the earlier flat layout saved: its
+    /// files stay as they are, and no folder is created beside them.
+    fn reject_legacy(&self, id: &str) -> Result<(), String> {
+        let present = |path: &Path| {
+            crate::disk::metadata_if_present(path)
+                .ok()
+                .flatten()
+                .is_some()
+        };
+        let legacy = [format!("{id}.jsonl"), format!("{id}.json")]
+            .iter()
+            .any(|name| present(&self.bucket.join(name)));
+        if legacy && !present(&self.journal_path(id)) {
+            return Err(super::LEGACY.into());
+        }
+        Ok(())
+    }
+
     pub(super) fn acquire(&self, id: &str) -> Result<Lease, String> {
         if !valid_id(id) {
             return Err("Invalid session identifier".into());
         }
+        self.reject_legacy(id)?;
+        let directory = self.session_directory(id);
         crate::disk::private_directory(&self.bucket)
+            .and_then(|()| crate::disk::ensure_private_directory(&directory))
             .map_err(|error| format!("Could not create session directory: {error}"))?;
-        let path = self.bucket.join(format!("{id}.lock"));
+        let path = directory.join(layout::LOCK);
         reject_special(&path)?;
+        // The lock file is never removed, even by deletion: another process
+        // may hold or wait on it, and a new file would not exclude that one.
         let lock = crate::disk::private_options()
             .read(true)
             .write(true)
@@ -248,7 +300,7 @@ impl Store {
 
     pub(super) fn create(&self, id: &str) -> Result<Lease, String> {
         let lease = self.acquire(id)?;
-        if self.journal_path(id).exists() || self.bucket.join(format!("{id}.json")).exists() {
+        if self.journal_path(id).exists() {
             return Err("Session identifier already exists; saved data was left unchanged".into());
         }
         Ok(lease)
@@ -259,11 +311,17 @@ impl Store {
         if !valid_id(id) {
             return Err("Invalid session identifier".into());
         }
+        self.reject_legacy(id)?;
+        if let Some(metadata) = crate::disk::metadata_if_present(&self.session_directory(id))
+            .map_err(|error| format!("Could not inspect session directory: {error}"))?
+            && !crate::disk::ordinary_directory(&metadata)
+        {
+            return Err(
+                "Session folder is a link or not a directory; it was left unchanged".into(),
+            );
+        }
         let journal = self.journal_path(id);
         if !journal.exists() {
-            if self.bucket.join(format!("{id}.json")).exists() {
-                return Err(super::UNSUPPORTED.into());
-            }
             return Err("Session not found in this working directory".into());
         }
         match super::journal::read(&journal, id, &self.directory)? {
@@ -275,8 +333,19 @@ impl Store {
     }
 
     pub(super) fn journal_path(&self, id: &str) -> PathBuf {
-        self.bucket.join(format!("{id}.jsonl"))
+        self.session_directory(id).join(layout::JOURNAL)
     }
+
+    pub(super) fn summary_path(&self, id: &str) -> PathBuf {
+        self.session_directory(id).join(layout::SUMMARY)
+    }
+}
+
+/// The session a file of the earlier flat layout belongs to.
+fn legacy_id(name: &str) -> Option<&str> {
+    name.strip_suffix(".jsonl")
+        .or_else(|| name.strip_suffix(".json"))
+        .filter(|id| valid_id(id))
 }
 
 impl Lease {

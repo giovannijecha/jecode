@@ -195,7 +195,30 @@ fn child_imports_survive_close_resume_and_parent_deletion() {
             .delete_session(&id, "fixture/model".into(), crate::effort::Effort::Default)
             .unwrap();
         assert!(replaced);
-        assert!(report.retained_collaboration.is_some());
+        assert_eq!(
+            report.retained_collaboration,
+            Some(store.collaboration(&id)),
+            "{mode}"
+        );
+        // The child saved its own session in the same layout, in the
+        // parent's retained collaborator home.
+        let child_buckets = store.collaborator_home(&id).join("sessions");
+        let child_journals = fs::read_dir(&child_buckets)
+            .unwrap()
+            .flat_map(|bucket| fs::read_dir(bucket.unwrap().path()).unwrap())
+            .map(|entry| entry.unwrap().path().join("session.jsonl"))
+            .filter(|journal| journal.is_file())
+            .count();
+        assert_eq!(child_journals, 1, "{mode}");
+        assert!(!store.fixture_journal(&id).exists());
+        assert!(
+            !store
+                .list()
+                .unwrap()
+                .sessions
+                .iter()
+                .any(|entry| entry.id == id)
+        );
         let orphan = pool.import_bytes("orphan.txt", b"unused").unwrap();
         assert_eq!(
             pool.collect(

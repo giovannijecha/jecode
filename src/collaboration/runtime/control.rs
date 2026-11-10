@@ -333,13 +333,7 @@ impl Observer {
                 .unwrap()
                 .as_ref()
                 .and_then(|(_, handle)| handle.as_ref())
-                .map(|handle| {
-                    handle
-                        .store()
-                        .bucket()
-                        .join("collaboration")
-                        .join(handle.id())
-                })
+                .map(|handle| handle.store().collaboration(&handle.id()))
                 .ok_or("Collaborators require session storage")?;
             let info = {
                 let state = self.0.state.lock().unwrap();

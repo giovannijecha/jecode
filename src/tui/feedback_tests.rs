@@ -162,7 +162,9 @@ fn autosave_recovery_clears_bookkeeping_but_keeps_the_error_until_the_next_send(
         .unwrap()
         .unwrap()
         .path();
-    let journal = bucket.join(format!("{}.jsonl", app.persistence.as_ref().unwrap().id()));
+    let journal = bucket
+        .join(app.persistence.as_ref().unwrap().id())
+        .join("session.jsonl");
     let original = std::fs::metadata(&journal).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_readonly(true);

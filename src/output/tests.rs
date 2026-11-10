@@ -53,7 +53,12 @@ fn owned_outputs_are_lazy_and_cross_session_references_survive_reconfiguration()
     logs.stdout.finish().unwrap();
     let reference = logs.stdout_ref.clone();
     assert!(reference.starts_with(&format!("output:{}:", first.id)));
-    assert!(root.join(&first.id).join(".jecode-output.json").is_file());
+    assert!(
+        root.join(&first.id)
+            .join("outputs")
+            .join(".jecode-output.json")
+            .is_file()
+    );
     drop(logs);
 
     let second_store = Store::for_session(
@@ -134,7 +139,7 @@ fn cloned_stores_can_create_first_owned_outputs_concurrently() {
 }
 
 #[test]
-fn removal_cleans_orphans_and_keeps_legacy_flat_files() {
+fn removal_cleans_orphans_and_leaves_unscoped_legacy_files() {
     let home = Directory::new();
     let project = Directory::new();
     let root = home.path().join("outputs");
@@ -147,7 +152,7 @@ fn removal_cleans_orphans_and_keeps_legacy_flat_files() {
     )
     .unwrap();
     let logs = store.create().unwrap();
-    let owned = root.join(&selected.id);
+    let owned = root.join(&selected.id).join("outputs");
     drop(logs);
     fs::write(owned.join("orphan.stdout"), b"unreferenced").unwrap();
     fs::create_dir(owned.join("nested")).unwrap();
@@ -172,14 +177,16 @@ fn removal_cleans_orphans_and_keeps_legacy_flat_files() {
     assert_eq!(removed.directories, 2);
 
     assert!(!owned.exists());
+    // The session folder itself belongs to the session's storage, not here.
+    assert!(root.join(&selected.id).is_dir());
     assert_eq!(
         fs::read(root.join("8-8-8.stdout")).unwrap(),
         b"shared legacy"
     );
-    assert_eq!(
-        fs::read(store.resolve("output:8-8-8:stdout").unwrap()).unwrap(),
-        b"shared legacy"
-    );
+    // A session's store saves only scoped references; an unscoped one names
+    // the earlier flat layout, which no session store resolves.
+    let error = store.resolve("output:8-8-8:stdout").unwrap_err();
+    assert!(error.contains("not saved for this conversation"), "{error}");
 }
 
 #[test]
@@ -212,7 +219,7 @@ fn foreign_or_missing_marker_preserves_existing_output() {
     .unwrap();
     let logs = store.create().unwrap();
     drop(logs);
-    let owned = root.join(&selected.id);
+    let owned = root.join(&selected.id).join("outputs");
     let marker = owned.join(".jecode-output.json");
     let original = fs::read(&marker).unwrap();
     let foreign = Directory::new();
@@ -256,7 +263,7 @@ fn linked_output_entry_blocks_removal_and_resolution_when_symlinks_are_available
     let logs = store.create().unwrap();
     let target = store.resolve(&logs.stdout_ref).unwrap();
     drop(logs);
-    let link = root.join(&selected.id).join("9-9-9.stdout");
+    let link = root.join(&selected.id).join("outputs").join("9-9-9.stdout");
     if symlink_file(&target, &link).is_err() {
         return; // Windows requires Developer Mode or the symlink privilege.
     }
@@ -287,7 +294,7 @@ fn linked_output_entry_blocks_removal_and_resolution() {
     let logs = store.create().unwrap();
     let target = store.resolve(&logs.stdout_ref).unwrap();
     drop(logs);
-    let link = root.join(&selected.id).join("9-9-9.stdout");
+    let link = root.join(&selected.id).join("outputs").join("9-9-9.stdout");
     symlink(&target, &link).unwrap();
     assert!(
         store
@@ -314,7 +321,7 @@ fn failed_final_directory_removal_restores_owner_for_retry() {
     .unwrap();
     drop(store.create().unwrap());
     let removal = prepare_removal(&root, project.path(), &selected.id, &selected).unwrap();
-    let owned = root.join(&selected.id);
+    let owned = root.join(&selected.id).join("outputs");
     fs::write(owned.join("late-file"), b"late").unwrap();
     let error = removal.remove().err().unwrap();
     assert!(error.contains("Output ownership was restored"), "{error}");
@@ -354,6 +361,7 @@ fn parent_permissions_failure_retains_owner_for_retry() {
     assert!(error.contains("Output ownership was restored"), "{error}");
     assert!(
         root.join(&selected.id)
+            .join("outputs")
             .join(".jecode-output.json")
             .is_file()
     );
@@ -361,5 +369,5 @@ fn parent_permissions_failure_retains_owner_for_retry() {
         .unwrap()
         .remove()
         .unwrap();
-    assert!(!root.join(&selected.id).exists());
+    assert!(!root.join(&selected.id).join("outputs").exists());
 }

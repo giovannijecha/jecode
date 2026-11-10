@@ -96,6 +96,7 @@ impl Session {
     fn new() -> Self {
         let directory = Directory::new();
         let area = Area::new(
+            directory.path(),
             directory.path().join("123456-789"),
             directory.path().into(),
             "123456-789",

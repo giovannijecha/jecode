@@ -326,7 +326,7 @@ fn live_chromium_localhost_interaction_and_profile_persistence() {
         .join(".tmp")
         .join(format!("browser-fixture-{}", std::process::id()));
     let session = "123456-789";
-    let area = Area::new(fixture.join(session), project, session).unwrap();
+    let area = Area::new(&fixture, fixture.join(session), project, session).unwrap();
     let profiles = fixture.join("persistent");
     let registry = Registry::default();
     let cancel = Cancellation::default();

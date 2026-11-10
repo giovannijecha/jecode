@@ -18,6 +18,17 @@ Changes since 0.4.5.
   snapshot is sent again after compaction or `/resume` when needed. See
   [Project instructions](docs/usage/PROJECT_INSTRUCTIONS.md#when-changes-take-effect).
 
+### Saved conversations
+
+- Each conversation owns one folder, `sessions/<project>/<session>/`, with its
+  journal, lock, summary, complete command output (`outputs/`), temporary files
+  (`tmp/`) and collaborator data (`collaboration/`). Attachments stay shared per
+  project. Temporary files last as long as the conversation: they survive exit
+  and resume until `/tmp clean` or deletion. See
+  [Files Jecode keeps](docs/usage/CONFIGURATION.md#files-jecode-keeps).
+- Deleting a conversation keeps its lock and names any unrecognized entry left
+  in its folder; retained collaborator work stays in its `collaboration/` folder.
+
 ### Removed
 
 - Model-free records of earlier work and persistent tool-result previews.
@@ -41,6 +52,11 @@ Changes since 0.4.5.
   release writes journal format 3 with session state 1; there is no migration.
   Finish or export important conversations with the version that saved them
   before updating. See [Sessions](docs/usage/SESSIONS.md#after-an-interruption).
+- Conversations saved in the earlier flat layout (`sessions/<project>/ID.jsonl`
+  with `outputs/`, `collaboration/` and `~/.jecode/tmp/`) are listed as using an
+  earlier storage layout and cannot be resumed or deleted. Their files are
+  neither moved nor removed, and attachments they reference are kept. Delete them
+  yourself when you no longer need them.
 - `/export` files use `jecode.conversation` format **2**, without the
   conversation-level `legacy_origin` field. Message origins are unchanged.
 - Existing checkpoint archives under `checkpoints/` and project-map notes in

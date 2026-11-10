@@ -336,9 +336,23 @@ fn resume_for_measurement(app: &mut App, id: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The session a journal belongs to: a journal is `<session>/session.jsonl`.
+fn measured_session(journal: &std::path::Path) -> Option<String> {
+    if journal.file_name()? != crate::sessions::layout::JOURNAL {
+        return None;
+    }
+    let id = journal
+        .parent()?
+        .file_name()?
+        .to_string_lossy()
+        .into_owned();
+    crate::sessions::valid_id(&id).then_some(id)
+}
+
 /// Scrolls a copy of one saved conversation in an isolated home and prints
 /// only timings and byte counts. Set `JECODE_MEASURE_JOURNAL` to a session
-/// journal and `JECODE_MEASURE_DIRECTORY` to the folder it belongs to.
+/// folder's `session.jsonl` and `JECODE_MEASURE_DIRECTORY` to the project
+/// folder it belongs to.
 #[test]
 #[ignore = "local release UI benchmark of a copied journal; prints no conversation text"]
 fn own_history_scroll() {
@@ -350,7 +364,8 @@ fn own_history_scroll() {
         return;
     };
     let journal = std::path::PathBuf::from(journal);
-    let id = journal.file_stem().unwrap().to_string_lossy().into_owned();
+    let id = measured_session(&journal)
+        .expect("JECODE_MEASURE_JOURNAL must name a session folder's session.jsonl");
     let home = Directory::new();
     let mut agent = Agent::new(
         OpenRouter::fixture("http://127.0.0.1:1".into()),

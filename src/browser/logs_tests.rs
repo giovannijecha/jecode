@@ -449,6 +449,7 @@ fn logs_action_pages_compact_entries_and_saves_raw_records() {
         .insert("tab-1".into(), Cdp::connect(&endpoint).unwrap());
     let directory = Directory::new();
     let area = Area::new(
+        directory.path(),
         directory.path().join("123456-789"),
         directory.path().into(),
         "123456-789",

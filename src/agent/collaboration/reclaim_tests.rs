@@ -34,9 +34,7 @@ fn project() -> (Directory, PathBuf) {
 fn storage(home: &Directory, project: &Path, session: &str) -> PathBuf {
     Store::new(home.path().to_path_buf(), project)
         .unwrap()
-        .bucket()
-        .join("collaboration")
-        .join(session)
+        .collaboration(session)
 }
 
 fn wait(agent: &Agent, id: &str) {

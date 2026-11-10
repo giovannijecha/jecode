@@ -14,6 +14,9 @@ const OWNERSHIP: Marker = Marker {
 /// Disposable working files belong to a folder and a resumable session.
 pub struct Area {
     path: PathBuf,
+    /// The home that owns this area; every folder below it on the way to
+    /// the area is created and checked as an ordinary directory.
+    boundary: PathBuf,
     project: PathBuf,
     session: String,
     establishment: std::sync::Arc<std::sync::Mutex<()>>,
@@ -36,12 +39,23 @@ pub use delegated::find;
 pub(crate) use removal::Removal;
 
 impl Area {
-    pub fn new(path: PathBuf, project: PathBuf, session: &str) -> Result<Self, String> {
-        if !path.is_absolute() || !crate::sessions::valid_id(session) {
+    /// The area at `path`, owned by the home `boundary` that contains it.
+    pub fn new(
+        boundary: &Path,
+        path: PathBuf,
+        project: PathBuf,
+        session: &str,
+    ) -> Result<Self, String> {
+        if !path.is_absolute()
+            || !crate::sessions::valid_id(session)
+            || path == boundary
+            || !path.starts_with(boundary)
+        {
             return Err("Invalid temporary area identity".into());
         }
         Ok(Self {
             path,
+            boundary: boundary.to_path_buf(),
             project,
             session: session.into(),
             establishment: std::sync::Arc::new(std::sync::Mutex::new(())),
@@ -52,6 +66,7 @@ impl Area {
     pub fn share(&self) -> Self {
         Self {
             path: self.path.clone(),
+            boundary: self.boundary.clone(),
             project: self.project.clone(),
             session: self.session.clone(),
             establishment: std::sync::Arc::clone(&self.establishment),
@@ -135,8 +150,12 @@ impl Area {
         // Parallel acquisitions share this area. Publish its ownership record
         // completely before another caller validates it or creates artifacts.
         let _establishment = self.establishment.lock().unwrap();
-        // Only these three owned descendants may be created or cleaned here.
-        let parents: Vec<_> = self.path.ancestors().take(3).collect();
+        // Only the owned folders between the home and the area are created.
+        let parents: Vec<_> = self
+            .path
+            .ancestors()
+            .take_while(|path| *path != self.boundary)
+            .collect();
         for path in parents.into_iter().rev() {
             private_directory(path)?;
         }
@@ -150,8 +169,14 @@ impl Area {
         OWNERSHIP.identity(&self.project, &self.session)
     }
 
+    /// The area's ownership, checked from its home down. `path` is the area
+    /// as configured or as resolved, so the home is found at the same depth.
     fn owned_directory(&self, path: PathBuf) -> owned::Directory {
-        let boundary = path.ancestors().take(4).last().unwrap().to_path_buf();
+        let depth = self
+            .path
+            .strip_prefix(&self.boundary)
+            .map_or(0, |below| below.components().count());
+        let boundary = path.ancestors().nth(depth).unwrap_or(&path).to_path_buf();
         owned::Directory::new(path, boundary, OWNERSHIP, self.identity())
     }
 

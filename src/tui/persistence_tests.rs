@@ -51,10 +51,9 @@ fn journal(home: &Directory, current: &App) -> std::path::PathBuf {
         .unwrap()
         .unwrap()
         .path();
-    bucket.join(format!(
-        "{}.jsonl",
-        current.persistence.as_ref().unwrap().id()
-    ))
+    bucket
+        .join(current.persistence.as_ref().unwrap().id())
+        .join("session.jsonl")
 }
 
 fn saved_exchange(app: &App) {
@@ -447,7 +446,7 @@ fn a_failed_new_checkpoint_keeps_the_current_model_context_and_input() {
         .unwrap()
         .unwrap()
         .path();
-    let path = bucket.join(format!("{id}.jsonl"));
+    let path = bucket.join(&id).join("session.jsonl");
     let original = std::fs::metadata(&path).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_readonly(true);

@@ -27,6 +27,7 @@ fn snapshot_text_limit_counts_characters() {
 fn live_chromium_snapshot_values_text_and_refs() {
     let directory = Directory::new();
     let area = Area::new(
+        directory.path(),
         directory.path().join("123456-789"),
         directory.path().into(),
         "123456-789",

@@ -35,7 +35,7 @@ fn deleting_isolated_collaboration_keeps_owned_files_and_parent_record() {
         "-qm",
         "initial",
     ]);
-    let retained = store.bucket.join("collaboration").join(&document.id);
+    let retained = store.collaboration(&document.id);
     let workspace = Workspace::prepare(project.path(), &retained, "a1", Mode::Isolated).unwrap();
     let record = Value::object([
         ("id", Value::string("a1")),
@@ -91,6 +91,19 @@ fn deleting_isolated_collaboration_keeps_owned_files_and_parent_record() {
     );
     assert!(!journal.exists());
     assert!(workspace.root().is_dir());
+    // The retained subtree stays in the session folder beside the inert lock,
+    // and the deleted parent is neither listed nor resumable.
+    let mut left = fs::read_dir(store.session_directory(&document.id))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect::<Vec<_>>();
+    left.sort();
+    assert_eq!(left, ["collaboration", "session.lock"]);
+    assert!(store.list().unwrap().sessions.is_empty());
+    assert!(store.list().unwrap().warnings.is_empty());
+    assert!(store.read(&document.id).is_err());
+    assert!(store.delete(&document.id).is_err());
+    assert!(workspace.root().is_dir());
     let manifest =
         crate::json::parse(&fs::read_to_string(retained.join("parent-1.json")).unwrap()).unwrap();
     assert_eq!(
@@ -118,7 +131,7 @@ fn deleting_isolated_collaboration_keeps_owned_files_and_parent_record() {
 #[test]
 fn conflicting_retained_record_keeps_parent_journal_intact() {
     let (_home, _project, store, document) = fixture();
-    let retained = store.bucket.join("collaboration").join(&document.id);
+    let retained = store.collaboration(&document.id);
     fs::create_dir_all(&retained).unwrap();
     fs::write(retained.join("child.txt"), "owned child data").unwrap();
     fs::write(retained.join("parent-0.json"), "foreign record").unwrap();
@@ -171,7 +184,7 @@ fn inactive_delete_holds_lease_and_preserves_lock_path() {
     let lease = store.acquire(&document.id).unwrap();
     lease.save(&document).unwrap();
     let journal = store.journal_path(&document.id);
-    let lock = store.bucket.join(format!("{}.lock", document.id));
+    let lock = store.session_directory(&document.id).join("session.lock");
     assert!(store.delete(&document.id).is_err());
     assert!(journal.exists());
     drop(lease);
@@ -189,9 +202,9 @@ fn failed_output_root_removal_preserves_journal_and_allows_a_later_delete() {
     lease.save(&document).unwrap();
     let journal = store.journal_path(&document.id);
     let before = fs::read(&journal).unwrap();
-    let root = store.output_directory();
+    let root = store.session_directory(&document.id).join("outputs");
     let output = crate::output::Store::for_session(
-        root.clone(),
+        store.bucket.clone(),
         project.path().to_path_buf(),
         &document.id,
         crate::redact::Redactor::empty(),
@@ -200,14 +213,14 @@ fn failed_output_root_removal_preserves_journal_and_allows_a_later_delete() {
     drop(output.create().unwrap());
     let removal = store.removal(&document).unwrap();
     // A late file makes the final directory removal fail after prepared entries.
-    fs::write(root.join(&document.id).join("late-file"), "late").unwrap();
+    fs::write(root.join("late-file"), "late").unwrap();
     let error = removal.remove().unwrap_err();
     assert!(error.contains("Output ownership was restored"), "{error}");
     assert_eq!(fs::read(&journal).unwrap(), before);
     drop(lease);
     store.delete(&document.id).unwrap();
     assert!(!journal.exists());
-    assert!(!root.join(&document.id).exists());
+    assert!(!root.exists());
 }
 
 #[test]
@@ -219,16 +232,49 @@ fn missing_invalid_and_unrelated_ids_leave_files_untouched() {
     let journal = store.journal_path(&document.id);
     assert!(store.delete("../config").is_err());
     assert!(store.delete("999-1-1").is_err());
+    assert!(!store.session_directory("999-1-1").exists());
     assert!(journal.exists());
-    let neighboring = store.bucket.join(format!("{}0.summary.json", document.id));
-    fs::write(&neighboring, "other").unwrap();
+    // A neighboring session keeps its journal, outputs and temporary files.
+    let mut neighbor = document.clone();
+    neighbor.id = format!("{}0", document.id);
+    let lease = store.acquire(&neighbor.id).unwrap();
+    lease.save(&neighbor).unwrap();
+    drop(lease);
+    let area = store.temporary_area(&neighbor.id).unwrap();
+    let (_, kept) = area.file("keep.txt", true).unwrap();
+    fs::write(&kept, "neighbor").unwrap();
+    // Entries that are not owned sidecars are kept and reported.
     let malformed = store
-        .bucket
-        .join(format!("{}.json.damaged---", document.id));
+        .session_directory(&document.id)
+        .join("session.jsonl.damaged---");
     fs::write(&malformed, "other").unwrap();
-    store.delete(&document.id).unwrap();
-    assert_eq!(fs::read_to_string(neighboring).unwrap(), "other");
+    let report = store.delete(&document.id).unwrap();
+    assert_eq!(report.kept, std::slice::from_ref(&malformed));
     assert_eq!(fs::read_to_string(malformed).unwrap(), "other");
+    assert_eq!(fs::read_to_string(kept).unwrap(), "neighbor");
+    let listing = store.list().unwrap();
+    assert_eq!(listing.sessions.len(), 1);
+    assert_eq!(listing.sessions[0].id, neighbor.id);
+    assert!(store.read(&neighbor.id).is_ok());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn linked_session_folder_is_rejected_before_anything_is_removed() {
+    let (_home, project, store, document) = fixture();
+    let lease = store.acquire(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    drop(lease);
+    // Replace the session folder with a link to a copy of itself elsewhere.
+    let target = Directory::new();
+    let moved = target.path().join("moved");
+    fs::rename(store.session_directory(&document.id), &moved).unwrap();
+    crate::test_support::link_directory(&moved, &store.session_directory(&document.id));
+    let error = store.delete(&document.id).unwrap_err();
+    assert!(error.contains("not a regular directory"), "{error}");
+    assert!(moved.join("session.jsonl").is_file());
+    assert!(store.list().unwrap().sessions.is_empty());
+    assert!(project.path().is_dir());
 }
 
 #[test]
@@ -264,7 +310,7 @@ fn linked_bucket_is_rejected_before_writing_to_its_target() {
         assert!(junction.status.success(), "{junction:?}");
     }
     assert!(store.delete(&document.id).is_err());
-    assert!(!target.path().join(format!("{}.lock", document.id)).exists());
+    assert!(!target.path().join(&document.id).exists());
     assert_eq!(fs::read_to_string(protected).unwrap(), "outside");
     #[cfg(windows)]
     fs::remove_dir(&store.bucket).unwrap();
@@ -279,21 +325,26 @@ fn known_sidecars_are_removed_with_the_journal() {
     lease.save(&document).unwrap();
     drop(lease);
     let journal = store.journal_path(&document.id);
+    let folder = store.session_directory(&document.id);
     let sidecars = [
-        format!("{}.jsonl.damaged-1-2-3", document.id),
-        format!("{}.summary.json", document.id),
-        format!("{}.summary.tmp-1-2-3", document.id),
-        format!("{}.tmp-1-2-3", document.id),
+        "session.jsonl.damaged-1-2-3",
+        "summary.json",
+        "summary.tmp-1-2-3",
     ];
     for name in &sidecars {
-        fs::write(store.bucket.join(name), "owned").unwrap();
+        fs::write(folder.join(name), "owned").unwrap();
     }
     let report = store.delete(&document.id).unwrap();
-    assert_eq!(report.files, 5);
+    assert_eq!(report.files, 4);
+    assert!(report.kept.is_empty());
     assert!(!journal.exists());
     for name in &sidecars {
-        assert!(!store.bucket.join(name).exists());
+        assert!(!folder.join(name).exists());
     }
+    // The inert lock and its folder stay, and are not a saved conversation.
+    assert!(folder.join("session.lock").is_file());
+    assert!(store.list().unwrap().sessions.is_empty());
+    assert!(store.list().unwrap().warnings.is_empty());
 }
 
 #[test]
@@ -327,7 +378,7 @@ fn corrupt_or_foreign_durable_record_is_rejected_before_cleanup() {
     lease.save(&document).unwrap();
     drop(lease);
     let journal = store.journal_path(&document.id);
-    let sidecar = store.bucket.join(format!("{}.summary.json", document.id));
+    let sidecar = store.summary_path(&document.id);
     for record in [
         "{broken\n",
         "{\"format\":\"jecode.session.journal\",\"format_version\":99}\n",
@@ -346,7 +397,7 @@ fn special_sidecar_blocks_all_cleanup_and_ancillary_failure_keeps_journal() {
     let lease = store.acquire(&document.id).unwrap();
     lease.save(&document).unwrap();
     let journal = store.journal_path(&document.id);
-    let sidecar = store.bucket.join(format!("{}.summary.json", document.id));
+    let sidecar = store.summary_path(&document.id);
     if sidecar.exists() {
         fs::remove_file(&sidecar).unwrap();
     }

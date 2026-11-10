@@ -274,7 +274,7 @@ fn an_unsaved_summary_is_not_applied_and_no_following_tool_runs() {
         .unwrap()
         .unwrap()
         .path();
-    let path = bucket.join(format!("{}.jsonl", handle.id()));
+    let path = bucket.join(handle.id()).join("session.jsonl");
     let mut original_permissions = None;
     let error = agent
         .run_turn("Inspect", &mut |event| {

@@ -201,8 +201,8 @@ error.
 | `lsp.json`, `lsp.lock` | Global [language servers](LSP.md), environment values and their configuration lock. |
 | `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
 | `skills/` | Your [personal skills](SKILLS.md). |
-| `sessions/<project>/` | [Saved conversations](SESSIONS.md), their complete command output, [attachments](ATTACHMENTS.md) and collaborator data, grouped by project directory. |
-| `tmp/<project>/<session>/` | Each conversation's [temporary files](TEMPORARY.md). |
+| `sessions/<project>/` | [Saved conversations](SESSIONS.md), grouped by project directory, with the project's shared [attachments](ATTACHMENTS.md) in `attachments/`. |
+| `sessions/<project>/<session>/` | One conversation: its journal `session.jsonl`, lock `session.lock` and listing cache `summary.json`, with recovery copies beside them; its complete command output in `outputs/`, its [temporary files](TEMPORARY.md) in `tmp/` and its [collaborators](COLLABORATION.md) in `collaboration/`. |
 | `browser/profiles/` | Named persistent browser profiles. |
 | `cache/native/` | Native helpers extracted from the executable on first use. This directory must be writable. |
 

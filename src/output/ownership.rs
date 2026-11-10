@@ -1,5 +1,6 @@
 use crate::disk::owned::{self, Marker};
 use crate::json::Value;
+use crate::sessions::layout;
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 
@@ -32,27 +33,34 @@ impl Identity {
         })
     }
 
-    fn directory(&self, root: &Path) -> owned::Directory {
+    fn directory(&self, sessions: &Path) -> owned::Directory {
         owned::Directory::new(
-            root.join(&self.session),
-            root.ancestors().last().unwrap().to_path_buf(),
+            outputs(sessions, &self.session),
+            sessions.ancestors().last().unwrap().to_path_buf(),
             MARKER,
             MARKER.identity(&self.project, &self.session),
         )
     }
 }
 
-pub(super) fn ensure(root: &Path, identity: &Identity) -> Result<PathBuf, String> {
-    if !root.is_absolute() {
+/// Where `session` saves outputs among the session folders in `sessions`.
+fn outputs(sessions: &Path, session: &str) -> PathBuf {
+    sessions.join(session).join(layout::OUTPUTS)
+}
+
+/// Creates the session's own output directory among the session folders in
+/// `sessions`, with its ownership record.
+pub(super) fn ensure(sessions: &Path, identity: &Identity) -> Result<PathBuf, String> {
+    if !sessions.is_absolute() {
         return Err("Output directory must be absolute".into());
     }
-    checked_ancestors(root)?;
-    private_directory(root)?;
-    let session = root.join(&identity.session);
-    checked_ancestors(&session)?;
-    private_directory(&session)?;
-    identity.directory(root).ensure()?;
-    Ok(session)
+    let path = outputs(sessions, &identity.session);
+    for directory in [sessions, &sessions.join(&identity.session), &path] {
+        checked_ancestors(directory)?;
+        private_directory(directory)?;
+    }
+    identity.directory(sessions).ensure()?;
+    Ok(path)
 }
 
 /// An unscoped store's output directory: the root itself.
@@ -61,15 +69,14 @@ pub(super) fn flat_directory(root: &Path) -> Result<PathBuf, String> {
     Ok(root.to_path_buf())
 }
 
-/// A session's directory under this store's root, when the session saved
-/// outputs there. Its record names the owner's folder, or for an unowned
-/// store the folder it records.
+/// The output directory of a session of this store's project, when the
+/// session saved outputs. Its record names the owner's folder.
 pub(super) fn session_directory(
-    root: &Path,
+    sessions: &Path,
     owner: Option<&Identity>,
     session: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let Some(path) = directory(root, session)? else {
+    let Some(path) = directory(sessions, session)? else {
         return Ok(None);
     };
     let project = match owner {
@@ -82,8 +89,11 @@ pub(super) fn session_directory(
 }
 
 /// The own directory of an agent above this one in its conversation.
-pub(super) fn owned_directory(root: &Path, owner: &Identity) -> Result<Option<PathBuf>, String> {
-    let Some(path) = directory(root, &owner.session)? else {
+pub(super) fn owned_directory(
+    sessions: &Path,
+    owner: &Identity,
+) -> Result<Option<PathBuf>, String> {
+    let Some(path) = directory(sessions, &owner.session)? else {
         return Ok(None);
     };
     verify(&path, &owner.project, &owner.session)?;
@@ -91,14 +101,14 @@ pub(super) fn owned_directory(root: &Path, owner: &Identity) -> Result<Option<Pa
 }
 
 /// A collaborator's directory in the home where this conversation's
-/// collaborators keep their sessions: `sessions/<folder>/outputs/<session>`.
+/// collaborators keep their sessions: `sessions/<folder>/<session>/outputs`.
 /// That home belongs to this conversation alone; the record names the
 /// collaborator's session and the folder it worked in.
 pub(super) fn collaborator_directory(
     home: &Path,
     session: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let sessions = home.join("sessions");
+    let sessions = home.join(layout::SESSIONS);
     checked_ancestors(&sessions)?;
     if !inspect_optional(&sessions)?.is_some_and(|metadata| metadata.is_dir()) {
         return Ok(None);
@@ -109,19 +119,18 @@ pub(super) fn collaborator_directory(
         let folder = entry
             .map_err(|error| format!("Could not inspect saved output: {error}"))?
             .path();
-        let root = folder.join("outputs");
         let present = crate::disk::metadata_if_present(&folder)
             .ok()
             .flatten()
             .is_some_and(|metadata| crate::disk::ordinary_directory(&metadata))
-            && crate::disk::metadata_if_present(&root.join(session))
+            && crate::disk::metadata_if_present(&outputs(&folder, session))
                 .ok()
                 .flatten()
                 .is_some();
         if !present {
             continue;
         }
-        if let Some(path) = directory(&root, session)? {
+        if let Some(path) = directory(&folder, session)? {
             verify(&path, &recorded_project(&path)?, session)?;
             return Ok(Some(path));
         }
@@ -143,18 +152,21 @@ pub(super) fn saved_file(
     }
 }
 
-/// `root/session` when it exists, refusing links and other entries on the way.
-fn directory(root: &Path, session: &str) -> Result<Option<PathBuf>, String> {
-    checked_ancestors(root)?;
-    if inspect_optional(root)?.is_none() {
+/// `sessions/session/outputs` when it exists, refusing links and other
+/// entries on the way.
+fn directory(sessions: &Path, session: &str) -> Result<Option<PathBuf>, String> {
+    checked_ancestors(sessions)?;
+    if inspect_optional(sessions)?.is_none() {
         return Ok(None);
     }
-    let path = root.join(session);
-    match inspect_optional(&path)? {
-        None => Ok(None),
-        Some(metadata) if metadata.is_dir() => Ok(Some(path)),
-        Some(_) => Err("Saved output session must be a directory".into()),
+    for path in [sessions.join(session), outputs(sessions, session)] {
+        match inspect_optional(&path)? {
+            None => return Ok(None),
+            Some(metadata) if metadata.is_dir() => {}
+            Some(_) => return Err("Saved output session must be a directory".into()),
+        }
     }
+    Ok(Some(outputs(sessions, session)))
 }
 
 fn recorded_project(directory: &Path) -> Result<PathBuf, String> {
@@ -178,8 +190,10 @@ fn verify(directory: &Path, project: &Path, session: &str) -> Result<(), String>
 
 pub(crate) struct Removal(Option<owned::Removal>);
 
+/// The removal of `session`'s output directory among the session folders in
+/// `sessions`.
 pub(crate) fn prepare_removal(
-    root: &Path,
+    sessions: &Path,
     project: &Path,
     session: &str,
     document: &crate::sessions::Document,
@@ -190,10 +204,10 @@ pub(crate) fn prepare_removal(
     {
         return Err("Output removal identity differs from the session".into());
     }
-    if !root.is_absolute() {
+    if !sessions.is_absolute() {
         return Err("Output directory must be absolute".into());
     }
-    Ok(Removal(identity.directory(root).prepare_removal()?))
+    Ok(Removal(identity.directory(sessions).prepare_removal()?))
 }
 
 impl Removal {
