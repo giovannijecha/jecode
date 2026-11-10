@@ -205,4 +205,19 @@ fn resumed_conversation_reads_its_closed_collaborators_files() {
     resumed.resume(&id).unwrap();
     assert_reads(&resumed, "tmp:notes.md", "child notes");
     assert_reads(&resumed, "tmp:a1:notes.md", "child notes");
+    // The child's area is its own session folder's, in the parent's
+    // collaborator home: `sessions/<project>/<child>/tmp`.
+    let children = resumed
+        .sessions()
+        .unwrap()
+        .store()
+        .collaborator_home(&id)
+        .join("sessions");
+    let areas = std::fs::read_dir(children)
+        .unwrap()
+        .flat_map(|bucket| std::fs::read_dir(bucket.unwrap().path()).unwrap())
+        .map(|session| session.unwrap().path().join("tmp").join("notes.md"))
+        .filter(|file| file.is_file())
+        .count();
+    assert_eq!(areas, 1);
 }

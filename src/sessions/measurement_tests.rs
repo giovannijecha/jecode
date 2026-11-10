@@ -155,7 +155,7 @@ fn session_history_and_listing() {
             assert_eq!(listing.sessions.len(), 1);
             assert!(listing.warnings.is_empty());
             row(&path, "list_cached_one", size, repeat, elapsed, bytes);
-            fs::remove_file(store.bucket.join(format!("{}.summary.json", document.id))).unwrap();
+            fs::remove_file(store.summary_path(&document.id)).unwrap();
             let (listing, elapsed) = timed(|| store.list().unwrap());
             assert_eq!(listing.sessions.len(), 1);
             assert!(listing.warnings.is_empty());

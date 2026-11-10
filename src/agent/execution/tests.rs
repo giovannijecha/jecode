@@ -539,7 +539,7 @@ fn failed_batch_result_checkpoint_recovers_uncertain_reads_without_replaying_wri
         .unwrap()
         .unwrap()
         .path();
-    let journal = bucket.join(format!("{id}.jsonl"));
+    let journal = bucket.join(&id).join("session.jsonl");
     let original = fs::metadata(&journal).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_readonly(true);

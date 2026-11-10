@@ -350,7 +350,7 @@ fn an_unsaved_write_outcome_recovers_as_unknown_without_replaying_the_effect() {
         .unwrap()
         .unwrap()
         .path();
-    let journal = bucket.join(format!("{id}.jsonl"));
+    let journal = bucket.join(&id).join("session.jsonl");
     let original = fs::metadata(&journal).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_readonly(true);

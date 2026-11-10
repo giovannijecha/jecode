@@ -191,10 +191,7 @@ fn failed_parent_receipt_never_claims_a_confirmed_child_return() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let handle = parent.sessions().unwrap();
-    let journal = handle
-        .store()
-        .bucket()
-        .join(format!("{}.jsonl", handle.id()));
+    let journal = handle.store().fixture_journal(&handle.id());
     let original_permissions = std::fs::metadata(&journal).unwrap().permissions();
     let restoration = RestoreJournalPermissions {
         path: journal.clone(),

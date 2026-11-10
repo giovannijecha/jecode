@@ -2,6 +2,7 @@
 
 use super::{Pool, references};
 use crate::disk;
+use crate::sessions::layout;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, ReadDir};
 use std::io::ErrorKind;
@@ -60,44 +61,82 @@ impl Pool {
     }
 }
 
+/// Reads every record in a project's session folder that can name an asset:
+/// each session's journal and sidecars, its retained collaborator records and
+/// its collaborators' own sessions. Files of the earlier flat layout are read
+/// too, so their assets are kept although those sessions cannot be opened.
 fn collect_references(sessions: &Path, referenced: &mut BTreeSet<String>) -> Result<(), String> {
-    for entry in directory(sessions, false)?.expect("required directory") {
+    collect_bucket(sessions, false, referenced)
+}
+
+fn collect_bucket(
+    bucket: &Path,
+    optional: bool,
+    referenced: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let Some(entries) = directory(bucket, optional)? else {
+        return Ok(());
+    };
+    for entry in entries {
         let entry = entry.map_err(inspect_error)?;
-        let name = entry.file_name();
-        if name.to_string_lossy() == "collaboration" {
-            collect_collaboration(&entry.path(), referenced)?;
-        } else if !name.to_string_lossy().ends_with(".lock") {
-            read_file(&entry.path(), referenced)?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if crate::sessions::valid_id(&name)
+            && disk::ordinary_directory(&fs::symlink_metadata(&path).map_err(inspect_error)?)
+        {
+            collect_session(&path, referenced)?;
+        } else if name == layout::COLLABORATION {
+            // The earlier layout kept each parent's collaborators here.
+            let Some(parents) = directory(&path, true)? else {
+                continue;
+            };
+            for parent in parents {
+                let parent = parent.map_err(inspect_error)?;
+                if crate::sessions::valid_id(&parent.file_name().to_string_lossy()) {
+                    collect_collaboration(&parent.path(), referenced)?;
+                }
+            }
+        } else if !name.ends_with(".lock") {
+            // Journals and sidecars of the earlier layout. Directories such
+            // as the attachment pool hold no records.
+            read_file(&path, referenced)?;
         }
     }
     Ok(())
 }
 
+/// One session's own records; its saved outputs and temporary files are not
+/// records, and its lock holds nothing.
+fn collect_session(session: &Path, referenced: &mut BTreeSet<String>) -> Result<(), String> {
+    for entry in directory(session, false)?.expect("required directory") {
+        let entry = entry.map_err(inspect_error)?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        match name.as_str() {
+            layout::LOCK | layout::OUTPUTS | layout::TEMPORARY => {}
+            layout::COLLABORATION => collect_collaboration(&entry.path(), referenced)?,
+            _ => read_file(&entry.path(), referenced)?,
+        }
+    }
+    Ok(())
+}
+
+/// Retained parent records and the collaborators' own sessions; isolated
+/// workspaces hold project files, not records.
 fn collect_collaboration(
     collaboration: &Path,
     referenced: &mut BTreeSet<String>,
 ) -> Result<(), String> {
-    let Some(parents) = directory(collaboration, true)? else {
+    let Some(entries) = directory(collaboration, true)? else {
         return Ok(());
     };
-    for parent in parents {
-        let parent = parent.map_err(inspect_error)?;
-        let name = parent.file_name();
-        if !crate::sessions::valid_id(&name.to_string_lossy()) {
-            continue;
-        }
-        let Some(entries) = directory(&parent.path(), true)? else {
-            continue;
-        };
-        for entry in entries {
-            let entry = entry.map_err(inspect_error)?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name == "child-home" {
-                collect_child_home(&entry.path(), referenced)?;
-            } else if name.starts_with("parent-") && name.ends_with(".json") {
-                read_file(&entry.path(), referenced)?;
-            }
+    for entry in entries {
+        let entry = entry.map_err(inspect_error)?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == layout::CHILD_HOME {
+            collect_child_home(&entry.path(), referenced)?;
+        } else if name.starts_with("parent-") && name.ends_with(".json") {
+            read_file(&entry.path(), referenced)?;
         }
     }
     Ok(())
@@ -107,24 +146,13 @@ fn collect_child_home(home: &Path, referenced: &mut BTreeSet<String>) -> Result<
     let Some(_) = directory(home, true)? else {
         return Ok(());
     };
-    let Some(buckets) = directory(&home.join("sessions"), true)? else {
+    let Some(buckets) = directory(&home.join(layout::SESSIONS), true)? else {
         return Ok(());
     };
     for bucket in buckets {
         let bucket = bucket.map_err(inspect_error)?;
-        let name = bucket.file_name();
-        let name = name.to_string_lossy();
-        if name.len() != 32 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            continue;
-        }
-        let Some(files) = directory(&bucket.path(), true)? else {
-            continue;
-        };
-        for file in files {
-            let file = file.map_err(inspect_error)?;
-            if !file.file_name().to_string_lossy().ends_with(".lock") {
-                read_file(&file.path(), referenced)?;
-            }
+        if layout::bucket_name(&bucket.file_name().to_string_lossy()) {
+            collect_bucket(&bucket.path(), true, referenced)?;
         }
     }
     Ok(())
@@ -167,9 +195,13 @@ fn read_file(path: &Path, referenced: &mut BTreeSet<String>) -> Result<(), Strin
         }
         return Ok(());
     }
-    if metadata.is_file() {
-        referenced.extend(references(&fs::read(path).map_err(inspect_error)?));
+    if !metadata.is_file() {
+        return Err(format!(
+            "Cannot inspect sessions: {} is not a regular file",
+            path.display()
+        ));
     }
+    referenced.extend(references(&fs::read(path).map_err(inspect_error)?));
     Ok(())
 }
 

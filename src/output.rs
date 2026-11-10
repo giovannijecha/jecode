@@ -14,6 +14,8 @@ pub(crate) use ownership::{Removal, prepare_removal};
 
 #[derive(Clone)]
 pub struct Store {
+    /// For a session's store, the folder holding its project's session
+    /// folders, each with its own `outputs`; otherwise the output directory.
     root: PathBuf,
     redactor: Redactor,
     owner: Option<ownership::Identity>,
@@ -51,17 +53,18 @@ impl Store {
         }
     }
 
+    /// The outputs of `session`, saved in its folder among `sessions`.
     pub fn for_session(
-        root: PathBuf,
+        sessions: PathBuf,
         project: PathBuf,
         session: &str,
         redactor: Redactor,
     ) -> Result<Self, String> {
-        if !root.is_absolute() {
+        if !sessions.is_absolute() {
             return Err("Output directory must be absolute".into());
         }
         Ok(Self {
-            root,
+            root: sessions,
             redactor,
             owner: Some(ownership::Identity::new(project, session)?),
             establishment: Arc::new(Mutex::new(())),
@@ -139,13 +142,16 @@ impl Store {
     pub fn resolve(&self, reference: &str) -> Result<PathBuf, String> {
         let (session, id, stream) = parse(reference)
             .ok_or("Invalid output reference: pass the exact output: value a tool returned")?;
+        let unavailable = || {
+            format!(
+                "{reference} is not saved for this conversation or its agents; ask the agent that ran it for the content, or run the command again"
+            )
+        };
         let directory = match session {
-            None => ownership::flat_directory(&self.root)?,
-            Some(session) => self.session_directory(session)?.ok_or_else(|| {
-                format!(
-                    "{reference} is not saved for this conversation or its agents; ask the agent that ran it for the content, or run the command again"
-                )
-            })?,
+            // Only a store without a session saves unscoped references.
+            None if self.owner.is_none() => ownership::flat_directory(&self.root)?,
+            None => return Err(unavailable()),
+            Some(session) => self.session_directory(session)?.ok_or_else(unavailable)?,
         };
         ownership::saved_file(&directory, id, stream)?.ok_or_else(|| {
             format!(

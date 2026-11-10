@@ -172,14 +172,15 @@ fn collection_removes_only_unreferenced_owned_assets() {
     let live = pool.import_bytes("live.txt", b"b").unwrap();
     let released = pool.import_bytes("released.txt", b"c").unwrap();
     let recent = pool.import_bytes("recent.txt", b"d").unwrap();
+    fs::create_dir(sessions.join("1-2-3")).unwrap();
     fs::write(
-        sessions.join("1-2-3.jsonl"),
+        sessions.join("1-2-3").join("session.jsonl"),
         format!("{{\"id\":\"{}\"}}", kept.id),
     )
     .unwrap();
     fs::write(pool.directory().join("notes.txt"), b"not owned").unwrap();
     // An open session holds a byte-range lock on its lease file.
-    let lease = fs::File::create(sessions.join("1-2-3.lock")).unwrap();
+    let lease = fs::File::create(sessions.join("1-2-3").join("session.lock")).unwrap();
     lease.lock().unwrap();
     let removed = pool
         .collect(

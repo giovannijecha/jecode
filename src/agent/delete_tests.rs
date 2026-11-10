@@ -39,13 +39,23 @@ fn deleting_current_removes_owned_orphans_and_the_next_turn_saves_only_the_new_c
     let reference = result.get("stdout_file").unwrap().as_str().unwrap();
     assert!(reference.starts_with(&format!("output:{id}:")));
     // The output was never added to the journal; ownership still identifies it.
-    assert!(store.output_directory().join(&id).exists());
+    assert!(store.session_directory(&id).join("outputs").exists());
+    assert_eq!(
+        std::path::Path::new(&temporary),
+        crate::scratch::environment_path(&store.session_directory(&id).join("tmp"))
+    );
     let (report, replaced) = current
         .delete_session(&id, "fixture/default".into(), Effort::High)
         .unwrap();
     assert!(replaced && report.files >= 6);
     assert!(!std::path::Path::new(&temporary).exists());
-    assert!(!store.output_directory().join(&id).exists());
+    assert!(!store.session_directory(&id).join("outputs").exists());
+    // Only the inert lock stays; the deleted conversation is not listed.
+    let left = fs::read_dir(store.session_directory(&id))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(left, ["session.lock"]);
     assert!(store.list().unwrap().sessions.is_empty());
     assert_eq!(
         fs::read_to_string(project.path().join("keep.txt")).unwrap(),

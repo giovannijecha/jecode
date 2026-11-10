@@ -14,6 +14,7 @@ fn deletion_message_displays_retained_collaborator_location() {
         files: 1,
         directories: 0,
         retained_collaboration: Some(std::path::PathBuf::from("retained/child")),
+        kept: Vec::new(),
     };
     let text = message("Old conversation", &report, false);
     assert!(text.contains("Collaborator files retained at retained/child"));

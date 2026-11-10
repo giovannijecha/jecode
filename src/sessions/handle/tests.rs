@@ -145,10 +145,7 @@ fn background_save_is_polled_without_waiting_and_exit_flushes_the_last_edit() {
 fn failed_background_save_reports_error_and_keeps_the_latest_edit_for_retry() {
     let (_home, _directory, handle) = fixture();
     handle.flush().unwrap();
-    let path = handle
-        .store()
-        .bucket()
-        .join(format!("{}.jsonl", handle.id()));
+    let path = handle.store().journal_path(&handle.id());
     let original = std::fs::metadata(&path).unwrap().permissions();
     let mut readonly = original.clone();
     readonly.set_readonly(true);

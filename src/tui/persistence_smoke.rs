@@ -85,22 +85,17 @@ fn sessions_windows_smoke() {
         .unwrap()
         .unwrap()
         .path();
-    let path = std::fs::read_dir(bucket)
+    let session = std::fs::read_dir(bucket)
         .unwrap()
         .flatten()
-        .find(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "jsonl")
-        })
+        .find(|entry| entry.path().join("session.jsonl").is_file())
         .unwrap()
         .path();
-    let saved = std::fs::read_to_string(&path).unwrap();
+    let saved = std::fs::read_to_string(session.join("session.jsonl")).unwrap();
     assert!(!saved.contains("isolated-fixture-key"));
     let document = crate::sessions::Store::new(home, directory.path())
         .unwrap()
-        .fixture_load(path.file_stem().unwrap().to_str().unwrap())
+        .fixture_load(session.file_name().unwrap().to_str().unwrap())
         .unwrap();
     assert_eq!(document.input.queued, ["/help", "queued follow-up"]);
     assert_eq!(document.input.draft.text, "draft kept");

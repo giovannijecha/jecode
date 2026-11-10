@@ -13,24 +13,35 @@ pub(super) fn hint(agent: &Agent, output: &mut impl Write) -> Result<(), String>
         writeln!(output, "Previous session: {} · /resume", session.title)
             .map_err(|error| error.to_string())?;
     }
-    // An upgrade can leave many sessions in an earlier format: say so once.
-    // `/resume` still lists each one.
-    let (unsupported, warnings): (Vec<_>, Vec<_>) = listing
-        .warnings
-        .into_iter()
-        .partition(|warning| warning.ends_with(crate::sessions::UNSUPPORTED));
-    if unsupported.len() > 1 {
-        writeln!(
-            output,
-            "{} saved sessions use an unsupported format or version; files left unchanged",
-            unsupported.len()
-        )
-        .map_err(|error| error.to_string())?;
+    // An upgrade can leave many sessions in an earlier format or storage
+    // layout: say so once per kind. `/resume` still lists each one.
+    let mut warnings = listing.warnings;
+    for (reason, summary) in [
+        (
+            crate::sessions::UNSUPPORTED,
+            "use an unsupported format or version",
+        ),
+        (
+            crate::sessions::LEGACY,
+            "use the storage layout of an earlier Jecode version",
+        ),
+    ] {
+        let (unsupported, rest): (Vec<_>, Vec<_>) = warnings
+            .into_iter()
+            .partition(|warning| warning.ends_with(reason));
+        warnings = rest;
+        if unsupported.len() > 1 {
+            writeln!(
+                output,
+                "{} saved sessions {summary}; files left unchanged",
+                unsupported.len()
+            )
+            .map_err(|error| error.to_string())?;
+        } else {
+            warnings.extend(unsupported);
+        }
     }
-    for warning in warnings
-        .iter()
-        .chain(unsupported.iter().filter(|_| unsupported.len() == 1))
-    {
+    for warning in warnings {
         writeln!(output, "{warning}").map_err(|error| error.to_string())?;
     }
     Ok(())

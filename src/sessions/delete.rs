@@ -1,4 +1,4 @@
-use super::{Document, Store, same_directory, valid_id};
+use super::{Document, Store, layout, same_directory, valid_id};
 use crate::{json::Value, output, scratch};
 use std::collections::BTreeSet;
 use std::fs;
@@ -10,6 +10,8 @@ pub(crate) struct DeleteReport {
     pub files: usize,
     pub directories: usize,
     pub retained_collaboration: Option<PathBuf>,
+    /// Entries of the session folder that deletion does not own, left in place.
+    pub kept: Vec<PathBuf>,
 }
 
 struct RetainedCollaboration {
@@ -19,23 +21,25 @@ struct RetainedCollaboration {
 }
 
 pub(crate) struct Removal {
-    bucket: PathBuf,
+    home: PathBuf,
+    session: PathBuf,
     attachment_bucket: PathBuf,
     ancillary: Vec<PathBuf>,
     durable: Option<PathBuf>,
     output: output::Removal,
     scratch: Option<scratch::Removal>,
     collaboration: Option<RetainedCollaboration>,
+    kept: Vec<PathBuf>,
     /// Attachments the deleted conversation sent; no grace period applies.
     released: BTreeSet<String>,
 }
 
 impl Store {
-    /// Check owned parent paths before opening even the persistent lock file.
-    /// This is also used when a fresh current handle needs its first lease.
-    pub(super) fn deletion_scope(&self) -> Result<(), String> {
-        inspect_parent(&self.bucket)?;
-        inspect_parent(&self.output_directory())
+    /// Check the owned folders from the home down to session `id` before
+    /// opening even the persistent lock file. This is also used when a fresh
+    /// current handle needs its first lease.
+    pub(super) fn deletion_scope(&self, id: &str) -> Result<(), String> {
+        inspect_owned(self.home(), &self.session_directory(id))
     }
 
     /// Delete an inactive session while holding the same exclusive lease used
@@ -44,34 +48,53 @@ impl Store {
         if !valid_id(id) {
             return Err("Invalid session identifier".into());
         }
-        self.deletion_scope()?;
+        self.deletion_scope(id)?;
+        // A missing session gets no folder or lock; the load under the lease
+        // below remains the authoritative check.
+        if !self.journal_path(id).exists() {
+            self.load(id)?;
+        }
         let _lease = self.acquire(id)?;
         let (document, _) = self.load(id)?;
         self.removal(&document)?.remove()
     }
 
     /// Called by the active handle while its existing lease and Live mutex are
-    /// held. A fresh conversation need not have a checkpoint yet.
+    /// held. A fresh conversation need not have a checkpoint yet. Everything
+    /// to remove is inspected before anything is removed.
     pub(super) fn removal(&self, document: &Document) -> Result<Removal, String> {
         if !valid_id(&document.id) || !same_directory(&document.directory, &self.directory) {
             return Err("Session identity or working directory changed".into());
         }
-        self.deletion_scope()?;
         let id = &document.id;
+        self.deletion_scope(id)?;
+        let session = self.session_directory(id);
+        let entries = match fs::read_dir(&session) {
+            Ok(entries) => entries
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| format!("Could not inspect session directory: {error}"))?,
+            Err(error) if error.kind() == ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(format!("Could not inspect session directory: {error}")),
+        };
         let mut ancillary = Vec::new();
         let mut durable = None;
-        let entries = fs::read_dir(&self.bucket)
-            .map_err(|error| format!("Could not inspect session directory: {error}"))?;
+        let mut kept = Vec::new();
         for entry in entries {
-            let entry = entry.map_err(|error| error.to_string())?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = entry.path();
-            if name == format!("{id}.jsonl") {
-                inspect_file(&path)?;
-                durable = Some(path);
-            } else if sidecar(&name, id) {
-                inspect_file(&path)?;
-                ancillary.push(path);
+            match name.as_str() {
+                layout::JOURNAL => {
+                    inspect_file(&path)?;
+                    durable = Some(path);
+                }
+                // The lock stays for other lockers; the owned folders are
+                // inspected by their own removals below.
+                layout::LOCK | layout::OUTPUTS | layout::TEMPORARY | layout::COLLABORATION => {}
+                _ if sidecar(&name) => {
+                    inspect_file(&path)?;
+                    ancillary.push(path);
+                }
+                _ => kept.push(path),
             }
         }
         // A fresh active session has no durable file. An inactive caller has
@@ -80,10 +103,10 @@ impl Store {
             self.load(id)?;
         }
         ancillary.sort();
-        let output =
-            output::prepare_removal(&self.output_directory(), &self.directory, id, document)?;
+        kept.sort();
+        let output = output::prepare_removal(&self.bucket, &self.directory, id, document)?;
         let scratch = self.temporary_area(id)?.prepare_removal()?;
-        let collaboration = RetainedCollaboration::prepare(&self.bucket, document)?;
+        let collaboration = RetainedCollaboration::prepare(&self.collaboration(id), document)?;
         // Draft attachments are left to the regular grace period: a fresh
         // conversation may inherit the draft before its first save.
         let released = document
@@ -92,7 +115,8 @@ impl Store {
             .flat_map(|message| crate::attachments::references(message.encode().as_bytes()))
             .collect();
         Ok(Removal {
-            bucket: self.bucket.clone(),
+            home: self.home().to_path_buf(),
+            session,
             attachment_bucket: self.attachment_bucket().to_path_buf(),
             released,
             ancillary,
@@ -100,6 +124,7 @@ impl Store {
             output,
             scratch,
             collaboration,
+            kept,
         })
     }
 }
@@ -109,12 +134,16 @@ impl Removal {
         self.remove_with_live(&BTreeSet::new())
     }
 
+    /// Retains collaborator records first, then removes outputs, the
+    /// temporary area and sidecars; the journal goes last, so a failure
+    /// leaves the conversation available for a later attempt.
     pub(crate) fn remove_with_live(
         self,
         live_attachments: &BTreeSet<String>,
     ) -> Result<DeleteReport, String> {
         let mut report = DeleteReport::default();
         if let Some(collaboration) = &self.collaboration {
+            inspect_owned(&self.home, &collaboration.directory)?;
             collaboration.save()?;
             report.retained_collaboration = Some(collaboration.directory.clone());
         }
@@ -128,25 +157,26 @@ impl Removal {
             report.directories += directories;
         }
         for path in self.ancillary.into_iter().chain(self.durable) {
-            inspect_parent(&self.bucket).map_err(incomplete)?;
+            inspect_owned(&self.home, &self.session).map_err(incomplete)?;
             inspect_file(&path).map_err(incomplete)?;
             fs::remove_file(&path).map_err(|error| {
                 incomplete(format!("Could not remove {}: {error}", path.display()))
             })?;
             report.files += 1;
         }
+        report.kept = self.kept;
         // Collection is best effort: the conversation itself is already gone.
-        report.files += crate::attachments::Pool::new(self.attachment_bucket.join("attachments"))
-            .collect(&self.attachment_bucket, live_attachments, &self.released)
-            .unwrap_or(0);
+        report.files +=
+            crate::attachments::Pool::new(self.attachment_bucket.join(layout::ATTACHMENTS))
+                .collect(&self.attachment_bucket, live_attachments, &self.released)
+                .unwrap_or(0);
         Ok(report)
     }
 }
 
 impl RetainedCollaboration {
-    fn prepare(bucket: &Path, document: &Document) -> Result<Option<Self>, String> {
-        let directory = bucket.join("collaboration").join(&document.id);
-        inspect_parent(&directory)?;
+    fn prepare(directory: &Path, document: &Document) -> Result<Option<Self>, String> {
+        let directory = directory.to_path_buf();
         let Some(metadata) = crate::disk::metadata_if_present(&directory)
             .map_err(|error| format!("Could not inspect collaborator files: {error}"))?
         else {
@@ -213,7 +243,6 @@ impl RetainedCollaboration {
     }
 
     fn save(&self) -> Result<(), String> {
-        inspect_parent(&self.directory)?;
         match crate::disk::metadata_if_present(&self.manifest)
             .map_err(|error| format!("Could not inspect retained collaborator record: {error}"))?
         {
@@ -260,17 +289,21 @@ fn incomplete(message: impl AsRef<str>) -> String {
     )
 }
 
-fn sidecar(name: &str, id: &str) -> bool {
-    if name == format!("{id}.summary.json") {
+/// The summary cache, its staging files and set-aside damaged journal tails,
+/// named as the summary and journal writers name them.
+fn sidecar(name: &str) -> bool {
+    if name == layout::SUMMARY {
         return true;
     }
     [
-        format!("{id}.jsonl.damaged-"),
-        format!("{id}.summary.tmp-"),
-        format!("{id}.tmp-"),
+        Path::new(layout::JOURNAL).with_extension("jsonl.damaged-"),
+        Path::new(layout::SUMMARY).with_extension("tmp-"),
     ]
     .iter()
-    .any(|prefix| name.strip_prefix(prefix).is_some_and(generated_id))
+    .any(|prefix| {
+        name.strip_prefix(prefix.to_string_lossy().as_ref())
+            .is_some_and(generated_id)
+    })
 }
 
 fn generated_id(value: &str) -> bool {
@@ -282,25 +315,27 @@ fn generated_id(value: &str) -> bool {
     }) && parts.next().is_none()
 }
 
-fn inspect_parent(path: &Path) -> Result<(), String> {
-    // The owner creates home/sessions/bucket and home/tmp/bucket. Reject a
-    // replaced parent before following any descendant for removal.
-    for parent in path
-        .ancestors()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-    {
-        match fs::symlink_metadata(parent) {
+/// Every folder from `home` down to `path` that exists is an ordinary
+/// directory. The owner creates them, so a replaced one is rejected before
+/// any descendant is followed for removal.
+fn inspect_owned(home: &Path, path: &Path) -> Result<(), String> {
+    let below = path
+        .strip_prefix(home)
+        .map_err(|_| "Owned session path is outside its home")?;
+    let mut current = home.to_path_buf();
+    for part in std::iter::once(None).chain(below.components().map(Some)) {
+        if let Some(part) = part {
+            current.push(part);
+        }
+        match fs::symlink_metadata(&current) {
             Ok(metadata) if crate::disk::linked(&metadata) || !metadata.is_dir() => {
                 return Err(format!(
                     "Owned directory is not a regular directory: {}",
-                    parent.display()
+                    current.display()
                 ));
             }
             Ok(_) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(format!("Could not inspect owned directory: {error}")),
         }
     }

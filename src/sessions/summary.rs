@@ -36,7 +36,7 @@ pub(super) fn stamp(store: &Store, id: &str) -> Option<Stamp> {
 }
 
 fn path(store: &Store, id: &str) -> PathBuf {
-    store.bucket.join(format!("{id}.summary.json"))
+    store.summary_path(id)
 }
 
 pub(super) fn load(store: &Store, id: &str, stamp: &Stamp) -> Option<Summary> {

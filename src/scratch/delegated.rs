@@ -4,13 +4,15 @@
 
 use super::{OWNERSHIP, relative};
 use crate::json::Value;
+use crate::sessions::layout;
 use std::fs::{self, Metadata};
 use std::path::{Path, PathBuf};
 
 /// The area root and file of `alias` in the existing temporary area of
-/// `session` under `home`, the `tmp` directory of that session's home.
-/// Entries below `boundary` must be ordinary, and the area must record
-/// `session`. A linked folder of areas is skipped without being entered.
+/// `session` under `home`, the home where that session's agent saves its
+/// sessions: `home/sessions/<folder>/<session>/tmp`. Entries below `boundary`
+/// must be ordinary, and the area must record `session`. A linked project
+/// folder is skipped without being entered.
 pub fn find(
     boundary: &Path,
     home: &Path,
@@ -18,7 +20,8 @@ pub fn find(
     alias: &str,
 ) -> Result<Option<(PathBuf, PathBuf)>, String> {
     let relative = relative(alias)?;
-    let below = home
+    let sessions = home.join(layout::SESSIONS);
+    let below = sessions
         .strip_prefix(boundary)
         .map_err(|_| "Invalid temporary area location")?;
     let mut path = boundary.to_path_buf();
@@ -28,14 +31,24 @@ pub fn find(
             return Ok(None);
         }
     }
-    for folder in fs::read_dir(home).map_err(failure)? {
+    for folder in fs::read_dir(&sessions).map_err(failure)? {
         let folder = folder.map_err(failure)?.path();
         let ordinary = crate::disk::metadata_if_present(&folder)
             .ok()
             .flatten()
             .is_some_and(|metadata| crate::disk::ordinary_directory(&metadata));
-        let area = folder.join(session);
-        let Some(metadata) = ordinary.then(|| present(&area)).transpose()?.flatten() else {
+        if !ordinary {
+            continue;
+        }
+        let owner = folder.join(session);
+        let Some(metadata) = present(&owner)? else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            return Err("Session folder must be a directory".into());
+        }
+        let area = owner.join(layout::TEMPORARY);
+        let Some(metadata) = present(&area)? else {
             continue;
         };
         if !metadata.is_dir() {

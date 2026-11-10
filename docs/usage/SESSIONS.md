@@ -5,6 +5,14 @@ conversation belongs to the directory where it started: you can resume it only
 from that directory, and moving the project to another path does not move its
 conversations. Starting `jecode` always opens a new conversation.
 
+Each conversation owns one folder, `sessions/<project>/<session>/`, holding its
+history, complete command output, [temporary files](TEMPORARY.md) and
+[collaborator](COLLABORATION.md) data; the project's
+[attachments](ATTACHMENTS.md) are shared in `sessions/<project>/attachments/`.
+See [Files Jecode keeps](CONFIGURATION.md#files-jecode-keeps). The folder is
+created when the conversation first saves or uses one of those areas; only a
+folder with a saved history is a conversation you can resume.
+
 ## Resume a conversation
 
 ```text
@@ -82,6 +90,14 @@ another directory are reported and left unchanged. The current journal format
 is version 4, with version 2 session state. Experimental versions do not migrate
 older saved formats; those conversations cannot be resumed by this build.
 
+Earlier versions kept each conversation's files side by side in
+`sessions/<project>/` (`SESSION_ID.jsonl` and its sidecars, with `outputs/`,
+`collaboration/` and a separate `~/.jecode/tmp/` tree). This build reports those
+conversations in `/resume` and at startup as using an earlier storage layout,
+and refuses to resume or delete them. It does not move, convert or remove any of
+their files; their attachments stay in the shared pool while those histories
+refer to them.
+
 ## Delete a conversation
 
 In the TUI's `/resume` picker, select a conversation and press Ctrl+D to mark it,
@@ -93,8 +109,16 @@ Deleting removes the conversation's saved history, recovery copies, complete
 command output and [temporary files](TEMPORARY.md). Attachments are removed when
 no other saved conversation uses them. Project files and
 [exports](COPY_AND_EXPORT.md#export) stay. If the conversation had
-[collaborators](COLLABORATION.md#stop-close-and-recover), their files and
-histories are kept and the result says where.
+[collaborators](COLLABORATION.md#stop-close-and-recover), their workspaces,
+histories and records are kept in the conversation's `collaboration/` folder and
+the result says where; the deleted conversation no longer appears in `/resume`.
+
+The files Jecode removes are checked before deletion, and the history goes
+last. A link or junction in their storage paths stops the deletion. Entries of
+the conversation's folder that Jecode does not recognize are left in place and
+named in the result. The empty `session.lock` and its folder stay, because
+another Jecode process may hold or wait on that lock; they are not a
+conversation.
 
 Deleting the current conversation opens a new one with your defaults and keeps
 your unsent input. If deletion fails partway, some files may already be gone;
@@ -102,6 +126,7 @@ read the error and retry from `/resume`.
 
 Conversations have no automatic expiry.
 
-Jecode cannot delete unsupported saved formats through the picker: deletion
-needs a valid document to check ownership of associated files. Remove those
-files manually when you no longer need them; Jecode leaves them unchanged.
+Jecode cannot delete unsupported saved formats or the earlier storage layout
+through the picker: deletion needs a valid document to check ownership of
+associated files. Remove those files manually when you no longer need them;
+Jecode leaves them unchanged.

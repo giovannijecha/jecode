@@ -236,7 +236,7 @@ fn storage_failure_before_tool_start_prevents_the_side_effect_and_keeps_a_valid_
         .unwrap()
         .unwrap()
         .path();
-    let path = bucket.join(format!("{id}.jsonl"));
+    let path = bucket.join(&id).join("session.jsonl");
     let original_permissions = std::fs::metadata(&path).unwrap().permissions();
     let mut permissions = original_permissions.clone();
     permissions.set_readonly(true);
@@ -270,7 +270,7 @@ fn the_first_streamed_text_is_on_disk_before_the_display_event() {
                     .unwrap()
                     .unwrap()
                     .path();
-                assert!(bucket.join(format!("{id}.jsonl")).exists());
+                assert!(bucket.join(&id).join("session.jsonl").exists());
                 let doc = crate::sessions::Store::new(home.path().to_path_buf(), directory.path())
                     .unwrap()
                     .fixture_load(&id)
@@ -322,7 +322,7 @@ fn failed_preparation_restores_ready_state_and_retry_submits_the_prompt_once() {
         .unwrap()
         .unwrap()
         .path();
-    let path = bucket.join(format!("{}.jsonl", handle.id()));
+    let path = bucket.join(handle.id()).join("session.jsonl");
     let before = std::fs::read(&path).unwrap();
     let original = std::fs::metadata(&path).unwrap().permissions();
     let mut readonly = original.clone();

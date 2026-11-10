@@ -57,8 +57,13 @@ fn cargo_uses_the_discovered_sdk_without_xcrun() {
     .unwrap();
     let mut tools = fixture(root.path());
     tools.configure_temporary(
-        crate::scratch::Area::new(home.path().join("tmp"), root.path().to_path_buf(), "1-1-0")
-            .unwrap(),
+        crate::scratch::Area::new(
+            home.path(),
+            home.path().join("tmp"),
+            root.path().to_path_buf(),
+            "1-1-0",
+        )
+        .unwrap(),
     );
     let cargo = |name: &str, remove_sdk: bool| {
         let script = format!(

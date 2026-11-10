@@ -165,5 +165,7 @@ work is not lost. To discard an isolated copy explicitly, have the main agent
 close the assignment before you delete the conversation.
 
 Collaborator data lives with the conversation, under
-`~/.jecode/sessions/<project>/collaboration/`. Collaborator histories cannot be
-opened from `/resume`.
+`~/.jecode/sessions/<project>/<session>/collaboration/`. Each collaborator's own
+history, command output and temporary files are kept in its session folder
+there, in the same layout as a main conversation. Collaborator histories cannot
+be opened from `/resume`.

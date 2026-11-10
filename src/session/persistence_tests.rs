@@ -391,18 +391,34 @@ fn startup_reports_several_unsupported_sessions_in_one_line() {
         super::persistence::hint(agent, &mut output).unwrap();
         String::from_utf8(output).unwrap()
     };
+    // Files of the earlier flat layout.
     std::fs::write(bucket.join("1-1-1.json"), "{}").unwrap();
     assert_eq!(
         hinted(&agent),
-        format!("Session 1-1-1: {}\n", crate::sessions::UNSUPPORTED)
+        format!("Session 1-1-1: {}\n", crate::sessions::LEGACY)
     );
-    std::fs::write(bucket.join("2-2-2.json"), "{}").unwrap();
+    std::fs::write(bucket.join("2-2-2.jsonl"), "{}").unwrap();
     assert_eq!(
         hinted(&agent),
-        "2 saved sessions use an unsupported format or version; files left unchanged\n"
+        "2 saved sessions use the storage layout of an earlier Jecode version; files left unchanged\n"
+    );
+    // Journals of the current layout in an unsupported format.
+    let future = "{\"format\":\"jecode.session.journal\",\"format_version\":99}\n";
+    for id in ["3-3-3", "4-4-4"] {
+        std::fs::create_dir_all(bucket.join(id)).unwrap();
+        std::fs::write(bucket.join(id).join("session.jsonl"), future).unwrap();
+    }
+    assert_eq!(
+        hinted(&agent),
+        "2 saved sessions use an unsupported format or version; files left unchanged\n\
+         2 saved sessions use the storage layout of an earlier Jecode version; files left unchanged\n"
     );
     assert_eq!(
         std::fs::read_to_string(bucket.join("1-1-1.json")).unwrap(),
         "{}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bucket.join("3-3-3").join("session.jsonl")).unwrap(),
+        future
     );
 }

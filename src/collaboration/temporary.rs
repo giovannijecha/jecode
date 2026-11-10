@@ -26,7 +26,7 @@ impl Observer {
             return Ok(Vec::new());
         };
         let store = handle.store();
-        let home = store.collaborator_home(&handle.id()).join("tmp");
+        let home = store.collaborator_home(&handle.id());
         let mut found = Vec::new();
         let mut failure = None;
         for (id, session) in self.sessions() {

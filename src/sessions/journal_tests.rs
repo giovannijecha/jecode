@@ -106,33 +106,6 @@ fn a_current_journal_with_a_missing_collaborator_log_is_rejected_unchanged() {
 }
 
 #[test]
-fn unsupported_flat_session_is_reported_and_left_unchanged() {
-    let (_directory, _home, store, doc) = fixture();
-    fs::create_dir_all(&store.bucket).unwrap();
-    let path = store.bucket.join(format!("{}.json", doc.id));
-    let bytes = b"previous session data";
-    fs::write(&path, bytes).unwrap();
-    let error = match store.load(&doc.id) {
-        Err(error) => error,
-        Ok(_) => panic!("previous session format was accepted"),
-    };
-    assert!(
-        error.contains("Unsupported session format or version"),
-        "{error}"
-    );
-    assert!(
-        store
-            .list()
-            .unwrap()
-            .warnings
-            .iter()
-            .any(|warning| warning.contains(&error))
-    );
-    assert!(store.create(&doc.id).is_err());
-    assert_eq!(fs::read(path).unwrap(), bytes);
-}
-
-#[test]
 fn tool_change_survives_journal_and_replays_without_entering_tool_result() {
     let (_directory, _home, store, mut doc) = fixture();
     let change = crate::file_change::Change::between(Some("old\n"), "new\n").unwrap();
@@ -284,6 +257,17 @@ fn a_torn_final_transaction_recovers_prior_work_and_preserves_the_uncommitted_by
         .find(|entry| entry.file_name().to_string_lossy().contains("damaged"))
         .unwrap();
     assert_eq!(fs::read(damaged.path()).unwrap(), torn);
+    // The set-aside tail stays beside the journal it came from.
+    assert_eq!(
+        path.parent(),
+        Some(store.session_directory(&doc.id).as_path())
+    );
+    assert!(
+        damaged
+            .file_name()
+            .to_string_lossy()
+            .starts_with("session.jsonl.damaged-")
+    );
 }
 
 #[test]
@@ -470,7 +454,7 @@ fn a_saved_tail_appends_like_the_whole_history_and_a_gap_is_refused() {
     ]));
     let (messages, events) = lease.history().unwrap();
     assert_eq!((messages, events), (2, 0));
-    let path = store.bucket().join(format!("{}.jsonl", doc.id));
+    let path = store.journal_path(&doc.id);
     let before = fs::read(&path).unwrap();
     let state = doc.without_history();
     let gap = journal::Tail {

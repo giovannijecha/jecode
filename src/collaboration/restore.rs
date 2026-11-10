@@ -92,7 +92,7 @@ impl Observer {
             return None;
         }
         let store = handle.store();
-        let storage = store.bucket().join("collaboration").join(handle.id());
+        let storage = store.collaboration(&handle.id());
         let names = match crate::disk::metadata_if_present(&storage) {
             Ok(None) => return None,
             Ok(Some(metadata)) if crate::disk::ordinary_directory(&metadata) => {

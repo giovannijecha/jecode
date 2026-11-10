@@ -40,10 +40,7 @@ fn failed_compaction_checkpoint_cannot_be_saved_later() {
     agent.save_session().unwrap();
     let handle = agent.sessions().unwrap();
     let previous = agent.context.value();
-    let journal = handle
-        .store()
-        .bucket()
-        .join(format!("{}.jsonl", handle.id()));
+    let journal = handle.store().fixture_journal(&handle.id());
     let original_permissions = std::fs::metadata(&journal).unwrap().permissions();
     let mut readonly = original_permissions.clone();
     readonly.set_readonly(true);

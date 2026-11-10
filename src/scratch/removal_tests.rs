@@ -5,7 +5,7 @@ fn area() -> (Directory, Directory, Area) {
     let home = Directory::new();
     let project = Directory::new();
     let path = home.path().join("tmp").join("bucket").join("123-45-6");
-    let area = Area::new(path, project.path().to_path_buf(), "123-45-6").unwrap();
+    let area = Area::new(home.path(), path, project.path().to_path_buf(), "123-45-6").unwrap();
     (home, project, area)
 }
 
