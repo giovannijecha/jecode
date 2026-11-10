@@ -49,11 +49,19 @@ function run({directory, bin, script}) {
   const command = windows ? 'powershell.exe' : 'sh';
   const args = windows ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(directory, script)] :
     [path.join(directory, script)];
+  // Windows names are case-insensitive, but Node de-duplicates object keys.
+  const env = Object.fromEntries(Object.entries(process.env).map(
+    ([name, value]) => [windows ? name.toUpperCase() : name, value]));
+  env.CARGO_TARGET_DIR = '';
+  env.PATH = `${bin}${path.delimiter}${env.PATH ?? ''}`;
+  if (windows) {
+    env.PSEXECUTIONPOLICYPREFERENCE = 'Restricted';
+    // This child uses Windows PowerShell even when its parent uses pwsh.
+    env.PSMODULEPATH = path.join(env.SYSTEMROOT, 'System32/WindowsPowerShell/v1.0/Modules');
+  }
   return spawnSync(command, args, {
     cwd: directory, encoding: 'utf8', timeout: 30_000,
-    env: {...process.env, CARGO_TARGET_DIR: '',
-      ...(windows ? {PSExecutionPolicyPreference: 'Restricted'} : {}),
-      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`},
+    env,
   });
 }
 
