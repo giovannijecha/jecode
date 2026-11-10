@@ -59,7 +59,7 @@ pub(super) fn read(path: &Path, id: &str, directory: &Path) -> Result<Read, Stri
         if value.get("format").and_then(Value::as_str) != Some("jecode.session.journal")
             || integer(&value, "format_version")? != 4
         {
-            return Err("Unsupported session format or version; file left unchanged".into());
+            return Err(super::UNSUPPORTED.into());
         }
         if integer(&value, "sequence")? != position.sequence as u64
             || integer(&value, "messages_from")? != position.messages as u64

@@ -198,8 +198,9 @@ sh target/package/jecode-macos-aarch64/INSTALL.sh
 sh target/package/jecode-macos-x86_64/INSTALL.sh
 ```
 
-`PACKAGE.sh` prints the exact output directory. The installer copies the
-executable to
+`PACKAGE.sh` prints the exact output directory. Both packaging scripts stop when
+that directory already exists; remove it before packaging again. The installer
+copies the executable to
 `${XDG_DATA_HOME:-$HOME/.local/share}/jecode/bin/jecode` and does not change
 `PATH`. Add that directory to your shell configuration, for example in
 `~/.profile`:

@@ -337,6 +337,8 @@ $package = Get-ChildItem target\package -Directory | Select-Object -First 1
 
 On Linux or macOS, run `sh PACKAGE.sh`, then
 `sh target/package/jecode-<platform>-<arch>/INSTALL.sh /absolute/test/root`.
+Packaging stops when its output directory exists; remove
+`target/package/jecode-<platform>-<arch>` before a second run.
 
 To check the package scripts without building or installing, run
 `node --test tools/package.test.mjs`. It uses an isolated source tree with stub

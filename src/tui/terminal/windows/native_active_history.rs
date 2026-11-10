@@ -94,7 +94,7 @@ pub(super) fn console(path: &Path) {
         .messages
         .lock()
         .unwrap()
-        .extend(crate::tui::measurement_tests::mixed_messages(4));
+        .extend(crate::tui::measurement_tests::mixed_messages(40));
     saved.save_session().unwrap();
     let id = saved.sessions().unwrap().snapshot().id.clone();
     drop(saved);

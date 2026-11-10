@@ -22,8 +22,9 @@ cp "$target_root/release/jecode" "$package/jecode"
 cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" \
     "$script_dir/CHANGELOG.md" "$script_dir/SECURITY.md" "$script_dir/CONTRIBUTING.md" "$package/"
 mkdir -p "$package/docs"
-# Without -L, find neither follows nor matches symbolic links.
-find "$script_dir/docs" -type f ! -name 'HARNESS*' ! -name AGENTS.md ! -name CLAUDE.md ! -name CODEX_HARNESS_STUDY.md | while IFS= read -r document; do
+# Without -L, find neither follows nor matches symbolic links. Names match
+# without case, as they do in PACKAGE.ps1.
+find "$script_dir/docs" -type f ! -iname 'HARNESS*' ! -iname AGENTS.md ! -iname CLAUDE.md ! -iname CODEX_HARNESS_STUDY.md | while IFS= read -r document; do
     relative=${document#"$script_dir/docs/"}
     mkdir -p "$package/docs/$(dirname "$relative")"
     cp "$document" "$package/docs/$relative"

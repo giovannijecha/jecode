@@ -185,9 +185,9 @@ impl Store {
         }
         let mut listing = Listing::default();
         for id in unsupported.difference(&ids) {
-            listing.warnings.push(format!(
-                "Session {id}: Unsupported session format or version; file left unchanged"
-            ));
+            listing
+                .warnings
+                .push(format!("Session {id}: {}", super::UNSUPPORTED));
         }
         for id in ids {
             let stamp = super::summary::stamp(self, &id);
@@ -262,7 +262,7 @@ impl Store {
         let journal = self.journal_path(id);
         if !journal.exists() {
             if self.bucket.join(format!("{id}.json")).exists() {
-                return Err("Unsupported session format or version; file left unchanged".into());
+                return Err(super::UNSUPPORTED.into());
             }
             return Err("Session not found in this working directory".into());
         }

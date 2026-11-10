@@ -35,9 +35,14 @@ function fixture(t) {
   }
   const docs = path.join(directory, 'docs/development');
   fs.mkdirSync(docs, {recursive: true});
-  for (const name of ['PUBLIC.md', 'CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'AGENTS.md', 'CLAUDE.md']) {
+  for (const name of ['PUBLIC.md', 'CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'Harness_Draft.md',
+    'AGENTS.md', 'CLAUDE.md']) {
     fs.writeFileSync(path.join(docs, name), `fixture ${name}\n`);
   }
+  const outside = path.join(directory, 'outside');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'LINKED.md'), 'fixture linked\n');
+  fs.symlinkSync(outside, path.join(directory, 'docs/linked'), windows ? 'junction' : 'dir');
   const release = path.join(directory, 'target/release');
   fs.mkdirSync(release, {recursive: true});
   fs.writeFileSync(path.join(release, windows ? 'jecode.exe' : 'jecode'), 'fixture binary');
@@ -71,9 +76,10 @@ test('standalone packaging excludes private docs and refuses an existing destina
   assert.equal(first.status, 0, first.stderr || first.error?.message);
   const docs = path.join(item.packageRoot, 'docs/development');
   assert.ok(fs.existsSync(path.join(docs, 'PUBLIC.md')));
-  for (const name of ['CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'AGENTS.md', 'CLAUDE.md']) {
+  for (const name of ['CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'Harness_Draft.md', 'AGENTS.md', 'CLAUDE.md']) {
     assert.ok(!fs.existsSync(path.join(docs, name)), `${name} entered the package`);
   }
+  assert.ok(!fs.existsSync(path.join(item.packageRoot, 'docs/linked')), 'a linked directory entered the package');
 
   const stale = path.join(docs, 'STALE.md');
   fs.writeFileSync(stale, 'preserve existing package contents');

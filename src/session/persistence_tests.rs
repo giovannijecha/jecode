@@ -379,3 +379,30 @@ fn plain_resume_deletes_saved_current_by_number_keeps_the_list_and_preserves_uns
     assert!(output.contains("No saved conversations"));
     assert_eq!(output.matches("Resume · current folder").count(), 2);
 }
+
+#[test]
+fn startup_reports_several_unsupported_sessions_in_one_line() {
+    let directory = Directory::new();
+    let agent = agent(&directory, "http://127.0.0.1:9");
+    let bucket = agent.sessions().unwrap().store().bucket().to_path_buf();
+    std::fs::create_dir_all(&bucket).unwrap();
+    let hinted = |agent: &Agent| {
+        let mut output = Vec::new();
+        super::persistence::hint(agent, &mut output).unwrap();
+        String::from_utf8(output).unwrap()
+    };
+    std::fs::write(bucket.join("1-1-1.json"), "{}").unwrap();
+    assert_eq!(
+        hinted(&agent),
+        format!("Session 1-1-1: {}\n", crate::sessions::UNSUPPORTED)
+    );
+    std::fs::write(bucket.join("2-2-2.json"), "{}").unwrap();
+    assert_eq!(
+        hinted(&agent),
+        "2 saved sessions use an unsupported format or version; files left unchanged\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(bucket.join("1-1-1.json")).unwrap(),
+        "{}"
+    );
+}

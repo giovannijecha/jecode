@@ -44,7 +44,10 @@ impl Exclusive {
     }
 
     pub fn acquire_cancellable(path: &Path, cancellation: &Cancellation) -> std::io::Result<Self> {
-        let file = open(path)?;
+        Self::from_file_cancellable(open(path)?, cancellation)
+    }
+
+    pub fn from_file_cancellable(file: File, cancellation: &Cancellation) -> std::io::Result<Self> {
         lock_cancellable(&file, cancellation)?;
         Ok(Self(file))
     }

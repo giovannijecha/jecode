@@ -83,7 +83,8 @@ fn build_request(
     let mut results = Vec::new();
     let active_start = attachments::active_view_start(messages);
     let mut views = Vec::new();
-    let mut latest_state = None;
+    // Wire positions of request-state messages, in order.
+    let mut states: Vec<usize> = Vec::new();
     // The system block every conversation shares, cached on its own.
     let mut shared = None;
     // With one-hour retention every breakpoint lasts an hour, so a break
@@ -126,15 +127,26 @@ fn build_request(
                 // Runtime state keeps its first position, so it is cacheable history.
                 let request_state = message.get("jecode_request_state") == Some(&Value::Bool(true));
                 let mut mapped = user(message, pool)?;
-                if request_state
-                    && subscription
-                    && supports_mid_system(model)
-                    && let Value::Object(fields) = &mut mapped
+                let system = request_state && subscription && supports_mid_system(model);
+                // An instruction snapshot and the runtime state that follows it
+                // share one system message: a system message is followed by an
+                // assistant turn or ends the request. Their adjacency is saved
+                // history, so the joined bytes stay stable.
+                if system
+                    && states.last().is_some_and(|last| last + 1 == wire.len())
+                    && let Some(Value::String(text)) = mapped.get("content")
+                    && let Some(Value::Object(previous)) = wire.last_mut()
+                    && let Some(Value::String(joined)) = previous.get_mut("content")
                 {
+                    joined.push_str("\n\n");
+                    joined.push_str(text);
+                    continue;
+                }
+                if system && let Value::Object(fields) = &mut mapped {
                     fields.insert("role".into(), Value::string("system"));
                 }
                 if request_state {
-                    latest_state = Some(wire.len());
+                    states.push(wire.len());
                 }
                 wire.push(mapped);
             }
@@ -170,11 +182,11 @@ fn build_request(
     // recent user-message ends, including earlier batched tool results.
     // The automatic top-level breakpoint covers the request end, including
     // newly sent state, so explicit slots keep the earlier boundaries.
-    let marked_end = if latest_state.is_some_and(|index| index + 1 == wire.len()) {
-        wire.len() - 1
-    } else {
-        wire.len()
-    };
+    let mut marked_end = wire.len();
+    while marked_end > 0 && states.last() == Some(&(marked_end - 1)) {
+        states.pop();
+        marked_end -= 1;
+    }
     let mut marked = 0;
     for message in wire[..marked_end].iter_mut().rev() {
         if message.get("role").and_then(Value::as_str) == Some("user")

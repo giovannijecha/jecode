@@ -22,9 +22,10 @@ Changes since 0.4.5.
 
 - Model-free records of earlier work and persistent tool-result previews.
   Long conversations are reduced only by the model summary described above.
-- Checkpoints and restore: the `/checkpoints` command, the `checkpoint` tool and
-  the `protect` argument of `bash`, `exec` and `process`. File changes are no
-  longer saved for restoring; use your version control.
+- Checkpoints and restore: the `/checkpoints` command, the `jecode checkpoints`
+  command line, the `checkpoint` tool and the `protect` argument of `bash`,
+  `exec` and `process`. File changes are no longer saved for restoring; use
+  your version control. `jecode checkpoints ...` is now read as a prompt.
 - The project map: the `map` tool and its saved notes.
 - The `edit` tool's top-level `old_text` and `new_text` arguments; it takes
   `edits` or `files`.
@@ -40,6 +41,8 @@ Changes since 0.4.5.
   release writes journal format 3 with session state 1; there is no migration.
   Finish or export important conversations with the version that saved them
   before updating. See [Sessions](docs/usage/SESSIONS.md#after-an-interruption).
+- `/export` files use `jecode.conversation` format **2**, without the
+  conversation-level `legacy_origin` field. Message origins are unchanged.
 - Existing checkpoint archives under `checkpoints/` and project-map notes in
   `projects/<project>/map.json` in the Jecode home are neither read nor removed.
   Delete them yourself when you no longer need them.
@@ -53,6 +56,14 @@ Changes since 0.4.5.
   its disk-space API in the reviewed ABI list.
 - Standalone packages omit private harness reports and require a fresh output
   directory, so removed documentation cannot remain from an earlier build.
+  `PACKAGE.sh` now matches the omitted names without case, as `PACKAGE.ps1` does.
+- `write` and `edit` serialize through a bounded set of lock files in the
+  temporary directory. When that directory cannot be used, the change proceeds
+  and the changed-file check still rejects a stale edit.
+- On the Claude plan, an instruction snapshot and the runtime state sent with
+  it share one mid-conversation system message.
+- Starting in a folder with several conversations from an earlier format
+  reports them in one line; `/resume` still lists each.
 - Resuming a conversation reapplies known-credential masking to saved
   instruction snapshots and runtime state as well as the summary.
 - The offline context check is the read-only replay of current-format session

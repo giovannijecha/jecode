@@ -125,7 +125,7 @@ them in order and installs the result once.
 
 To change several files in one call, send `files: [{"path": "...", "edits":
 [...]}, ...]` instead of `path` (up to 12 entries, each file once, not combined
-with top-level `edits`, `old_text` or `new_text`; a top-level `path` beside `files`
+with top-level `edits`; a top-level `path` beside `files`
 is ignored). Each file is applied all or nothing like a single
 `edit`; a failed file does not stop the others, and the result lists each file
 in order with its own outcome or error. The call needs one permission decision.

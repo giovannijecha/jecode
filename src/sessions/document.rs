@@ -213,7 +213,7 @@ impl Document {
         events: Vec<Value>,
     ) -> Result<Self, String> {
         if string(value, "format")? != "jecode.session" || integer(value, "format_version")? != 2 {
-            return Err("Unsupported session format or version; file left unchanged".into());
+            return Err(super::UNSUPPORTED.into());
         }
         let id = string(value, "id")?.to_string();
         if !valid_id(&id) {

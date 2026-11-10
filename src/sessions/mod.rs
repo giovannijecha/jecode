@@ -20,6 +20,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Why a saved session from another Jecode version cannot be opened.
+pub(crate) const UNSUPPORTED: &str = "Unsupported session format or version; file left unchanged";
+
 pub(crate) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

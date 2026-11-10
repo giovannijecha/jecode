@@ -237,6 +237,46 @@ fn mid_system_state_preserves_the_cached_prefix_as_history_grows() {
 }
 
 #[test]
+fn adjacent_snapshot_and_state_share_one_mid_system_message() {
+    let state = |text: &str| {
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string(text)),
+            ("jecode_request_state", Value::Bool(true)),
+        ])
+    };
+    let request = wire::request(
+        "claude-opus-5-5",
+        Effort::Medium,
+        &[
+            Value::object([
+                ("role", Value::string("user")),
+                ("content", Value::string("Prompt")),
+            ]),
+            state("Instruction snapshot"),
+            state("Runtime state"),
+        ],
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let messages = request.get("messages").and_then(Value::as_array).unwrap();
+    assert_eq!(messages.len(), 2, "{}", request.encode());
+    assert_eq!(
+        messages[1].get("role").and_then(Value::as_str),
+        Some("system")
+    );
+    assert_eq!(
+        messages[1].get("content").and_then(Value::as_str),
+        Some("Instruction snapshot\n\nRuntime state")
+    );
+    // The explicit breakpoint stays on the prompt; the request end is automatic.
+    assert!(messages[0].encode().contains("cache_control"));
+}
+
+#[test]
 fn mid_system_is_limited_to_documented_model_ids() {
     let state = Value::object([
         ("role", Value::string("user")),
