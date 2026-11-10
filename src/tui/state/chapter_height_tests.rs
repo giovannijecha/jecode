@@ -249,16 +249,6 @@ fn long_singletons_keep_their_height_when_the_second_call_forms_a_chapter() {
     let error = "Could not read a long path: permission denied. ".repeat(6);
     let notice = Value::object([
         ("exit_code", Value::number(0)),
-        (
-            "checkpoint",
-            Value::object([
-                ("status", Value::string("partial")),
-                (
-                    "reason",
-                    Value::string("Several untracked paths could not be captured before execution"),
-                ),
-            ]),
-        ),
         ("stdout_truncated", Value::Bool(true)),
         ("stdout_bytes", Value::number(2048)),
         ("output_limit_bytes", Value::number(1024)),

@@ -107,7 +107,7 @@ fn both_native_backends_omit_delegation_from_child_requests() {
                 .collect();
             assert_eq!(names, expected, "{provider}, delegation={enabled}");
             assert_eq!(names.contains(&"agent"), enabled);
-            for working_tool in ["read", "write", "edit", "bash", "exec", "browser", "map"] {
+            for working_tool in ["read", "write", "edit", "bash", "exec", "browser"] {
                 assert!(
                     names.contains(&working_tool),
                     "{provider}: missing {working_tool}"

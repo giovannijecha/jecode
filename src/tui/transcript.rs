@@ -83,6 +83,8 @@ pub(super) struct Layout {
     /// Built blocks to render again in place; later blocks stay cached
     /// unless the separator context after the range changes.
     stale: Option<Range<usize>>,
+    /// Rewrap the stale range from its end, where the reader usually is.
+    tail_first: bool,
     pending: Vec<Vec<Line>>,
     pending_start: usize,
     pending_revision: Option<u64>,
@@ -91,6 +93,12 @@ pub(super) struct Layout {
     pending_frame: Option<usize>,
     keycap: Option<usize>,
     keycap_key: Option<KeycapKey>,
+}
+
+/// What one layout pass may still draw.
+struct Budget {
+    rows: usize,
+    blocks: usize,
 }
 
 struct Partial {
@@ -107,7 +115,7 @@ struct PendingStream {
 
 impl Layout {
     pub fn prepare(&mut self, state: &State, columns: usize, max_blocks: usize) {
-        if columns != self.columns || self.generation != Some(state.generation) {
+        if self.generation != Some(state.generation) || self.blocks.is_empty() {
             self.blocks.clear();
             self.contexts.clear();
             self.context = Rows::default();
@@ -118,7 +126,18 @@ impl Layout {
             self.pending.clear();
             self.pending_revision = None;
             self.pending_stream = None;
+            self.tail_first = false;
             self.columns = columns;
+        } else if columns != self.columns {
+            // Built blocks stay on the page, shortened to the new width, while
+            // they are wrapped again from the end of the conversation.
+            self.columns = columns;
+            self.partial = None;
+            self.pending.clear();
+            self.pending_revision = None;
+            self.pending_stream = None;
+            self.invalidate(1..self.blocks.len());
+            self.tail_first = self.stale.is_some();
         }
         if self.tools != state.tool_revision {
             // Several reads can finish in one event batch. Preserve the
@@ -127,10 +146,19 @@ impl Layout {
                 .tool_details
                 .changed_since(state.tool_revision.wrapping_sub(self.tools))
                 .unwrap_or(0..usize::MAX);
-            self.invalidate(items.start + 1..items.end.saturating_add(1));
-            self.partial = None;
+            // Prose and a stream outside the change keep their progress, so a
+            // burst of tool events cannot restart a long rebuild indefinitely.
+            let blocks = items.start + 1..items.end.saturating_add(1);
+            if self
+                .partial
+                .as_ref()
+                .is_some_and(|partial| blocks.contains(&partial.block))
+            {
+                self.partial = None;
+            }
+            self.forget_stream(&items);
+            self.invalidate(blocks);
             self.pending_revision = None;
-            self.pending_stream = None;
             self.tools = state.tool_revision;
         }
         // The header follows the model and effort, and the startup space
@@ -140,42 +168,76 @@ impl Layout {
         }
         self.refresh_keycap(state);
         let end = state.settled_len() + 1;
-        let mut rows_left = 256usize;
-        let mut blocks_left = max_blocks;
-        while blocks_left > 0
-            && rows_left > 0
+        let mut budget = Budget {
+            rows: 256,
+            blocks: max_blocks,
+        };
+        // New settled items come first, so they never wait for a long rebuild,
+        // unless the single partial prose block belongs to that rebuild.
+        if self
+            .partial
+            .as_ref()
+            .is_none_or(|partial| partial.block >= self.blocks.len())
+        {
+            self.append(state, end, &mut budget);
+            self.rebuild(state, &mut budget);
+        } else {
+            self.rebuild(state, &mut budget);
+            self.append(state, end, &mut budget);
+        }
+    }
+
+    /// Draws stale blocks again in place, from either end of the range.
+    fn rebuild(&mut self, state: &State, budget: &mut Budget) {
+        while budget.blocks > 0
+            && budget.rows > 0
             && let Some(stale) = self.stale.clone()
         {
-            let block = stale.start;
+            let block = if self.tail_first {
+                stale.end - 1
+            } else {
+                stale.start
+            };
             let mut context = self.contexts[block];
-            let Some(lines) = self.bounded(state, block, &mut context, &mut rows_left) else {
+            let Some(lines) = self.bounded(state, block, &mut context, &mut budget.rows) else {
                 break;
             };
-            blocks_left -= 1;
+            budget.blocks -= 1;
             self.blocks[block] = lines;
             let next = block + 1;
-            self.stale = if next == self.blocks.len() {
-                self.context = context;
-                None
-            } else if next < stale.end || context != self.contexts[next] {
-                // A changed separator carries on to the next block.
+            // A changed separator carries on to the next block.
+            let carried = next < self.blocks.len() && context != self.contexts[next];
+            if carried {
                 self.contexts[next] = context;
+            } else if next == self.blocks.len() {
+                self.context = context;
+            }
+            self.stale = if self.tail_first {
+                let end = if carried { next + 1 } else { block };
+                (stale.start < end).then_some(stale.start..end)
+            } else if next < stale.end || carried {
                 Some(next..stale.end.max(next + 1))
             } else {
                 None
             };
         }
-        while self.stale.is_none() && self.blocks.len() < end && blocks_left > 0 && rows_left > 0 {
+        self.tail_first &= self.stale.is_some();
+    }
+
+    /// Builds the first blocks of newly settled items.
+    fn append(&mut self, state: &State, end: usize, budget: &mut Budget) {
+        while self.blocks.len() < end && budget.blocks > 0 && budget.rows > 0 {
             let previous = self.context;
             let mut context = previous;
-            let Some(lines) = self.bounded(state, self.blocks.len(), &mut context, &mut rows_left)
+            let Some(lines) =
+                self.bounded(state, self.blocks.len(), &mut context, &mut budget.rows)
             else {
                 break;
             };
             self.context = context;
             self.contexts.push(previous);
             self.blocks.push(lines);
-            blocks_left -= 1;
+            budget.blocks -= 1;
         }
     }
 
@@ -258,15 +320,16 @@ impl Layout {
             .max()
             .map_or(0, |index| index + 2);
         self.keycap = keycap;
+        self.forget_stream(&(block.saturating_sub(1)..last.saturating_sub(1)));
         self.invalidate(block..last);
         self.pending_revision = None;
-        self.pending_stream = None;
     }
 
     /// Marks built blocks to render again; blocks not built yet follow the
     /// source when they are.
     fn invalidate(&mut self, blocks: Range<usize>) {
-        if blocks.is_empty() || blocks.start >= self.blocks.len() {
+        let blocks = blocks.start..blocks.end.min(self.blocks.len());
+        if blocks.is_empty() {
             return;
         }
         self.stale = Some(match self.stale.take() {
@@ -275,9 +338,47 @@ impl Layout {
         });
     }
 
+    /// Drops the incremental stream when the changed items include it.
+    fn forget_stream(&mut self, items: &Range<usize>) {
+        if self
+            .pending_stream
+            .as_ref()
+            .is_some_and(|stream| items.contains(&(self.pending_start + stream.index)))
+        {
+            self.pending_stream = None;
+        }
+    }
+
+    /// Where the mutable tail begins: the first item without a built block.
+    /// Items that settle while a rebuild holds them back join the tail.
+    fn pending_from(&self, state: &State) -> usize {
+        state.settled_len().min(self.blocks.len().saturating_sub(1))
+    }
+
+    /// Settled items still waiting for their first block.
+    pub fn backlog(&self, state: &State) -> usize {
+        (state.settled_len() + 1).saturating_sub(self.blocks.len())
+    }
+
+    /// The built blocks before the mutable tail.
+    pub fn settled_blocks(&self) -> &[Vec<Line>] {
+        &self.blocks[..(self.pending_start + 1).min(self.blocks.len())]
+    }
+
     pub fn prepare_pending(&mut self, state: &State, max_rows: usize) {
         self.refresh_keycap(state);
-        let start = state.settled_len();
+        let start = self.pending_from(state);
+        if start > self.pending_start && start - self.pending_start <= self.pending.len() {
+            // Items now built as blocks leave the front of the tail; a stream
+            // after them keeps its progress.
+            let built = start - self.pending_start;
+            self.pending.drain(..built);
+            self.pending_stream = self.pending_stream.take().and_then(|mut stream| {
+                stream.index = stream.index.checked_sub(built)?;
+                Some(stream)
+            });
+            self.pending_start = start;
+        }
         let changed = self.pending_revision != Some(state.revision) || self.pending_start != start;
         // Running cards animate and count time; draw them again once a frame.
         let frame = super::motion::frame();
@@ -285,6 +386,19 @@ impl Layout {
             && state.items[start..]
                 .iter()
                 .any(|item| matches!(item, Item::Tool { result: None, .. }));
+        // The newest prose belongs to the live tail. Older settled answers
+        // still waiting for a block are built by `prepare` with its row budget.
+        let live_prose = state.items[start..].iter().rposition(|item| {
+            item.is_visible()
+                && matches!(
+                    item,
+                    Item::Streaming { .. }
+                        | Item::Text {
+                            kind: Kind::Assistant,
+                            ..
+                        }
+                )
+        });
         if changed || running {
             self.pending_frame = Some(frame);
             let reuse =
@@ -295,9 +409,15 @@ impl Layout {
             }
             let mut context = self.context;
             for (index, item) in state.items[start..].iter().enumerate() {
-                if let Item::Streaming { text } = item
-                    && item.is_visible()
-                {
+                let prose = match item {
+                    Item::Streaming { text }
+                    | Item::Text {
+                        kind: Kind::Assistant,
+                        text,
+                    } if item.is_visible() => Some(text.as_str()),
+                    _ => None,
+                };
+                if let Some(text) = prose.filter(|_| live_prose == Some(index)) {
                     if self
                         .pending_stream
                         .as_ref()
@@ -326,6 +446,15 @@ impl Layout {
                     // needs the same separator context as full Rows::render.
                     let mut marker = vec![Line::default()];
                     context.finish(&mut marker);
+                } else if prose.is_some() {
+                    // Do not parse a settled answer in one unbounded frame.
+                    // Its block replaces this temporary gap as `prepare` runs.
+                    if index < self.pending.len() {
+                        self.pending[index].clear();
+                    } else {
+                        self.pending.push(Vec::new());
+                    }
+                    context.previous = true;
                 } else {
                     if self
                         .pending_stream
@@ -348,10 +477,7 @@ impl Layout {
                 }
             }
             self.pending.truncate(state.items.len() - start);
-            if !state.items[start..]
-                .iter()
-                .any(|item| matches!(item, Item::Streaming { .. }) && item.is_visible())
-            {
+            if live_prose.is_none() {
                 self.pending_stream = None;
             }
             self.pending_start = start;
@@ -366,7 +492,7 @@ impl Layout {
 
     pub fn pending_ready(&self, state: &State) -> bool {
         self.pending_revision == Some(state.revision)
-            && self.pending_start == state.settled_len()
+            && self.pending_start == self.pending_from(state)
             && self
                 .pending_stream
                 .as_ref()

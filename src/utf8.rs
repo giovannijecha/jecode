@@ -1,5 +1,4 @@
 //! Incremental validation of text without retaining the complete input.
-use std::io::Read;
 
 #[derive(Default)]
 pub struct Text {
@@ -48,20 +47,6 @@ impl Text {
     }
 }
 
-pub fn is_text(mut reader: impl Read) -> std::io::Result<bool> {
-    let mut text = Text::default();
-    let mut buffer = [0; 64 * 1024];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            return Ok(text.finish().is_ok());
-        }
-        if text.push(&buffer[..read]).is_err() {
-            return Ok(false);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,7 +62,8 @@ mod tests {
             text.finish().unwrap();
         }
         for bytes in [b"\0".as_slice(), b"\xff", b"\xe2\x82", b"\xf0\x80\x80\x80"] {
-            assert!(!is_text(bytes).unwrap());
+            let mut text = Text::default();
+            assert!(text.push(bytes).is_err() || text.finish().is_err());
         }
     }
 }

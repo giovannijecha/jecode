@@ -42,36 +42,8 @@ fn fallback_uses_executor_edit_shapes_for_valid_and_invalid_calls() {
             None,
         ),
         (
-            Value::object([
-                ("edits", Value::Array(vec![replacement()])),
-                ("old_text", Value::Null),
-                ("new_text", Value::string("")),
-            ]),
-            None,
-        ),
-        (
-            Value::object([
-                ("edits", Value::Array(vec![])),
-                ("old_text", Value::string("before")),
-                ("new_text", Value::string("after")),
-            ]),
-            None,
-        ),
-        (
-            Value::object([
-                ("edits", Value::Null),
-                ("old_text", Value::string("before")),
-                ("new_text", Value::string("after")),
-            ]),
-            None,
-        ),
-        (
-            Value::object([
-                ("edits", Value::Array(vec![replacement()])),
-                ("old_text", Value::string("before")),
-                ("new_text", Value::string("after")),
-            ]),
-            Some("Use either edits or old_text/new_text, not both"),
+            Value::object([("edits", Value::Null)]),
+            Some("edits must be an array"),
         ),
         (
             Value::object([("edits", Value::Array(vec![]))]),
@@ -86,13 +58,26 @@ fn fallback_uses_executor_edit_shapes_for_valid_and_invalid_calls() {
                 ("old_text", Value::string("")),
                 ("new_text", Value::string("after")),
             ]),
+            Some("edits must be an array"),
+        ),
+        (
+            Value::object([(
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("")),
+                    ("new_text", Value::string("after")),
+                ])]),
+            )]),
             Some("old_text must not be empty; use write to replace the whole file"),
         ),
         (
-            Value::object([
-                ("old_text", Value::string("before")),
-                ("new_text", Value::string("after\0")),
-            ]),
+            Value::object([(
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("before")),
+                    ("new_text", Value::string("after\0")),
+                ])]),
+            )]),
             Some("File content must be UTF-8 text without NUL bytes"),
         ),
     ];
@@ -199,7 +184,7 @@ fn successful_large_file_batch_reaches_the_fallback_card() {
     let encoded = arguments.encode();
     let cancellation = crate::cancel::Cancellation::default();
     let execution = tools.execute_begun(
-        tools.begin_cancellable("edit", &encoded, &cancellation),
+        crate::tools::Begun::default(),
         "edit",
         &encoded,
         &cancellation,
@@ -243,7 +228,7 @@ fn successful_large_file_batch_reaches_the_fallback_card() {
     ]);
     let encoded = single.encode();
     let execution = tools.execute_begun(
-        tools.begin_cancellable("edit", &encoded, &cancellation),
+        crate::tools::Begun::default(),
         "edit",
         &encoded,
         &cancellation,
@@ -412,24 +397,6 @@ fn cancelled_batch_does_not_show_unsaved_replacement_snippets() {
         !text.contains("Replacement") && !text.contains("one"),
         "{text}"
     );
-
-    let legacy = Value::object([
-        ("path", Value::string("large.txt")),
-        ("old_text", Value::string("before")),
-        ("new_text", Value::string("after")),
-    ]);
-    let text = plain(&draw(
-        "edit",
-        &legacy,
-        Some(&cancelled),
-        None,
-        80,
-        &Presentation::default(),
-    ));
-    assert!(
-        text.contains("Cancelled") && !text.contains("after"),
-        "{text}"
-    );
 }
 
 #[test]
@@ -466,32 +433,6 @@ fn oversized_single_replacements_report_the_unavailable_snippet_diff() {
     );
     assert!(
         !text.contains("No changes") && !text.contains("xxxxx"),
-        "{text}"
-    );
-
-    let legacy = Value::object([
-        ("path", Value::string("large.txt")),
-        ("old_text", Value::string("line\n".repeat(20_001))),
-        ("new_text", Value::string("short")),
-    ]);
-    let text = plain(&draw(
-        "edit",
-        &legacy,
-        Some(&result),
-        None,
-        80,
-        &Presentation::default(),
-    ));
-    assert!(
-        text.contains("Applied 1 replacement · full-file diff unavailable"),
-        "{text}"
-    );
-    assert!(
-        text.contains("Snippet diff unavailable within display limits."),
-        "{text}"
-    );
-    assert!(
-        !text.contains("No changes") && !text.contains("line\nline"),
         "{text}"
     );
 }

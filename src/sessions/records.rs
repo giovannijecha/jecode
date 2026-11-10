@@ -199,7 +199,7 @@ fn hidden(event: &Value, index: usize, returned: &BTreeSet<usize>) -> bool {
         Some("local_command")
             if matches!(
                 event.get("command").and_then(Value::as_str),
-                Some("Context compaction" | "Context digest" | "Context previews")
+                Some("Context compaction")
             ) =>
         {
             returned_turn()

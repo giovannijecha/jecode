@@ -173,7 +173,6 @@ impl App {
                 Ok(report) => self.local_finish(Kind::Notice, &report.message, report.details),
                 Err(error) => self.local_finish(Kind::Error, &error, vec![]),
             },
-            "/checkpoints" => self.start_checkpoints(arguments),
             "/export" if arguments.is_empty() => match self.archive.save() {
                 Ok(path) => self.local_finish(
                     Kind::Notice,
@@ -303,10 +302,6 @@ impl App {
                 super::information::Information::new("Skills".into(), details.clone())
                     .aside(&result),
             ),
-            Some("/checkpoints") => Some(super::information::Information::new(
-                result.clone(),
-                details.clone(),
-            )),
             _ => None,
         };
         match information {

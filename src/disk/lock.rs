@@ -43,20 +43,11 @@ impl Exclusive {
         Ok(Self(file))
     }
 
-    pub fn file_mut(&mut self) -> &mut File {
-        &mut self.0
-    }
-
-    pub fn try_from_file(file: File) -> std::io::Result<Option<Self>> {
-        match file.try_lock() {
-            Ok(()) => Ok(Some(Self(file))),
-            Err(TryLockError::WouldBlock) => Ok(None),
-            Err(TryLockError::Error(error)) => Err(error),
-        }
-    }
-
     pub fn acquire_cancellable(path: &Path, cancellation: &Cancellation) -> std::io::Result<Self> {
-        let file = open(path)?;
+        Self::from_file_cancellable(open(path)?, cancellation)
+    }
+
+    pub fn from_file_cancellable(file: File, cancellation: &Cancellation) -> std::io::Result<Self> {
         lock_cancellable(&file, cancellation)?;
         Ok(Self(file))
     }

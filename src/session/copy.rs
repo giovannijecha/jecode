@@ -79,7 +79,6 @@ mod tests {
     fn archive() -> Archive {
         Archive {
             backend: "fixture".into(),
-            legacy_origin: None,
             model: "fixture/model".into(),
             directory: "fixture".into(),
             effort: "default".into(),

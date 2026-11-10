@@ -27,6 +27,23 @@ fn record() -> Value {
             "instructions",
             Value::string("Preserve ordering for empty queries"),
         ),
+        (
+            "log",
+            Value::Array(vec![
+                Value::object([
+                    ("kind", Value::string("assignment")),
+                    ("version", Value::number(2)),
+                    (
+                        "instructions",
+                        Value::string("Preserve ordering for empty queries"),
+                    ),
+                ]),
+                Value::object([
+                    ("kind", Value::string("returned")),
+                    ("version", Value::number(2)),
+                ]),
+            ]),
+        ),
         ("activity", Value::string("Report returned")),
         ("tools", Value::Array(vec![])),
         ("files", Value::Array(vec![Value::string("src/search.rs")])),

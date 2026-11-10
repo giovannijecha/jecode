@@ -24,14 +24,13 @@ repository root.
 | [Tools](usage/TOOLS.md) | What the agent can do: files, search, commands, processes, web, browser and MCP. |
 | [MCP connections](usage/MCP.md) | Global HTTP connections, tokens, browser sign-in and remote tool permissions. |
 | [Language servers](usage/LSP.md) | User-enabled local servers, semantic navigation, diagnostics and execution scope. |
-| [Checkpoints](usage/CHECKPOINTS.md) | Recovering files after a modifying tool call. |
 | [Saved conversations](usage/SESSIONS.md) | Resuming, recovering and deleting conversations. |
 | [Attachments](usage/ATTACHMENTS.md) | Files and clipboard images. |
 | [Collaborating agents](usage/COLLABORATION.md) | Delegated assignments, isolated workspaces and review. |
 | [Questions and plans](usage/QUESTIONS_AND_PLANS.md) | Answering the agent's questions and following its plan. |
 | [Copy and export](usage/COPY_AND_EXPORT.md) | Copying answers and saving conversations as JSON. |
 | [Temporary files](usage/TEMPORARY.md) | Each conversation's working area and its cleanup. |
-| [Long-running work](usage/LONG_WORK.md) | Retries, exact context records, fallback summaries and original history. |
+| [Long-running work](usage/LONG_WORK.md) | Retries, the context meter, compaction summaries and original history. |
 
 ## Reference
 
@@ -58,7 +57,7 @@ repository root.
 | Reference | Contents |
 | --- | --- |
 | [Development and testing](development/TESTING.md) | Toolchain, checks, native fixtures, live checks and CI. |
-| [Context checks](development/CONTEXT_CHECKS.md) | Offline screens of saved contexts and record growth, without model calls. |
+| [Context checks](development/CONTEXT_CHECKS.md) | Offline replay of saved contexts, without model calls, and dated screening results. |
 | [Releasing](development/RELEASING.md) | Preparing and verifying native and npm release artifacts. |
 | [Architecture](development/ARCHITECTURE.md) | Modules, request lifecycle, storage and native boundaries. |
 | [Platform support](development/PLATFORMS.md) | Verification status, platform limits and host checks. |

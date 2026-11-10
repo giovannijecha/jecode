@@ -184,14 +184,19 @@ fn collaborators_read_temporary_files_their_main_agent_hands_them() {
     assert_reads(&child, "tmp:handoff.txt", "main notes");
 
     // Changes stay in the collaborator's own area.
-    let edited = call(
-        &child,
+    let edited = child.tools.execute(
         "edit",
-        &[
-            ("path", "tmp:handoff.txt"),
-            ("old_text", "main"),
-            ("new_text", "child"),
-        ],
+        &Value::object([
+            ("path", Value::string("tmp:handoff.txt")),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("main")),
+                    ("new_text", Value::string("child")),
+                ])]),
+            ),
+        ])
+        .encode(),
     );
     assert!(edited.get("error").is_some(), "{edited:?}");
     let written = call(

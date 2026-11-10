@@ -7,7 +7,7 @@ use crate::{
 };
 
 #[test]
-fn routing_round_trips_and_older_sessions_keep_sending_no_routing_fields() {
+fn routing_round_trips_and_invalid_preferences_are_rejected() {
     let directory = Directory::new();
     let mut saved = Document::new(
         directory.path().to_path_buf(),
@@ -30,20 +30,15 @@ fn routing_round_trips_and_older_sessions_keep_sending_no_routing_fields() {
     let Value::Object(fields) = &mut value else {
         unreachable!()
     };
-    // A mode from a newer version is not guessed at.
+    // Unknown routing must not silently change a resumed request.
     fields.insert(
         "routing".into(),
         json::parse(r#"{"mode":"cheapest"}"#).unwrap(),
     );
-    assert_eq!(Document::parse(&value).unwrap().routing, Routing::Default);
+    assert!(Document::parse(&value).is_err());
     let Value::Object(fields) = &mut value else {
         unreachable!()
     };
     fields.remove("routing");
-    let legacy = Document::parse(&value).unwrap();
-    assert_eq!(legacy.routing, Routing::Default);
-    assert_eq!(
-        legacy.state_value().get("routing").unwrap().encode(),
-        r#"{"mode":"default"}"#
-    );
+    assert!(Document::parse(&value).is_err());
 }

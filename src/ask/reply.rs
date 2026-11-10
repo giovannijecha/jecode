@@ -1,7 +1,7 @@
 //! What the user returned: per question, the chosen option IDs and the typed
 //! text, or an explicit dismissal.
 
-use super::{LEGACY_ID, Question, Request};
+use super::{Question, Request};
 use crate::json::Value;
 
 /// The longest text one answer may carry.
@@ -61,26 +61,16 @@ impl Reply {
         }
     }
 
-    /// A saved result, including an earlier one with one `choice` and `text`.
+    /// A saved result with one answer per question, or a dismissal.
     pub(crate) fn parse(value: &Value) -> Option<Self> {
         match value.get("outcome")?.as_str()? {
-            "answered" => match value.get("answers") {
-                Some(Value::Array(items)) => items
-                    .iter()
-                    .map(Answer::parse)
-                    .collect::<Option<_>>()
-                    .map(Self::Answered),
-                Some(_) => None,
-                None => Some(Self::Answered(vec![Answer {
-                    id: LEGACY_ID.into(),
-                    choices: match value.get("choice")? {
-                        Value::Null => Vec::new(),
-                        Value::String(choice) => vec![choice.clone()],
-                        _ => return None,
-                    },
-                    text: value.get("text")?.as_str()?.into(),
-                }])),
-            },
+            "answered" => value
+                .get("answers")?
+                .as_array()?
+                .iter()
+                .map(Answer::parse)
+                .collect::<Option<_>>()
+                .map(Self::Answered),
             "dismissed" => Some(Self::Dismissed),
             _ => None,
         }

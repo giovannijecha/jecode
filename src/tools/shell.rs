@@ -27,7 +27,6 @@ pub(super) fn execute(
     cancellation: &Cancellation,
 ) -> Result<Value, String> {
     let text = required_string(arguments, "command")?;
-    let _ = protect_paths(arguments)?;
     if text.trim().is_empty() {
         return Err("command must not be empty".into());
     }
@@ -212,25 +211,6 @@ fn preview(path: &Path, limit: usize) -> Result<(String, bool), String> {
         ),
         true,
     ))
-}
-
-/// Declared workspace names whose preimages Bash may need. Command text is
-/// never parsed to guess write effects.
-pub(super) fn protect_paths(arguments: &Value) -> Result<Vec<String>, String> {
-    let Some(value) = arguments.get("protect") else {
-        return Ok(Vec::new());
-    };
-    value
-        .as_array()
-        .ok_or("protect must be a list of workspace paths")?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| "protect must contain only workspace paths".to_string())
-        })
-        .collect()
 }
 
 fn unknown_outcome(message: &str, [stdout_ref, stderr_ref]: [String; 2]) -> Value {

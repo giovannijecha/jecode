@@ -50,7 +50,9 @@ tools.
 
 ## How the model uses skills
 
-Each request lists your skills' names and descriptions. When one fits, the model
+The model sees your skills' names and descriptions in the instruction snapshot
+shared with [project instructions](PROJECT_INSTRUCTIONS.md#when-changes-take-effect);
+a changed list is sent once, when it changes. When one fits, the model
 reads it, and any supporting files it needs, with references such as
 `skill:debugging` or `skill:debugging/references/DETAILS.md`. Skill bodies are
 never sent on every request. You can also ask for a skill by name in your

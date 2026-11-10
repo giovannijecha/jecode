@@ -32,10 +32,10 @@ public sealed partial class JecodeTestPty {
         int commands = Mark();
         Send("burst draft\x07");
         WaitFast("draft kept", commands);
-        WaitFast("21 commands", commands);
+        WaitFast("JECODE_COMMAND_COUNT commands", commands);
         int filtered = Mark();
         Send("mod");
-        WaitFast("1 of 21 commands", filtered);
+        WaitFast("1 of JECODE_COMMAND_COUNT commands", filtered);
         int returned = Mark();
         Send("\x1b");
         WaitFast("Ctrl+G commands", returned);

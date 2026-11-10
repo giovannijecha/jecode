@@ -6,6 +6,7 @@ fn record(id: &str, number: usize, closed: bool) -> Value {
         ("number", Value::number(number)),
         ("state", Value::string("returned")),
         ("workspace_closed", Value::Bool(closed)),
+        ("log", Value::Array(vec![])),
     ])
 }
 

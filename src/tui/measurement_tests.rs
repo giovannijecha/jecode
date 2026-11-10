@@ -212,7 +212,7 @@ pub(super) fn mixed_messages(turns: usize) -> Vec<Value> {
                     ("path", Value::string(format!("src/module_{turn}.rs"))),
                     ("command", Value::string(format!("cargo test case_{turn}"))),
                 ]);
-                crate::test_support::tool_call(id, name, arguments)
+                crate::test_support::stored_tool_call(id, name, arguments)
             })
             .collect();
         messages.push(Value::object([

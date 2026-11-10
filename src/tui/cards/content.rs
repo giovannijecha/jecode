@@ -1,6 +1,6 @@
 use super::{
-    Body, Status, Tool, diff, discovery, edit_fallback, field, flag, line_rows, map, preview,
-    streams, summary::size,
+    Body, Status, Tool, diff, discovery, edit_fallback, field, flag, line_rows, preview, streams,
+    summary::size,
 };
 use crate::{
     file_change::Change,
@@ -40,7 +40,6 @@ pub(super) fn render(
     }
     match tool.name {
         "list" | "search" => discovery::render(tool.name, result, columns, expanded),
-        "map" => map::render(result, columns, expanded),
         "read" if !expanded => Body::new(Vec::new()),
         "read" if result.get("files").is_some() => Body::new(files(result, columns)),
         "read" if result.get("content").and_then(Value::as_str).is_some() => {
@@ -59,10 +58,6 @@ pub(super) fn render(
                 .then(|| streams::headline(&streams::entries(result, failed), failed))
                 .flatten();
             streams::render(result, failed, skip, columns, expanded)
-        }
-        "checkpoint" => {
-            let lines = payload(&crate::checkpoints::render::text(result, "/checkpoints"));
-            selected(&lines, columns, expanded, 0)
         }
         // A page's text, or the raw result, waits for Ctrl+O.
         "web" if result.get("preview").and_then(Value::as_str).is_some() => {
@@ -317,23 +312,6 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
                     )
                 });
             }
-        }
-    }
-    if let Some(checkpoint) = result.get("checkpoint") {
-        let text = |key| checkpoint.get(key).and_then(Value::as_str);
-        if let Some(status @ ("partial" | "none")) = text("status")
-            && (expanded || status == "partial" || matches!(name, "read" | "write" | "edit"))
-        {
-            notices.push((
-                WARNING,
-                text("reason").map_or_else(
-                    || format!("Checkpoint {status}"),
-                    |reason| format!("Checkpoint {status} · {reason}"),
-                ),
-            ));
-        }
-        if expanded && let Some(reference) = text("ref") {
-            notices.push((MUTED, format!("Checkpoint {reference}")));
         }
     }
     notices

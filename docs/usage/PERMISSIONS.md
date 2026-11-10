@@ -3,15 +3,13 @@
 Every conversation has a permission level that decides what the agent's tools
 may do. You choose the level; the model cannot raise it or approve its own
 requests. Jecode enforces the level on file and command calls, web requests
-other than GET or HEAD, browser control, checkpoint restores and collaborator
-integration.
+other than GET or HEAD, browser control and collaborator integration.
 
 [MCP](MCP.md) calls are not governed by Read, Workspace or Full. Each
 connection's global enabled or suspended state, and the permissions granted at
 the service, govern its calls at every level, including Read. Suspend a
 connection in Settings → **MCP** in the TUI, or in `~/.jecode/mcp.json`, to
-block future calls globally. Server hints do not grant permissions, and local
-checkpoints cannot undo a remote operation.
+block future calls globally. Server hints do not grant permissions.
 
 [LSP](LSP.md) calls likewise follow explicit global server enablement at every
 local level. Enabled language servers run as your user with their configured
@@ -26,7 +24,7 @@ subdirectories.
 
 | Level | In the working folder | Outside it |
 | --- | --- | --- |
-| **Read** | Read and search files; fetch web pages with GET or HEAD. No edits, commands, checkpoint restores or browser control. | Refused. |
+| **Read** | Read and search files; fetch web pages with GET or HEAD. No edits, commands or browser control. | Refused. |
 | **Workspace** (default) | Read and edit files; run commands, [confined](#command-confinement) by the operating system. Network access is allowed. | Each file access, and each command started from an outside directory, asks for [approval](#approval-requests). |
 | **Full** | Everything, with your normal user permissions. | Everything, with your normal user permissions. |
 
@@ -201,7 +199,8 @@ Permissions do not isolate the whole Jecode process. File tools check paths
 before they act, and confinement covers command processes; network
 services you reach act with their own authority. Full is unconfined, and
 confinement does not undo changes made inside the working folder. Use
-[checkpoints](CHECKPOINTS.md) to recover files after an unwanted change.
+your own version control, such as Git, to recover files after an unwanted
+change.
 
 Conversations save level changes, approvals, revocations and decisions. A
 request that was pending when Jecode stopped is recorded as not executed on

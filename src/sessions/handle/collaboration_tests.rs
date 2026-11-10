@@ -4,7 +4,7 @@ use crate::{
     effort::Effort,
     export::Archive,
     json::Value,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 
 #[test]
@@ -27,7 +27,6 @@ fn asynchronous_receipt_saves_before_unsaved_tool_result_without_corrupting_pend
     let redactor = Redactor::empty();
     let archive = Archive {
         backend: "openrouter".into(),
-        legacy_origin: None,
         model: "fixture/model".into(),
         directory: project.path().to_path_buf(),
         messages: Arc::new(Mutex::new(document.messages.clone())),
@@ -53,7 +52,7 @@ fn asynchronous_receipt_saves_before_unsaved_tool_result_without_corrupting_pend
         ("content", Value::Null),
         (
             "tool_calls",
-            Value::Array(vec![tool_call(
+            Value::Array(vec![stored_tool_call(
                 "c1",
                 "read",
                 Value::object([("path", Value::string("file.txt"))]),
@@ -127,7 +126,6 @@ fn closed_collaborator_receipt_survives_journal_reload() {
     let redactor = Redactor::empty();
     let archive = Archive {
         backend: "openrouter".into(),
-        legacy_origin: None,
         model: "fixture/model".into(),
         directory: project.path().to_path_buf(),
         messages: Arc::new(Mutex::new(document.messages.clone())),

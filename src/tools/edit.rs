@@ -4,29 +4,13 @@ use crate::json::Value;
 /// Files one edit call may change.
 pub(crate) const MAX_FILES: usize = 12;
 
-/// Parses the edit tool's ordered replacements, including legacy call shapes.
+/// Parses the edit tool's ordered replacements.
 pub(crate) fn steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {
-    let legacy = ["old_text", "new_text"]
-        .iter()
-        .any(|name| match arguments.get(name) {
-            None | Some(Value::Null) => false,
-            Some(Value::String(text)) if text.is_empty() => false,
-            Some(_) => true,
-        });
-    if let Some(items) = arguments.get("edits") {
-        match items {
-            Value::Array(items) if !items.is_empty() => {
-                if legacy {
-                    return Err("Use either edits or old_text/new_text, not both".into());
-                }
-                return items.iter().map(step).collect();
-            }
-            Value::Array(_) | Value::Null if legacy => return Ok(vec![step(arguments)?]),
-            Value::Array(_) => return Err("edits must contain at least one replacement".into()),
-            _ => return Err("edits must be an array".into()),
-        }
+    match arguments.get("edits") {
+        Some(Value::Array(items)) if !items.is_empty() => items.iter().map(step).collect(),
+        Some(Value::Array(_)) => Err("edits must contain at least one replacement".into()),
+        _ => Err("edits must be an array".into()),
     }
-    Ok(vec![step(arguments)?])
 }
 
 /// The files of a multi-file edit in call order, each entry with its path
@@ -46,9 +30,9 @@ pub(crate) fn files(arguments: &Value) -> Result<Option<Vec<(&str, &Value)>>, St
     }
     // A path without replacements beside files changes nothing, so files is
     // the call; only single-file replacements conflict with it.
-    if ["edits", "old_text", "new_text"]
-        .iter()
-        .any(|name| arguments.get(name).is_some_and(|value| !placeholder(value)))
+    if arguments
+        .get("edits")
+        .is_some_and(|value| !placeholder(value))
     {
         return Err(
             "Send replacements either as path with edits for one file, or inside files entries for several, not both"

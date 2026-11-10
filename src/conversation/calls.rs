@@ -19,24 +19,19 @@ impl ToolCall {
         ])
     }
 
-    /// Reads both Jecode calls and the OpenRouter shape in older archives.
+    /// Reads Jecode's provider-neutral stored form.
     pub fn parse(value: &Value) -> Result<Self, String> {
+        if value.get("function").is_some() {
+            return Err("Unsupported stored tool call shape".into());
+        }
         let id = field(value, "id")?;
         if id.is_empty() {
             return Err("Tool call id cannot be empty".into());
         }
-        let function = if let Some(function) = value.get("function") {
-            if value.get("type").and_then(Value::as_str) != Some("function") {
-                return Err("Unsupported legacy tool call type".into());
-            }
-            function
-        } else {
-            value
-        };
         Ok(Self {
             id: id.into(),
-            name: field(function, "name")?.into(),
-            arguments: field(function, "arguments")?.into(),
+            name: field(value, "name")?.into(),
+            arguments: field(value, "arguments")?.into(),
         })
     }
 }

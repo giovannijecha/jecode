@@ -230,7 +230,6 @@ fn a_checkpoint_waiting_for_disk_access_leaves_the_history_free() {
     let document = handle.snapshot();
     let archive = crate::export::Archive {
         backend: "openrouter".into(),
-        legacy_origin: None,
         model: "fixture/model".into(),
         directory: document.directory.clone(),
         messages: Arc::new(Mutex::new(document.messages.clone())),

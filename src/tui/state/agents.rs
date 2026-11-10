@@ -15,13 +15,9 @@ fn label(event: &Value) -> String {
     }
 }
 
-/// Whether the runtime recorded the event outside any turn. Older events
-/// carry no mark; only their restored unknown outcomes are known to be.
+/// Whether the runtime recorded the event outside any turn.
 pub(in crate::tui) fn outside_turn(event: &Value) -> bool {
-    match event.get("in_turn") {
-        Some(in_turn) => in_turn == &Value::Bool(false),
-        None => event.get("kind").and_then(Value::as_str) == Some("unknown"),
-    }
+    event.get("in_turn") == Some(&Value::Bool(false))
 }
 
 impl State {
@@ -111,38 +107,5 @@ impl State {
             self.begin_tool_turn();
         }
         self.collaboration_event(event);
-    }
-
-    /// Older saved events carry no call label. Resumed conversations record
-    /// an agent call after the events it caused; those events take the
-    /// call's work label and join its chapter.
-    pub fn adopt_collaboration(&mut self, indices: &[usize], work: &str) {
-        for &index in indices {
-            if let Some(Item::Tool {
-                name, arguments, ..
-            }) = self.items.get_mut(index)
-                && name == "collaboration"
-            {
-                *arguments = Value::object([
-                    (
-                        "label",
-                        arguments.get("label").cloned().unwrap_or(Value::Null),
-                    ),
-                    ("work", Value::string(work)),
-                    ("lone", Value::Bool(false)),
-                ]);
-            }
-        }
-        for &index in indices {
-            if let Some(Item::Tool { presentation, .. }) = self.items.get_mut(index) {
-                presentation.chapter_start = None;
-            }
-            if index < self.items.len() {
-                self.cache_chapter(index);
-            }
-        }
-        self.changed();
-        self.output_changed();
-        self.update_chapters(indices);
     }
 }

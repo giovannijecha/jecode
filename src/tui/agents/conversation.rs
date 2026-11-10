@@ -143,53 +143,15 @@ fn counted(counts: &Value) -> Change {
     }
 }
 
-/// Snapshots without a log show the assignment, calls, messages and outcome.
-fn fallback(record: &Value) -> Vec<Value> {
-    let entry = |kind: &str, index: usize| {
-        Value::object([
-            ("kind", Value::string(kind)),
-            ("index", Value::number(index)),
-        ])
-    };
-    let mut entries = vec![Value::object([
-        ("kind", Value::string("assignment")),
-        (
-            "version",
-            Value::number(super::number(record, "received_version")),
-        ),
-        (
-            "instructions",
-            Value::string(super::value(record, "instructions")),
-        ),
-    ])];
-    entries.extend((0..super::list(record, "tools").len()).map(|index| entry("tool", index)));
-    entries.extend((0..super::list(record, "updates").len()).map(|index| entry("message", index)));
-    let report = record
-        .get("report")
-        .and_then(|report| report.get("version"));
-    match (super::value(record, "state"), report) {
-        ("returned" | "failed", Some(version)) => entries.push(Value::object([
-            ("kind", Value::string("returned")),
-            ("version", version.clone()),
-        ])),
-        ("stopped", _) => entries.push(Value::object([("kind", Value::string("stopped"))])),
-        _ => {}
-    }
-    entries
-}
-
 pub(in crate::tui) fn items(record: &Value, changes: &HashMap<String, Change>) -> Vec<Item> {
     let tools = super::list(record, "tools");
     let updates = super::list(record, "updates");
     let state = super::value(record, "state");
     let working = matches!(state, "running" | "stopping");
-    let entries = record
-        .get("log")
-        .and_then(Value::as_array)
-        .map_or_else(|| fallback(record), <[Value]>::to_vec);
+    let entries = super::list(record, "log");
     let mut items = Vec::new();
     let mut turn_id = 0;
-    for entry in &entries {
+    for entry in entries {
         let index = entry.get("index").and_then(Value::as_usize);
         match super::value(entry, "kind") {
             "assignment" => {

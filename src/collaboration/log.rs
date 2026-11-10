@@ -64,35 +64,17 @@ pub(super) fn value(entries: &[Entry], messages: usize, kept: usize) -> Value {
 }
 
 /// The log of a saved record and its message ordinal count. Message indices
-/// are ordinals into the saved `updates` (`persisted` of them). Records saved
-/// before the log existed get their assignment, calls, messages and outcome.
-pub(super) fn restore(record: &Value, persisted: usize, tools: usize) -> (Vec<Entry>, usize) {
+/// are ordinals into the saved `updates` (`persisted` of them).
+pub(super) fn restore(
+    record: &Value,
+    persisted: usize,
+    tools: usize,
+) -> Result<(Vec<Entry>, usize), String> {
     let number = |value: &Value, key| value.get(key).and_then(Value::as_usize);
-    let Some(saved) = record.get("log").and_then(Value::as_array) else {
-        let mut entries = Vec::new();
-        let received = number(record, "received_version").unwrap_or(0);
-        if received > 0 {
-            entries.push(Entry::Assignment {
-                version: received,
-                instructions: text(record, "instructions"),
-            });
-        }
-        entries.extend((0..tools).map(Entry::Tool));
-        entries.extend((0..persisted).map(|ordinal| Entry::Message(Some(ordinal))));
-        match text(record, "state").as_str() {
-            "returned" | "failed" => {
-                if let Some(version) = record
-                    .get("report")
-                    .and_then(|report| number(report, "version"))
-                {
-                    entries.push(Entry::Returned(version));
-                }
-            }
-            "stopped" => entries.push(Entry::Stopped),
-            _ => {}
-        }
-        return (entries, persisted);
-    };
+    let saved = record
+        .get("log")
+        .and_then(Value::as_array)
+        .ok_or("Unsupported collaborator log format; file left unchanged")?;
     let entries = saved
         .iter()
         .filter_map(|item| match text(item, "kind").as_str() {
@@ -111,7 +93,7 @@ pub(super) fn restore(record: &Value, persisted: usize, tools: usize) -> (Vec<En
             _ => None,
         })
         .collect();
-    (entries, persisted)
+    Ok((entries, persisted))
 }
 
 fn text(value: &Value, key: &str) -> String {

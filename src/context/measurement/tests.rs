@@ -116,15 +116,15 @@ fn media_weights_are_tokens_at_every_text_density() {
 }
 
 #[test]
-fn snapshot_measurements_roundtrip_and_old_sessions_remain_readable() {
+fn snapshot_measurements_roundtrip_and_missing_fields_are_rejected() {
     let mut context = Context::default();
     let source = vec![message("system", "Agent"), message("user", "Inspect")];
     measure(&mut context, &source, Some(1000), Some(20));
     context.output_message = Some(2);
     let value = context.value();
     assert_eq!(Context::parse(Some(&value)).unwrap().value(), value);
-    let mut legacy = value;
-    if let Value::Object(fields) = &mut legacy {
+    let mut incomplete = value;
+    if let Value::Object(fields) = &mut incomplete {
         for name in [
             "output_message",
             "measured_bytes",
@@ -133,14 +133,11 @@ fn snapshot_measurements_roundtrip_and_old_sessions_remain_readable() {
             fields.remove(name);
         }
     }
-    let restored = Context::parse(Some(&legacy)).unwrap();
-    assert_eq!(restored.input_tokens, Some(1000));
-    assert_eq!(restored.measured_end, source.len());
-    assert_eq!(restored.measured_bytes, None);
+    assert!(Context::parse(Some(&incomplete)).is_err());
 }
 
 #[test]
-fn legacy_whole_prompt_density_is_discarded_without_losing_usage() {
+fn missing_calibration_method_is_rejected() {
     let mut context = Context::default();
     measure(
         &mut context,
@@ -148,15 +145,13 @@ fn legacy_whole_prompt_density_is_discarded_without_losing_usage() {
         Some(1000),
         Some(20),
     );
-    let mut legacy = context.value();
-    if let Value::Object(fields) = &mut legacy
+    let mut incomplete = context.value();
+    if let Value::Object(fields) = &mut incomplete
         && let Some(Value::Object(calibration)) = fields.get_mut("token_calibration")
     {
         calibration.remove("method");
     }
-    let restored = Context::parse(Some(&legacy)).unwrap();
-    assert_eq!(restored.input_tokens, Some(1000));
-    assert_eq!(restored.calibration, None);
+    assert!(Context::parse(Some(&incomplete)).is_err());
 }
 
 #[test]

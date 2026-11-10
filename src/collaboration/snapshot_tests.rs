@@ -19,6 +19,7 @@ fn seeded(count: usize, tools: usize) -> (Observer, Directory, Directory) {
             ("workspace", Value::string("shared")),
             ("workspace_info", workspace.value()),
             ("directory", Value::string(project.path().to_string_lossy())),
+            ("log", Value::Array(vec![])),
         ]);
         observer
             .0

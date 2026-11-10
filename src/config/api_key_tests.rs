@@ -2,7 +2,7 @@ use super::*;
 use crate::test_support::Directory;
 
 #[test]
-fn api_keys_coexist_with_subscription_accounts_and_legacy_openrouter_settings() {
+fn api_keys_coexist_with_subscription_accounts_and_scoped_openrouter_settings() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
     let mut settings = Settings::new("router-fixture-key".into(), "fixture/router".into()).unwrap();

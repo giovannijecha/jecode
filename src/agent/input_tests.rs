@@ -208,7 +208,6 @@ fn a_retry_is_rebuilt_with_messages_sent_while_it_waited() {
 
 #[test]
 fn messages_sent_during_compaction_join_the_request_after_it() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let prompt = "original objective ".repeat(1500);
     let mut responses = vec![(

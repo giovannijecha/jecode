@@ -50,10 +50,6 @@ fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
     let result = Value::object([
         ("exit_code", Value::number(0)),
         ("stdout", Value::string("first\nsecond\nready\n")),
-        (
-            "checkpoint",
-            object([("status", "none"), ("reason", "No changes")]),
-        ),
     ]);
     for columns in [40, 80] {
         let card = draw(
@@ -72,7 +68,7 @@ fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
         );
         assert!(card.rows[2].plain().starts_with("  │ "));
         assert!(card.rows[2].plain().ends_with('…'));
-        assert_eq!(card.rows[3].plain(), "  └ ready  +2 lines · no checkpoint");
+        assert_eq!(card.rows[3].plain(), "  └ ready  +2 lines");
         assert_eq!(card.rows.len(), 4);
         assert!(card.hidden);
         assert!(
@@ -193,7 +189,7 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
 }
 
 #[test]
-fn expanded_output_and_checkpoint_notice_remain_complete() {
+fn expanded_output_remains_complete() {
     let args = object([
         ("command", "printf output"),
         ("description", "Print output"),
@@ -201,10 +197,6 @@ fn expanded_output_and_checkpoint_notice_remain_complete() {
     let result = Value::object([
         ("exit_code", Value::number(0)),
         ("stdout", Value::string("first\n\nlast\n")),
-        (
-            "checkpoint",
-            object([("status", "none"), ("reason", "No changes")]),
-        ),
     ]);
     let shown = Presentation {
         expanded: true,
@@ -212,7 +204,6 @@ fn expanded_output_and_checkpoint_notice_remain_complete() {
     };
     let card = draw("bash", &args, Some(&result), &shown, 40);
     assert!(plain(&card).contains("  │ first\n  │ \n  │ last"));
-    assert!(plain(&card).contains("Checkpoint none · No changes"));
     assert!(!card.hidden);
 }
 

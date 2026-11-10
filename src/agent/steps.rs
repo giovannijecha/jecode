@@ -1,8 +1,8 @@
 //! One call that runs several tools in order. Models tend to send one call per
 //! response, and every response sends the conversation again. The transcript
 //! keeps the model's own call with one combined result, because native output
-//! is replayed verbatim; each step still has its permission check, checkpoint
-//! and card, like a call of its own.
+//! is replayed verbatim; each step still has its permission check and
+//! card, like a call of its own.
 
 use super::Agent;
 use crate::{
@@ -160,9 +160,8 @@ impl Agent {
 /// queries and background commands report failures through their status.
 /// A command that yielded before its outcome was known cannot have succeeded
 /// yet, unless the step asked for that with its own `wait_ms`.
-/// A multi-file edit fails when any file does, and a restore when any path
-/// conflicts, fails or is skipped; a multi-file read reports each path and
-/// goes on, as it does alone.
+/// A multi-file edit fails when any file does; a multi-file read reports each
+/// path and goes on, as it does alone.
 pub(crate) fn failed(tool: &str, result: &Value) -> bool {
     result.get("error").is_some()
         || result
@@ -188,15 +187,6 @@ pub(crate) fn failed(tool: &str, result: &Value) -> bool {
                 .get("files")
                 .and_then(Value::as_array)
                 .is_some_and(|files| files.iter().any(|file| file.get("error").is_some())))
-        || (tool == "checkpoint"
-            && ["conflict_count", "failed_count", "skipped_count"]
-                .iter()
-                .any(|count| {
-                    result
-                        .get(count)
-                        .and_then(Value::as_usize)
-                        .is_some_and(|count| count > 0)
-                }))
 }
 
 fn combined(steps: &[ToolCall], results: &[(String, Value)]) -> Value {

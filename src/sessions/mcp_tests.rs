@@ -1,6 +1,6 @@
 use crate::{
     json::Value,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 
 /// The recovered result of an MCP request interrupted by a crash.
@@ -27,7 +27,7 @@ fn recovered(action: &str) -> Value {
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     "remote-started",
                     "mcp",
                     Value::object([

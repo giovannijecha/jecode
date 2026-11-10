@@ -8,16 +8,50 @@ use std::time::{Duration, Instant};
 mod protocol;
 pub mod sandbox;
 pub mod server;
-pub use protocol::{completion, tool_call};
+pub use protocol::{completion, stored_tool_call, tool_call};
 
-/// Whether a request message carries runtime state rather than conversation.
-pub fn is_request_state(message: &Value) -> bool {
+fn message_text(message: &Value) -> Option<&str> {
     let content = message.get("content");
-    let text = content
+    content
         .and_then(Value::as_str)
-        .or_else(|| content?.as_array()?.first()?.get("text")?.as_str());
+        .or_else(|| content?.as_array()?.first()?.get("text")?.as_str())
+}
+
+fn is_snapshot(message: &Value) -> bool {
+    message_text(message).is_some_and(|text| text.starts_with(crate::context::SNAPSHOT_HEADER))
+}
+
+/// Whether a request message carries runtime state or an instruction
+/// snapshot rather than conversation.
+pub fn is_request_state(message: &Value) -> bool {
     message.get("jecode_request_state") == Some(&Value::Bool(true))
-        || text.is_some_and(|text| text.starts_with("Jecode session state"))
+        || is_snapshot(message)
+        || message_text(message).is_some_and(|text| text.starts_with("Jecode session state"))
+}
+
+fn request_items(body: &Value) -> &[Value] {
+    body.get("messages")
+        .or_else(|| body.get("input"))
+        .and_then(Value::as_array)
+        .expect("Fixture request has messages")
+}
+
+/// The current instruction snapshot in a request, wherever it was first sent.
+pub fn latest_snapshot(body: &Value) -> Option<String> {
+    request_items(body)
+        .iter()
+        .rev()
+        .find(|message| is_snapshot(message))
+        .and_then(message_text)
+        .map(str::to_owned)
+}
+
+/// Instruction snapshots in a request, in the order first sent.
+pub fn snapshot_count(body: &Value) -> usize {
+    request_items(body)
+        .iter()
+        .filter(|message| is_snapshot(message))
+        .count()
 }
 
 /// History assertions exclude runtime state, which stays where it was first
@@ -32,20 +66,12 @@ pub fn durable_messages(messages: &[Value]) -> Vec<Value> {
 
 /// The latest runtime state text in a request, wherever it was first sent.
 pub fn latest_state(body: &Value) -> String {
-    body.get("messages")
-        .or_else(|| body.get("input"))
-        .and_then(Value::as_array)
-        .expect("Fixture request has messages")
+    request_items(body)
         .iter()
         .rev()
-        .find(|message| is_request_state(message))
-        .and_then(|message| {
-            let content = message.get("content")?;
-            content
-                .as_str()
-                .or_else(|| content.as_array()?.first()?.get("text")?.as_str())
-                .map(str::to_owned)
-        })
+        .find(|message| is_request_state(message) && !is_snapshot(message))
+        .and_then(message_text)
+        .map(str::to_owned)
         .expect("Fixture request has runtime state")
 }
 

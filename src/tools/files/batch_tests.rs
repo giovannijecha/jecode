@@ -1,5 +1,4 @@
 use super::*;
-use crate::checkpoints::session::Session;
 use crate::test_support::Directory;
 
 mod ambiguity;
@@ -32,7 +31,6 @@ fn batch_edits_use_unique_matches_in_staged_order_and_report_one_change() {
     let (result, change) = edit_with_change(
         &root,
         &batch(&[("alpha", "gamma"), ("gamma\nbeta", "delta")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -60,7 +58,7 @@ fn rejected_later_batch_step_keeps_original_bytes() {
     ] {
         fs::write(&path, original).unwrap();
         let (result, change) =
-            edit_with_change(&root, &batch(&steps), None, &Cancellation::default()).unwrap();
+            edit_with_change(&root, &batch(&steps), &Cancellation::default()).unwrap();
         assert!(
             result
                 .get("error")
@@ -171,19 +169,16 @@ fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
     let root = fs::canonicalize(directory.path()).unwrap();
     let path = root.join("source.txt");
     fs::write(&path, "original").unwrap();
-    let mixed = Value::object([
+    let retired = Value::object([
         ("path", Value::string("source.txt")),
         ("old_text", Value::string("original")),
         ("new_text", Value::string("changed")),
-        (
-            "edits",
-            Value::Array(vec![Value::object([
-                ("old_text", Value::string("original")),
-                ("new_text", Value::string("changed")),
-            ])]),
-        ),
     ]);
-    assert!(edit(&root, &mixed).unwrap_err().contains("either"));
+    assert!(
+        edit(&root, &retired)
+            .unwrap_err()
+            .contains("edits must be an array")
+    );
     assert!(
         edit(&root, &batch(&[]))
             .unwrap_err()
@@ -195,7 +190,6 @@ fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
     let (result, change) = edit_with_change(
         &root,
         &batch(&[("original", "original")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -203,57 +197,6 @@ fn batch_rejects_invalid_shapes_and_noop_does_not_replace_file() {
     assert!(change.is_none());
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
     assert_eq!(fs::read(&path).unwrap(), b"original");
-}
-
-#[test]
-fn batch_ignores_empty_legacy_placeholders_from_native_call() {
-    let directory = Directory::new();
-    let root = fs::canonicalize(directory.path()).unwrap();
-    let path = root.join("source.txt");
-    let tools = crate::tools::Tools::new(&root).unwrap();
-    for placeholder in [Value::string(""), Value::Null] {
-        fs::write(&path, "before").unwrap();
-        let mut arguments = batch(&[("before", "after")]);
-        let Value::Object(fields) = &mut arguments else {
-            unreachable!()
-        };
-        fields.insert("old_text".into(), placeholder.clone());
-        fields.insert("new_text".into(), placeholder);
-        let result = tools.execute("edit", &arguments.encode());
-        assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "after");
-    }
-}
-
-#[test]
-fn populated_legacy_fields_still_conflict_with_batch_and_legacy_calls_still_work() {
-    let directory = Directory::new();
-    let root = fs::canonicalize(directory.path()).unwrap();
-    let path = root.join("source.txt");
-    fs::write(&path, "before").unwrap();
-    for (old, new) in [("before", ""), ("", "after")] {
-        let mut arguments = batch(&[("before", "after")]);
-        let Value::Object(fields) = &mut arguments else {
-            unreachable!()
-        };
-        fields.insert("old_text".into(), Value::string(old));
-        fields.insert("new_text".into(), Value::string(new));
-        assert!(edit(&root, &arguments).unwrap_err().contains("either"));
-    }
-    assert_eq!(fs::read_to_string(&path).unwrap(), "before");
-
-    for unused_edits in [Value::Null, Value::Array(vec![])] {
-        fs::write(&path, "before").unwrap();
-        let legacy = Value::object([
-            ("path", Value::string("source.txt")),
-            ("old_text", Value::string("before")),
-            ("new_text", Value::string("after")),
-            ("edits", unused_edits),
-        ]);
-        let result = edit(&root, &legacy).unwrap();
-        assert_eq!(result.get("bytes_written"), Some(&Value::number(5)));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "after");
-    }
 }
 
 #[test]
@@ -284,7 +227,6 @@ fn streaming_batch_composes_each_step_and_installs_only_after_validation() {
     let (result, change) = edit_with_change(
         &root,
         &batch(&[("start", "begin"), ("begin:", "front:"), (":end", ":tail")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -302,7 +244,6 @@ fn streaming_batch_composes_each_step_and_installs_only_after_validation() {
     let (noop, change) = edit_with_change(
         &root,
         &batch(&[("front:", "front:")]),
-        None,
         &Cancellation::default(),
     )
     .unwrap();
@@ -358,52 +299,4 @@ fn streaming_batch_ambiguity_created_across_pieces_keeps_original_and_permission
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
     assert_eq!(fs::metadata(&path).unwrap().permissions(), permissions);
     assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
-}
-
-#[test]
-fn batch_captures_one_checkpoint_only_after_all_matches_validate() {
-    let home = Directory::new();
-    let directory = Directory::new();
-    let root = fs::canonicalize(directory.path()).unwrap();
-    let path = root.join("source.txt");
-    fs::write(&path, "first second").unwrap();
-    let session = Session::offline(home.path(), &root);
-    session.begin("batch-edits");
-    let (rejected, _) = edit_with_change(
-        &root,
-        &batch(&[("first", "changed"), ("missing", "x")]),
-        Some(&session),
-        &Cancellation::default(),
-    )
-    .unwrap();
-    assert!(rejected.get("checkpoint").is_none());
-    assert!(
-        session
-            .store()
-            .unwrap()
-            .list(10, &Cancellation::default())
-            .unwrap()
-            .is_empty()
-    );
-    let (result, _) = edit_with_change(
-        &root,
-        &batch(&[("first", "changed"), ("second", "other")]),
-        Some(&session),
-        &Cancellation::default(),
-    )
-    .unwrap();
-    assert_eq!(
-        result.get("checkpoint").unwrap().get("status"),
-        Some(&Value::string("saved"))
-    );
-    assert_eq!(
-        session
-            .store()
-            .unwrap()
-            .list(10, &Cancellation::default())
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(fs::read_to_string(&path).unwrap(), "changed other");
 }

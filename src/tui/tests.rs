@@ -143,8 +143,13 @@ fn worker_results_previews_export_and_local_commands_use_the_same_conversation()
                         "edit",
                         Value::object([
                             ("path", Value::string("fixture.txt")),
-                            ("old_text", Value::string("before")),
-                            ("new_text", Value::string("after")),
+                            (
+                                "edits",
+                                Value::Array(vec![Value::object([
+                                    ("old_text", Value::string("before")),
+                                    ("new_text", Value::string("after")),
+                                ])]),
+                            ),
                         ]),
                     ),
                     tool_call(

@@ -17,7 +17,10 @@ fn stores_user_configuration_and_preserves_future_fields() {
         panic!()
     };
     root.insert("future".into(), Value::Bool(true));
-    let Value::Object(provider) = root.get_mut("openrouter").unwrap() else {
+    let Some(Value::Object(backends)) = root.get_mut("backends") else {
+        panic!()
+    };
+    let Some(Value::Object(provider)) = backends.get_mut("openrouter") else {
         panic!()
     };
     provider.insert("future_option".into(), Value::number(7));
@@ -30,7 +33,12 @@ fn stores_user_configuration_and_preserves_future_fields() {
     let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
     assert_eq!(document.get("future"), Some(&Value::Bool(true)));
     assert_eq!(
-        document.get("openrouter").unwrap().get("future_option"),
+        document
+            .get("backends")
+            .unwrap()
+            .get("openrouter")
+            .unwrap()
+            .get("future_option"),
         Some(&Value::number(7))
     );
     assert_eq!(
@@ -104,8 +112,8 @@ fn config_paths_are_user_scoped_and_environment_pairs_are_explicit() {
 fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"},"context":{"future":1}}"#;
-    fs::write(store.path(), legacy).unwrap();
+    let initial = r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}},"context":{"future":1}}"#;
+    fs::write(store.path(), initial).unwrap();
     let mut saved = store.load().unwrap().unwrap();
     assert_eq!(saved.auto_compact, crate::context::AUTO_COMPACT_DEFAULT);
     saved.auto_compact = 65;
@@ -119,6 +127,8 @@ fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values
     assert_eq!(context.get("future"), Some(&Value::number(1)));
     assert!(
         document
+            .get("backends")
+            .unwrap()
             .get("openrouter")
             .unwrap()
             .get("auto_compact_percent")
@@ -133,7 +143,7 @@ fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values
     }
     for value in ["0", "100", "\"80\"", "80.5", "-1", "null"] {
         let text = format!(
-            r#"{{"openrouter":{{"api_key":"isolated-fixture-key","model":"fixture/model"}},"context":{{"auto_compact_percent":{value}}}}}"#
+            r#"{{"selection":{{"backend":"openrouter","model":"fixture/model"}},"backends":{{"openrouter":{{"api_key":"isolated-fixture-key"}}}},"context":{{"auto_compact_percent":{value}}}}}"#
         );
         fs::write(store.path(), &text).unwrap();
         let error = store.load().err().unwrap();
@@ -142,8 +152,7 @@ fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values
         assert!(store.save(&settings("fixture/new")).is_err());
         assert_eq!(fs::read_to_string(store.path()).unwrap(), text);
     }
-    let text =
-        r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"},"context":80}"#;
+    let text = r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}},"context":80}"#;
     fs::write(store.path(), text).unwrap();
     assert!(
         store
@@ -160,10 +169,10 @@ fn auto_compact_defaults_persists_beside_the_provider_and_rejects_invalid_values
 fn routing_preferences_are_optional_per_model_and_keep_entries_this_version_skips() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    // Files written before routing existed load with Auto for every model.
+    // Routing is optional and defaults to Auto for every model.
     fs::write(
         store.path(),
-        r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#,
+        r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}}}"#,
     )
     .unwrap();
     let loaded = store.load().unwrap().unwrap();
@@ -171,12 +180,12 @@ fn routing_preferences_are_optional_per_model_and_keep_entries_this_version_skip
     assert_eq!(loaded.routing_for("fixture/model"), Routing::Auto);
     fs::write(
         store.path(),
-        r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model","routing":{
+        r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key","routing":{
             "fixture/model":{"mode":"endpoint","endpoint":"deepinfra/fp8"},
             "fixture/other":{"mode":"auto"},
             "fixture/future":{"mode":"fastest","margin":2},
             "fixture/legacy":{"mode":"default"},
-            "not a model":{"mode":"auto"}}}}"#,
+            "not a model":{"mode":"auto"}}}}}"#,
     )
     .unwrap();
     let mut loaded = store.load().unwrap().unwrap();
@@ -193,7 +202,13 @@ fn routing_preferences_are_optional_per_model_and_keep_entries_this_version_skip
         .insert("fixture/third".into(), Routing::Endpoint("groq".into()));
     store.save(&loaded).unwrap();
     let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
-    let routing = document.get("openrouter").unwrap().get("routing").unwrap();
+    let routing = document
+        .get("backends")
+        .unwrap()
+        .get("openrouter")
+        .unwrap()
+        .get("routing")
+        .unwrap();
     assert_eq!(
         routing.get("fixture/model").unwrap().encode(),
         r#"{"mode":"auto"}"#
@@ -221,10 +236,10 @@ fn routing_preferences_are_optional_per_model_and_keep_entries_this_version_skip
 fn malformed_routing_rejects_the_file_without_replacing_it() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    let text = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model","routing":["auto"]}}"#;
+    let text = r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key","routing":["auto"]}}}"#;
     fs::write(store.path(), text).unwrap();
     let error = store.load().err().unwrap();
-    assert!(error.contains("openrouter.routing must be an object"));
+    assert!(error.contains("backends.openrouter.routing must be an object"));
     assert!(!error.contains("isolated-fixture-key"));
     let mut next = settings("fixture/model");
     next.routing.insert("fixture/model".into(), Routing::Auto);
@@ -233,50 +248,27 @@ fn malformed_routing_rejects_the_file_without_replacing_it() {
 }
 
 #[test]
-fn selected_backend_is_separate_from_legacy_openrouter_account() {
+fn retired_root_openrouter_settings_are_rejected_without_replacing_the_file() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    fs::write(store.path(), r#"{"selection":{"backend":"fixture","model":"model-a","effort":"default","future":true},"backends":{"fixture":{"api_key":"fixture-key","future":7}},"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/old","future":9}}"#).unwrap();
-    let mut selected = store.load().unwrap().unwrap();
-    assert_eq!(selected.backend_id, "fixture");
-    assert_eq!(selected.model, "model-a");
-    assert_eq!(selected.credential_for("fixture"), Some("fixture-key"));
-    assert_eq!(
-        selected.credential_for("openrouter"),
-        Some("isolated-fixture-key")
-    );
-    selected.model = "model-b".into();
-    store.save(&selected).unwrap();
-    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
-    assert_eq!(
-        document.get("selection").unwrap().get("model"),
-        Some(&Value::string("model-b"))
-    );
-    assert_eq!(
-        document.get("selection").unwrap().get("future"),
-        Some(&Value::Bool(true))
-    );
-    assert_eq!(
-        document
-            .get("backends")
-            .unwrap()
-            .get("fixture")
-            .unwrap()
-            .get("future"),
-        Some(&Value::number(7))
-    );
-    assert_eq!(
-        document.get("openrouter").unwrap().get("model"),
-        Some(&Value::string("fixture/old"))
-    );
-    assert_eq!(
-        document.get("openrouter").unwrap().get("future"),
-        Some(&Value::number(9))
-    );
+    for root in [
+        r#"{"api_key":"isolated-fixture-key"}"#,
+        r#"{"api_key":"","model":"unconfigured"}"#,
+    ] {
+        let original = format!(
+            r#"{{"selection":{{"backend":"fixture","model":"model-a"}},"backends":{{"fixture":{{"api_key":"fixture-key"}}}},"openrouter":{root}}}"#
+        );
+        fs::write(store.path(), &original).unwrap();
+        let error = store.load().err().unwrap();
+        assert!(error.contains("Unsupported root openrouter settings"));
+        assert!(!error.contains("isolated-fixture-key"));
+        assert!(store.save(&settings("model-b")).is_err());
+        assert_eq!(fs::read_to_string(store.path()).unwrap(), original);
+    }
 }
 
 #[test]
-fn legacy_openrouter_edits_override_mirrored_selection_and_credentials() {
+fn retired_root_key_cannot_override_scoped_selection() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
     let mut selected = settings("fixture/first");
@@ -291,72 +283,47 @@ fn legacy_openrouter_edits_override_mirrored_selection_and_credentials() {
     let Value::Object(root) = &mut document else {
         panic!()
     };
-    let Value::Object(legacy) = root.get_mut("openrouter").unwrap() else {
-        panic!()
-    };
-    legacy.insert("api_key".into(), Value::string("legacy-edited-key"));
-    legacy.insert("model".into(), Value::string("fixture/edited"));
-    legacy.insert("effort".into(), Value::string("default"));
-    legacy.insert(
-        "routing".into(),
-        Value::object([(
-            "fixture/edited",
-            Routing::Endpoint("edited-endpoint".into()).value(),
-        )]),
-    );
+    let mirror = Value::object([
+        ("api_key", Value::string("legacy-edited-key")),
+        ("model", Value::string("fixture/edited")),
+        ("effort", Value::string("default")),
+        (
+            "routing",
+            Value::object([(
+                "fixture/first",
+                Routing::Endpoint("edited-endpoint".into()).value(),
+            )]),
+        ),
+    ]);
+    root.insert("openrouter".into(), mirror.clone());
     fs::write(store.path(), document.encode()).unwrap();
 
-    let loaded = store.load().unwrap().unwrap();
-    assert_eq!(loaded.api_key, "legacy-edited-key");
-    assert_eq!(
-        loaded.credential_for("openrouter"),
-        Some("legacy-edited-key")
-    );
-    assert_eq!(loaded.model, "fixture/edited");
-    assert_eq!(loaded.effort, Effort::Default);
-    assert_eq!(
-        loaded.routing_for("fixture/edited"),
-        Routing::Endpoint("edited-endpoint".into())
-    );
-    store.save(&loaded).unwrap();
-    let reopened = store.load().unwrap().unwrap();
-    assert_eq!(reopened.api_key, "legacy-edited-key");
-    assert_eq!(reopened.model, "fixture/edited");
-    assert_eq!(reopened.effort, Effort::Default);
-    assert_eq!(
-        reopened.routing_for("fixture/edited"),
-        Routing::Endpoint("edited-endpoint".into())
-    );
+    assert!(store.load().err().unwrap().contains("Unsupported root"));
+    assert!(store.previous_model("openrouter").is_err());
+    let saved = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
+    assert_eq!(saved.get("openrouter"), Some(&mirror));
 }
 
 #[test]
-fn legacy_openrouter_key_edit_does_not_change_another_backend_selection() {
+fn legacy_only_configuration_is_rejected_without_overwriting_it() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    fs::write(store.path(), r#"{"selection":{"backend":"fixture","model":"fixture/model"},"backends":{"fixture":{"api_key":"fixture-key"},"openrouter":{"api_key":"stale-openrouter-key"}},"openrouter":{"api_key":"legacy-edited-key","model":"openrouter/edited"}}"#).unwrap();
-    let loaded = store.load().unwrap().unwrap();
-    assert_eq!(loaded.backend_id, "fixture");
-    assert_eq!(loaded.api_key, "fixture-key");
-    assert_eq!(loaded.model, "fixture/model");
-    assert_eq!(
-        loaded.credential_for("openrouter"),
-        Some("legacy-edited-key")
+    let original = r#"{"openrouter":{"api_key":"fixture-key","model":"fixture/model"}}"#;
+    fs::write(store.path(), original).unwrap();
+    assert!(store.load().err().unwrap().contains("Missing selection"));
+    assert!(
+        store
+            .previous_model("openrouter")
+            .unwrap_err()
+            .contains("Missing selection")
     );
-    store.save(&loaded).unwrap();
-    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
-    assert_eq!(
-        document
-            .get("backends")
-            .unwrap()
-            .get("openrouter")
-            .unwrap()
-            .get("api_key"),
-        Some(&Value::string("legacy-edited-key"))
+    assert!(
+        store
+            .save(&settings("fixture/new"))
+            .unwrap_err()
+            .contains("Missing selection")
     );
-    assert_eq!(
-        document.get("openrouter").unwrap().get("model"),
-        Some(&Value::string("openrouter/edited"))
-    );
+    assert_eq!(fs::read_to_string(store.path()).unwrap(), original);
 }
 
 #[test]
@@ -434,8 +401,8 @@ fn routing_preference_is_scoped_to_its_backend_even_for_the_same_model_id() {
 fn prompt_cache_defaults_to_five_minutes_keeps_a_saved_hour_and_rejects_unknown_values() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#;
-    fs::write(store.path(), legacy).unwrap();
+    let initial = r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}}}"#;
+    fs::write(store.path(), initial).unwrap();
     let mut saved = store.load().unwrap().unwrap();
     assert_eq!(saved.cache_retention, CacheRetention::Short);
     // 0.3.5 saved its one-hour default with every configuration; it stays chosen.
@@ -452,7 +419,7 @@ fn prompt_cache_defaults_to_five_minutes_keeps_a_saved_hour_and_rejects_unknown_
     );
     for value in ["\"1d\"", "\"\"", "60", "null"] {
         let text = format!(
-            r#"{{"openrouter":{{"api_key":"isolated-fixture-key","model":"fixture/model"}},"context":{{"prompt_cache":{value}}}}}"#
+            r#"{{"selection":{{"backend":"openrouter","model":"fixture/model"}},"backends":{{"openrouter":{{"api_key":"isolated-fixture-key"}}}},"context":{{"prompt_cache":{value}}}}}"#
         );
         fs::write(store.path(), &text).unwrap();
         let error = store.load().err().unwrap();
@@ -465,8 +432,8 @@ fn prompt_cache_defaults_to_five_minutes_keeps_a_saved_hour_and_rejects_unknown_
 fn theme_defaults_to_auto_persists_and_rejects_unknown_values() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    let legacy = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"}}"#;
-    fs::write(store.path(), legacy).unwrap();
+    let initial = r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}}}"#;
+    fs::write(store.path(), initial).unwrap();
     let mut saved = store.load().unwrap().unwrap();
     assert_eq!(saved.theme, Theme::Auto);
     saved.theme = Theme::Light;
@@ -479,14 +446,14 @@ fn theme_defaults_to_auto_persists_and_rejects_unknown_values() {
     assert_eq!(store.load().unwrap().unwrap().theme, Theme::Light);
     for value in ["\"sepia\"", "\"\"", "1", "null"] {
         let text = format!(
-            r#"{{"openrouter":{{"api_key":"isolated-fixture-key","model":"fixture/model"}},"appearance":{{"theme":{value}}}}}"#
+            r#"{{"selection":{{"backend":"openrouter","model":"fixture/model"}},"backends":{{"openrouter":{{"api_key":"isolated-fixture-key"}}}},"appearance":{{"theme":{value}}}}}"#
         );
         fs::write(store.path(), &text).unwrap();
         let error = store.load().err().unwrap();
         assert!(error.contains("appearance.theme"), "{error}");
         assert!(!error.contains("isolated-fixture-key"));
     }
-    let text = r#"{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/model"},"appearance":[]}"#;
+    let text = r#"{"selection":{"backend":"openrouter","model":"fixture/model"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}},"appearance":[]}"#;
     fs::write(store.path(), text).unwrap();
     assert!(store.load().err().unwrap().contains("appearance"));
 }

@@ -16,20 +16,15 @@ mod shell;
 mod temporary;
 mod writes;
 
-pub(crate) use files::read_source;
 pub(crate) use files::read_text_page;
 #[cfg(test)]
 pub use schema::encoded_size;
 pub use schema::{definitions, definitions_for, encoded_size_for};
 
 use crate::cancel::Cancellation;
-use crate::checkpoints::actions;
-use crate::checkpoints::session::{CommandGuard, Session};
-use crate::checkpoints::show;
 use crate::json::{self, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 pub(super) const OUTPUT_LIMIT: usize = 64 * 1024;
 
@@ -41,7 +36,6 @@ pub struct Execution {
 /// Work done before a tool call runs, so it can be shown before the result.
 #[derive(Default)]
 pub struct Begun {
-    command: Option<CommandGuard>,
     /// An approved file access outside the working folder uses this
     /// directory as its root; see `Tools::access`.
     base: Option<PathBuf>,
@@ -65,11 +59,6 @@ impl Begun {
         self.permission = Some((level, access));
         self
     }
-
-    /// The checkpoint before a shell command and how current it is.
-    pub fn note(&self) -> Option<String> {
-        self.command.as_ref().map(CommandGuard::note)
-    }
 }
 
 pub struct Tools {
@@ -82,7 +71,6 @@ pub struct Tools {
     collaborators: crate::collaboration::Observer,
     attachments: Option<crate::attachments::Pool>,
     processes: processes::Registry,
-    checkpoints: Option<Arc<Session>>,
     browsers: crate::browser::Registry,
     browser_profiles: Option<PathBuf>,
     session_home: Option<PathBuf>,
@@ -92,7 +80,6 @@ pub struct Tools {
     lsp_home: Option<PathBuf>,
     lsp_runtime: crate::lsp::Runtime,
     lsp_redactor: crate::redact::Redactor,
-    project_map: crate::project_map::Map,
 }
 
 impl Tools {
@@ -103,7 +90,6 @@ impl Tools {
             return Err("The working directory must be a directory".into());
         }
         Ok(Self {
-            project_map: crate::project_map::Map::new(root.clone()),
             outputs: crate::output::Store::new(
                 root.join(".jecode-output"),
                 crate::redact::Redactor::empty(),
@@ -114,7 +100,6 @@ impl Tools {
             collaborators: crate::collaboration::Observer::default(),
             attachments: None,
             processes: processes::Registry::default(),
-            checkpoints: None,
             browsers: crate::browser::Registry::default(),
             browser_profiles: None,
             session_home: None,
@@ -138,11 +123,6 @@ impl Tools {
         }
         if path.starts_with("skill:") {
             return Err("Personal skills are read-only and must be read through the agent".into());
-        }
-        if show::is_reference(path) {
-            return Err(
-                "Saved recovery files are read-only; restore them with the checkpoint tool".into(),
-            );
         }
         let absolute = self
             .temporary
@@ -172,48 +152,8 @@ impl Tools {
         arguments: &str,
         cancellation: &Cancellation,
     ) -> Value {
-        self.execute_begun(
-            self.begin_cancellable(name, arguments, cancellation),
-            name,
-            arguments,
-            cancellation,
-        )
-        .result
-    }
-
-    pub fn begin_cancellable(
-        &self,
-        name: &str,
-        arguments: &str,
-        cancellation: &Cancellation,
-    ) -> Begun {
-        let command = self
-            .checkpoints
-            .as_ref()
-            .filter(|_| matches!(name, "bash" | "exec" | "process"))
-            .and_then(|session| {
-                let arguments = json::parse(arguments).ok()?;
-                match name {
-                    "bash" => {
-                        arguments.get("command")?.as_str()?;
-                    }
-                    "exec" => {
-                        arguments.get("executable")?.as_str()?;
-                    }
-                    _ if matches!(
-                        arguments.get("action").and_then(Value::as_str),
-                        Some("write" | "resize" | "interrupt")
-                    ) => {}
-                    _ => return None,
-                }
-                let paths = shell::protect_paths(&arguments).ok()?;
-                Some(session.command_scoped_named_cancellable(name, &paths, cancellation))
-            });
-        Begun {
-            command,
-            base: None,
-            permission: None,
-        }
+        self.execute_begun(Begun::default(), name, arguments, cancellation)
+            .result
     }
 
     pub fn execute_begun(
@@ -243,10 +183,6 @@ impl Tools {
                         cancellation,
                     )
                     .map(|value| (value, None)),
-                    "map" => self
-                        .project_map
-                        .execute(&arguments, cancellation)
-                        .map(|value| (value, None)),
                     "read" => {
                         let path = required_string(&arguments, "path")?;
                         if attachment::is_reference(path) {
@@ -259,9 +195,6 @@ impl Tools {
                             .map(|value| (value, None))
                         } else if crate::output::is_reference(path) {
                             files::read_page(&self.outputs.resolve(path)?, &arguments, cancellation)
-                                .map(|value| (value, None))
-                        } else if show::is_reference(path) {
-                            self.read_checkpoint(path, &arguments, cancellation)
                                 .map(|value| (value, None))
                         } else {
                             let (root, arguments) = self.read_arguments(&arguments)?;
@@ -320,7 +253,7 @@ impl Tools {
                             processes: &self.processes,
                             sandbox: sandbox.as_ref(),
                         };
-                        let mut result = match name {
+                        let result = match name {
                             "bash" => shell::execute(context, &arguments, cancellation),
                             "process" => self.processes.execute(
                                 &arguments,
@@ -338,12 +271,6 @@ impl Tools {
                             },
                         }
                         .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));
-                        if let Some(command) = begun.command {
-                            let checkpoint = command.finish();
-                            if let Value::Object(fields) = &mut result {
-                                fields.insert("checkpoint".into(), checkpoint);
-                            }
-                        }
                         Ok((result, None))
                     }
                     "lsp" => Ok((self.lsp(&arguments, cancellation), None)),
@@ -358,9 +285,6 @@ impl Tools {
                         ),
                         None,
                     )),
-                    "checkpoint" => self
-                        .checkpoint(&arguments, cancellation)
-                        .map(|value| (value, None)),
                     "web" => crate::web::execute(self.temporary()?, &arguments, cancellation)
                         .map(|value| (value, None)),
                     "browser" => self
@@ -374,64 +298,14 @@ impl Tools {
         // Reconcile actual disk state independently of presentation events.
         // Commands may change files even when they return a failure.
         let refresh_analysis = matches!(name, "write" | "edit" | "bash" | "exec")
-            || matches!(name, "process" | "checkpoint")
+            || name == "process"
                 && json::parse(arguments).ok().is_some_and(|arguments| {
-                    arguments.get("action").and_then(Value::as_str)
-                        == Some(if name == "process" {
-                            "write"
-                        } else {
-                            "restore"
-                        })
+                    arguments.get("action").and_then(Value::as_str) == Some("write")
                 });
         if refresh_analysis {
             self.lsp_runtime.invalidate_paths(&[]);
         }
         Execution { result, change }
-    }
-
-    /// Protects workspace changes from this conversation's tools.
-    pub fn configure_checkpoints(&mut self, session: Arc<Session>) {
-        self.checkpoints = Some(session);
-    }
-
-    pub fn checkpoints(&self) -> Option<&Arc<Session>> {
-        self.checkpoints.as_ref()
-    }
-
-    fn enabled_checkpoints(&self) -> Result<&Arc<Session>, String> {
-        self.checkpoints
-            .as_ref()
-            .ok_or_else(|| "Checkpoints are not enabled in this session".into())
-    }
-
-    fn checkpoint(&self, arguments: &Value, cancellation: &Cancellation) -> Result<Value, String> {
-        let session = self.enabled_checkpoints()?;
-        let result = actions::run(session.store()?, arguments, cancellation)?;
-        if result
-            .get("restored")
-            .and_then(Value::as_array)
-            .is_some_and(|paths| {
-                paths.iter().any(|entry| {
-                    entry
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .is_some_and(|path| path.rsplit('/').next() == Some("AGENTS.md"))
-                })
-            })
-        {
-            session.restored_instructions();
-        }
-        Ok(result)
-    }
-
-    fn read_checkpoint(
-        &self,
-        path: &str,
-        arguments: &Value,
-        cancellation: &Cancellation,
-    ) -> Result<Value, String> {
-        let session = self.enabled_checkpoints()?;
-        show::read(session.store()?, path, arguments, cancellation)
     }
 }
 
@@ -469,8 +343,6 @@ pub(crate) fn optional_number(
     Ok(number)
 }
 
-#[cfg(test)]
-mod checkpoint_tests;
 #[cfg(test)]
 mod local_read_tests;
 #[cfg(test)]

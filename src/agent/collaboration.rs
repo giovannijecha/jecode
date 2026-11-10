@@ -202,31 +202,10 @@ impl Agent {
                 if self.cancellation.requested() {
                     return Err("Operation cancelled".into());
                 }
-                let checkpoint = self.tools.checkpoints().map_or_else(
-                    || {
-                        Value::object([
-                            ("status", Value::string("none")),
-                            ("reason", Value::string("Checkpoints are not enabled")),
-                        ])
-                    },
-                    |session| {
-                        session
-                            .command_scoped_named_cancellable("agent", &paths, &self.cancellation)
-                            .finish()
-                    },
-                );
-                // An interrupted capture has no restorable copy; leave the
-                // project untouched.
-                if self.cancellation.requested() {
-                    return Err("Operation cancelled".into());
-                }
-                let mut result = observer
+                let result = observer
                     .workspace(id()?)?
                     .integrate(&paths, required(arguments, "expected_review_token")?)?;
                 self.tools.invalidate_analysis();
-                if let Value::Object(fields) = &mut result {
-                    fields.insert("checkpoint".into(), checkpoint);
-                }
                 Ok(result)
             }
             "close" => observer.close(id()?),
@@ -269,15 +248,11 @@ impl Agent {
         child.enable_sessions_with_attachments(&child_home, Some(&handle.store()))?;
         // References the main agent hands over resolve in its own storage.
         child.tools.inherit_references(&self.tools);
-        child.enable_checkpoints(&child_home);
         // Confinement protects the whole Jecode home, not this agent's own part of it.
         child.tools.configure_session_home(&home);
         child.skills.configure(&home);
         let _ = child.configure_mcp(&home);
         let _ = child.configure_lsp(&home);
-        child
-            .tools
-            .share_project_map_notes(&home, self.tools.root());
         Ok(child)
     }
 }
@@ -314,8 +289,6 @@ mod view;
 
 #[cfg(test)]
 mod attachment_tests;
-#[cfg(test)]
-mod checkpoint_tests;
 #[cfg(test)]
 mod diff_tests;
 #[cfg(test)]

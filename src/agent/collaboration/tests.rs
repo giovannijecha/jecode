@@ -266,6 +266,14 @@ fn resume_recovers_records_and_marks_unfinished_work_unknown() {
         ("sent_version", Value::number(2)),
         ("received_version", Value::number(1)),
         ("instructions", Value::string("Old")),
+        (
+            "log",
+            Value::Array(vec![Value::object([
+                ("kind", Value::string("assignment")),
+                ("version", Value::number(1)),
+                ("instructions", Value::string("Old")),
+            ])]),
+        ),
     ]);
     let event = Value::object([
         ("type", Value::string("collaboration")),

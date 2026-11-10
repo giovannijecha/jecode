@@ -7,7 +7,6 @@ to it.
 ```text
 jecode [--plain] [--model MODEL] [--attach PATH]... [PROMPT]
 jecode [--plain] resume [SESSION_ID]
-jecode checkpoints [COMMAND]
 jecode setup
 jecode --help
 jecode --version
@@ -38,9 +37,8 @@ or with `TERM=dumb`, use `--plain` or a single prompt instead.
 
 Options go before the prompt. Any argument that starts with `-` is read as an
 option, so put `--` before a prompt that starts with `-` or contains a separate
-argument that does, and before a prompt whose first word is `resume` or
-`checkpoints`. Quoting the whole prompt as one argument avoids most of these
-cases:
+argument that does, and before a prompt whose first word is `resume`. Quoting
+the whole prompt as one argument avoids most of these cases:
 
 ```sh
 jecode -- "-v flag behaves differently on Windows"
@@ -113,7 +111,6 @@ commands:
 | `/copy` | Copy part of the latest answer through a numbered menu. |
 | `/export` | Save the conversation as JSON. |
 | `/tmp [clean]` | Show or clear the conversation's temporary files. |
-| `/checkpoints [COMMAND]` | Inspect or restore checkpoints. |
 | `/process [ID]` | List running and recent processes, or show one's status and last output. |
 | `/process stop ID` | Stop a process. |
 | `/process write ID TEXT`, `/process interrupt ID`, `/process resize ID COLS ROWS` | Type a line into, interrupt or resize an interactive process. |
@@ -132,17 +129,3 @@ Differences from the TUI:
 - A process that ends while plain chat waits for input appears at the next line you
   enter. Its outcome is saved by then, or when you leave the conversation.
 - There is no `/ask`; questions are asked inline.
-
-## Checkpoint commands
-
-`jecode checkpoints` inspects and restores [checkpoints](CHECKPOINTS.md) without
-a provider, key or network:
-
-```text
-jecode checkpoints list [--limit N]
-jecode checkpoints inspect rc-ID [PATH...]
-jecode checkpoints show rc-ID PATH [--offset N | --byte-offset N] [--limit N]
-jecode checkpoints restore rc-ID [PATH...] [--preview] [--expected TOKEN|latest]
-```
-
-Run `jecode checkpoints help` for the same summary.

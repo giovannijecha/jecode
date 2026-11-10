@@ -54,12 +54,11 @@ model receives the portable history.
 
 ## Automatic compaction
 
-Long conversations cost more with every request, well before they exceed the
-model's context window. Jecode keeps them small with exact records of earlier
-work, drawn from the original history without a model request. If a request
-would still exceed a share of the window, set by **Auto-compact at** (default
-80%), Jecode shortens large tool results and then, if needed, asks the model to
-summarize earlier work. The original history stays saved and readable. See
+Requests grow with the conversation. Until a request would exceed a share of the
+model's context window, set by **Auto-compact at** (default 80%), Jecode only
+appends to it, so earlier messages can come from the provider's prompt cache.
+At that point the model summarizes earlier work and keeps the recent messages
+verbatim. The original history stays saved and readable. See
 [Long-running work](LONG_WORK.md#context-and-compaction) for what is kept.
 
 Set the threshold in `/settings` → **Context** → **Auto-compact at** as a whole
@@ -79,12 +78,10 @@ default cache lasts five minutes after its last use: after a longer break, the
 next request writes what is in the window to the cache again.
 
 `/settings` → **Context** → **Prompt cache** chooses **5 minutes**, the default,
-or **1 hour**. Before 0.4.5 the default was one hour, and configurations saved by
-0.3.5 record that choice and keep it; choose **5 minutes** to adopt the new
-default. One hour keeps a prefix eligible for reuse across
+or **1 hour**. One hour keeps a prefix eligible for reuse across
 longer breaks, but cache writes cost more: twice the input price instead of
 1.25 times at [Anthropic's API list prices](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
-Records reduce what must be rewritten after a break; the tradeoff depends on
+The tradeoff depends on
 pauses, the active window and provider cache hits. The choice applies from the next
 request, in the current conversation and its collaborators, for Claude on
 Anthropic, the Claude plan and OpenRouter. Other models keep their provider's
@@ -135,6 +132,9 @@ conversation; save defaults in the TUI or in the file.
 
 Settings live in `~/.jecode/config.json` (`%USERPROFILE%\.jecode\config.json` on
 Windows). Jecode writes it from setup and `/settings`; you can also edit it.
+Files containing the retired root-level `openrouter` block are unsupported and
+left unchanged. Keep provider settings under `backends` and remove the retired
+block manually before launching; Jecode does not migrate it.
 A typical file after connecting OpenRouter and then choosing a ChatGPT model as
 the default:
 
@@ -153,12 +153,6 @@ the default:
       "routing": { "provider/model-id": { "mode": "auto" } }
     }
   },
-  "openrouter": {
-    "api_key": "YOUR_OPENROUTER_KEY",
-    "model": "provider/model-id",
-    "effort": "default",
-    "routing": { "provider/model-id": { "mode": "auto" } }
-  },
   "context": { "auto_compact_percent": 80, "prompt_cache": "5m" },
   "appearance": { "theme": "auto" },
   "permissions": { "default": "workspace" }
@@ -171,14 +165,13 @@ the default:
 | `backends.<id>.model` | The last saved model for each provider, used when Jecode falls back to that provider. |
 | `backends.<id>.api_key` | The API key for `openrouter`, `openai-api` or `anthropic-api`, in plain text. Account tokens are never stored here. |
 | `backends.<id>.routing` | Saved routing per model ID. |
-| `openrouter` | The original OpenRouter block, still read and updated for compatibility. When present, its key, model, effort and routing take precedence for OpenRouter. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
 | `context.prompt_cache` | How long Claude prompt caches last: `5m` or `1h`. Default `5m`. |
 | `appearance.theme` | `auto`, `dark` or `light`. Default `auto`. |
 | `permissions.default` | `read`, `workspace` or `full`. Default `workspace`. |
 
-To pin an endpoint by hand, set the model's routing entry, in the `openrouter`
-block when the file has one:
+To pin an endpoint by hand, set the model's entry under
+`backends.openrouter.routing`:
 
 ```json
 { "mode": "endpoint", "endpoint": "provider/variant" }
@@ -210,14 +203,18 @@ error.
 | `skills/` | Your [personal skills](SKILLS.md). |
 | `sessions/<project>/` | [Saved conversations](SESSIONS.md), their complete command output, [attachments](ATTACHMENTS.md) and collaborator data, grouped by project directory. |
 | `tmp/<project>/<session>/` | Each conversation's [temporary files](TEMPORARY.md). |
-| `projects/<project>/map.json` | Notes saved by the project map tool; see [Tools](TOOLS.md#project-map). |
-| `checkpoints/<project>-<id>/` | [Checkpoints](CHECKPOINTS.md), each expiring after 24 hours. |
 | `browser/profiles/` | Named persistent browser profiles. |
 | `cache/native/` | Native helpers extracted from the executable on first use. This directory must be writable. |
 
-All of these files are local and can contain sensitive data: conversations,
-command output and checkpoints hold project file contents, including files Git
-ignores such as `.env`.
+Empty file-modification locks live in the operating system's temporary
+directory, separately for each account: `jecode-file-locks-<uid>` on Unix and
+`jecode-file-locks` in the account's temporary directory on Windows. The 256
+lock files contain no project data and coordinate processes using different
+`JECODE_HOME` directories.
+
+All of these files are local and can contain sensitive data: conversations
+and command output hold project file contents, including files Git ignores such
+as `.env`.
 
 ## Environment variables
 

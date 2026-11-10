@@ -180,9 +180,14 @@ impl Settings {
     }
 
     pub(super) fn parse(document: &Value) -> Result<Self, String> {
-        let selection = document.get("selection");
-        if selection.is_some_and(|value| !matches!(value, Value::Object(_))) {
+        let selection = document
+            .get("selection")
+            .ok_or("Missing selection.backend and selection.model")?;
+        if !matches!(selection, Value::Object(_)) {
             return Err("selection must be an object".into());
+        }
+        if document.get("openrouter").is_some() {
+            return Err("Unsupported root openrouter settings".into());
         }
         if document
             .get("backends")
@@ -190,34 +195,15 @@ impl Settings {
         {
             return Err("backends must be an object".into());
         }
-        if selection
-            .and_then(|value| value.get("backend"))
-            .is_some_and(|value| value.as_str().is_none())
-        {
-            return Err("selection.backend must be a string".into());
-        }
-        if selection
-            .and_then(|value| value.get("model"))
-            .is_some_and(|value| value.as_str().is_none())
-        {
-            return Err("selection.model must be a string".into());
-        }
         let backend_id = selection
-            .and_then(|value| value.get("backend"))
-            .and_then(Value::as_str)
-            .unwrap_or("openrouter");
+            .get("backend")
+            .ok_or("Missing selection.backend")?
+            .as_str()
+            .ok_or("selection.backend must be a string")?;
         validate_backend_id(backend_id)?;
-        let legacy = document.get("openrouter");
-        if legacy
-            .and_then(|value| value.get("routing"))
-            .is_some_and(|value| !matches!(value, Value::Object(_)))
-        {
-            return Err("openrouter.routing must be an object".into());
-        }
         let provider = document
             .get("backends")
-            .and_then(|value| value.get(backend_id))
-            .or_else(|| (backend_id == "openrouter").then_some(legacy).flatten());
+            .and_then(|value| value.get(backend_id));
         if provider.is_some_and(|value| !matches!(value, Value::Object(_))) {
             return Err(format!("backends.{backend_id} must be an object"));
         }
@@ -242,37 +228,16 @@ impl Settings {
                     .map(|key| (id.clone(), key.into()))
             })
             .collect();
-        // Older versions edit this object after newer versions have saved
-        // mirrored fields. It remains authoritative for OpenRouter.
-        let legacy_key = legacy
+        let api_key = provider
             .and_then(|value| value.get("api_key"))
             .and_then(Value::as_str)
-            .filter(|key| !key.is_empty());
-        let api_key = if backend_id == "openrouter" {
-            legacy_key.or_else(|| {
-                provider
-                    .and_then(|value| value.get("api_key"))
-                    .and_then(Value::as_str)
-            })
-        } else {
-            provider
-                .and_then(|value| value.get("api_key"))
-                .and_then(Value::as_str)
-        }
-        .unwrap_or("");
+            .unwrap_or("");
         validate_saved_key(backend_id, api_key)?;
-        let legacy_model = legacy
-            .and_then(|value| value.get("model"))
-            .and_then(Value::as_str);
-        let selected_model = selection
-            .and_then(|value| value.get("model"))
-            .and_then(Value::as_str);
-        let model = if backend_id == "openrouter" {
-            legacy_model.or(selected_model)
-        } else {
-            selected_model
-        }
-        .ok_or("Missing selected model")?;
+        let model = selection
+            .get("model")
+            .ok_or("Missing selection.model")?
+            .as_str()
+            .ok_or("selection.model must be a string")?;
         validate_model(model)?;
         let mut settings = Self {
             backend_id: backend_id.into(),
@@ -291,35 +256,14 @@ impl Settings {
                 .credentials
                 .insert(backend_id.into(), api_key.into());
         }
-        if let Some(key) = legacy_key {
-            settings.credentials.insert("openrouter".into(), key.into());
-        }
-        let selected_effort = selection.and_then(|value| value.get("effort"));
-        let legacy_effort = legacy.and_then(|value| value.get("effort"));
-        let effort = if backend_id == "openrouter" {
-            legacy_effort.or(selected_effort)
-        } else {
-            selected_effort
-        };
-        if let Some(value) = effort {
+        if let Some(value) = selection.get("effort") {
             settings.effort = Effort::parse(value.as_str().ok_or("Invalid selected effort")?)?;
         }
-        // Absent in older files. Entries this version cannot use are skipped
-        // here and kept in the file on save.
-        let routing = if backend_id == "openrouter" {
-            legacy
-                .and_then(|value| value.get("routing"))
-                .or_else(|| provider.and_then(|value| value.get("routing")))
-        } else {
-            provider.and_then(|value| value.get("routing"))
-        };
+        // Optional preferences this version cannot use are kept in the file on save.
+        let routing = provider.and_then(|value| value.get("routing"));
         if let Some(routing) = routing {
             let Value::Object(entries) = routing else {
-                return Err(if backend_id == "openrouter" {
-                    "openrouter.routing must be an object".into()
-                } else {
-                    format!("backends.{backend_id}.routing must be an object")
-                });
+                return Err(format!("backends.{backend_id}.routing must be an object"));
             };
             settings.routing = entries
                 .iter()

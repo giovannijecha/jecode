@@ -133,14 +133,14 @@ fn configured_provider_keeps_explicit_model_overrides_and_no_notice() {
 }
 
 #[test]
-fn legacy_fallback_model_remains_available() {
+fn fallback_uses_the_saved_model_of_an_available_backend() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    fs::write(store.path(), r#"{"selection":{"backend":"openai","model":"missing"},"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/legacy"}}"#).unwrap();
+    fs::write(store.path(), r#"{"selection":{"backend":"openai","model":"missing"},"backends":{"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/available"}}}"#).unwrap();
     let settings = store.load().unwrap().unwrap();
     let (backend, _) = client(&store, &settings, None, true).unwrap();
     assert_eq!(backend.id(), "openrouter");
-    assert_eq!(backend.model(), "fixture/legacy");
+    assert_eq!(backend.model(), "fixture/available");
 }
 
 #[test]

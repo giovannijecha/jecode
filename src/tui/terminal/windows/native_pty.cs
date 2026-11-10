@@ -214,26 +214,6 @@ public sealed partial class JecodeTestPty : IDisposable {
     }
 
 
-    static int ReadCount(string path) {
-        for (int attempt = 0; attempt < 20; attempt++) {
-            try {
-                int count;
-                if (int.TryParse(File.ReadAllText(path), out count)) return count;
-            } catch (IOException) { }
-            Thread.Sleep(2);
-        }
-        throw new IOException("Checkpoint write counter was not readable");
-    }
-
-    static int WaitNextCount(string path, int previous) {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        while (clock.ElapsedMilliseconds < 20000) {
-            if (ReadCount(path) > previous) return ReadCount(path);
-            Thread.Sleep(5);
-        }
-        throw new IOException("Checkpoint writes stopped during ConPTY latency samples");
-    }
-
     static void PrintLatency(string phase, string kind, double[] samples) {
         double[] sorted = (double[])samples.Clone();
         Array.Sort(sorted);
@@ -244,11 +224,9 @@ public sealed partial class JecodeTestPty : IDisposable {
         Console.WriteLine(name + "_P95_US=" + sorted[94].ToString("F3", culture));
     }
 
-    void Latency(string directory, bool active) {
+    void Latency() {
         WaitFast("Ask anything");
-        string phase = active ? "active" : "idle";
-        string counter = Path.Combine(directory, "home", "latency-count.txt");
-        int before = active ? WaitNextCount(counter, 0) : 0, midway = before;
+        string phase = "idle";
         double[] burst = new double[100], key = new double[100];
         for (int index = 0; index < burst.Length; index++) {
             string marker = "q" + index.ToString("D3");
@@ -267,12 +245,9 @@ public sealed partial class JecodeTestPty : IDisposable {
             int clear = Mark();
             Send("\x15");
             WaitFast("Ask anything", clear);
-            if (active && index == 49) midway = WaitNextCount(counter, before);
         }
-        int after = active ? WaitNextCount(counter, midway) : 0;
         PrintLatency(phase, "BURST4", burst);
         PrintLatency(phase, "KEY", key);
-        if (active) Console.WriteLine("NATIVE_LATENCY_ACTIVE_WRITES=" + before + "," + midway + "," + after);
         using (var child = System.Diagnostics.Process.GetProcessById((int)processId)) {
             child.Refresh();
             Console.WriteLine("NATIVE_LATENCY_" + phase + "_CHILD_RUST_WORKING_SET_BYTES=" + child.WorkingSet64);
@@ -338,8 +313,22 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Send("next\r");
                 pty.Wait("SETUP_NATIVE_DONE");
                 pty.Finish(true);
-            } else if (scenario == "latency-idle" || scenario == "latency-active") {
-                pty.Latency(directory, scenario == "latency-active");
+            } else if (scenario == "latency-idle") {
+                pty.Latency();
+            } else if (scenario == "active-long-history") {
+                pty.Wait("Ask anything");
+                pty.Send("inspect long history"); Thread.Sleep(150); pty.Send("\r");
+                pty.Wait("NATIVE_STREAM_HEAD");
+                int typed = pty.Mark(); pty.Send("kept draft");
+                pty.Wait("kept draft", typed);
+                int narrow = pty.Mark(); pty.Resize(44, 12);
+                pty.Wait("kept draft", narrow);
+                pty.Resize(80, 24);
+                int stopped = pty.Mark(); pty.Send("\x1b");
+                pty.Wait("Stopped", stopped);
+                pty.Send("\x11");
+                pty.Wait("NATIVE_ACTIVE_HISTORY_RESTORED");
+                pty.Finish(true);
             } else if (scenario == "direct-input") {
                 pty.Wait("Ask anything");
                 pty.Send("start terminal"); Thread.Sleep(150); pty.Send("\r");

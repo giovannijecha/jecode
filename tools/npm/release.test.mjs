@@ -153,7 +153,7 @@ test('PE files expose their subsystem and imports, and unreviewed ones fail', ()
 test('the Windows audit covers the executable and every embedded helper', t => {
   const directory = fixture(t);
   const names = ['jecode-shell.exe', 'jecode-supervisor.exe', 'jecode-pty.exe', 'jecode-terminal.exe',
-    'jecode-checkpoint_space.exe', 'jecode-openai_crypto.exe', 'jecode-http.exe'];
+    'jecode-openai_crypto.exe', 'jecode-http.exe'];
   const helpers = Object.fromEntries(names.map(name => [name, peFile({libraries: ['mscoree.dll']})]));
   const tree = releaseTree(directory, 'jecode.exe', helpers);
   assert.deepEqual(auditWindows(tree.main, tree.write(peFile()), 17763).sort(), [...names, 'jecode.exe'].sort());

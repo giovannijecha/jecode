@@ -28,9 +28,10 @@ pub(super) struct Request {
     pub messages: Vec<Value>,
     pub measurement: crate::context::measurement::RequestMeasurement,
     pub estimated_tokens: usize,
-    /// Runtime state sent at the end of this request, with its source position.
-    /// Once the provider accepts the request, it stays at that position.
-    pub state: Option<(usize, String)>,
+    /// An instruction snapshot and runtime state sent at the end of this
+    /// request, with their source position. Once the provider accepts the
+    /// request, they stay at that position.
+    pub states: Vec<(usize, String)>,
     /// Finished processes that state carries; delivered once it is accepted.
     pub completions: Vec<crate::tools::processes::Completion>,
 }
@@ -46,8 +47,8 @@ impl Agent {
         let original = self.messages.lock().unwrap();
         let mut messages = self.projected_context(&self.context, &original);
         let overhead = self.request_overhead(&self.context, &messages[0], &original, &environment);
-        let state = self.pending_state(&self.context, &environment, &original);
-        append_state(&mut messages, state.as_deref());
+        let states = self.pending_states(&self.context, &environment, &original);
+        append_states(&mut messages, &states);
         let measurement = self.context.request_measurement(
             &original,
             &messages,
@@ -59,7 +60,10 @@ impl Agent {
             messages,
             measurement,
             estimated_tokens: self.context_estimate(&environment, &original),
-            state: state.map(|text| (original.len(), text)),
+            states: states
+                .into_iter()
+                .map(|text| (original.len(), text))
+                .collect(),
             completions: environment.2,
         }
     }
@@ -71,11 +75,11 @@ impl Agent {
         messages: &[Value],
         environment: &environment::Environment,
     ) -> usize {
-        let pending = self.pending_state(context, environment, messages);
+        let pending = self.pending_states(context, environment, messages);
         let states = context
             .visible_states()
             .map(|state| state.text.as_str())
-            .chain(pending.as_deref())
+            .chain(pending.iter().map(String::as_str))
             .map(|text| state_message(text).encode().len())
             .fold(0usize, usize::saturating_add);
         let last = messages
@@ -85,7 +89,7 @@ impl Agent {
             .filter(|(index, _)| !context.returned.contains(index))
             .map(|(_, message)| message)
             .next_back();
-        let note = if pending.is_none() && (context.summary.is_empty() || last.is_some()) {
+        let note = if pending.is_empty() && (context.summary.is_empty() || last.is_some()) {
             super::continuation::note_after(last.or(Some(system)))
         } else {
             None
@@ -96,6 +100,36 @@ impl Agent {
             .saturating_add(crate::tools::encoded_size_for(!self.child))
             .saturating_add(states)
             .saturating_add(note.map_or(0, |note| note.encode().len()))
+    }
+
+    /// The instruction snapshot, then runtime state, that this request must
+    /// add after the window; each only when it differs from its own kind.
+    fn pending_states(
+        &self,
+        context: &crate::context::Context,
+        environment: &environment::Environment,
+        messages: &[Value],
+    ) -> Vec<String> {
+        self.pending_snapshot(context)
+            .into_iter()
+            .chain(self.pending_state(context, environment, messages))
+            .collect()
+    }
+
+    /// Current instructions when they differ from the latest snapshot in the
+    /// window. Without one, they are sent when any apply, or when compaction
+    /// summarized an earlier snapshot, so a summary cannot carry stale rules.
+    fn pending_snapshot(&self, context: &crate::context::Context) -> Option<String> {
+        let current = self.instruction_snapshot();
+        match context.latest_state(true) {
+            Some(latest) => (latest.text != current).then_some(current),
+            None => (self.has_instructions()
+                || context
+                    .states
+                    .iter()
+                    .any(crate::context::RequestState::is_snapshot))
+            .then_some(current),
+        }
     }
 
     /// Current runtime state when it differs from the latest state already in
@@ -116,13 +150,12 @@ impl Agent {
             .filter(|(marker, _)| {
                 !context
                     .visible_states()
-                    .any(|state| state.text.contains(marker.as_str()))
+                    .any(|state| !state.is_snapshot() && state.text.contains(marker.as_str()))
             })
             .map(|(_, entry)| entry.as_str())
             .collect::<Vec<_>>();
         let latest = context
-            .visible_states()
-            .last()
+            .latest_state(false)
             .map(|state| lasting_state(&state.text));
         let completions = &environment.2;
         if reports.is_empty() && completions.is_empty() {
@@ -147,29 +180,13 @@ impl Agent {
         context: &crate::context::Context,
         messages: &[Value],
     ) -> Vec<Value> {
-        let stamped;
-        let messages = if let Some(origin) = &self.legacy_origin {
-            stamped = messages
-                .iter()
-                .cloned()
-                .map(|mut message| {
-                    if message.get("role").and_then(Value::as_str) == Some("assistant") {
-                        crate::conversation::stamp(&mut message, origin);
-                    }
-                    message
-                })
-                .collect::<Vec<_>>();
-            &stamped
-        } else {
-            messages
-        };
         let mut projected = context.project(messages, self.compatible_from);
         let origin = self.identity();
         for message in &mut projected {
             crate::conversation::retain_output_measurement(message, &origin);
         }
         if let Some(system) = projected.first_mut() {
-            // Send current native instructions while retaining original history verbatim.
+            // Send the current native prompt while retaining original history verbatim.
             *system = self.current_system_message();
         }
         projected
@@ -207,18 +224,30 @@ impl Agent {
             }
             None => {
                 let mut projected = self.projected_context(context, messages);
-                let state = self.pending_state(context, environment, messages);
-                append_state(&mut projected, state.as_deref());
+                let states = self.pending_states(context, environment, messages);
+                append_states(&mut projected, &states);
                 context.estimate_projected_for(&projected, self.client.inputs(), !self.child)
             }
         }
     }
+
+    /// The request projection used by compaction's before/after size check.
+    /// Count both pending state kinds and any continuation note on each side.
+    pub(super) fn instructed_context(
+        &self,
+        context: &crate::context::Context,
+        environment: &environment::Environment,
+        messages: &[Value],
+    ) -> Vec<Value> {
+        let mut projected = self.projected_context(context, messages);
+        let states = self.pending_states(context, environment, messages);
+        append_states(&mut projected, &states);
+        projected
+    }
 }
 
 /// Ends a request with newly sent state, then the user turn it may need.
-fn append_state(projected: &mut Vec<Value>, state: Option<&str>) {
-    if let Some(state) = state {
-        projected.push(state_message(state));
-    }
+fn append_states(projected: &mut Vec<Value>, states: &[String]) {
+    projected.extend(states.iter().map(|state| state_message(state)));
     super::continuation::end_with_user_turn(projected);
 }

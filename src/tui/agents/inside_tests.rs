@@ -90,6 +90,7 @@ fn step_hunk_arriving_after_its_counts_refreshes_the_open_card() {
         ]),
     );
     set(&mut shown, "tools", Value::Array(tools));
+    sync_log(&mut shown);
     app.state.collaboration = vec![shown];
     app.state.agents_panel = Some(Panel {
         inside: Some("a1".into()),
@@ -164,6 +165,7 @@ fn repeated_child_call_ids_keep_counts_without_a_mismatched_hunk() {
     let repeated = tools[0].clone();
     tools.push(repeated);
     set(&mut shown, "tools", Value::Array(tools));
+    sync_log(&mut shown);
     app.state.collaboration = vec![shown];
     app.state.agents_panel = Some(Panel {
         inside: Some("a1".into()),
@@ -224,6 +226,7 @@ fn repeated_source_change_ids_stay_ambiguous_after_a_third_event() {
         ]),
     );
     set(&mut shown, "tools", Value::Array(tools));
+    sync_log(&mut shown);
     app.state.collaboration = vec![shown];
     app.state.agents_panel = Some(Panel {
         inside: Some("a1".into()),
@@ -266,8 +269,13 @@ fn inside_edit_cards_show_the_child_hunks_live_and_after_resume() {
     ]);
     let edit = Value::object([
         ("path", Value::string("notes.txt")),
-        ("old_text", Value::string("second")),
-        ("new_text", Value::string("changed")),
+        (
+            "edits",
+            Value::Array(vec![Value::object([
+                ("old_text", Value::string("second")),
+                ("new_text", Value::string("changed")),
+            ])]),
+        ),
     ]);
     // The main agent waits in the same batch, so the child's requests come
     // strictly between its own.
@@ -407,6 +415,7 @@ fn inside_rows_are_reused_until_what_they_show_changes() {
         ),
     ]));
     set(&mut state.collaboration[0], "tools", Value::Array(tools));
+    sync_log(&mut state.collaboration[0]);
     let grown = draw(&state);
     assert!(!Arc::ptr_eq(&first, &grown));
     assert!(text(&grown).contains("docs/usage/CLI.md"));

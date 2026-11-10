@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::backend::openrouter::Limits;
-use crate::test_support::{Directory, HttpFixture, completion, tool_call};
+use crate::test_support::{Directory, HttpFixture, completion, stored_tool_call};
 
 fn message(role: &str, text: &str) -> Value {
     Value::object([
@@ -23,7 +23,7 @@ fn history(agent: &mut Agent, older: &str) -> Vec<Value> {
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     "recent",
                     "read",
                     Value::object([("path", Value::string("source"))]),
@@ -45,9 +45,92 @@ fn history(agent: &mut Agent, older: &str) -> Vec<Value> {
     agent.messages.lock().unwrap().clone()
 }
 
+/// Appends an assistant finding and a user message that cross the recent-tail
+/// budget by exactly one exchange, so the next compaction ends before `user`.
+fn add_batch(agent: &Agent, limits: Limits, number: usize, user: &str) {
+    let budget = agent.context.budget(limits, 80) / 4;
+    let expected_boundary = agent.messages.lock().unwrap().len() + 1;
+    let mut repeats = 100;
+    loop {
+        let batch = [
+            message(
+                "assistant",
+                &format!("Batch {number} finding. ").repeat(repeats),
+            ),
+            message("user", user),
+        ];
+        let mut candidate = agent.messages.lock().unwrap().clone();
+        candidate.extend(batch.clone());
+        if agent.recent_boundary(&candidate, budget) == expected_boundary {
+            agent.messages.lock().unwrap().extend(batch);
+            break;
+        }
+        repeats += 100;
+        assert!(
+            repeats <= 2_200,
+            "a bounded batch must cross the recent-tail budget"
+        );
+    }
+}
+
+#[test]
+fn a_later_correction_stays_after_the_requirement_it_reverses_across_compactions_and_resume() {
+    const REQUIREMENT: &str = "Write the report in French and add an export section.";
+    const CORRECTION: &str = "Correction: write it in English, and cancel the export section.";
+    let directory = Directory::new();
+    let home = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (200, completion("Report drafted.", vec![])),
+        (200, completion("Report revised.", vec![])),
+    ]);
+    let endpoint = fixture.endpoint.clone();
+    let mut agent = Agent::new(
+        OpenRouter::fixture(endpoint.clone()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.prepare_turn(REQUIREMENT).unwrap();
+    let limits = Limits {
+        context: agent.fixture_capacity(16_000, 80),
+        output: Some(4096),
+    };
+    add_batch(&agent, limits, 1, CORRECTION);
+    assert!(
+        agent
+            .compact_if_needed(Some(limits), true, &mut |_| Ok(()))
+            .unwrap()
+    );
+    add_batch(&agent, limits, 2, "Continue the report.");
+    assert!(
+        agent
+            .compact_if_needed(Some(limits), true, &mut |_| Ok(()))
+            .unwrap()
+    );
+    // Both requests now precede the window and reach the model only as archived requests.
+    assert_eq!(agent.context.from, 5);
+    for request in fixture.finish() {
+        let body = request.body.encode();
+        let (requirement, correction) = (body.find(REQUIREMENT), body.find(CORRECTION));
+        assert!(requirement.is_some() && correction.is_some() && requirement < correction);
+    }
+    agent.checkpoint(crate::sessions::Stage::Ready).unwrap();
+    let id = agent.sessions().unwrap().id();
+    let projected = agent.transport_messages();
+    let encoded = Value::Array(projected.clone()).encode();
+    assert!(encoded.find(REQUIREMENT).unwrap() < encoded.find(CORRECTION).unwrap());
+    assert!(encoded.contains("an earlier request does not override a later correction"));
+    drop(agent);
+    let mut resumed = Agent::new(
+        OpenRouter::fixture(endpoint),
+        Tools::new(directory.path()).unwrap(),
+    );
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    assert_eq!(resumed.transport_messages(), projected);
+}
+
 #[test]
 fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![(
@@ -119,7 +202,6 @@ fn compaction_keeps_the_recent_request_and_complete_tool_pair_after_resume() {
 
 #[test]
 fn repeated_model_summaries_carry_prior_work_across_resume_without_changing_history() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![
@@ -146,32 +228,7 @@ fn repeated_model_summaries_carry_prior_work_across_resume_without_changing_hist
         context: capacity,
         output: Some(4096),
     };
-    let add_batch = |agent: &Agent, number: usize| {
-        let budget = agent.context.budget(limits, 80) / 4;
-        let expected_boundary = agent.messages.lock().unwrap().len() + 1;
-        let mut repeats = 100;
-        loop {
-            let batch = [
-                message(
-                    "assistant",
-                    &format!("Batch {number} finding. ").repeat(repeats),
-                ),
-                message("user", &format!("Continue with batch {number}.")),
-            ];
-            let mut candidate = agent.messages.lock().unwrap().clone();
-            candidate.extend(batch.clone());
-            if agent.recent_boundary(&candidate, budget) == expected_boundary {
-                agent.messages.lock().unwrap().extend(batch);
-                break;
-            }
-            repeats += 100;
-            assert!(
-                repeats <= 2_200,
-                "a bounded batch must cross the recent-tail budget"
-            );
-        }
-    };
-    add_batch(&agent, 1);
+    add_batch(&agent, limits, 1, "Continue with batch 1.");
     let first_original = agent.messages.lock().unwrap().clone();
     assert!(
         agent
@@ -180,7 +237,7 @@ fn repeated_model_summaries_carry_prior_work_across_resume_without_changing_hist
     );
     assert_eq!(agent.context.from, 3);
     assert_eq!(*agent.messages.lock().unwrap(), first_original);
-    add_batch(&agent, 2);
+    add_batch(&agent, limits, 2, "Continue with batch 2.");
     let complete_original = agent.messages.lock().unwrap().clone();
     assert!(
         agent
@@ -246,7 +303,7 @@ fn expired_tool_view_does_not_shrink_the_recent_tail() {
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     "earlier",
                     "read",
                     Value::object([("path", Value::string("image"))]),
@@ -260,7 +317,7 @@ fn expired_tool_view_does_not_shrink_the_recent_tail() {
             ("role", Value::string("assistant")),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call(
+                Value::Array(vec![stored_tool_call(
                     "recent",
                     "read",
                     Value::object([("path", Value::string("next image"))]),
@@ -279,7 +336,6 @@ fn expired_tool_view_does_not_shrink_the_recent_tail() {
 
 #[test]
 fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Partial summary only.", vec![])),
@@ -322,7 +378,6 @@ fn a_failure_in_a_later_summary_portion_keeps_the_previous_context_and_originals
 
 #[test]
 fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
-    crate::agent::compaction::test_fallback_tiers();
     let home = Directory::new();
     let project = Directory::new();
     let package = home.path().join("skills/audit");
@@ -348,7 +403,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
         ("role", Value::string("assistant")),
         (
             "tool_calls",
-            Value::Array(vec![crate::test_support::tool_call(
+            Value::Array(vec![crate::test_support::stored_tool_call(
                 "read-skill",
                 "read",
                 Value::object([("path", Value::string("skill:audit"))]),

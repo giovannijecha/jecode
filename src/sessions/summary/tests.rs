@@ -61,7 +61,7 @@ fn summaries_track_the_committed_journal_and_bound_large_titles() {
 }
 
 #[test]
-fn cached_summary_identifies_backend_and_accepts_legacy_missing_field() {
+fn cached_summary_identifies_backend_and_rejects_missing_field() {
     let (_home, _directory, store, mut document) = fixture();
     document.backend = "future".into();
     let lease = store.create(&document.id).unwrap();
@@ -76,10 +76,7 @@ fn cached_summary_identifies_backend_and_accepts_legacy_missing_field() {
         fields.remove("backend");
     }
     fs::write(&cache, value.encode()).unwrap();
-    assert_eq!(
-        load(&store, &document.id, &current).unwrap().backend,
-        "openrouter"
-    );
+    assert!(load(&store, &document.id, &current).is_none());
 }
 
 #[test]

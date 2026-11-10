@@ -12,13 +12,19 @@ case $(uname -s) in
     *) printf 'Use PACKAGE.ps1 on Windows.\n' >&2; exit 2 ;;
 esac
 package=$target_root/package/jecode-$platform-$architecture
-mkdir -p "$package"
+if [ -e "$package" ] || [ -L "$package" ]; then
+    printf 'Package destination already exists: %s\n' "$package" >&2
+    exit 1
+fi
+mkdir -p "$(dirname "$package")"
+mkdir "$package"
 cp "$target_root/release/jecode" "$package/jecode"
 cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" \
     "$script_dir/CHANGELOG.md" "$script_dir/SECURITY.md" "$script_dir/CONTRIBUTING.md" "$package/"
 mkdir -p "$package/docs"
-# Without -L, find neither follows nor matches symbolic links.
-find "$script_dir/docs" -type f ! -name 'HARNESS*' ! -name AGENTS.md ! -name CLAUDE.md | while IFS= read -r document; do
+# Without -L, find neither follows nor matches symbolic links. Names match
+# without case, as they do in PACKAGE.ps1.
+find "$script_dir/docs" -type f ! -iname 'HARNESS*' ! -iname AGENTS.md ! -iname CLAUDE.md ! -iname CODEX_HARNESS_STUDY.md | while IFS= read -r document; do
     relative=${document#"$script_dir/docs/"}
     mkdir -p "$package/docs/$(dirname "$relative")"
     cp "$document" "$package/docs/$relative"

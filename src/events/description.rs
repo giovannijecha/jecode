@@ -6,7 +6,6 @@ pub fn description(name: &str, arguments: &Value) -> String {
         "read"
             | "list"
             | "search"
-            | "map"
             | "bash"
             | "exec"
             | "process"
@@ -89,24 +88,6 @@ pub fn target(name: &str, arguments: &Value) -> String {
             .map_or_else(|| id.to_owned(), |number| format!("AGENT {number}"));
         return format!("{action} {label}").trim_end().into();
     }
-    if name == "map" {
-        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
-        return match field("action") {
-            "remember" => field("title").to_owned(),
-            "forget" => field("id").to_owned(),
-            _ => {
-                let path = if field("path").is_empty() {
-                    "."
-                } else {
-                    field("path")
-                };
-                match field("query") {
-                    "" => path.to_owned(),
-                    query => format!("{query} in {path}"),
-                }
-            }
-        };
-    }
     if name == "list" {
         return arguments
             .get("path")
@@ -163,15 +144,6 @@ pub fn target(name: &str, arguments: &Value) -> String {
         return format!("{} {}", field("action"), field("process_id"))
             .trim_end()
             .into();
-    }
-    if name == "checkpoint" {
-        let field = |key| arguments.get(key).and_then(Value::as_str).unwrap_or("");
-        let mut words = vec![field("action"), field("ref")];
-        if let Some(paths) = arguments.get("paths").and_then(Value::as_array) {
-            words.extend(paths.iter().filter_map(Value::as_str));
-        }
-        words.retain(|word| !word.is_empty());
-        return words.join(" ");
     }
     if name == "bash" {
         return arguments

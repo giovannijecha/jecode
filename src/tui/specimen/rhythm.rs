@@ -51,13 +51,6 @@ fn scenario(columns: usize) -> State {
                     "running checks\nchecking wrapping\nchecking colours\nAll checks passed\n",
                 ),
             ),
-            (
-                "checkpoint",
-                Value::object([
-                    ("status", Value::string("none")),
-                    ("reason", Value::string("No repository changes")),
-                ]),
-            ),
         ]),
     );
     state.message(

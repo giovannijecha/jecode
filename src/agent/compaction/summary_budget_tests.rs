@@ -34,7 +34,6 @@ fn historical_notes(agent: &Agent) {
 
 #[test]
 fn a_large_window_requests_a_compact_handoff_with_room_to_recover_truncation() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![(200, completion(&candidate(), vec![]))]);
     let mut agent = Agent::new(
@@ -75,7 +74,6 @@ fn a_large_window_requests_a_compact_handoff_with_room_to_recover_truncation() {
 
 #[test]
 fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
-    crate::agent::compaction::test_fallback_tiers();
     let charged = |mut response: Value, cost: f64| {
         let Value::Object(fields) = &mut response else {
             unreachable!()
@@ -124,7 +122,6 @@ fn routing_charges_include_truncated_summary_attempts_and_their_recovery() {
 
 #[test]
 fn learned_summary_allowance_survives_resume_and_avoids_repeated_truncation() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let home = Directory::new();
     let fixture = HttpFixture::new(vec![
@@ -294,23 +291,34 @@ fn model_and_effort_changes_clear_only_the_learned_summary_allowance() {
 }
 
 #[test]
-fn summary_allowance_reads_older_context_without_rewriting_it() {
-    let mut value = crate::context::Context::default().value();
-    if let Value::Object(fields) = &mut value {
-        fields.remove("summary_output_tokens");
+fn summary_allowance_round_trips_and_rejects_missing_or_invalid_values() {
+    let value = crate::context::Context {
+        summary_output_tokens: 2048,
+        ..Default::default()
     }
+    .value();
     let original = value.clone();
     assert_eq!(
         crate::context::Context::parse(Some(&value))
             .unwrap()
             .summary_output_tokens,
-        0
+        2048
     );
     assert_eq!(value, original);
-    if let Value::Object(fields) = &mut value {
+
+    let mut incomplete = value.clone();
+    if let Value::Object(fields) = &mut incomplete {
+        fields.remove("summary_output_tokens");
+    }
+    assert!(crate::context::Context::parse(Some(&incomplete)).is_err());
+    assert_eq!(value, original);
+
+    let mut invalid = value.clone();
+    if let Value::Object(fields) = &mut invalid {
         fields.insert("summary_output_tokens".into(), Value::string("invalid"));
     }
-    assert!(crate::context::Context::parse(Some(&value)).is_err());
+    assert!(crate::context::Context::parse(Some(&invalid)).is_err());
+    assert_eq!(value, original);
 }
 
 #[test]

@@ -9,7 +9,7 @@ fn tool_catalog_and_encoded_size_are_reused() {
 #[test]
 fn every_tool_advertises_optional_parallel_boolean() {
     let tools = definitions().as_array().unwrap();
-    assert_eq!(tools.len(), 18);
+    assert_eq!(tools.len(), 16);
     for tool in tools {
         let name = tool.get("name").and_then(Value::as_str).unwrap();
         // A steps call always runs alone; its steps run in order.
@@ -94,7 +94,6 @@ fn work_and_description_are_optional_only_for_routine_tools() {
                 | "exec"
                 | "list"
                 | "search"
-                | "map"
                 | "mcp"
                 | "lsp"
         ) {
@@ -223,68 +222,13 @@ fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum()
 }
 
 #[test]
-fn map_is_appended_as_a_bounded_routine_tool() {
-    let tools = definitions().as_array().unwrap();
-    assert_eq!(tools[11].get("name").and_then(Value::as_str), Some("map"));
-    let parameters = tools[11].get("parameters").unwrap();
-    assert_eq!(parameters.get("required"), Some(&Value::Array(vec![])));
-    let properties = parameters.get("properties").unwrap();
-    let actions = properties.get("action").unwrap().get("enum").unwrap();
-    assert_eq!(
-        actions,
-        &Value::Array(["overview", "remember", "forget"].map(Value::string).into())
-    );
-    assert_eq!(
-        properties.get("offset").unwrap().get("minimum"),
-        Some(&Value::number(1))
-    );
-    let limit = properties.get("limit").unwrap();
-    assert_eq!(limit.get("minimum"), Some(&Value::number(1)));
-    assert_eq!(limit.get("maximum"), Some(&Value::number(1000)));
-    let sources = properties.get("sources").unwrap();
-    assert_eq!(sources.get("type"), Some(&Value::string("array")));
-    let source = sources.get("items").unwrap();
-    assert_eq!(
-        source.get("additionalProperties"),
-        Some(&Value::Bool(false))
-    );
-    assert_eq!(
-        source.get("required"),
-        Some(&Value::Array(vec![Value::string("path")]))
-    );
-    assert_eq!(
-        source
-            .get("properties")
-            .unwrap()
-            .get("line")
-            .unwrap()
-            .get("minimum"),
-        Some(&Value::number(1))
-    );
-    for name in ["path", "query", "id", "title", "summary"] {
-        assert_eq!(
-            properties.get(name).unwrap().get("type"),
-            Some(&Value::string("string")),
-            "{name}"
-        );
-    }
-    for name in ["include_hidden", "include_ignored"] {
-        assert_eq!(
-            properties.get(name).unwrap().get("type"),
-            Some(&Value::string("boolean")),
-            "{name}"
-        );
-    }
-}
-
-#[test]
 fn exec_is_appended_without_moving_browser_and_advertises_structured_terminal_input() {
     let tools = definitions().as_array().unwrap();
     assert_eq!(
-        tools[7].get("name").and_then(Value::as_str),
+        tools[6].get("name").and_then(Value::as_str),
         Some("browser")
     );
-    let exec = &tools[8];
+    let exec = &tools[7];
     assert_eq!(exec.get("name").and_then(Value::as_str), Some("exec"));
     let parameters = exec.get("parameters").unwrap();
     assert_eq!(
@@ -404,13 +348,11 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             "edit",
             "bash",
             "process",
-            "checkpoint",
             "web",
             "browser",
             "exec",
             "list",
             "search",
-            "map",
             "mcp",
             "lsp",
             "agent",

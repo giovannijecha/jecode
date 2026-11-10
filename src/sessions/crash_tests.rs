@@ -3,7 +3,7 @@ use crate::{
     backend::openrouter::OpenRouter,
     json::Value,
     sessions::{Stage, Store},
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
     tools::Tools,
 };
 use std::{
@@ -130,7 +130,7 @@ fn crash_child() {
             ("content", Value::Null),
             (
                 "tool_calls",
-                Value::Array(vec![tool_call("write", "write", arguments.clone())]),
+                Value::Array(vec![stored_tool_call("write", "write", arguments.clone())]),
             ),
         ]));
     let handle = agent.sessions().unwrap();

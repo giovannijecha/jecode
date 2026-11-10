@@ -39,7 +39,6 @@ impl App {
         let state = &self.state;
         let open = state.selector.is_some()
             || state.information.is_some()
-            || self.checkpoint_job.is_some()
             || state.processes.is_some()
             || state.agents_panel.is_some()
             || state.ask_panel.is_some()

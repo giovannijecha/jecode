@@ -133,8 +133,13 @@ fn scenario(columns: usize) -> State {
         "edit",
         Value::object([
             ("path", Value::string("src/parser.rs")),
-            ("old_text", Value::string("old();")),
-            ("new_text", Value::string("parse_tokens();")),
+            (
+                "edits",
+                Value::Array(vec![Value::object([
+                    ("old_text", Value::string("old();")),
+                    ("new_text", Value::string("parse_tokens();")),
+                ])]),
+            ),
         ]),
         Value::object([("bytes_written", Value::number(36))]),
         Some("fn parse() {\n    old();\n}\n"),

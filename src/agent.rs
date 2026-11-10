@@ -17,7 +17,6 @@ pub struct Agent {
     messages: Messages,
     cancellation: Cancellation,
     compatible_from: usize,
-    legacy_origin: Option<crate::conversation::Origin>,
     redactor: crate::redact::Redactor,
     events: Messages,
     persistence: Option<crate::sessions::Handle>,
@@ -27,9 +26,6 @@ pub struct Agent {
     auto_compact: Arc<AtomicU8>,
     /// User preference: whether Claude prompt caches last an hour.
     cache_retention: Arc<std::sync::atomic::AtomicBool>,
-    /// Exact records come before previews and summaries. Tests of those
-    /// fallback tiers turn them off explicitly.
-    records: bool,
     project_instructions: String,
     skills: crate::skills::Library,
     used_skills: std::collections::BTreeSet<String>,
@@ -87,7 +83,6 @@ impl Agent {
             messages: Arc::new(Mutex::new(Vec::new())),
             cancellation,
             compatible_from: 0,
-            legacy_origin: None,
             redactor,
             events: Arc::new(Mutex::new(Vec::new())),
             persistence: None,
@@ -97,7 +92,6 @@ impl Agent {
             cache_retention: Arc::new(std::sync::atomic::AtomicBool::new(
                 crate::backend::CacheRetention::default() == crate::backend::CacheRetention::Long,
             )),
-            records: compaction::records_by_default(),
             project_instructions: String::new(),
             skills: crate::skills::Library::default(),
             used_skills: std::collections::BTreeSet::new(),
@@ -166,7 +160,6 @@ impl Agent {
         self.prepared = None;
         self.context = crate::context::Context::default();
         self.compatible_from = 0;
-        self.legacy_origin = None;
         self.events.lock().unwrap().clear();
         *self.messages.lock().unwrap() = vec![self.system_message()];
     }
@@ -174,7 +167,6 @@ impl Agent {
     pub fn archive(&self) -> Archive {
         Archive {
             backend: self.backend_id().into(),
-            legacy_origin: self.legacy_origin.clone(),
             model: self.model().into(),
             directory: self.tools.root().to_path_buf(),
             messages: Arc::clone(&self.messages),
@@ -415,7 +407,6 @@ impl Drop for Agent {
 
 mod ask;
 mod backend;
-pub(crate) mod checkpoints;
 mod collaboration;
 mod compaction;
 mod continuation;
@@ -453,8 +444,6 @@ mod backend_tests;
 #[cfg(test)]
 mod browser_tests;
 #[cfg(test)]
-mod checkpoint_tests;
-#[cfg(test)]
 mod compaction_tests;
 #[cfg(test)]
 mod context_estimate_tests;
@@ -482,8 +471,6 @@ mod local_read_tests;
 mod long_work_tests;
 #[cfg(test)]
 mod lsp_tests;
-#[cfg(test)]
-mod map_tests;
 #[cfg(test)]
 mod mcp_tests;
 #[cfg(test)]

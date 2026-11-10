@@ -296,7 +296,7 @@ fn trimmed_labels_group_and_missing_or_blank_labels_use_activity() {
 }
 
 #[test]
-fn narration_mutations_checkpoint_and_skill_reads_break_chapters() {
+fn narration_mutations_and_skill_reads_break_chapters() {
     let mut state = State::default();
     state.begin_tool_turn();
     let routine = || args([("path", "src/a.rs"), ("work", "Inspect")]);
@@ -309,7 +309,6 @@ fn narration_mutations_checkpoint_and_skill_reads_break_chapters() {
     for (index, (name, arguments)) in [
         ("write", args([("path", "src/a.rs")])),
         ("edit", args([("path", "src/a.rs")])),
-        ("checkpoint", args([("action", "list")])),
     ]
     .into_iter()
     .enumerate()
@@ -349,9 +348,9 @@ fn narration_mutations_checkpoint_and_skill_reads_break_chapters() {
             .iter()
             .filter(|text| text.starts_with("  READ   "))
             .count(),
-        6
+        5
     );
-    for expected in [" WRITE   ", " UPDATE  ", "  SAVE   ", " SKILL   "] {
+    for expected in [" WRITE   ", " UPDATE  ", " SKILL   "] {
         assert!(
             headings.iter().any(|text| text.contains(expected)),
             "{headings:?}"

@@ -20,6 +20,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Why a saved session from another Jecode version cannot be opened.
+pub(crate) const UNSUPPORTED: &str = "Unsupported session format or version; file left unchanged";
+
 pub(crate) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -62,8 +65,6 @@ fn same_directory(a: &Path, b: &Path) -> bool {
         .is_some_and(|(a, b)| directory_key(&a) == directory_key(&b))
 }
 
-#[cfg(test)]
-mod checkpoint_measurements;
 #[cfg(test)]
 mod crash_tests;
 #[cfg(test)]

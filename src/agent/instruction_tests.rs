@@ -158,10 +158,7 @@ fn resumed_requests_use_current_environment_and_keep_original_history() {
             let description = function.get("description").and_then(Value::as_str).unwrap();
             match function.get("name").and_then(Value::as_str) {
                 Some("write") => assert!(description.contains("one-off verification")),
-                Some("bash") => {
-                    assert!(description.contains("session temporary storage"));
-                    assert!(description.contains("protect"));
-                }
+                Some("bash") => assert!(description.contains("session temporary storage")),
                 _ => {}
             }
         }

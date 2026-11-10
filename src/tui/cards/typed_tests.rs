@@ -106,7 +106,6 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
         ("edit", "UPDATE"),
         ("bash", "BASH"),
         ("process", "PROCESS"),
-        ("checkpoint", "SAVE"),
         ("web", "WEB"),
         ("browser", "BROWSER"),
         ("future_tool", "FUTURE_TOOL"),
@@ -116,7 +115,7 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
             motion::set_frame(frame);
             let shown = Presentation {
                 elapsed: Some(Duration::from_millis(240 * frame as u64)),
-                note: Some("checkpoint rc-fixture".into()),
+                note: Some("Approved once".into()),
                 ..Presentation::default()
             };
             let rows = card(
@@ -161,16 +160,13 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
                 assert_eq!(rows.len(), 1, "{name}");
                 assert_eq!(
                     rows[0].plain(),
-                    format!(
-                        "{}fixture.rs  {expected} · checkpoint rc-fixture",
-                        centred(label)
-                    ),
+                    format!("{}fixture.rs  {expected} · Approved once", centred(label)),
                     "{name}"
                 );
             } else {
                 assert_eq!(
                     rows.last().unwrap().plain(),
-                    format!("  └ Running · {expected} · checkpoint rc-fixture")
+                    format!("  └ Running · {expected} · Approved once")
                 );
             }
             assert!(!plain(&rows).join("").contains(['▰', '▱', '●']));

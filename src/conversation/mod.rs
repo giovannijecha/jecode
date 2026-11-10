@@ -32,12 +32,9 @@ pub struct Origin {
 }
 
 impl Origin {
+    #[cfg(test)]
     pub fn new(backend: &str, model: &str) -> Self {
-        Self {
-            backend: backend.into(),
-            model: model.into(),
-            account: None,
-        }
+        Self::with_account(backend, model, None)
     }
 
     pub fn with_account(backend: &str, model: &str, account: Option<String>) -> Self {
@@ -226,11 +223,7 @@ pub fn project(message: &Value, current: &Origin) -> Value {
     if fields.get("jecode_request_state") == Some(&Value::Bool(true)) {
         projected.insert("jecode_request_state".into(), Value::Bool(true));
     }
-    for key in [
-        "jecode_cache_prefix",
-        crate::backend::retention::MARKER,
-        crate::context::digest::ANCHOR,
-    ] {
+    for key in ["jecode_cache_prefix", crate::backend::retention::MARKER] {
         if let Some(value) = fields.get(key) {
             projected.insert(key.into(), value.clone());
         }

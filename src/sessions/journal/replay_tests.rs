@@ -1,4 +1,4 @@
-//! Offline checks of saved context and sustained record growth. No backend is used.
+//! Offline checks of saved context. No backend is used.
 
 use super::{Document, state};
 use crate::{context::Context, json::Value};
@@ -12,7 +12,6 @@ struct Replay {
     checkpoints: usize,
     messages: usize,
     peak_projection_bytes: usize,
-    max_record_level: u8,
 }
 
 impl Replay {
@@ -32,14 +31,6 @@ impl Replay {
         }
         let bytes = before.iter().map(|message| message.encode().len()).sum();
         self.peak_projection_bytes = self.peak_projection_bytes.max(bytes);
-        self.max_record_level = self.max_record_level.max(
-            context
-                .digests
-                .iter()
-                .map(|span| span.level)
-                .max()
-                .unwrap_or(0),
-        );
         self.checkpoints += 1;
         self.messages = messages.len();
         Ok(())
@@ -55,10 +46,6 @@ impl Replay {
                 (
                     "peak_projection_bytes",
                     Value::number(self.peak_projection_bytes)
-                ),
-                (
-                    "max_record_level",
-                    Value::number(self.max_record_level as usize)
                 ),
                 (
                     "elapsed_ms",
@@ -97,7 +84,7 @@ fn replay(path: &Path) -> Result<Replay, String> {
             .map_or((vec![], vec![]), |doc| (doc.messages, doc.events));
         let valid = checkpoint.get("format").and_then(Value::as_str)
             == Some("jecode.session.journal")
-            && checkpoint.get("format_version").and_then(Value::as_usize) == Some(3)
+            && checkpoint.get("format_version").and_then(Value::as_usize) == Some(4)
             && checkpoint.get("sequence").and_then(Value::as_usize) == Some(stats.checkpoints)
             && checkpoint.get("messages_from").and_then(Value::as_usize) == Some(messages.len())
             && checkpoint.get("events_from").and_then(Value::as_usize) == Some(events.len());
@@ -149,157 +136,48 @@ fn message(role: &str, text: &str) -> Value {
 }
 
 #[test]
-fn legacy_compaction_clears_inherited_records_but_explicit_invalid_records_fail() {
-    use crate::{context::digest::Epoch, effort::Effort, test_support::Directory};
-    use std::io::Write;
-
-    let directory = Directory::new();
-    let mut doc = Document::new(
-        directory.path().into(),
-        "fixture/model".into(),
-        Effort::Default,
-    )
-    .unwrap();
-    doc.messages = vec![
-        message("system", "Fixture"),
-        message("user", "First"),
-        message("assistant", "First answer"),
-        message("user", "Second"),
-        message("assistant", "Second answer"),
-        message("user", "Third"),
-        message("assistant", "Third answer"),
-        message("user", "Fourth"),
-    ];
-    doc.context.from = 5;
-    doc.context.summary = "Summary of the first exchange".into();
-    doc.context.digests = vec![Epoch::new(3, 5, 1, String::new())];
-
-    let append_checkpoint = |path: &Path, from: usize, explicit: bool| {
-        let mut position = None;
-        super::append(path, &super::Tail::whole(&doc), &mut position).unwrap();
-        let mut context = Value::object([
-            ("from", Value::number(from)),
-            (
-                "summary",
-                Value::string("Summary through the third exchange"),
-            ),
-        ]);
-        if explicit && let Value::Object(fields) = &mut context {
-            fields.insert(
-                "digests".into(),
-                doc.context.value().get("digests").unwrap().clone(),
-            );
-        }
-        let checkpoint = Value::object([
-            ("format", Value::string("jecode.session.journal")),
-            ("format_version", Value::number(3)),
-            ("sequence", Value::number(1)),
-            ("messages_from", Value::number(doc.messages.len())),
-            ("events_from", Value::number(0)),
-            ("messages", Value::Array(vec![])),
-            ("events", Value::Array(vec![])),
-            ("state", Value::object([("context", context)])),
-            (
-                "partial",
-                Value::object([
-                    ("keep_bytes", Value::number(0)),
-                    ("text", Value::string("")),
-                ]),
-            ),
-        ]);
-        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
-        writeln!(file, "{}", checkpoint.encode()).unwrap();
-    };
-
-    let legacy = directory.path().join("legacy.jsonl");
-    append_checkpoint(&legacy, 7, false);
-    let super::Read::Saved(saved) = super::read(&legacy, &doc.id, &doc.directory).unwrap() else {
-        panic!("missing saved checkpoint");
-    };
-    assert_eq!(saved.document.context.from, 7);
-    assert!(saved.document.context.digests.is_empty());
-    assert_eq!(
-        saved.document.context.summary,
-        "Summary through the third exchange"
-    );
-    assert_eq!(saved.document.messages, doc.messages);
-    assert_eq!(replay(&legacy).unwrap().checkpoints, 2);
-    let mut stale = doc.state_value();
-    let old_patch = Value::object([(
-        "context",
-        Value::object([
-            ("from", Value::number(7)),
-            (
-                "summary",
-                Value::string("Summary through the third exchange"),
-            ),
-        ]),
-    )]);
-    state::merge(&mut stale, &old_patch);
-    let stale = Context::parse(stale.get("context")).unwrap();
-    assert!(
-        stale.validate(&doc.messages).is_err(),
-        "the former object merge retains a digest ending before the new boundary"
-    );
-
-    let unchanged = directory.path().join("unchanged.jsonl");
-    append_checkpoint(&unchanged, 5, false);
-    let super::Read::Saved(saved) = super::read(&unchanged, &doc.id, &doc.directory).unwrap()
-    else {
-        panic!("missing saved checkpoint");
-    };
-    assert_eq!(saved.document.context.digests.len(), 1);
-
-    let invalid = directory.path().join("invalid.jsonl");
-    append_checkpoint(&invalid, 7, true);
-    assert!(
-        super::read(&invalid, &doc.id, &doc.directory)
-            .err()
-            .unwrap()
-            .contains("Invalid saved context boundary")
-    );
-    assert!(replay(&invalid).is_err());
-}
-
-#[test]
-fn legacy_summary_without_records_opens_in_the_new_reader() {
+fn previous_session_formats_are_rejected_without_changing_the_journal() {
     use crate::{effort::Effort, test_support::Directory};
 
     let directory = Directory::new();
-    let path = directory.path().join("legacy-summary.jsonl");
+    let path = directory.path().join("previous.jsonl");
     let mut doc = Document::new(
         directory.path().into(),
         "fixture/model".into(),
         Effort::Default,
     )
     .unwrap();
-    doc.messages = vec![
-        message("system", "Fixture"),
-        message("user", "First"),
-        message("assistant", "First answer"),
-        message("user", "Second"),
-    ];
-    doc.context.from = 3;
-    doc.context.summary = "First exchange completed".into();
+    doc.messages = vec![message("system", "Fixture"), message("user", "Task")];
     let mut position = None;
     super::append(&path, &super::Tail::whole(&doc), &mut position).unwrap();
-    let mut checkpoint = crate::json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let Value::Object(fields) = &mut checkpoint else {
-        unreachable!()
-    };
-    let Some(Value::Object(state)) = fields.get_mut("state") else {
-        unreachable!()
-    };
-    let Some(Value::Object(context)) = state.get_mut("context") else {
-        unreachable!()
-    };
-    context.remove("digests");
-    std::fs::write(&path, format!("{}\n", checkpoint.encode())).unwrap();
-    let super::Read::Saved(saved) = super::read(&path, &doc.id, &doc.directory).unwrap() else {
-        panic!("missing saved checkpoint");
-    };
-    assert!(saved.document.context.digests.is_empty());
-    assert_eq!(saved.document.context.project(&doc.messages, 0).len(), 4);
+    let current = std::fs::read_to_string(&path).unwrap();
+    let checkpoint = crate::json::parse(&current).unwrap();
+
+    for old_document in [false, true] {
+        let mut previous = checkpoint.clone();
+        let Value::Object(fields) = &mut previous else {
+            unreachable!()
+        };
+        if old_document {
+            let Some(Value::Object(state)) = fields.get_mut("state") else {
+                unreachable!()
+            };
+            state.insert("format_version".into(), Value::number(1));
+        } else {
+            fields.insert("format_version".into(), Value::number(3));
+        }
+        let bytes = format!("{}\n", previous.encode());
+        std::fs::write(&path, &bytes).unwrap();
+        let error = match super::read(&path, &doc.id, &doc.directory) {
+            Err(error) => error,
+            Ok(_) => panic!("previous session format was accepted"),
+        };
+        assert!(
+            error.contains("Unsupported session format or version"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), bytes);
+    }
 }
 
 #[test]
@@ -319,11 +197,11 @@ fn replay_checks_state_patches_and_rejects_broken_continuations() {
     doc.messages.push(message("assistant", "First answer"));
     let end = doc.messages.len();
     doc.messages.push(message("user", "Second"));
-    doc.context.push_digest(end, String::new());
+    doc.context.from = end;
+    doc.context.summary = "First exchange".into();
     super::append(&path, &super::Tail::whole(&doc), &mut position).unwrap();
     let stats = replay(&path).unwrap();
     assert_eq!(stats.checkpoints, 2);
-    assert_eq!(stats.max_record_level, 1);
     assert_eq!(stats.messages, 4);
     let mut lines = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, lines.trim_end_matches('\n')).unwrap();
@@ -336,83 +214,4 @@ fn replay_checks_state_patches_and_rejects_broken_continuations() {
     lines.replace_range(last..last + "\"sequence\":1".len(), "\"sequence\":9");
     std::fs::write(&path, lines).unwrap();
     assert!(replay(&path).unwrap_err().contains("Invalid continuation"));
-}
-
-#[test]
-#[ignore = "synthetic record endurance; no provider or real elapsed-hour claim"]
-fn offline_record_endurance() {
-    const TURNS: usize = 360;
-    const BUDGET: usize = 32_000;
-    let started = Instant::now();
-    let mut context = Context::default();
-    let mut messages = vec![
-        message("system", "Offline fixture"),
-        message("user", "Turn 0"),
-    ];
-    let mut originals = Vec::new();
-    let mut stats = Replay::default();
-    for turn in 0..TURNS {
-        let id = format!("read-{turn}");
-        let path = format!("src/file{turn}.rs");
-        messages.push(Value::object([
-            ("role", Value::string("assistant")),
-            ("content", Value::string("")),
-            (
-                "tool_calls",
-                Value::Array(vec![crate::test_support::tool_call(
-                    &id,
-                    "read",
-                    Value::object([("path", Value::string(path))]),
-                )]),
-            ),
-        ]));
-        let marker = format!("ARCHIVED_PAYLOAD_{turn}");
-        let result = Value::object([
-            (
-                "content",
-                Value::string(format!("{marker}\n{}", "x".repeat(64 * 1024))),
-            ),
-            ("lines_returned", Value::number(2)),
-            ("total_lines", Value::number(2)),
-        ])
-        .encode();
-        originals.push((messages.len(), marker));
-        messages.push(Value::object([
-            ("role", Value::string("tool")),
-            ("tool_call_id", Value::string(id)),
-            ("content", Value::string(result)),
-        ]));
-        messages.push(message("assistant", &format!("Finished turn {turn}")));
-        let end = messages.len();
-        let live = message("user", &format!("Turn {}", turn + 1));
-        messages.push(live.clone());
-        context.push_digest(end, String::new());
-        context.roll_up(&messages, BUDGET);
-        stats.check(&context, &messages, 0).unwrap();
-        let projected = context.project(&messages, 0);
-        assert_eq!(projected.last(), Some(&live), "the next request stays live");
-        assert_eq!(
-            projected
-                .iter()
-                .filter(|m| m.get(crate::context::digest::ANCHOR).is_some())
-                .count(),
-            1
-        );
-        let bytes = projected.iter().map(|message| message.encode().len()).sum();
-        assert!(
-            context.estimate_bytes(bytes) < BUDGET,
-            "synthetic context exceeded its budget"
-        );
-    }
-    for (index, marker) in originals {
-        assert!(
-            messages[index]
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap()
-                .contains(&marker)
-        );
-    }
-    assert_eq!(stats.max_record_level, 3, "exercise both rollup levels");
-    stats.report("synthetic_record_endurance_360_turns", started);
 }

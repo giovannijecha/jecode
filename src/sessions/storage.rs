@@ -169,6 +169,7 @@ impl Store {
             Err(error) => return Err(format!("Could not list sessions: {error}")),
         };
         let mut ids = BTreeSet::new();
+        let mut unsupported = BTreeSet::new();
         for entry in entries {
             let entry = entry.map_err(|error| format!("Could not list sessions: {error}"))?;
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -176,9 +177,18 @@ impl Store {
                 && valid_id(id)
             {
                 ids.insert(id.to_string());
+            } else if let Some(id) = name.strip_suffix(".json")
+                && valid_id(id)
+            {
+                unsupported.insert(id.to_string());
             }
         }
         let mut listing = Listing::default();
+        for id in unsupported.difference(&ids) {
+            listing
+                .warnings
+                .push(format!("Session {id}: {}", super::UNSUPPORTED));
+        }
         for id in ids {
             let stamp = super::summary::stamp(self, &id);
             if let Some(summary) = stamp
@@ -238,7 +248,7 @@ impl Store {
 
     pub(super) fn create(&self, id: &str) -> Result<Lease, String> {
         let lease = self.acquire(id)?;
-        if self.journal_path(id).exists() {
+        if self.journal_path(id).exists() || self.bucket.join(format!("{id}.json")).exists() {
             return Err("Session identifier already exists; saved data was left unchanged".into());
         }
         Ok(lease)
@@ -251,6 +261,9 @@ impl Store {
         }
         let journal = self.journal_path(id);
         if !journal.exists() {
+            if self.bucket.join(format!("{id}.json")).exists() {
+                return Err(super::UNSUPPORTED.into());
+            }
             return Err("Session not found in this working directory".into());
         }
         match super::journal::read(&journal, id, &self.directory)? {

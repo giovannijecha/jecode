@@ -295,6 +295,11 @@ fn decode(value: Value, id: &str) -> Result<State, String> {
         queue,
         visited,
         pages_total,
-        options: super::options::parse(value.get("options").unwrap_or(&Value::Null))?,
+        options: super::options::parse(
+            value
+                .get("options")
+                .filter(|value| matches!(value, Value::Object(_)))
+                .ok_or("Invalid saved crawl request options")?,
+        )?,
     })
 }

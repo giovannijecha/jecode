@@ -73,7 +73,7 @@ pub(super) fn requests(
     ]))
 }
 
-pub(super) fn preview(message: &Value, index: usize, limit: usize) -> Value {
+pub(crate) fn preview(message: &Value, index: usize, limit: usize) -> Value {
     let Some(content) = message.get("content").and_then(Value::as_str) else {
         return message.clone();
     };

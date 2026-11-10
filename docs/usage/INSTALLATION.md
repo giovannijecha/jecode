@@ -64,8 +64,8 @@ To remove:
 npm uninstall -g @giovannijecha/jecode
 ```
 
-npm removes its own package and command. Your settings, accounts, conversations,
-and checkpoints in `~/.jecode/` (or the directory selected by `JECODE_HOME`)
+npm removes its own package and command. Your settings, accounts and conversations
+in `~/.jecode/` (or the directory selected by `JECODE_HOME`)
 remain in place. An npm uninstall does not remove a separate source-built
 installation. On Windows, close any running Jecode process before updating or
 uninstalling if npm reports that the executable is in use.
@@ -136,7 +136,8 @@ that helps tell builds apart.
 ### Install the standalone executable
 
 The installers copy a packaged executable into a per-user directory. They never
-build source, so prepare a package first.
+build source, so prepare a package first. Both package scripts refuse an existing
+output directory; move or remove an earlier package before preparing a new one.
 
 #### Windows
 
@@ -197,8 +198,9 @@ sh target/package/jecode-macos-aarch64/INSTALL.sh
 sh target/package/jecode-macos-x86_64/INSTALL.sh
 ```
 
-`PACKAGE.sh` prints the exact output directory. The installer copies the
-executable to
+`PACKAGE.sh` prints the exact output directory. Both packaging scripts stop when
+that directory already exists; remove it before packaging again. The installer
+copies the executable to
 `${XDG_DATA_HOME:-$HOME/.local/share}/jecode/bin/jecode` and does not change
 `PATH`. Add that directory to your shell configuration, for example in
 `~/.profile`:
@@ -238,5 +240,5 @@ conversations in `~/.jecode/` are not touched.
    Advanced system settings → Environment Variables**.
 
 This does not remove `~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows), which
-holds your configuration, credentials, saved conversations, and checkpoints;
+holds your configuration, credentials and saved conversations;
 see [Configuration](CONFIGURATION.md#files-jecode-keeps).

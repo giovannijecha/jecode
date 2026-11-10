@@ -10,6 +10,29 @@ include!(concat!(env!("OUT_DIR"), "/native_assets.rs"));
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+/// The current Unix account, queried through the existing owned OS adapter.
+#[cfg(unix)]
+pub(crate) fn effective_user_id() -> Result<u32, String> {
+    static UID: OnceLock<u32> = OnceLock::new();
+    if let Some(uid) = UID.get() {
+        return Ok(*uid);
+    }
+    let output = std::process::Command::new(helper("process_unix")?)
+        .arg("uid")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|error| format!("Could not query the current Unix account: {error}"))?;
+    if !output.status.success() {
+        return Err("Could not query the current Unix account".into());
+    }
+    let uid = std::str::from_utf8(&output.stdout)
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .ok_or("The Unix account adapter returned an invalid identity")?;
+    let _ = UID.set(uid);
+    Ok(uid)
+}
+
 /// Windows PowerShell is an OS component. Resolve it independently of PATH.
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn powershell() -> std::process::Command {
@@ -260,36 +283,6 @@ mod tests {
         );
         worker.join().unwrap();
         assert_eq!(fs::read(published).unwrap(), bytes);
-    }
-
-    #[test]
-    fn bundled_adapter_runs_without_compilation() {
-        let name = if cfg!(windows) {
-            "checkpoint_space"
-        } else {
-            "process_unix"
-        };
-        let path = helper(name).unwrap();
-        let mut command = std::process::Command::new(path);
-        if cfg!(windows) {
-            command.arg(std::env::temp_dir());
-        } else {
-            command.args(["space", "/"]);
-        }
-        command.env("PATH", "");
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            String::from_utf8(output.stdout)
-                .unwrap()
-                .trim()
-                .parse::<u64>()
-                .is_ok()
-        );
     }
 }
 

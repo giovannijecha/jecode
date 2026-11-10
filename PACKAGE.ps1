@@ -16,14 +16,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the built architecture.' }
     $hostTriple = ([string]($hostInfo | Where-Object { $_ -like 'host: *' })).Substring(6)
     $package = Join-Path $targetRoot ('package/jecode-windows-' + $hostTriple.Split('-')[0])
-    New-Item -ItemType Directory -Path $package -Force | Out-Null
+    if (Test-Path -LiteralPath $package) { throw "Package destination already exists: $package" }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $package) -Force | Out-Null
+    New-Item -ItemType Directory -Path $package -ErrorAction Stop | Out-Null
     Copy-Item -LiteralPath $binary -Destination (Join-Path $package 'jecode.exe') -Force
     foreach ($name in @('INSTALL.ps1', 'LICENSE', 'README.md', 'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name) -Force
     }
     $docsRoot = Join-Path $PSScriptRoot 'docs'
     foreach ($document in Get-ChildItem -LiteralPath $docsRoot -Recurse -File) {
-        if ($document.Name -like 'HARNESS*' -or $document.Name -in @('AGENTS.md', 'CLAUDE.md') -or
+        if ($document.Name -like 'HARNESS*' -or $document.Name -in @('AGENTS.md', 'CLAUDE.md', 'CODEX_HARNESS_STUDY.md') -or
             ($document.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
         $relative = $document.FullName.Substring($docsRoot.Length).TrimStart('\', '/')
         $destination = Join-Path (Join-Path $package 'docs') $relative

@@ -8,10 +8,10 @@ what the cards show. The tools themselves are described in
 ## Tool cards
 
 A card starts with a badge naming the tool (READ, UPDATE, WRITE, BASH, EXEC,
-PROCESS, LIST, SEARCH, MAP, SAVE, WEB, BROWSER, MCP, LSP, SKILL or AGENTS), then
+PROCESS, LIST, SEARCH, WEB, BROWSER, MCP, LSP, SKILL or AGENTS), then
 its target, such as a file path or a command. Every badge takes eight cells with
 its name centred, so the targets of short names line up from column 9. The badge color shows the
-state: the tool family's color when finished (SAVE, MCP, LSP and tools without a
+state: the tool family's color when finished (MCP, LSP and tools without a
 family use a quiet grey), a moving shimmer while running, red when
 the call failed and amber when it was stopped or timed out. A result line hangs
 below the title:
@@ -22,7 +22,6 @@ below the title:
 | Read (several paths) | `3 files · 120 lines`, adding `N not read` when a path failed, then each file under its path. |
 | Read (image or PDF) | `Opened image · 800×600 · 12 KiB`, or `Opened PDF · 4 pages · 1.2 MiB`. |
 | List, Search | Entry or match counts, files searched, errors, and `more from N` when there is another page. |
-| Map | Counts of entries, files and notes; `partial` when the survey was cut short. |
 | Update | `+N −M lines`, followed by the diff. Used for `edit` and for a `write` that replaced an existing file. |
 | Update (several files) | One card naming every path, with `3 files · +9 −1 lines` and `N failed` in red. The first three diffs stay open; later files keep their heading. |
 | Write (new file) | `New file · N lines` and the first six lines. |
@@ -45,7 +44,7 @@ Ctrl+O shows the full arguments and result; each MCP call keeps its own row
 inside a Work chapter. Cancellation before dispatch uses the stopped badge
 and `Cancelled` in amber: the call was not sent. An uncertain remote outcome uses amber and
 **Outcome unknown**: the service may already have acted. Check it before
-retrying; a local checkpoint cannot restore it.
+retrying.
 
 LSP calls use the same quiet badge and `server › action` target. Errors and
 warnings found by diagnostics are successful analysis; their counts use the
@@ -58,8 +57,7 @@ When the agent supplies a `description` for a command, the card shows it as the
 title and the command beneath it (`$ command` for Bash, `> program args` for
 Exec). Blank output lines are skipped in compact cards. If output was trimmed,
 a note such as `stdout trimmed to the last 64 KiB of 89 KiB · full output saved`
-says so. A checkpoint saved before a command appears as a quiet note; partial
-or failed checkpoint coverage shows a warning.
+says so.
 
 Cards show the result as it was when the call returned. For a process still
 running, use `/process`. When a process that no call is waiting for ends, a
@@ -68,8 +66,8 @@ Ctrl+O opens the end of its output.
 
 ## Work chapters
 
-Two or more consecutive routine calls (Read, List, Search, Map overview, Bash,
-Exec, Process, Web, Browser, MCP, LSP, collaboration events and agent list,
+Two or more consecutive routine calls (Read, List, Search, Bash, Exec,
+Process, Web, Browser, MCP, LSP, collaboration events and agent list,
 inspect, wait and diff) with the same `work` label in the same turn are
 grouped into a **Work chapter**. The agent chooses the label; calls without one
 are grouped as **Activity**. Assistant text, a different label, a skill read or
@@ -82,7 +80,7 @@ failures. Below it:
   on, plus running, background and stopped calls;
 - every command keeps its own row, with its running time or a failed exit code;
 - failed or unusual calls keep a row with their error;
-- up to four of the latest completed reads, listings, searches, maps, web and
+- up to four of the latest completed reads, listings, searches, web and
   browser calls stay at the bottom.
 
 When several calls run in parallel, each running call has its own row, and the
@@ -109,10 +107,9 @@ the edit.
 
 When the agent is idle and no panel is open, Ctrl+O expands every tool call of
 the latest finished turn into its full card: the complete command and output,
-numbered file content, all diff hunks, exit codes and durations, and each
-call's checkpoint reference. Press Ctrl+O again to return to compact cards. The
-view keeps its reading position, and a short notice confirms how many tools
-were expanded.
+numbered file content, all diff hunks, exit codes and durations. Press Ctrl+O
+again to return to compact cards. The view keeps its reading position, and a
+short notice confirms how many tools were expanded.
 
 Ctrl+O applies only to the latest finished turn and does nothing if that turn
 had no tool calls. The last card with hidden content shows a `Ctrl+O expand`

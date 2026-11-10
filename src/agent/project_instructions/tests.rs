@@ -5,6 +5,8 @@ use crate::json::Value;
 use crate::test_support::{Directory, HttpFixture, Request, completion, tool_call};
 use crate::tools::Tools;
 
+mod lifecycle;
+
 fn agent(directory: &Directory, fixture: &HttpFixture) -> Agent {
     Agent::new(
         OpenRouter::fixture(fixture.endpoint.clone()),
@@ -18,6 +20,11 @@ fn system(request: &Request) -> &str {
         .unwrap()
         .as_str()
         .unwrap()
+}
+
+/// The instructions in effect for a request: its latest snapshot.
+fn current(request: &Request) -> String {
+    crate::test_support::latest_snapshot(&request.body).unwrap_or_default()
 }
 
 #[test]
@@ -218,20 +225,22 @@ fn each_turn_keeps_one_snapshot_and_the_next_turn_reloads_creation_edits_and_del
     assert_eq!(agent.messages.lock().unwrap()[0], original_system);
     let requests = fixture.finish();
     assert_eq!(requests.len(), 5);
-    assert!(!system(&requests[0]).contains("Project instructions from"));
+    assert!(current(&requests[0]).is_empty());
     for request in &requests[1..3] {
-        assert!(system(request).contains("Original project rules"));
-        assert!(system(request).contains("Source: src/AGENTS.md"));
-        assert!(system(request).contains("Directory scope: src and its descendants"));
-        assert!(!system(request).contains("Revised project rules"));
-        assert_eq!(
-            system(request).matches("Project instructions from").count(),
-            1
-        );
+        assert!(current(request).contains("Original project rules"));
+        assert!(current(request).contains("Source: src/AGENTS.md"));
+        assert!(current(request).contains("Directory scope: src and its descendants"));
+        assert!(!current(request).contains("Revised project rules"));
+        // The tool-loop request reuses the turn's snapshot instead of adding one.
+        assert_eq!(crate::test_support::snapshot_count(&request.body), 1);
     }
-    assert!(system(&requests[3]).contains("Revised project rules"));
-    assert!(!system(&requests[3]).contains("Original project rules"));
-    assert!(!system(&requests[4]).contains("Project instructions from"));
+    assert!(current(&requests[3]).contains("Revised project rules"));
+    assert!(!current(&requests[3]).contains("Original project rules"));
+    assert!(current(&requests[4]).contains(super::super::environment::NO_INSTRUCTIONS));
+    assert!(!current(&requests[4]).contains("project rules"));
+    for request in &requests {
+        assert!(!system(request).contains("project rules"));
+    }
 }
 
 #[test]
@@ -304,171 +313,6 @@ fn source_edits_invalidate_measurements_even_if_redacted_projection_is_identical
 }
 
 #[test]
-fn resumed_sessions_reload_current_rules_without_rewriting_original_history() {
-    let directory = Directory::new();
-    let home = Directory::new();
-    fs::create_dir(directory.path().join("src")).unwrap();
-    let path = directory.path().join("src").join(FILE_NAME);
-    fs::write(&path, "Earlier project rules").unwrap();
-    let fixture = HttpFixture::new(vec![
-        (200, completion("First answer", vec![])),
-        (200, completion("Resumed answer", vec![])),
-    ]);
-    let mut first = agent(&directory, &fixture);
-    first.enable_sessions(home.path()).unwrap();
-    first.run_turn("Original request", &mut |_| Ok(())).unwrap();
-    let original = first.messages.lock().unwrap().clone();
-    let id = first.sessions().unwrap().id();
-    drop(first);
-    fs::write(&path, "Current project rules").unwrap();
-    let mut resumed = agent(&directory, &fixture);
-    resumed.enable_sessions(home.path()).unwrap();
-    resumed.project_instructions = "Stale cached rules".into();
-    resumed.resume(&id).unwrap();
-    assert!(resumed.project_instructions.is_empty());
-    assert_eq!(*resumed.messages.lock().unwrap(), original);
-    resumed.run_turn("Continue", &mut |_| Ok(())).unwrap();
-    assert_eq!(resumed.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(
-        resumed.sessions().unwrap().snapshot().messages[0],
-        original[0]
-    );
-    let requests = fixture.finish();
-    assert!(system(&requests[0]).contains("Earlier project rules"));
-    assert!(system(&requests[1]).contains("Current project rules"));
-    assert!(!system(&requests[1]).contains("Earlier project rules"));
-    assert!(!system(&requests[1]).contains("Stale cached rules"));
-    resumed.clear();
-    assert!(resumed.project_instructions.is_empty());
-    assert!(
-        !resumed.messages.lock().unwrap()[0]
-            .encode()
-            .contains("Current project rules")
-    );
-}
-
-#[test]
-fn live_requests_keep_the_rules_after_context_compaction() {
-    let directory = Directory::new();
-    let home = Directory::new();
-    fs::create_dir(directory.path().join("src")).unwrap();
-    let instruction = directory.path().join("src").join(FILE_NAME);
-    fs::write(&instruction, "Compaction project rules").unwrap();
-    let fixture = HttpFixture::new(vec![
-        (
-            400,
-            Value::object([(
-                "error",
-                Value::object([
-                    ("code", Value::string("context_length_exceeded")),
-                    ("message", Value::string("Maximum context length exceeded")),
-                ]),
-            )]),
-        ),
-        (
-            200,
-            completion(&String::from("Continue inspection"), vec![]),
-        ),
-        (200, completion("Continue inspection", vec![])),
-        (200, completion("Finished", vec![])),
-    ]);
-    let mut agent = agent(&directory, &fixture);
-    agent.enable_sessions(home.path()).unwrap();
-    agent.set_auto_compact(90);
-    let temporary = agent.tools.temporary_instructions();
-    let prompt = "original objective ".repeat(2500);
-    let original = agent.messages.lock().unwrap().clone();
-    let mut notices = Vec::new();
-    let result = agent.run_turn(&prompt, &mut |event| {
-        if let Event::Maintenance { ref text } = event {
-            notices.push(text.clone());
-            fs::write(&instruction, "Changed during compaction").unwrap();
-        }
-        if matches!(event, Event::Recovering { .. }) {
-            return Err("Unexpected fixture request".into());
-        }
-        Ok(())
-    });
-    let requests = fixture.finish();
-    assert!(
-        result.is_ok(),
-        "{result:?}; tools: {:?}; notices: {notices:?}",
-        requests
-            .iter()
-            .map(|request| request.body.get("tools").is_some())
-            .collect::<Vec<_>>()
-    );
-    assert!(agent.context.from > 1);
-    assert!(!notices.is_empty());
-    assert!(!agent.context.summary.is_empty());
-    assert_eq!(agent.messages.lock().unwrap()[..original.len()], original);
-    assert_eq!(requests.len(), 4);
-    for request in [&requests[0], &requests[3]] {
-        assert!(system(request).contains("Compaction project rules"));
-        assert!(!system(request).contains("Changed during compaction"));
-        assert!(system(request).contains("Source: src/AGENTS.md"));
-        assert!(
-            request
-                .body
-                .get("messages")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .last()
-                .unwrap()
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap()
-                .contains(&temporary)
-        );
-        assert!(system(request).contains("useful durable tests"));
-        assert!(system(request).contains("one-off verification"));
-        assert_eq!(
-            system(request)
-                .matches("Working files and verification:")
-                .count(),
-            1
-        );
-        assert_eq!(
-            system(request).matches("Project instructions from").count(),
-            1
-        );
-    }
-}
-
-#[test]
-fn new_sessions_do_not_save_the_previous_turns_rules_as_original_system_history() {
-    let directory = Directory::new();
-    let home = Directory::new();
-    fs::write(directory.path().join(FILE_NAME), "Local project rules").unwrap();
-    let fixture = HttpFixture::new(vec![(200, completion("Done", vec![]))]);
-    let mut agent = agent(&directory, &fixture);
-    agent.enable_sessions(home.path()).unwrap();
-    let baseline = agent.messages.lock().unwrap()[0].clone();
-    agent.run_turn("First request", &mut |_| Ok(())).unwrap();
-    assert!(!agent.project_instructions.is_empty());
-    let previous = agent.sessions().unwrap().id();
-    agent
-        .start_new("fixture/model".into(), agent.effort())
-        .unwrap();
-    assert_ne!(agent.sessions().unwrap().id(), previous);
-    assert!(agent.project_instructions.is_empty());
-    assert_eq!(*agent.messages.lock().unwrap(), vec![baseline.clone()]);
-    assert_eq!(
-        agent.sessions().unwrap().snapshot().messages,
-        vec![baseline.clone()]
-    );
-    agent.prepare_turn("New request").unwrap();
-    assert_eq!(agent.sessions().unwrap().snapshot().messages[0], baseline);
-    assert!(
-        agent.transport_messages()[0]
-            .encode()
-            .contains("Local project rules")
-    );
-    assert_eq!(fixture.finish().len(), 1);
-}
-
-#[test]
 fn configured_credentials_are_masked_in_project_instructions() {
     let directory = Directory::new();
     fs::write(
@@ -480,7 +324,7 @@ fn configured_credentials_are_masked_in_project_instructions() {
     let mut agent = agent(&directory, &fixture);
     agent.run_turn("Inspect", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
-    assert!(system(&requests[0]).contains("Do not print [redacted]."));
+    assert!(current(&requests[0]).contains("Do not print [redacted]."));
     assert!(!requests[0].body.encode().contains("isolated-fixture-key"));
 }
 
@@ -506,5 +350,5 @@ fn an_unreadable_file_stops_the_request_and_can_be_retried_after_unlocking() {
     agent.run_turn("Inspect", &mut |_| Ok(())).unwrap();
     let requests = fixture.finish();
     assert_eq!(requests.len(), 1);
-    assert!(system(&requests[0]).contains("Unlocked project rules"));
+    assert!(current(&requests[0]).contains("Unlocked project rules"));
 }

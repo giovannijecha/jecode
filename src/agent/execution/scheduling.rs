@@ -42,9 +42,7 @@ fn automatic(call: &ToolCall, arguments: &Value) -> bool {
     let action = arguments.get("action").and_then(Value::as_str);
     match call.name.as_str() {
         "list" | "search" => true,
-        "map" => matches!(action, None | Some("overview")),
         "read" => arguments.get("path").and_then(Value::as_str).is_some(),
-        "checkpoint" => matches!(action, Some("list" | "inspect")),
         "process" => action == Some("list"),
         "mcp" => matches!(action, None | Some("list" | "tools")),
         "web" => {

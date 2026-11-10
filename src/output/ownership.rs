@@ -55,7 +55,7 @@ pub(super) fn ensure(root: &Path, identity: &Identity) -> Result<PathBuf, String
     Ok(session)
 }
 
-/// The directory of legacy references without a session: the root itself.
+/// An unscoped store's output directory: the root itself.
 pub(super) fn flat_directory(root: &Path) -> Result<PathBuf, String> {
     checked_ancestors(root)?;
     Ok(root.to_path_buf())

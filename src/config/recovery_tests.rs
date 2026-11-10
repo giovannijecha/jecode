@@ -3,10 +3,10 @@ use crate::{json, test_support::Directory};
 use std::fs;
 
 #[test]
-fn empty_legacy_key_does_not_hide_a_scoped_key() {
+fn scoped_key_is_available_without_a_retired_root_block() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    fs::write(store.path(), r#"{"selection":{"backend":"openai","model":"saved-model"},"backends":{"openrouter":{"api_key":"isolated-new-key"}},"openrouter":{"api_key":"","model":"unconfigured"}}"#).unwrap();
+    fs::write(store.path(), r#"{"selection":{"backend":"openai","model":"saved-model"},"backends":{"openrouter":{"api_key":"isolated-new-key"}}}"#).unwrap();
     let settings = store.load().unwrap().unwrap();
     assert_eq!(
         settings.credential_for("openrouter"),
@@ -16,7 +16,7 @@ fn empty_legacy_key_does_not_hide_a_scoped_key() {
 }
 
 #[test]
-fn replacing_a_key_while_another_provider_is_default_updates_both_formats() {
+fn replacing_a_key_while_another_provider_is_default_updates_scoped_settings() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
     let mut settings = Settings::new("isolated-old-key".into(), "fixture/model".into()).unwrap();
@@ -32,6 +32,8 @@ fn replacing_a_key_while_another_provider_is_default_updates_both_formats() {
     let document = json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
     assert_eq!(
         document
+            .get("backends")
+            .unwrap()
             .get("openrouter")
             .unwrap()
             .get("api_key")
@@ -39,6 +41,7 @@ fn replacing_a_key_while_another_provider_is_default_updates_both_formats() {
             .as_str(),
         Some("isolated-new-key")
     );
+    assert!(document.get("openrouter").is_none());
     assert_eq!(saved.backend_id, "openai");
 }
 

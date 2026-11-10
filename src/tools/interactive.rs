@@ -8,7 +8,6 @@ pub(super) fn execute(
     arguments: &Value,
     cancellation: &Cancellation,
 ) -> Result<Value, String> {
-    let _ = shell::protect_paths(arguments)?;
     if arguments.get("stdin").is_some() {
         return Err("Use process write for terminal input; stdin applies to non-TTY exec".into());
     }

@@ -78,8 +78,9 @@ If the initial save fails, Jecode does not contact the provider or run tools.
 Fix the storage problem and send the work again. A damaged final save is
 recovered from the previous complete one, with the incomplete bytes kept
 separately. Damaged earlier records, unsupported formats and conversations from
-another directory are reported and left unchanged. Conversations saved by
-versions before the current storage format (version 3) cannot be opened.
+another directory are reported and left unchanged. The current journal format
+is version 4, with version 2 session state. Experimental versions do not migrate
+older saved formats; those conversations cannot be resumed by this build.
 
 ## Delete a conversation
 
@@ -100,3 +101,7 @@ your unsent input. If deletion fails partway, some files may already be gone;
 read the error and retry from `/resume`.
 
 Conversations have no automatic expiry.
+
+Jecode cannot delete unsupported saved formats through the picker: deletion
+needs a valid document to check ownership of associated files. Remove those
+files manually when you no longer need them; Jecode leaves them unchanged.

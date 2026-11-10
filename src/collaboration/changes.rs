@@ -29,6 +29,7 @@ impl Observer {
             ("number", Value::number(1)),
             ("state", Value::string("returned")),
             ("workspace_closed", Value::Bool(true)),
+            ("log", Value::Array(vec![])),
         ]);
         let mut record = super::Record::from_value(&seed).unwrap();
         record.session_events = Some(events);

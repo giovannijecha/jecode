@@ -96,7 +96,6 @@ impl Agent {
             .bind(self.archive(), self.persistence.clone());
         self.bind_permissions();
         self.collaboration_seen = 0;
-        self.begin_checkpoints();
         if let Some(handle) = &self.persistence {
             self.tools.configure_output_store(
                 handle
@@ -129,7 +128,6 @@ impl Agent {
             archive.messages =
                 std::sync::Arc::new(std::sync::Mutex::new(document.messages.clone()));
             archive.events = std::sync::Arc::new(std::sync::Mutex::new(document.events.clone()));
-            archive.legacy_origin = document.legacy_origin.clone();
             handle.checkpoint(
                 &archive,
                 document.compatible_from,
@@ -166,12 +164,7 @@ impl Agent {
         self.rebuild_used_skills();
         *self.events.lock().unwrap() = document.events;
         self.compatible_from = document.compatible_from;
-        self.legacy_origin = document.legacy_origin;
         self.context = document.context;
-        if self.context.from > 1 && self.context.skill_references.is_empty() {
-            self.refresh_skills();
-            self.context.skill_references = self.redact(&self.skill_checkpoint_instructions());
-        }
         let calibration = self.context.calibration;
         self.context.reset_projection();
         self.context.calibration = calibration;
@@ -191,7 +184,6 @@ impl Agent {
         } else {
             self.collaboration.latest_return_sequence()
         };
-        self.begin_checkpoints();
         let handle = self.persistence.as_ref().unwrap();
         self.tools.configure_output_store(
             handle
@@ -259,7 +251,6 @@ impl Agent {
         self.collaboration
             .bind(self.archive(), self.persistence.clone())?;
         self.collaboration_seen = 0;
-        self.begin_checkpoints();
         self.tools.configure_output_store(outputs);
         self.questions
             .bind(self.archive(), self.persistence.clone());

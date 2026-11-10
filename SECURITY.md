@@ -57,8 +57,6 @@ content; Jecode does not inspect or redact secrets inside them.
 Jecode keeps local data under `~/.jecode/`, including sensitive copies of:
 
 - saved conversations, complete command output and attachment copies;
-- checkpoints, which hold unredacted copies of project files, including files
-  Git ignores such as `.env`;
 - temporary files, web responses and browser data;
 - named browser profiles under `~/.jecode/browser/profiles/`, which can keep
   cookies and signed-in sessions.

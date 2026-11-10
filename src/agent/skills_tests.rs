@@ -60,7 +60,7 @@ fn a_read_skill_receipt_remains_reloadable_after_compaction_and_resume() {
         ("role", Value::string("assistant")),
         (
             "tool_calls",
-            Value::Array(vec![crate::test_support::tool_call(
+            Value::Array(vec![crate::test_support::stored_tool_call(
                 "read-skill",
                 "read",
                 Value::object([("path", Value::string("skill:audit"))]),
@@ -88,6 +88,7 @@ fn a_read_skill_receipt_remains_reloadable_after_compaction_and_resume() {
     let original_message_count = first.messages.lock().unwrap().len();
     first.context.from = original_message_count;
     first.context.summary = "Continue auditing the project.".into();
+    first.context.skill_references = first.skill_checkpoint_instructions();
     assert!(
         first
             .skill_checkpoint_instructions()

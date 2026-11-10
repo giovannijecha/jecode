@@ -31,7 +31,6 @@ pub fn groupable(tool: &Tool<'_>) -> bool {
         "read"
             | "list"
             | "search"
-            | "map"
             | "bash"
             | "exec"
             | "process"
@@ -40,7 +39,6 @@ pub fn groupable(tool: &Tool<'_>) -> bool {
             | "mcp"
             | "lsp"
     ) && !(tool.name == "read" && field(tool.arguments, "path").starts_with("skill:"))
-        && (tool.name != "map" || matches!(field(tool.arguments, "action"), "" | "overview"))
 }
 
 pub fn label(tool: &Tool<'_>) -> String {
@@ -111,10 +109,7 @@ fn named(tool: &Tool<'_>) -> Line {
 }
 
 fn ordinary(tool: &Tool<'_>) -> bool {
-    matches!(
-        tool.name,
-        "read" | "list" | "search" | "map" | "web" | "browser"
-    )
+    matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
 }
 
 /// Keep the latest completed targets at the foot, up to the call concurrency
@@ -299,10 +294,8 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         );
         return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
     }
-    if matches!(
-        tool.name,
-        "read" | "list" | "search" | "map" | "web" | "browser"
-    ) && state == Status::Running
+    if matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
+        && state == Status::Running
     {
         let (_, target) = heading(tool);
         let mut line = named(tool);
@@ -317,7 +310,7 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         line.push(&suffix, DIM);
         return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
     }
-    if matches!(tool.name, "list" | "search" | "map")
+    if matches!(tool.name, "list" | "search")
         && let Some(result) = tool.result
         && (result.get("complete") == Some(&crate::json::Value::Bool(false))
             || result
@@ -381,10 +374,8 @@ pub fn exception(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         }
         return vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)];
     }
-    if matches!(
-        tool.name,
-        "read" | "list" | "search" | "map" | "web" | "browser"
-    ) && matches!(state, Status::Running | Status::Done)
+    if matches!(tool.name, "read" | "list" | "search" | "web" | "browser")
+        && matches!(state, Status::Running | Status::Done)
     {
         return Vec::new();
     }

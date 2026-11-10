@@ -80,11 +80,10 @@ fn openrouter_discovery_results_reach_the_next_request_and_survive_resume() {
         .map(|wrapper| wrapper.get("function").unwrap().clone())
         .collect::<Vec<_>>();
     assert_eq!(
-        &catalog_names(&catalog)[9..],
+        &catalog_names(&catalog)[8..],
         &[
             "list",
             "search",
-            "map",
             "mcp",
             "lsp",
             "agent",
@@ -215,11 +214,10 @@ fn openai_namespace_carries_empty_search_receipt_to_the_followup() {
     );
     let catalog = namespace.get("tools").unwrap().as_array().unwrap();
     assert_eq!(
-        &catalog_names(catalog)[9..],
+        &catalog_names(catalog)[8..],
         &[
             "list",
             "search",
-            "map",
             "mcp",
             "lsp",
             "agent",

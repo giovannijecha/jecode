@@ -46,7 +46,6 @@ and does not run. The Ctrl+G sheet never queues: commands that wait stay listed 
 | `/init` | Have the model create or update the project's `AGENTS.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md). | Waits |
 | `/skills` | List your personal skills. See [Skills](../usage/SKILLS.md). | Opens |
 | `/tmp [clean]` | Show, or clear, the conversation's temporary files. See [Temporary files](../usage/TEMPORARY.md). | Waits |
-| `/checkpoints [COMMAND]` | List, inspect or restore checkpoints; `/checkpoints help` shows the commands. See [Checkpoints](../usage/CHECKPOINTS.md). | Waits |
 | `/process [ID]` | Inspect, stop, background or type into running and recent processes; `/process stop ID` stops one. See [Terminal interface](INTERFACE.md#processes). | Now |
 
 ### Jecode

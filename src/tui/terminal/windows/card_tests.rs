@@ -37,10 +37,9 @@ pub(super) fn console() {
     });
     let result = Value::object([
         ("exit_code", Value::number(0)),
-        (
-            "checkpoint",
-            Value::object([("status", Value::string("partial"))]),
-        ),
+        ("stdout_truncated", Value::Bool(true)),
+        ("stdout_bytes", Value::number(2048)),
+        ("output_limit_bytes", Value::number(1024)),
     ]);
     state.event(Event::ToolFinished {
         id: "verify".into(),
@@ -113,8 +112,8 @@ pub(super) fn console() {
     let rows: Vec<_> = state.rows().into_iter().flatten().collect();
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("Checkpoint partial")),
-        "expanded Bash details lost the partial checkpoint status"
+            .any(|row| row.plain().contains("stdout capture kept")),
+        "expanded Bash details lost the capture notice"
     );
     assert!(
         rows.iter()
@@ -379,49 +378,7 @@ fn discovery_console(terminal: &Terminal) {
                     ),
                 ]),
             ),
-            (
-                "map-empty",
-                Value::object([("path", Value::string("src"))]),
-                Value::object([
-                    ("entries_returned", Value::number(0)),
-                    ("files", Value::number(0)),
-                    ("entries", Value::Array(vec![])),
-                    ("complete", Value::Bool(true)),
-                ]),
-            ),
-            (
-                "map-note",
-                Value::object([("path", Value::string("src"))]),
-                Value::object([
-                    ("entries_returned", Value::number(1)),
-                    ("files", Value::number(1)),
-                    ("complete", Value::Bool(true)),
-                    (
-                        "entries",
-                        Value::Array(vec![Value::object([
-                            ("kind", Value::string("note")),
-                            ("id", Value::string("n1")),
-                            ("title", Value::string("Renderer boundary")),
-                            ("origin", Value::string("model")),
-                            ("freshness", Value::string("changed")),
-                            (
-                                "sources",
-                                Value::Array(vec![Value::object([
-                                    ("path", Value::string("src/agent.rs")),
-                                    ("line", Value::number(12)),
-                                    ("status", Value::string("changed")),
-                                ])]),
-                            ),
-                        ])]),
-                    ),
-                ]),
-            ),
         ] {
-            let tool_name = if name.starts_with("map-") {
-                "map"
-            } else {
-                name
-            };
             for expanded in [false, true] {
                 let mut state = State {
                     width: columns,
@@ -431,13 +388,13 @@ fn discovery_console(terminal: &Terminal) {
                 state.begin_tool_turn();
                 state.event(Event::ToolStarted {
                     id: name.into(),
-                    name: tool_name.into(),
+                    name: name.into(),
                     arguments: arguments.clone(),
                 });
                 state.event(Event::ToolFinished {
                     id: name.into(),
-                    name: tool_name.into(),
-                    summary: crate::events::tool_summary(tool_name, &result),
+                    name: name.into(),
+                    summary: crate::events::tool_summary(name, &result),
                     result: result.clone(),
                 });
                 if expanded {
@@ -448,9 +405,7 @@ fn discovery_console(terminal: &Terminal) {
                 let plain: Vec<_> = rows.iter().map(crate::tui::line::Line::plain).collect();
                 let detail = match name {
                     "list" => "src/agent.rs",
-                    "search" => "src/agent.rs:27",
-                    "map-empty" => "No map entries",
-                    _ => "src/agent.rs:12",
+                    _ => "src/agent.rs:27",
                 };
                 assert_eq!(plain.iter().any(|row| row.contains(detail)), expanded);
                 assert!(

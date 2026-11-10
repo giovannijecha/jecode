@@ -106,7 +106,6 @@ fn replacements() -> Value {
 fn build_definitions() -> Value {
     let mut tools = base_definitions();
     tools.extend(super::discovery::definitions());
-    tools.extend(crate::project_map::definitions());
     tools.push(mcp::definition());
     tools.push(lsp::definition());
     tools.push(collaboration::definition());
@@ -196,7 +195,7 @@ fn base_definitions() -> Vec<Value> {
     vec![
         routine(
             "read",
-            "Read a project file or tmp:relative/path, or several at once with paths: when a step needs more than one file, read them in one call (each with the default window, results in order, outside paths and media need a single path). UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary), history:processes (saved process outcomes). Input withdrawn to the composer is excluded from history reads. checkpoint:rc-ID:path reads a saved preimage (expires after 24 hours). History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
+            "Read a project file or tmp:relative/path, or several at once with paths: when a step needs more than one file, read them in one call (each with the default window, results in order, outside paths and media need a single path). UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary), history:processes (saved process outcomes). Input withdrawn to the composer is excluded from history reads. History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
             Value::object([
                 ("path", string()),
                 (
@@ -257,22 +256,9 @@ fn base_definitions() -> Vec<Value> {
         ),
         routine(
             "bash",
-            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection including 2>&1 and &>, here-documents, * ? [...] patterns, the built-ins cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc -l/-c, and literal argv for installed programs. It is not GNU Bash; unsupported syntax fails explicitly. Use protect for recoverable writes: workspace-relative files or recursive directories, new directories with trailing '/', or '.' for the workspace. Generated/ignored directories need explicit names; protect a symlink target too. Only declared paths are saved before launch; capture failure does not prevent execution. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Run related commands together in one command line instead of one call each. Every command is a managed process. Without wait_ms the call waits up to 10 seconds: a command that ends in time returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs; interrupting that wait stops the command. Still running, it returns yielded:true, a process_id and its next output window, and keeps running. Set wait_ms to choose the wait; it returns the process_id form, and interrupting it leaves the command running. Waiting never ends execution; timeout_seconds does, and omitted means no deadline. The outcome reaches you automatically when the process ends, so continue independent work; builds, tests, generation and exports still need their outcome before dependent work or a claim of success. Servers and watchers need a real readiness check; a live process or empty output does not establish readiness. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. poll/stop via process. Shell & does not create a separate process_id. Checkpoint receipts describe prelaunch coverage, not success.",
+            "Run Jecode's built-in command language in the project directory on every host. It supports quotes, $variables, ${variable:-default}, ;, newlines, &&, ||, pipelines, file redirection including 2>&1 and &>, here-documents, * ? [...] patterns, the built-ins cat, cd, cp, echo, env, export, grep, head, ls, mkdir, mktemp, mv, printenv, printf, pwd, rm, seq, sleep, tail, test, touch, tr -d, wc -l/-c, and literal argv for installed programs. It is not GNU Bash; unsupported syntax fails explicitly. stdin is closed; shell state does not persist. JECODE_TMP, TMPDIR, TEMP and TMP point to session temporary storage; quote paths and write disposable output under \"$JECODE_TMP\". Run related commands together in one command line instead of one call each. Every command is a managed process. Without wait_ms the call waits up to 10 seconds: a command that ends in time returns exit/cancellation/timeout status, byte counts, 16 KiB head/tail previews per stream and full saved-output refs; interrupting that wait stops the command. Still running, it returns yielded:true, a process_id and its next output window, and keeps running. Set wait_ms to choose the wait; it returns the process_id form, and interrupting it leaves the command running. Waiting never ends execution; timeout_seconds does, and omitted means no deadline. The outcome reaches you automatically when the process ends, so continue independent work; builds, tests, generation and exports still need their outcome before dependent work or a claim of success. Servers and watchers need a real readiness check; a live process or empty output does not establish readiness. output_limit_bytes sets a positive per-stream budget, capped at 256 KiB; logs remain complete. poll/stop via process. Shell & does not create a separate process_id.",
             Value::object([
                 ("command", string()),
-                (
-                    "protect",
-                    Value::object([
-                        ("type", Value::string("array")),
-                        ("items", string()),
-                        (
-                            "description",
-                            Value::string(
-                                "Optional workspace-relative paths to save before Bash; existing directories are recursive, a trailing slash declares a new directory, and '.' covers the workspace.",
-                            ),
-                        ),
-                    ]),
-                ),
                 (
                     "timeout_seconds",
                     Value::object([
@@ -308,7 +294,7 @@ fn base_definitions() -> Vec<Value> {
         ),
         routine(
             "process",
-            "Manage conversation-owned Bash and exec processes, active and recently finished. list recovers IDs, status, elapsed time, commands and output refs. poll waits up to wait_ms (default 0) and returns the next unread output window; output_mode:tail jumps to the newest unread bytes and reports skipped bytes, still readable from the saved file. A finished process is reported to you once at your next request, so poll to read output or to wait with nothing else to do, not to learn that it ended. moved_to_background means the user released that wait; the process keeps running. stop terminates the process and descendants; poll if it returns stopping. For tty exec, write sends text or one key (see key enum), resize changes cols/rows and interrupt sends Ctrl+C. write accepts at most 64 KiB; protect saves declared workspace paths before input or control. A write receipt confirms control-pipe delivery, not command completion; unconfirmed input may still arrive, so inspect before retrying. Output windows default to 16 KiB per stream; output_limit_bytes is capped at 256 KiB. Poll until drained or read the saved file with byte_offset. Empty output does not prove readiness; check status. exit_code appears after exit. wait_cancelled interrupts only the wait. Processes end on conversation change or Jecode exit; saved output remains readable.",
+            "Manage conversation-owned Bash and exec processes, active and recently finished. list recovers IDs, status, elapsed time, commands and output refs. poll waits up to wait_ms (default 0) and returns the next unread output window; output_mode:tail jumps to the newest unread bytes and reports skipped bytes, still readable from the saved file. A finished process is reported to you once at your next request, so poll to read output or to wait with nothing else to do, not to learn that it ended. moved_to_background means the user released that wait; the process keeps running. stop terminates the process and descendants; poll if it returns stopping. For tty exec, write sends text or one key (see key enum), resize changes cols/rows and interrupt sends Ctrl+C. write accepts at most 64 KiB. A write receipt confirms control-pipe delivery, not command completion; unconfirmed input may still arrive, so inspect before retrying. Output windows default to 16 KiB per stream; output_limit_bytes is capped at 256 KiB. Poll until drained or read the saved file with byte_offset. Empty output does not prove readiness; check status. exit_code appears after exit. wait_cancelled interrupts only the wait. Processes end on conversation change or Jecode exit; saved output remains readable.",
             Value::object([
                 (
                     "action",
@@ -357,7 +343,6 @@ fn base_definitions() -> Vec<Value> {
                 ),
                 ("cols", integer(1, Some(1000))),
                 ("rows", integer(1, Some(1000))),
-                ("protect", strings()),
                 ("wait_ms", integer(0, None)),
                 (
                     "output_limit_bytes",
@@ -376,59 +361,11 @@ fn base_definitions() -> Vec<Value> {
             ]),
             &["action"],
         ),
-        tool(
-            "checkpoint",
-            "List, inspect or restore before-state snapshots from modifying calls. write/edit save their file; Bash and exec save only declared protect paths. Refs expire 24 hours after capture. inspect returns an expected token for the selected current paths; omit paths for the saved call scope. restore needs that token for the same paths or expected set to latest to acknowledge live state. preview:true plans without writing; a real restore saves an undo. A receipt describes captured preimages, not command success.",
-            Value::object([
-                (
-                    "action",
-                    Value::object([
-                        ("type", Value::string("string")),
-                        (
-                            "enum",
-                            Value::Array(["list", "inspect", "restore"].map(Value::string).into()),
-                        ),
-                    ]),
-                ),
-                ("ref", string()),
-                (
-                    "paths",
-                    Value::object([
-                        ("type", Value::string("array")),
-                        ("items", string()),
-                        (
-                            "description",
-                            Value::string(
-                                "Optional selected paths for inspect or restore. Omit to select the scope saved by the call.",
-                            ),
-                        ),
-                    ]),
-                ),
-                (
-                    "expected",
-                    Value::object([
-                        ("type", Value::string("string")),
-                        (
-                            "description",
-                            Value::string(
-                                "Required for restore: the fingerprint from inspect for these paths, or latest to acknowledge the current live state.",
-                            ),
-                        ),
-                    ]),
-                ),
-                (
-                    "preview",
-                    Value::object([("type", Value::string("boolean"))]),
-                ),
-                ("limit", integer(1, Some(200))),
-            ]),
-            &["action"],
-        ),
         web::web(),
         web::browser(),
         routine(
             "exec",
-            "Run one executable with literal argv and no implicit shell; for several commands, use one bash call. A bare name uses PATH, including any shim found there; Jecode does not bypass it. cwd defaults to the project directory; relative cwd uses the project root, and executable paths with a directory use cwd. env strings set variables and null removes them after inherited provider credentials are stripped. stdin sends a string then closes; omitted means EOF. tty:true rejects stdin and always returns a process_id; use process write/resize/interrupt. Terminal stdout combines child streams; stderr holds bridge diagnostics. Without tty, waiting, yielding, outcome delivery, previews and saved refs follow Bash: omitted wait_ms waits up to 10 seconds for a final result, then returns yielded:true and a process_id while the program keeps running. timeout_seconds bounds execution. protect saves declared workspace paths before launch, independent of cwd.",
+            "Run one executable with literal argv and no implicit shell; for several commands, use one bash call. A bare name uses PATH, including any shim found there; Jecode does not bypass it. cwd defaults to the project directory; relative cwd uses the project root, and executable paths with a directory use cwd. env strings set variables and null removes them after inherited provider credentials are stripped. stdin sends a string then closes; omitted means EOF. tty:true rejects stdin and always returns a process_id; use process write/resize/interrupt. Terminal stdout combines child streams; stderr holds bridge diagnostics. Without tty, waiting, yielding, outcome delivery, previews and saved refs follow Bash: omitted wait_ms waits up to 10 seconds for a final result, then returns yielded:true and a process_id while the program keeps running. timeout_seconds bounds execution.",
             Value::object([
                 ("executable", string()),
                 ("args", strings()),
@@ -452,7 +389,6 @@ fn base_definitions() -> Vec<Value> {
                 ("tty", boolean()),
                 ("cols", integer(1, Some(1000))),
                 ("rows", integer(1, Some(1000))),
-                ("protect", strings()),
                 ("wait_ms", integer(0, None)),
                 ("timeout_seconds", integer(1, None)),
                 (

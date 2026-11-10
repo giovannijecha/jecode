@@ -151,18 +151,14 @@ fn malformed_calls_are_refused_before_any_file_changes() {
 }
 
 #[test]
-fn every_written_file_gets_its_own_checkpoint_and_outside_files_need_the_calls_approval() {
-    let home = Directory::new();
+fn outside_files_of_a_multi_file_edit_need_the_calls_approval() {
     let root = Directory::new();
     let other = Directory::new();
     fs::write(root.path().join("a.rs"), "one\n").unwrap();
     fs::write(root.path().join("b.rs"), "two\n").unwrap();
     let outside = other.path().join("c.rs");
     fs::write(&outside, "three\n").unwrap();
-    let mut tools = Tools::new(root.path()).unwrap();
-    let session = Session::offline(home.path(), tools.root());
-    session.begin("conversation-a");
-    tools.configure_checkpoints(session);
+    let tools = Tools::new(root.path()).unwrap();
     let arguments = files(vec![
         entry("a.rs", vec![replace("one", "1")]),
         entry("b.rs", vec![replace("two", "2")]),
@@ -175,16 +171,11 @@ fn every_written_file_gets_its_own_checkpoint_and_outside_files_need_the_calls_a
         .get("files")
         .and_then(Value::as_array)
         .unwrap();
-    let references: Vec<_> = entries[..2]
-        .iter()
-        .map(|entry| text(entry.get("checkpoint").unwrap(), "ref"))
-        .collect();
     assert!(
-        references
+        entries[..2]
             .iter()
-            .all(|reference| reference.starts_with("rc-"))
+            .all(|entry| entry.get("error").is_none())
     );
-    assert_ne!(references[0], references[1]);
     assert!(text(&entries[2], "error").contains("restricted to the working directory"));
     assert_eq!(fs::read_to_string(&outside).unwrap(), "three\n");
 
@@ -207,10 +198,6 @@ fn every_written_file_gets_its_own_checkpoint_and_outside_files_need_the_calls_a
         .unwrap();
     assert!(entries.iter().all(|entry| entry.get("error").is_none()));
     assert_eq!(fs::read_to_string(&outside).unwrap(), "3\n");
-    assert_eq!(
-        text(entries[1].get("checkpoint").unwrap(), "reason"),
-        "the file is outside the working folder"
-    );
 }
 
 #[test]

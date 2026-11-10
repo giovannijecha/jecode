@@ -71,7 +71,6 @@ impl App {
         dirty |= self.poll_job()?;
         dirty |= self.poll_imports();
         dirty |= self.finish_delete(false)?;
-        dirty |= self.finish_checkpoints(false);
         dirty |= self.sync_commands();
         for _ in 0..32 {
             let Some(event) = self.next_event() else {

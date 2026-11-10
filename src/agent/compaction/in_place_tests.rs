@@ -65,7 +65,6 @@ fn last_text(request: &crate::test_support::Request) -> String {
 
 #[test]
 fn proactive_compaction_summarizes_over_the_cached_conversation() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("Goal kept; next action: finish.", vec![])),
@@ -101,7 +100,6 @@ fn proactive_compaction_summarizes_over_the_cached_conversation() {
 
 #[test]
 fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (
@@ -140,7 +138,6 @@ fn a_tool_call_instead_of_a_summary_falls_back_to_portions() {
 
 #[test]
 fn repeated_empty_replies_fall_back_to_portions() {
-    crate::agent::compaction::test_fallback_tiers();
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![])),
@@ -154,4 +151,30 @@ fn repeated_empty_replies_fall_back_to_portions() {
     agent.run_turn("Continue.", &mut |_| Ok(())).unwrap();
     assert_eq!(fixture.finish().len(), 6);
     assert_eq!(agent.context.summary, "Goal kept from portions.");
+}
+
+#[test]
+fn a_provider_failure_during_an_in_place_summary_keeps_the_previous_context() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![(
+        401,
+        Value::object([(
+            "error",
+            Value::object([("message", Value::string("Fixture credential rejection"))]),
+        )]),
+    )]);
+    let mut agent = crowded(&fixture, &directory);
+    let before = agent.messages.lock().unwrap().clone();
+    let (from, summary) = (agent.context.from, agent.context.summary.clone());
+    let error = agent.run_turn("Continue.", &mut |_| Ok(())).unwrap_err();
+    assert!(error.contains("Fixture credential rejection"), "{error}");
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 1);
+    assert!(last_text(&requests[0]).starts_with("Context checkpoint: Jecode is compacting"));
+    // Nothing was summarized away and the original conversation is unchanged.
+    assert_eq!(
+        (agent.context.from, agent.context.summary.clone()),
+        (from, summary)
+    );
+    assert!(agent.messages.lock().unwrap().starts_with(&before));
 }

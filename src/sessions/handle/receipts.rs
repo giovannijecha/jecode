@@ -112,7 +112,6 @@ mod tests {
         let redactor = Redactor::empty();
         let archive = Archive {
             backend: "openrouter".into(),
-            legacy_origin: None,
             model: "fixture/model".into(),
             directory: project.path().to_path_buf(),
             messages: Arc::new(Mutex::new(document.messages.clone())),

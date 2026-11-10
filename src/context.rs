@@ -3,14 +3,14 @@ use std::collections::BTreeSet;
 
 pub use crate::conversation::portable;
 
-pub(crate) mod digest;
 pub(crate) mod measurement;
 pub(crate) mod provider;
 pub(crate) mod source;
 mod state;
 mod view;
 
-pub use state::{RequestState, state_message};
+pub use state::{RequestState, SNAPSHOT_HEADER, state_message};
+pub(crate) use view::preview;
 
 /// Introduces a compaction summary, which the same model wrote in an earlier context window.
 const SUMMARY_PREFIX: &str = "Another language model started this task and wrote the summary below. The work it did with tools is still in place: files, saved outputs and the original history. Build on it and avoid repeating finished work.";
@@ -95,14 +95,10 @@ pub struct Context {
 
     /// Output allowance learned from summary truncation, independent of live prompt usage.
     pub summary_output_tokens: usize,
-    pub preview_until: usize,
-    pub preview_limit: usize,
     /// Byte budget for verbatim recent user requests after compaction.
     pub request_limit: usize,
     /// Runtime state updates in source order, each at the position first sent.
     pub states: Vec<RequestState>,
-    /// Exact native records of the messages before `from`, oldest first.
-    pub digests: Vec<digest::Epoch>,
 }
 impl Default for Context {
     fn default() -> Self {
@@ -122,11 +118,8 @@ impl Default for Context {
             calibration: None,
 
             summary_output_tokens: 0,
-            preview_until: 0,
-            preview_limit: 0,
-            request_limit: 0,
+            request_limit: 8192,
             states: Vec::new(),
-            digests: Vec::new(),
         }
     }
 }
@@ -174,20 +167,12 @@ impl Context {
                 "summary_output_tokens",
                 Value::number(self.summary_output_tokens),
             ),
-            ("preview_until", Value::number(self.preview_until)),
-            ("preview_limit", Value::number(self.preview_limit)),
             ("request_limit", Value::number(self.request_limit)),
             ("request_states", state::value(&self.states)),
-            (
-                "digests",
-                Value::Array(self.digests.iter().map(digest::Epoch::value).collect()),
-            ),
         ])
     }
     pub fn parse(value: Option<&Value>) -> Result<Self, String> {
-        let Some(value) = value else {
-            return Ok(Self::default());
-        };
+        let value = value.ok_or("Missing saved context")?;
         let number = |key| {
             value
                 .get(key)
@@ -203,7 +188,11 @@ impl Context {
             None => Err("Missing saved context measurement"),
         };
         Ok(Self {
-            reported: provider::Counter::parse(value.get("provider_usage"))?,
+            reported: provider::Counter::parse(Some(
+                value
+                    .get("provider_usage")
+                    .ok_or("Missing saved provider usage")?,
+            ))?,
             returned: BTreeSet::new(),
             from: number("from")?,
             summary: value
@@ -211,35 +200,20 @@ impl Context {
                 .and_then(Value::as_str)
                 .ok_or("Invalid context summary")?
                 .into(),
-            skill_references: match value.get("skill_references") {
-                None => String::new(),
-                Some(value) => value
-                    .as_str()
-                    .ok_or("Invalid saved skill references")?
-                    .into(),
-            },
+            skill_references: value
+                .get("skill_references")
+                .and_then(Value::as_str)
+                .ok_or("Invalid saved skill references")?
+                .into(),
             ceiling: optional("ceiling")?,
             input_tokens: optional("input_tokens")?,
-            // Sessions saved before output measurements existed lack the field.
-            output_tokens: match value.get("output_tokens") {
-                None => None,
-                Some(_) => optional("output_tokens")?,
-            },
+            output_tokens: optional("output_tokens")?,
             measured_end: number("measured_end")?,
-            output_message: match value.get("output_message") {
-                None => None,
-                Some(_) => optional("output_message")?,
-            },
-            measured_bytes: match value.get("measured_bytes") {
-                None => None,
-                Some(_) => optional("measured_bytes")?,
-            },
-            measured_overhead_bytes: match value.get("measured_overhead_bytes") {
-                None => None,
-                Some(_) => optional("measured_overhead_bytes")?,
-            },
+            output_message: optional("output_message")?,
+            measured_bytes: optional("measured_bytes")?,
+            measured_overhead_bytes: optional("measured_overhead_bytes")?,
             calibration: match value.get("token_calibration") {
-                None | Some(Value::Null) => None,
+                Some(Value::Null) => None,
                 Some(calibration) => {
                     let tokens = calibration
                         .get("tokens")
@@ -251,34 +225,16 @@ impl Context {
                         .and_then(Value::as_usize)
                         .filter(|value| *value > 0)
                         .ok_or("Invalid saved byte calibration")?;
-                    // Older whole-prompt ratios can include opaque replayed reasoning.
-                    (calibration.get("method").and_then(Value::as_str) == Some("text_growth"))
-                        .then_some((tokens, bytes))
+                    if calibration.get("method").and_then(Value::as_str) != Some("text_growth") {
+                        return Err("Invalid saved token calibration method".into());
+                    }
+                    Some((tokens, bytes))
                 }
+                None => return Err("Missing saved token calibration".into()),
             },
-
-            summary_output_tokens: value.get("summary_output_tokens").map_or(Ok(0), |value| {
-                value
-                    .as_usize()
-                    .ok_or("Invalid saved summary output budget")
-            })?,
-            preview_until: value.get("preview_until").map_or(Ok(0), |value| {
-                value
-                    .as_usize()
-                    .ok_or("Invalid saved context preview boundary")
-            })?,
-            preview_limit: value.get("preview_limit").map_or(Ok(0), |value| {
-                value
-                    .as_usize()
-                    .ok_or("Invalid saved context preview limit")
-            })?,
-            request_limit: value.get("request_limit").map_or(Ok(0), |value| {
-                value
-                    .as_usize()
-                    .ok_or("Invalid saved context request limit")
-            })?,
+            summary_output_tokens: number("summary_output_tokens")?,
+            request_limit: number("request_limit")?,
             states: state::parse(value.get("request_states"))?,
-            digests: digest::parse(value.get("digests"))?,
         })
     }
     pub fn validate(&self, messages: &[Value]) -> Result<(), String> {
@@ -289,14 +245,12 @@ impl Context {
                 .output_message
                 .is_some_and(|index| index < self.measured_end || index >= messages.len())
             || self.measured_bytes == Some(0)
-            || (self.records_start() > 1 && self.summary.trim().is_empty())
-            || !digest::valid(&self.digests, self.from, messages.len())
+            || (self.from > 1 && self.summary.trim().is_empty())
+            || self.request_limit == 0
             || self.ceiling == Some(0)
             || self
                 .calibration
                 .is_some_and(|(tokens, bytes)| tokens == 0 || bytes == 0)
-            || self.preview_until > messages.len()
-            || self.preview_limit > crate::tools::OUTPUT_LIMIT
             || messages
                 .get(self.from)
                 .is_some_and(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
@@ -334,12 +288,9 @@ impl Context {
         if let Some(system) = messages.first() {
             result.push(system.clone());
         }
-        if let Some(requests) = view::requests(
-            messages,
-            self.records_start(),
-            self.request_budget(),
-            &self.returned,
-        ) {
+        if let Some(requests) =
+            view::requests(messages, self.from, self.request_budget(), &self.returned)
+        {
             result.push(requests);
         }
         if !self.summary.is_empty() {
@@ -349,15 +300,11 @@ impl Context {
                     "content",
                     Value::string(format!(
                         "{SUMMARY_PREFIX} It covers the conversation before history:{}; messages from that boundary onward remain in the transcript below. Read history:N for any original message and history:requests for every user request.\n\n{}{}",
-                        self.records_start(), self.summary,
+                        self.from, self.summary,
                         if self.skill_references.is_empty() { String::new() } else { format!("\n\n{}", self.skill_references) }
                     )),
                 ),
             ]));
-        }
-        for (index, epoch) in self.digests.iter().enumerate() {
-            let last = index + 1 == self.digests.len();
-            result.push(epoch.message(messages, &self.returned, last));
         }
         let mut states = self.visible_states().peekable();
         for (index, message) in messages.iter().enumerate().skip(self.from) {
@@ -378,12 +325,7 @@ impl Context {
         index: usize,
         compatible_from: usize,
     ) -> Value {
-        if index < self.preview_until
-            && self.preview_limit > 0
-            && message.get("role").and_then(Value::as_str) == Some("tool")
-        {
-            view::preview(message, index, self.preview_limit)
-        } else if index < compatible_from
+        if index < compatible_from
             && message.get("role").and_then(Value::as_str) == Some("assistant")
             && !crate::conversation::has_origin(message)
         {
@@ -394,12 +336,7 @@ impl Context {
     }
 
     fn request_budget(&self) -> usize {
-        // Sessions saved before the request budget existed keep the former bound.
-        if self.request_limit > 0 {
-            self.request_limit
-        } else {
-            8192
-        }
+        self.request_limit
     }
 
     pub(crate) fn user_requests(&self, messages: &[Value]) -> String {

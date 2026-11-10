@@ -72,18 +72,13 @@ fn new_user_messages_leave_the_entire_compacted_prefix_unchanged() {
 }
 
 #[test]
-fn saved_skill_references_are_optional_for_older_sessions_and_survive_roundtrips() {
+fn saved_skill_references_are_required_and_survive_roundtrips() {
     let mut context = Context::default();
     let mut old = context.value();
     if let Value::Object(fields) = &mut old {
         fields.remove("skill_references");
     }
-    assert!(
-        Context::parse(Some(&old))
-            .unwrap()
-            .skill_references
-            .is_empty()
-    );
+    assert!(Context::parse(Some(&old)).is_err());
     context.skill_references = "skill:audit".into();
     assert_eq!(
         Context::parse(Some(&context.value()))

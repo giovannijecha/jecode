@@ -11,7 +11,6 @@ fn command_record(result: Value, summary: &str) -> Value {
             ("result", result),
         ])]),
     );
-    // The structured result takes precedence over an ambiguous old summary.
     set(
         &mut agent,
         "checks",
@@ -41,23 +40,17 @@ fn structured_command_outcomes_classify_checks() {
 }
 
 #[test]
-fn legacy_summaries_remain_readable_without_structured_results() {
+fn missing_result_does_not_mark_a_check_failed() {
     let mut agent = record(1, "returned");
-    for (summary, failed) in [
-        ("bash: exit 0", false),
-        ("bash: exit 1", true),
-        ("exec: exit 0; output truncated", false),
-        ("bash: exit 1; full output saved", true),
-        ("exec: timed out", true),
-        ("bash: search check failed", true),
-    ] {
-        set(
-            &mut agent,
-            "checks",
-            Value::Array(vec![Value::string(summary)]),
-        );
-        assert_eq!(failed_check(&agent).is_some(), failed, "{summary}");
-    }
+    set(
+        &mut agent,
+        "tools",
+        Value::Array(vec![Value::object([
+            ("name", Value::string("exec")),
+            ("text", Value::string("running command")),
+        ])]),
+    );
+    assert_eq!(failed_check(&agent), None);
 }
 
 #[test]

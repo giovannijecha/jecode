@@ -5,9 +5,6 @@ mod ask;
 mod attach;
 mod background;
 mod cards;
-#[cfg(test)]
-mod checkpoint_tests;
-mod checkpoints;
 mod commands;
 #[cfg(test)]
 mod completion_tests;
@@ -112,7 +109,6 @@ struct App {
     copy_targets: Vec<crate::copy::Target>,
     copy_job: Option<(String, crate::clipboard::Job)>,
     deletion_job: Option<delete::Job>,
-    checkpoint_job: Option<checkpoints::Job>,
     imports: Vec<attach::Import>,
     settings_parent: Option<selector::Setting>,
     mcp: mcp::Ui,
@@ -234,7 +230,6 @@ impl App {
             copy_targets: vec![],
             copy_job: None,
             deletion_job: None,
-            checkpoint_job: None,
             imports: Vec::new(),
             settings_parent: None,
             mcp: mcp::Ui::default(),
@@ -281,9 +276,9 @@ impl App {
         self.worker = Some(worker);
     }
 
-    /// A turn, deletion or restore is running; new prompts wait in the queue.
+    /// A turn or deletion is running; new prompts wait in the queue.
     fn busy(&self) -> bool {
-        self.worker.is_some() || self.deletion_job.is_some() || self.checkpoint_job.is_some()
+        self.worker.is_some() || self.deletion_job.is_some()
     }
 
     /// Nothing runs in the background, including other jobs.
@@ -396,16 +391,13 @@ pub(crate) fn launch(
             let delay = app
                 .state
                 .feedback_wait(now, app.renderer.wait(&app.state, now));
-            // Worker events wake the loop; only a finishing turn and a
-            // restore are polled.
+            // Worker events wake the loop; only a finishing turn is polled.
             let delay = if app
                 .worker
                 .as_ref()
                 .is_some_and(|worker| worker.events.closed())
             {
                 delay.min(Duration::from_millis(1))
-            } else if app.checkpoint_job.is_some() {
-                delay.min(Duration::from_millis(16))
             } else {
                 delay
             };
@@ -461,7 +453,6 @@ impl Drop for App {
         // The worker may have accepted input whose event was never polled.
         self.reconcile_accepted();
         drop(self.job.take());
-        self.finish_checkpoints(true);
         let deletion_error = self.finish_delete(true).err();
         self.persist_input(true);
         self.collect_attachments();

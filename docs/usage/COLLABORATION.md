@@ -15,8 +15,8 @@ collaborators for smaller work, ask for them.
 
 Each collaborator starts with its own conversation and the main agent's current
 model, effort and routing. It receives its assignment and any context the main
-agent supplies, plus the project's `AGENTS.md` instructions, your personal
-skills and the shared project-map notes. It does not receive the main
+agent supplies, plus the project's `AGENTS.md` instructions and your personal
+skills. It does not receive the main
 conversation. Later model changes in the main conversation do not affect
 collaborators that already exist.
 
@@ -87,9 +87,9 @@ the same network and system access as anywhere else.
 For isolated work, `diff` shows changed files against the starting state and
 your current project, and `integrate` applies explicitly selected files. A file
 you changed in the meantime is reported as a conflict instead of being
-overwritten. Integration works file by file, not as one transaction, saves a
-[checkpoint](CHECKPOINTS.md) of the files it replaces, and handles ordinary file
-additions, edits and deletions. Check the combined project afterwards.
+overwritten. Integration works file by file, not as one transaction, and
+handles ordinary file additions, edits and deletions. Check the combined
+project afterwards.
 
 For shared work, `diff` lists recorded changed files. With `path`, it pages the
 collaborator's recorded edit hunks in call order, including multi-file edits.

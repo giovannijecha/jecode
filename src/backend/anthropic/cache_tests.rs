@@ -237,6 +237,46 @@ fn mid_system_state_preserves_the_cached_prefix_as_history_grows() {
 }
 
 #[test]
+fn adjacent_snapshot_and_state_share_one_mid_system_message() {
+    let state = |text: &str| {
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string(text)),
+            ("jecode_request_state", Value::Bool(true)),
+        ])
+    };
+    let request = wire::request(
+        "claude-opus-5-5",
+        Effort::Medium,
+        &[
+            Value::object([
+                ("role", Value::string("user")),
+                ("content", Value::string("Prompt")),
+            ]),
+            state("Instruction snapshot"),
+            state("Runtime state"),
+        ],
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let messages = request.get("messages").and_then(Value::as_array).unwrap();
+    assert_eq!(messages.len(), 2, "{}", request.encode());
+    assert_eq!(
+        messages[1].get("role").and_then(Value::as_str),
+        Some("system")
+    );
+    assert_eq!(
+        messages[1].get("content").and_then(Value::as_str),
+        Some("Instruction snapshot\n\nRuntime state")
+    );
+    // The explicit breakpoint stays on the prompt; the request end is automatic.
+    assert!(messages[0].encode().contains("cache_control"));
+}
+
+#[test]
 fn mid_system_is_limited_to_documented_model_ids() {
     let state = Value::object([
         ("role", Value::string("user")),
@@ -382,56 +422,4 @@ fn collect_controls(value: &Value, found: &mut Vec<Value>) {
             .for_each(|value| collect_controls(value, found)),
         _ => {}
     }
-}
-
-#[test]
-fn the_end_of_the_records_keeps_a_breakpoint_as_history_grows() {
-    let mut messages = vec![
-        Value::object([
-            ("role", Value::string("system")),
-            ("content", Value::string("Stable project instructions")),
-        ]),
-        Value::object([
-            ("role", Value::string("user")),
-            ("content", Value::string("Native record")),
-            (crate::context::digest::ANCHOR, Value::Bool(true)),
-        ]),
-    ];
-    for index in 0..44 {
-        messages.push(Value::object([
-            (
-                "role",
-                Value::string(if index % 2 == 0 { "assistant" } else { "user" }),
-            ),
-            ("content", Value::string(format!("Turn {index}"))),
-        ]));
-    }
-    let request = wire::request(
-        "model-a",
-        Effort::Default,
-        &messages,
-        None,
-        None,
-        None,
-        None,
-    )
-    .unwrap();
-    let history = request.get("messages").and_then(Value::as_array).unwrap();
-    let marked = |message: &Value| {
-        message
-            .get("content")
-            .and_then(Value::as_array)
-            .is_some_and(|blocks| {
-                blocks
-                    .iter()
-                    .any(|block| block.get("cache_control").is_some())
-            })
-    };
-    assert!(marked(&history[0]), "the record itself is marked");
-    assert_eq!(
-        history.iter().filter(|message| marked(message)).count(),
-        2,
-        "with one recent boundary, inside the four provider slots"
-    );
-    assert!(!request.encode().contains(crate::context::digest::ANCHOR));
 }

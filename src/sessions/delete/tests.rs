@@ -51,6 +51,20 @@ fn deleting_isolated_collaboration_keeps_owned_files_and_parent_record() {
         ("sent_version", Value::number(1)),
         ("received_version", Value::number(1)),
         (
+            "log",
+            Value::Array(vec![
+                Value::object([
+                    ("kind", Value::string("assignment")),
+                    ("version", Value::number(1)),
+                    ("instructions", Value::string("")),
+                ]),
+                Value::object([
+                    ("kind", Value::string("returned")),
+                    ("version", Value::number(1)),
+                ]),
+            ]),
+        ),
+        (
             "report",
             Value::object([
                 ("version", Value::number(1)),
@@ -283,7 +297,7 @@ fn known_sidecars_are_removed_with_the_journal() {
 }
 
 #[test]
-fn deleting_a_migrated_session_removes_its_original_copies() {
+fn deleting_a_current_session_leaves_older_copies_untouched() {
     let (_home, _project, store, document) = fixture();
     let lease = store.acquire(&document.id).unwrap();
     lease.save(&document).unwrap();
@@ -293,32 +307,16 @@ fn deleting_a_migrated_session_removes_its_original_copies() {
         format!("{}.json.bak", document.id),
         format!("{}.json.damaged-1-2-3", document.id),
     ];
-    for name in &originals {
-        fs::write(store.bucket.join(name), document.value().encode()).unwrap();
+    for (index, name) in originals.iter().enumerate() {
+        fs::write(store.bucket.join(name), format!("old data {index}")).unwrap();
     }
     store.delete(&document.id).unwrap();
     assert!(!store.journal_path(&document.id).exists());
-    for name in originals {
-        assert!(!store.bucket.join(&name).exists(), "Retained {name}");
-    }
-}
-
-#[test]
-fn unverified_original_copies_block_deletion_before_removing_the_journal() {
-    let (_home, _project, store, document) = fixture();
-    let lease = store.acquire(&document.id).unwrap();
-    lease.save(&document).unwrap();
-    drop(lease);
-    let original = store.bucket.join(format!("{}.json", document.id));
-    let mut foreign = document.value();
-    if let crate::json::Value::Object(ref mut fields) = foreign {
-        fields.insert("id".into(), crate::json::Value::string("999-1-1"));
-    }
-    for text in [foreign.encode(), "{broken".into()] {
-        fs::write(&original, &text).unwrap();
-        assert!(store.delete(&document.id).is_err());
-        assert!(store.journal_path(&document.id).exists());
-        assert_eq!(fs::read_to_string(&original).unwrap(), text);
+    for (index, name) in originals.iter().enumerate() {
+        assert_eq!(
+            fs::read_to_string(store.bucket.join(name)).unwrap(),
+            format!("old data {index}")
+        );
     }
 }
 

@@ -35,7 +35,6 @@ fn exports_exact_protocol_messages_and_masks_the_key_in_nested_arguments() {
     ];
     let archive = Archive {
         backend: "fixture".into(),
-        legacy_origin: None,
         effort: "default".into(),
         events: Arc::new(Mutex::new(vec![])),
         model: "fixture/model".into(),
@@ -50,7 +49,7 @@ fn exports_exact_protocol_messages_and_masks_the_key_in_nested_arguments() {
     let text = fs::read_to_string(first).unwrap();
     assert!(!text.contains("fixture-secret"));
     let document = json::parse(&text).unwrap();
-    assert_eq!(document.get("format_version"), Some(&Value::number(1)));
+    assert_eq!(document.get("format_version"), Some(&Value::number(2)));
     let build = document.get("build").unwrap();
     assert_eq!(build.get("os"), Some(&Value::string(std::env::consts::OS)));
     assert_eq!(
@@ -134,7 +133,6 @@ fn exports_only_the_transcript_when_messages_reference_attachments() {
     );
     let archive = Archive {
         backend: "fixture".into(),
-        legacy_origin: None,
         effort: "default".into(),
         events: Arc::new(Mutex::new(vec![])),
         model: "fixture/model".into(),

@@ -3,7 +3,7 @@ use crate::{
     effort::Effort,
     json::{self, Value},
     redact::Redactor,
-    test_support::{Directory, tool_call},
+    test_support::{Directory, stored_tool_call},
 };
 use std::sync::{Arc, Mutex};
 
@@ -29,9 +29,9 @@ fn document(directory: &Directory) -> Document {
             (
                 "tool_calls",
                 Value::Array(vec![
-                    tool_call("slow", "bash", Value::object([])),
-                    tool_call("fast", "write", Value::object([])),
-                    tool_call("later", "read", Value::object([])),
+                    stored_tool_call("slow", "bash", Value::object([])),
+                    stored_tool_call("fast", "write", Value::object([])),
+                    stored_tool_call("later", "read", Value::object([])),
                 ]),
             ),
         ]),
@@ -58,7 +58,6 @@ fn receipt(id: &str, result: Value, change: Value) -> Value {
 fn archive(doc: &Document, redactor: Redactor) -> crate::export::Archive {
     crate::export::Archive {
         backend: doc.backend.clone(),
-        legacy_origin: None,
         model: doc.model.clone().unwrap(),
         directory: doc.directory.clone(),
         messages: Arc::new(Mutex::new(doc.messages.clone())),
@@ -69,13 +68,14 @@ fn archive(doc: &Document, redactor: Redactor) -> crate::export::Archive {
 }
 
 #[test]
-fn completed_second_call_recovers_in_source_order_with_timing_and_change() {
+fn mirrored_batch_recovers_in_source_order_with_timing_and_change() {
     let home = Directory::new();
     let directory = Directory::new();
     let store = Store::new(home.path().to_path_buf(), directory.path()).unwrap();
     let mut doc = document(&directory);
     let change = crate::file_change::Change::between(Some("old\n"), "new\n").unwrap();
     doc.pending.batch = vec!["slow".into(), "fast".into()];
+    doc.pending.reads = doc.pending.batch.clone();
     doc.pending.completed = vec![receipt(
         "fast",
         Value::object([("bytes_written", Value::number(4))]),
@@ -206,47 +206,7 @@ fn batch_receipt_is_redacted_before_its_checkpoint() {
             .and_then(Value::as_str),
         Some("[redacted]")
     );
-    assert_eq!(saved.pending.reads, ["slow", "fast"]);
-}
-
-#[test]
-fn older_reader_treats_interrupted_explicit_batch_as_unknown() {
-    let directory = Directory::new();
-    let mut doc = document(&directory);
-    doc.pending.batch = vec!["slow".into(), "fast".into()];
-    doc.pending.reads = doc.pending.batch.clone();
-    doc.pending.completed = vec![receipt(
-        "fast",
-        Value::object([("value", Value::string("known to new readers"))]),
-        Value::Null,
-    )];
-    let mut old_view = doc.value();
-    if let Value::Object(fields) = &mut old_view
-        && let Some(Value::Object(pending)) = fields.get_mut("pending")
-    {
-        pending.remove("batch");
-        pending.remove("completed");
-    }
-    let mut restored = Document::parse(&old_view).unwrap();
-    assert!(restored.recover());
-    for message in &restored.messages[3..5] {
-        let result = json::parse(message.get("content").and_then(Value::as_str).unwrap()).unwrap();
-        assert_eq!(
-            result.get("outcome").and_then(Value::as_str),
-            Some("unknown")
-        );
-    }
-    let later = json::parse(
-        restored.messages[5]
-            .get("content")
-            .and_then(Value::as_str)
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        later.get("outcome").and_then(Value::as_str),
-        Some("not_executed")
-    );
+    assert!(saved.pending.reads.is_empty());
 }
 
 #[cfg(windows)]
@@ -291,23 +251,22 @@ fn failed_result_checkpoint_rolls_back_the_staged_receipt() {
     std::fs::set_permissions(&journal, original).unwrap();
     let saved = handle.store().fixture_load(&handle.id()).unwrap();
     assert!(saved.pending.completed.is_empty());
-    assert_eq!(saved.pending.reads, ["slow", "fast"]);
+    assert!(saved.pending.reads.is_empty());
 }
 
 #[test]
-fn malformed_batch_and_older_pending_formats_are_distinguished() {
+fn malformed_or_missing_batch_fields_are_rejected() {
     let directory = Directory::new();
     let mut doc = document(&directory);
     doc.pending.batch = vec!["slow".into(), "fast".into()];
-    let mut legacy = doc.value();
-    if let Value::Object(fields) = &mut legacy
+    let mut incomplete = doc.value();
+    if let Value::Object(fields) = &mut incomplete
         && let Some(Value::Object(pending)) = fields.get_mut("pending")
     {
         pending.remove("batch");
         pending.remove("completed");
     }
-    let parsed = Document::parse(&legacy).unwrap();
-    assert!(parsed.pending.batch.is_empty() && parsed.pending.completed.is_empty());
+    assert!(Document::parse(&incomplete).is_err());
 
     doc.pending.completed = vec![receipt("later", Value::object([]), Value::Null)];
     assert!(Document::parse(&doc.value()).is_err());

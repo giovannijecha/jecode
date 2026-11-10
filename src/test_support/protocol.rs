@@ -14,6 +14,15 @@ pub fn tool_call(id: &str, name: &str, arguments: Value) -> Value {
     ])
 }
 
+pub fn stored_tool_call(id: &str, name: &str, arguments: Value) -> Value {
+    crate::conversation::ToolCall {
+        id: id.into(),
+        name: name.into(),
+        arguments: arguments.encode(),
+    }
+    .value()
+}
+
 pub fn completion(text: &str, calls: Vec<Value>) -> Value {
     Value::object([(
         "choices",

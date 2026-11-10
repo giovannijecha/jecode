@@ -21,57 +21,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn record(number: usize, state: &str) -> Value {
-    Value::object([
-        ("id", Value::string(format!("a{number}"))),
-        ("number", Value::number(number)),
-        ("title", Value::string(format!("Search part {number}"))),
-        ("state", Value::string(state)),
-        ("workspace", Value::string("isolated")),
-        ("directory", Value::string("fixture")),
-        ("sent_version", Value::number(2)),
-        ("received_version", Value::number(1)),
-        ("instructions", Value::string("Implement search")),
-        ("pending_instruction", Value::string("Preserve order")),
-        ("activity", Value::string("Checking search")),
-        (
-            "tools",
-            Value::Array(vec![Value::object([
-                ("id", Value::string("c1")),
-                ("name", Value::string("edit")),
-                ("state", Value::string("done")),
-                ("text", Value::string("src/search.rs")),
-                (
-                    "arguments",
-                    Value::object([("path", Value::string("src/search.rs"))]),
-                ),
-                ("result", Value::object([])),
-                (
-                    "change",
-                    Value::object([
-                        ("added", Value::number(3)),
-                        ("removed", Value::number(1)),
-                        ("created", Value::Bool(false)),
-                    ]),
-                ),
-            ])]),
-        ),
-        ("files", Value::Array(vec![Value::string("src/search.rs")])),
-        (
-            "checks",
-            Value::Array(vec![Value::string("bash: search check passed")]),
-        ),
-        (
-            "report",
-            Value::object([
-                ("version", Value::number(1)),
-                ("text", Value::string("Search implemented")),
-            ]),
-        ),
-        ("reviewed", Value::Bool(false)),
-        ("error", Value::Null),
-    ])
-}
+#[path = "fixtures.rs"]
+mod fixtures;
+use fixtures::{record, sync_log};
 
 fn event(sequence: usize, kind: &str, number: usize, records: Vec<Value>) -> Value {
     let id = if number == 0 {
@@ -421,6 +373,7 @@ fn inside_follows_new_rows_until_the_reader_pauses() {
         })
         .collect();
     set(&mut agent, "tools", Value::Array(tools));
+    sync_log(&mut agent);
     let mut state = State {
         width: 80,
         height: 24,

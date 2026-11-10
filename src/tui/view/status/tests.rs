@@ -302,11 +302,6 @@ fn tool_labels_prefer_the_description_then_a_verb_and_a_short_target() {
             "Polling p3",
         ),
         ("process", vec![("action", "list")], "Listing processes"),
-        (
-            "checkpoint",
-            vec![("action", "save")],
-            "Saving a checkpoint",
-        ),
         ("custom", vec![], "Running custom"),
     ] {
         assert_eq!(tool_label(name, &arguments(&pairs)), label);

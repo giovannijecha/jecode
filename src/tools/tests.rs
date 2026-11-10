@@ -27,9 +27,8 @@ fn workspace_shell_uses_the_native_boundary() {
         Value::string("mkdir -p nested; printf owned > nested/marker.txt"),
     )])
     .encode();
-    let begun = tools
-        .begin_cancellable("bash", &arguments, &Cancellation::default())
-        .with_permission(crate::permissions::Level::Workspace, None);
+    let begun =
+        crate::tools::Begun::default().with_permission(crate::permissions::Level::Workspace, None);
     let result = tools
         .execute_begun(begun, "bash", &arguments, &Cancellation::default())
         .result;
@@ -119,8 +118,13 @@ fn saved_large_output_can_be_read_in_full_and_cannot_be_modified_by_file_tools()
                     &Value::object([
                         ("path", Value::string(path)),
                         ("content", Value::string("overwrite")),
-                        ("old_text", Value::string("x")),
-                        ("new_text", Value::string("y"))
+                        (
+                            "edits",
+                            Value::Array(vec![Value::object([
+                                ("old_text", Value::string("x")),
+                                ("new_text", Value::string("y")),
+                            ])]),
+                        ),
                     ])
                     .encode()
                 )

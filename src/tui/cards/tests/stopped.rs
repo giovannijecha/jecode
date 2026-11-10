@@ -27,8 +27,13 @@ fn calls() -> Vec<(&'static str, Value)> {
             "edit",
             Value::object([
                 ("path", Value::string("session.rs")),
-                ("old_text", Value::string("before")),
-                ("new_text", Value::string("after")),
+                (
+                    "edits",
+                    Value::Array(vec![Value::object([
+                        ("old_text", Value::string("before")),
+                        ("new_text", Value::string("after")),
+                    ])]),
+                ),
             ]),
         ),
         (

@@ -4,7 +4,7 @@ use crate::{
     backend::openrouter::OpenRouter,
     permissions::{Decision, Level, Surface},
     sessions::Stage,
-    test_support::{Directory, HttpFixture, completion, tool_call},
+    test_support::{Directory, HttpFixture, completion, stored_tool_call, tool_call},
     tools::Tools,
 };
 use std::{fs, thread};
@@ -88,7 +88,7 @@ fn browser_control_requires_full_while_read_only_web_is_available() {
         Tools::new(project.path()).unwrap(),
     );
     let call = |id: &str, name: &str, arguments: Value| {
-        crate::backend::ToolCall::parse(&tool_call(id, name, arguments)).unwrap()
+        crate::backend::ToolCall::parse(&stored_tool_call(id, name, arguments)).unwrap()
     };
     let inspect = call(
         "inspect",
@@ -342,7 +342,11 @@ fn a_request_pending_at_quit_is_recorded_as_not_run() {
     let mut agent = make_agent();
     agent.enable_sessions(home.path()).unwrap();
     agent.prepare_turn("Compare").unwrap();
-    let call = read_call("read-1", &outside);
+    let call = stored_tool_call(
+        "read-1",
+        "read",
+        Value::object([("path", Value::string(outside.to_string_lossy()))]),
+    );
     agent.messages.lock().unwrap().push(Value::object([
         ("role", Value::string("assistant")),
         ("content", Value::Null),
@@ -393,7 +397,12 @@ fn a_waiting_approval_does_not_run_after_switching_to_read() {
         permissions.set_level(Level::Read).unwrap();
         permissions.decide(request.id, Decision::Once).unwrap();
     });
-    let call = crate::backend::ToolCall::parse(&read_call("read-1", &target)).unwrap();
+    let call = crate::backend::ToolCall::parse(&stored_tool_call(
+        "read-1",
+        "read",
+        Value::object([("path", Value::string(target.to_string_lossy()))]),
+    ))
+    .unwrap();
     let gate = agent.permit(&call, &mut |_| Ok(()));
     responder.join().unwrap();
     match gate {
@@ -483,7 +492,12 @@ fn failed_permission_event_abandons_the_request_without_running() {
         Tools::new(project.path()).unwrap(),
     );
     agent.permissions().set_surface(Surface::Panel);
-    let call = crate::backend::ToolCall::parse(&read_call("read-1", &target)).unwrap();
+    let call = crate::backend::ToolCall::parse(&stored_tool_call(
+        "read-1",
+        "read",
+        Value::object([("path", Value::string(target.to_string_lossy()))]),
+    ))
+    .unwrap();
     let gate = agent.permit(&call, &mut |_| Err("display closed".into()));
     assert!(agent.permissions().pending().is_none());
     match gate {
@@ -533,9 +547,15 @@ fn approved_symlink_cannot_switch_to_a_different_outside_file() {
         make_symlink(&second, &link).unwrap();
         permissions.decide(request.id, Decision::Once).unwrap();
     });
-    let call =
-        crate::backend::ToolCall::parse(&read_call("read-1", &project.path().join("link.txt")))
-            .unwrap();
+    let call = crate::backend::ToolCall::parse(&stored_tool_call(
+        "read-1",
+        "read",
+        Value::object([(
+            "path",
+            Value::string(project.path().join("link.txt").to_string_lossy()),
+        )]),
+    ))
+    .unwrap();
     let gate = agent.permit(&call, &mut |_| Ok(()));
     responder.join().unwrap();
     match gate {
