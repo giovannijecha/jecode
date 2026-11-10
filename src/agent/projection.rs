@@ -231,18 +231,17 @@ impl Agent {
         }
     }
 
-    /// The projection with the instruction snapshot it still needs, so size
-    /// comparisons across compaction count instructions on both sides.
+    /// The request projection used by compaction's before/after size check.
+    /// Count both pending state kinds and any continuation note on each side.
     pub(super) fn instructed_context(
         &self,
         context: &crate::context::Context,
+        environment: &environment::Environment,
         messages: &[Value],
     ) -> Vec<Value> {
         let mut projected = self.projected_context(context, messages);
-        projected.extend(
-            self.pending_snapshot(context)
-                .map(|text| state_message(&text)),
-        );
+        let states = self.pending_states(context, environment, messages);
+        append_states(&mut projected, &states);
         projected
     }
 }

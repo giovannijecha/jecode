@@ -3,6 +3,22 @@ use super::*;
 use crate::{json::Value, test_support::Response};
 use std::{path::Path, sync::mpsc};
 
+fn history(turns: usize) -> Vec<Value> {
+    let mut history = crate::tui::measurement_tests::mixed_messages(turns);
+    let output = Value::object([("content", Value::string("Saved fixture output"))]).encode();
+    // Exercise many transcript items without overflowing the loopback server's
+    // request-body limit with repeated, collapsed tool output.
+    for message in &mut history {
+        if message.get("role").and_then(Value::as_str) == Some("tool")
+            && let Value::Object(fields) = message
+        {
+            fields.insert("content".into(), Value::string(&output));
+        }
+    }
+    assert!(Value::Array(history.clone()).encode().len() < 8 * 1024 * 1024);
+    history
+}
+
 #[test]
 #[ignore = "requires Windows ConPTY for active long-history interruption"]
 fn native_windows_escape_during_active_long_history() {
@@ -94,7 +110,7 @@ pub(super) fn console(path: &Path) {
         .messages
         .lock()
         .unwrap()
-        .extend(crate::tui::measurement_tests::mixed_messages(40));
+        .extend(history(300));
     saved.save_session().unwrap();
     let id = saved.sessions().unwrap().snapshot().id.clone();
     drop(saved);

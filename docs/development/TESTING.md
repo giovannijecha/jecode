@@ -93,6 +93,10 @@ the executable directly. Repeated snapshots keep the same native cell and mode
 assertions without repeatedly starting PowerShell and its compiler. Timeout
 diagnostics retain the end of the terminal output so child failures stay visible.
 
+The Windows active-history Esc fixture resumes 300 turns with compact saved tool
+outputs, keeping the request below the loopback server's 8 MiB body limit. It
+checks transcript rebuilding and cancellation; compaction uses separate fixtures.
+
 ```text
 cargo test --locked --offline tui::terminal::windows::native_tests::native_windows_fullscreen_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1

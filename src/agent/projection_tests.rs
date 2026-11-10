@@ -58,3 +58,24 @@ fn runtime_suffix_is_accounted_for_without_creating_a_saved_user_request() {
             .contains("not a new user task")
     );
 }
+
+#[test]
+fn compaction_size_view_includes_the_pending_runtime_state() {
+    let directory = Directory::new();
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    agent.prepare_turn("Continue the existing task.").unwrap();
+    let original = agent.messages.lock().unwrap().clone();
+    let compared = agent.instructed_context(&agent.context, &agent.environment(), &original);
+    let sent = agent.transport_messages();
+    assert_eq!(compared, sent);
+    assert!(
+        compared
+            .last()
+            .unwrap()
+            .encode()
+            .contains("Jecode session state")
+    );
+}

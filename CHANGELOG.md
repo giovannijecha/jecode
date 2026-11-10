@@ -29,8 +29,8 @@ Changes since 0.4.5.
 - The project map: the `map` tool and its saved notes.
 - The `edit` tool's top-level `old_text` and `new_text` arguments; it takes
   `edits` or `files`.
-- The root-level `openrouter` block in `config.json` is no longer read. Jecode
-  uses `selection` and `backends`; see
+- Configurations containing the retired root-level `openrouter` block are
+  rejected without rewriting the file. Jecode uses `selection` and `backends`; see
   [Configuration](docs/usage/CONFIGURATION.md).
 
 ### Upgrading from 0.4.5
@@ -57,9 +57,11 @@ Changes since 0.4.5.
 - Standalone packages omit private harness reports and require a fresh output
   directory, so removed documentation cannot remain from an earlier build.
   `PACKAGE.sh` now matches the omitted names without case, as `PACKAGE.ps1` does.
-- `write` and `edit` serialize through a bounded set of lock files in the
-  temporary directory. When that directory cannot be used, the change proceeds
-  and the changed-file check still rejects a stale edit.
+- `write` and `edit` serialize through 256 lock files in the account's temporary
+  namespace. Unix accounts sharing `/tmp` use separate UID directories. If a
+  lock cannot be opened or acquired, the modification fails without writing.
+- Compaction compares request sizes with pending instruction snapshots,
+  runtime state and continuation notes included on both sides.
 - On the Claude plan, an instruction snapshot and the runtime state sent with
   it share one mid-conversation system message.
 - Starting in a folder with several conversations from an earlier format

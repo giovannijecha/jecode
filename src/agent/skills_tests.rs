@@ -88,6 +88,7 @@ fn a_read_skill_receipt_remains_reloadable_after_compaction_and_resume() {
     let original_message_count = first.messages.lock().unwrap().len();
     first.context.from = original_message_count;
     first.context.summary = "Continue auditing the project.".into();
+    first.context.skill_references = first.skill_checkpoint_instructions();
     assert!(
         first
             .skill_checkpoint_instructions()

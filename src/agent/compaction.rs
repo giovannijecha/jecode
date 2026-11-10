@@ -261,7 +261,8 @@ impl Agent {
             }
         }
         let requests = next.user_requests(&original);
-        let before_bytes = self.context_bytes(&self.instructed_context(&self.context, &original));
+        let before_bytes =
+            self.context_bytes(&self.instructed_context(&self.context, &environment, &original));
         drop(original);
         events.emit(Event::Maintenance {
             text: format!(
@@ -290,7 +291,8 @@ impl Agent {
                 "The summary and original user requests do not fit {budget_text}; the previous context and original session are preserved. Raise Auto-compact at in /settings or choose a model with more context."
             ));
         }
-        let after_bytes = self.context_bytes(&self.instructed_context(&next, &original));
+        let after_bytes =
+            self.context_bytes(&self.instructed_context(&next, &environment, &original));
         drop(original);
         if after_bytes >= before_bytes {
             return Err("Context compaction did not reduce the request. The original conversation and context are preserved; choose a model with more context or retry.".into());

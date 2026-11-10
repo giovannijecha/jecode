@@ -101,3 +101,7 @@ your unsent input. If deletion fails partway, some files may already be gone;
 read the error and retry from `/resume`.
 
 Conversations have no automatic expiry.
+
+Jecode cannot delete unsupported saved formats through the picker: deletion
+needs a valid document to check ownership of associated files. Remove those
+files manually when you no longer need them; Jecode leaves them unchanged.

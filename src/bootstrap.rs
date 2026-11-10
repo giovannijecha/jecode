@@ -273,6 +273,19 @@ mod tests {
             .is_err()
         );
         assert_eq!(fs::read_to_string(store.path()).unwrap(), "{broken");
+
+        let retired = r#"{"selection":{"backend":"openrouter","model":"fixture/saved"},"backends":{"openrouter":{"api_key":"isolated-fixture-key"}},"openrouter":{"api_key":"retired-fixture-key"}}"#;
+        fs::write(store.path(), retired).unwrap();
+        let error = resolve_settings(
+            &store,
+            Some("stale-fixture-key".into()),
+            Some("fixture/old".into()),
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("Unsupported root openrouter settings"));
+        assert!(!error.contains("retired-fixture-key"));
+        assert_eq!(fs::read_to_string(store.path()).unwrap(), retired);
     }
 
     #[test]

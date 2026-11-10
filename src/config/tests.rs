@@ -248,47 +248,27 @@ fn malformed_routing_rejects_the_file_without_replacing_it() {
 }
 
 #[test]
-fn unknown_root_openrouter_is_preserved_but_not_an_account() {
+fn retired_root_openrouter_settings_are_rejected_without_replacing_the_file() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    fs::write(store.path(), r#"{"selection":{"backend":"fixture","model":"model-a","effort":"default","future":true},"backends":{"fixture":{"api_key":"fixture-key","future":7}},"openrouter":{"api_key":"isolated-fixture-key","model":"fixture/old","future":9}}"#).unwrap();
-    let mut selected = store.load().unwrap().unwrap();
-    assert_eq!(selected.backend_id, "fixture");
-    assert_eq!(selected.model, "model-a");
-    assert_eq!(selected.credential_for("fixture"), Some("fixture-key"));
-    assert_eq!(selected.credential_for("openrouter"), None);
-    selected.model = "model-b".into();
-    store.save(&selected).unwrap();
-    let document = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
-    assert_eq!(
-        document.get("selection").unwrap().get("model"),
-        Some(&Value::string("model-b"))
-    );
-    assert_eq!(
-        document.get("selection").unwrap().get("future"),
-        Some(&Value::Bool(true))
-    );
-    assert_eq!(
-        document
-            .get("backends")
-            .unwrap()
-            .get("fixture")
-            .unwrap()
-            .get("future"),
-        Some(&Value::number(7))
-    );
-    assert_eq!(
-        document.get("openrouter").unwrap().get("model"),
-        Some(&Value::string("fixture/old"))
-    );
-    assert_eq!(
-        document.get("openrouter").unwrap().get("future"),
-        Some(&Value::number(9))
-    );
+    for root in [
+        r#"{"api_key":"isolated-fixture-key"}"#,
+        r#"{"api_key":"","model":"unconfigured"}"#,
+    ] {
+        let original = format!(
+            r#"{{"selection":{{"backend":"fixture","model":"model-a"}},"backends":{{"fixture":{{"api_key":"fixture-key"}}}},"openrouter":{root}}}"#
+        );
+        fs::write(store.path(), &original).unwrap();
+        let error = store.load().err().unwrap();
+        assert!(error.contains("Unsupported root openrouter settings"));
+        assert!(!error.contains("isolated-fixture-key"));
+        assert!(store.save(&settings("model-b")).is_err());
+        assert_eq!(fs::read_to_string(store.path()).unwrap(), original);
+    }
 }
 
 #[test]
-fn legacy_mirror_cannot_override_selection_key_effort_or_routing() {
+fn retired_root_key_cannot_override_scoped_selection() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
     let mut selected = settings("fixture/first");
@@ -318,31 +298,8 @@ fn legacy_mirror_cannot_override_selection_key_effort_or_routing() {
     root.insert("openrouter".into(), mirror.clone());
     fs::write(store.path(), document.encode()).unwrap();
 
-    let loaded = store.load().unwrap().unwrap();
-    assert_eq!(loaded.api_key, "isolated-fixture-key");
-    assert_eq!(
-        loaded.credential_for("openrouter"),
-        Some("isolated-fixture-key")
-    );
-    assert_eq!(loaded.model, "fixture/first");
-    assert_eq!(loaded.effort, Effort::High);
-    assert_eq!(
-        loaded.routing_for("fixture/first"),
-        Routing::Endpoint("first-endpoint".into())
-    );
-    assert_eq!(
-        store.previous_model("openrouter").unwrap().as_deref(),
-        Some("fixture/first")
-    );
-    store.save(&loaded).unwrap();
-    let reopened = store.load().unwrap().unwrap();
-    assert_eq!(reopened.api_key, "isolated-fixture-key");
-    assert_eq!(reopened.model, "fixture/first");
-    assert_eq!(reopened.effort, Effort::High);
-    assert_eq!(
-        reopened.routing_for("fixture/first"),
-        Routing::Endpoint("first-endpoint".into())
-    );
+    assert!(store.load().err().unwrap().contains("Unsupported root"));
+    assert!(store.previous_model("openrouter").is_err());
     let saved = crate::json::parse(&fs::read_to_string(store.path()).unwrap()).unwrap();
     assert_eq!(saved.get("openrouter"), Some(&mirror));
 }

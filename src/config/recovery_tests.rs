@@ -3,10 +3,10 @@ use crate::{json, test_support::Directory};
 use std::fs;
 
 #[test]
-fn unknown_root_key_does_not_hide_a_scoped_key() {
+fn scoped_key_is_available_without_a_retired_root_block() {
     let directory = Directory::new();
     let store = Store::new(directory.path().to_path_buf());
-    fs::write(store.path(), r#"{"selection":{"backend":"openai","model":"saved-model"},"backends":{"openrouter":{"api_key":"isolated-new-key"}},"openrouter":{"api_key":"","model":"unconfigured"}}"#).unwrap();
+    fs::write(store.path(), r#"{"selection":{"backend":"openai","model":"saved-model"},"backends":{"openrouter":{"api_key":"isolated-new-key"}}}"#).unwrap();
     let settings = store.load().unwrap().unwrap();
     assert_eq!(
         settings.credential_for("openrouter"),

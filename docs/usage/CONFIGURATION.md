@@ -132,6 +132,9 @@ conversation; save defaults in the TUI or in the file.
 
 Settings live in `~/.jecode/config.json` (`%USERPROFILE%\.jecode\config.json` on
 Windows). Jecode writes it from setup and `/settings`; you can also edit it.
+Files containing the retired root-level `openrouter` block are unsupported and
+left unchanged. Keep provider settings under `backends` and remove the retired
+block manually before launching; Jecode does not migrate it.
 A typical file after connecting OpenRouter and then choosing a ChatGPT model as
 the default:
 
@@ -202,6 +205,12 @@ error.
 | `tmp/<project>/<session>/` | Each conversation's [temporary files](TEMPORARY.md). |
 | `browser/profiles/` | Named persistent browser profiles. |
 | `cache/native/` | Native helpers extracted from the executable on first use. This directory must be writable. |
+
+Empty file-modification locks live in the operating system's temporary
+directory, separately for each account: `jecode-file-locks-<uid>` on Unix and
+`jecode-file-locks` in the account's temporary directory on Windows. The 256
+lock files contain no project data and coordinate processes using different
+`JECODE_HOME` directories.
 
 All of these files are local and can contain sensitive data: conversations
 and command output hold project file contents, including files Git ignores such

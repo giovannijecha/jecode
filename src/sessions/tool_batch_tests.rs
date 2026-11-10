@@ -68,13 +68,14 @@ fn archive(doc: &Document, redactor: Redactor) -> crate::export::Archive {
 }
 
 #[test]
-fn completed_second_call_recovers_in_source_order_with_timing_and_change() {
+fn mirrored_batch_recovers_in_source_order_with_timing_and_change() {
     let home = Directory::new();
     let directory = Directory::new();
     let store = Store::new(home.path().to_path_buf(), directory.path()).unwrap();
     let mut doc = document(&directory);
     let change = crate::file_change::Change::between(Some("old\n"), "new\n").unwrap();
     doc.pending.batch = vec!["slow".into(), "fast".into()];
+    doc.pending.reads = doc.pending.batch.clone();
     doc.pending.completed = vec![receipt(
         "fast",
         Value::object([("bytes_written", Value::number(4))]),
@@ -205,7 +206,7 @@ fn batch_receipt_is_redacted_before_its_checkpoint() {
             .and_then(Value::as_str),
         Some("[redacted]")
     );
-    assert_eq!(saved.pending.reads, ["slow", "fast"]);
+    assert!(saved.pending.reads.is_empty());
 }
 
 #[cfg(windows)]
@@ -250,7 +251,7 @@ fn failed_result_checkpoint_rolls_back_the_staged_receipt() {
     std::fs::set_permissions(&journal, original).unwrap();
     let saved = handle.store().fixture_load(&handle.id()).unwrap();
     assert!(saved.pending.completed.is_empty());
-    assert_eq!(saved.pending.reads, ["slow", "fast"]);
+    assert!(saved.pending.reads.is_empty());
 }
 
 #[test]

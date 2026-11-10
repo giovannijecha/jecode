@@ -113,7 +113,8 @@ migration, persisted preview state and the conversation-level legacy origin
 adapter were removed. Backend/model switching still uses per-message origins.
 Tool-result previews remain local to the portion-summary transcript; they no
 longer become persistent context state. The configuration uses `selection` and
-`backends`; an old root-level OpenRouter mirror has no effect.
+`backends`; a retired root-level OpenRouter block is rejected without rewriting
+the configuration.
 
 After updating fixtures to the current writer's output, executed checks passed:
 

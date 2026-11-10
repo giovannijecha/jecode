@@ -278,7 +278,6 @@ impl Handle {
             }
             Stage::ToolBatch(ids) => {
                 live.document.pending.batch = ids.iter().map(|id| live.redactor.text(id)).collect();
-                live.document.pending.reads = live.document.pending.batch.clone();
                 live.document.pending.completed.clear();
             }
             Stage::ToolBatchResult(receipt) => {
@@ -300,7 +299,6 @@ impl Handle {
             }
             Stage::ReadBatchFinished => live.document.pending.reads.clear(),
             Stage::ToolBatchFinished => {
-                live.document.pending.reads.clear();
                 live.document.pending.batch.clear();
                 live.document.pending.completed.clear();
             }

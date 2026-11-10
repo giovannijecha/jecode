@@ -186,6 +186,9 @@ impl Settings {
         if !matches!(selection, Value::Object(_)) {
             return Err("selection must be an object".into());
         }
+        if document.get("openrouter").is_some() {
+            return Err("Unsupported root openrouter settings".into());
+        }
         if document
             .get("backends")
             .is_some_and(|value| !matches!(value, Value::Object(_)))

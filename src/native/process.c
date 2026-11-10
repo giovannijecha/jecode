@@ -166,6 +166,9 @@ static int guard(const char *input, char **argv) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "uid")) {
+        return printf("%lu\n", (unsigned long)geteuid()) < 0 ? 1 : 0;
+    }
     if (argc >= 4 && !strcmp(argv[1], "guard")) return guard(argv[2], &argv[3]);
     if (argc == 3 && !strcmp(argv[1], "fifo")) return mkfifo(argv[2], 0600) < 0 ? 1 : 0;
     if (argc == 3 && !strcmp(argv[1], "kill-group")) {
