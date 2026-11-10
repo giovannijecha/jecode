@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml/badge.svg)](https://github.com/giovannijecha/jecode/actions/workflows/CI.yml)
 
-Jecode is a fast, efficient coding agent for your terminal. You describe a task;
-the model you choose reads your project, edits files, runs commands and checks
+Jecode is a coding agent for your terminal. You describe a task; the model you
+choose reads your project, edits files, runs commands and checks
 the result, while you watch each step and control what it may change.
 
 It is a single native executable written in Rust, without third-party Rust
@@ -14,37 +14,6 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 ![Jecode running in Windows Terminal, with its startup screen, composer and model status](docs/images/jecode-startup.png)
 
 *Jecode 0.4.5 in Windows Terminal, with GPT-6.1 Sol selected.*
-
-## Measured efficiency
-
-On a historical five-turn coding benchmark, Jecode used **21% fewer cost-weighted tokens
-than Codex** with GPT-6.1 Sol and **36% fewer than Claude Code** with Claude
-Sonnet 5.5. Every run passed all 21 hidden acceptance tests.
-
-| Same model, high effort | Weighted token use | Active time |
-| --- | ---: | ---: |
-| Jecode vs Codex 0.166, GPT-6.1 Sol | **21% less** | 11% longer |
-| Jecode vs Claude Code 2.1.318, Sonnet 5.5 | **36% less** | **30% shorter** |
-
-These are maintainer measurements from one Node project on Windows, recorded
-2026-11-04: 7 vs 6 GPT runs and 4 vs 3 Claude runs. Jecode used account sign-in;
-its API-key routes were not compared. Time excludes two deliberate 6.5-minute
-pauses. Weighted tokens account for cache reads, writes and output; they are not
-raw token totals, API bills or a multiplier for your plan's quota. Read the
-[method, per-run data and limits](docs/development/AGENT_BENCHMARK.md).
-
-Jecode supports prompt caching, batched file operations and prepared tool
-sequences in one request. Native HTTP connections persist between requests;
-OpenAI conversations use WebSocket with HTTP fallback. Separate
-[transport measurements](docs/development/PERFORMANCE.md#provider-transports)
-record lower first-update latency on Windows; the comparison above predates
-that work and the current context handling. The
-[benchmark report](docs/development/AGENT_BENCHMARK.md#exact-records-development-branch-2026-11-07)
-also records short and 40-turn comparisons of an earlier, since-retired context
-design, including quality misses. None of these measures the current context
-path or establishes a general 25% token saving at equal quality. Separate
-[offline checks](docs/development/CONTEXT_CHECKS.md) screen long saved contexts
-without model calls; they do not establish a ten-hour live result.
 
 ## Long conversations and processes
 
@@ -126,8 +95,6 @@ quit, and `/help` or F1 for commands and common shortcuts.
 
 - [Providers](docs/usage/PROVIDERS.md): account setup, usage and provider-specific
   compatibility limits.
-- [Agent benchmark](docs/development/AGENT_BENCHMARK.md): Jecode vs Codex and
-  Claude Code, with the measurements behind the comparison.
 - [Terminal interface](docs/tui/INTERFACE.md): sending, queueing, stopping and
   reading the agent's work.
 - [Permissions](docs/usage/PERMISSIONS.md): what the agent may do, and approvals.

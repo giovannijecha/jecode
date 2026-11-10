@@ -291,8 +291,7 @@ cargo test --locked --offline efficiency_live::durable_prefix_cache_survives_run
 
 `agent::compaction::live_tests::live_summary_and_resumed_readback_preserve_critical_work`
 makes two Claude requests to check that a compaction summary keeps critical
-task facts across a resume. Results are recorded in
-[Performance](PERFORMANCE.md#subscription-context-reuse).
+task facts across a resume.
 
 ## Manual checks
 

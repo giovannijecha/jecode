@@ -6,8 +6,8 @@ Changes since 0.4.5.
 
 ### Long work and context
 
-- Jecode has one context path. Each request adds to the previous one, so earlier
-  messages are sent unchanged and can come from the provider's prompt cache.
+- Jecode has one context path. Each request adds to the previous one, keeping
+  earlier messages unchanged.
   When a request would pass **Auto-compact at** (default **80%**), or the
   provider rejects it as too long, the same model summarizes earlier work and
   the recent messages stay verbatim. The original history stays saved and

@@ -72,21 +72,15 @@ choose a model with a larger context window, then continue.
 
 ## Prompt cache
 
-Claude models can reuse the unchanged start of each request from the provider's
-prompt cache, which is much cheaper than sending it again. The provider's
-default cache lasts five minutes after its last use: after a longer break, the
-next request writes what is in the window to the cache again.
-
 `/settings` → **Context** → **Prompt cache** chooses **5 minutes**, the default,
-or **1 hour**. One hour keeps a prefix eligible for reuse across
-longer breaks, but cache writes cost more: twice the input price instead of
-1.25 times at [Anthropic's API list prices](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
-The tradeoff depends on
-pauses, the active window and provider cache hits. The choice applies from the next
-request, in the current conversation and its collaborators, for Claude on
-Anthropic, the Claude plan and OpenRouter. Other models keep their provider's
-automatic caching. Jecode's own instructions and tools, shared by every
-conversation, are always cached for one hour on Anthropic and the Claude plan.
+or **1 hour** for the unchanged start of Claude requests. The choice applies
+from the next request, in the current conversation and its collaborators, for
+Claude on Anthropic, the Claude plan and OpenRouter. Jecode always requests
+one-hour retention for its own shared instructions and tools on Anthropic and
+the Claude plan. Other models keep their provider's automatic caching.
+
+These settings request a cache lifetime; the provider determines whether a
+prefix is cached or reused.
 
 ## Theme
 

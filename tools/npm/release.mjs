@@ -86,7 +86,7 @@ export async function pack(artifacts, destination, {local = false} = {}) {
   const expected = new Map();
   const manifest = {
     name: packageName, version: releaseVersion,
-    description: 'A fast, efficient terminal coding agent in Rust',
+    description: 'A terminal coding agent in Rust',
     license: 'MIT', author: 'Giovanni Jecha',
     repository: {type: 'git', url: 'git+https://github.com/giovannijecha/jecode.git'},
     homepage: 'https://github.com/giovannijecha/jecode#readme',

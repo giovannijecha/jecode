@@ -1,15 +1,16 @@
 # Performance measurement
 
 Jecode includes opt-in probes for UI work, model-stream parsing, file edits,
-session storage and process startup. This page explains how to run them
-and records results that still describe the current design. Results were
-measured on Windows unless stated; CI on other platforms does not establish
-their performance.
+session storage and process startup. This page explains how to run the current
+probes and preserves dated results from earlier builds. Those results are not
+release measurements of 0.5.5, particularly where its context and session
+storage changed. Results were measured on Windows unless stated; CI on other
+platforms does not establish their performance.
 
 For comparisons with other coding agents, see the
-[Jecode vs Codex and Claude Code benchmark](AGENT_BENCHMARK.md). It records
-coding work with Jecode's account routes; the probes below measure separate parts of
-Jecode and do not establish a lead over another harness.
+[historical Jecode vs Codex and Claude Code benchmark](AGENT_BENCHMARK.md). It
+records coding work with earlier Jecode account routes; the probes below measure
+separate parts of Jecode and do not establish a lead over another harness.
 
 ## Measurement rules
 
@@ -63,8 +64,9 @@ Sonnet 5.5, 53k tokens) and 10 at about 544 KB:
 | WebSocket, full input | 2.56 s | 3.28 s | | |
 | WebSocket, `previous_response_id` | 2.46 s | 3.85 s | | |
 
-Both routes accepted gzip bodies and `previous_response_id` works over the
-ChatGPT route's WebSocket, but neither improved latency, so Jecode uses neither.
+Both routes accepted gzip bodies and `previous_response_id` worked over the
+ChatGPT route's WebSocket, but neither improved latency in these samples, so
+the tested adapters used neither.
 A connection failed by the provider's message limit (between 7 and 27 MB here)
 falls back to HTTP after about 3 s. On a minimal request, a new WinHTTP process
 spent about 60 ms starting, 25 ms on TCP and 100 ms on TLS, 230–370 ms in all
@@ -127,11 +129,11 @@ driver of the instruction loader against the `jecode-fast` checkout. Four
 alternating before/after/after/before blocks each warmed up five scans and measured
 21 batches of three scans. Median scan times were 15.1 and 15.3 ms before, and
 11.1 and 10.4 ms after. Every scan returned the same 4,351 bytes of instructions.
-These measure instruction discovery alone, not a model request or whole turn.
+These measured instruction discovery alone, not a model request or whole turn.
 
-The loader now obtains directory metadata from its existing `DirEntry` rather
-than looking up the path again. On Windows, that metadata is already available
-from directory enumeration; on Unix, it retains the same metadata lookup. See
+The tested loader obtained directory metadata from its existing `DirEntry` rather
+than looking up the path again. On Windows, that metadata was already available
+from directory enumeration; on Unix, the loader retained the same metadata lookup. See
 the [standard-library contract](https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata).
 The search still includes `target` and other build output outside its skip list
 (`.git`, `.tmp`, `node_modules`, `.venv` and `vendor`), and still skips directory
@@ -141,7 +143,8 @@ links and junctions. No instruction selection rule changed.
 
 Recorded 2026-10-31 with bounded live requests, synthetic reference records and
 a minimal reply. The warm request appended the previous answer and a new user
-message and changed only the request-only session state.
+message and changed only the request-only session state. This predates 0.5.5's
+context path and does not measure its cache reuse.
 
 | Route and model | Warm input tokens | Cached tokens | Cached share |
 | --- | ---: | ---: | ---: |
@@ -170,13 +173,13 @@ the optimized source of that date (three warmups, 21 samples, A/B/B/A).
 | Select a settled tool among 5,000 history items | 69.4–70.5 ms | 0.05–0.06 ms |
 | Capture a short draft with 5,000 saved 4 KiB messages | 5.0–6.7 ms | < 0.001 ms |
 
-The gains come from caching composer layout, reusing stable Markdown prefixes,
+The measured gains came from caching composer layout, reusing stable Markdown prefixes,
 invalidating only affected tool cards and saving outside the document lock.
 Scrolling showed no change beyond run variation.
 
 On 2026-10-30, expanding tools with Ctrl+O after a 750,000-byte answer took a
 longest single layout pass of 4.4–6.1 ms, down from 85–148 ms, because the
-rebuild now yields in bounded steps. Total layout work stayed about the same.
+tested rebuild yielded in bounded steps. Total layout work stayed about the same.
 
 ### Windows startup, typing and scrolling
 
@@ -199,18 +202,18 @@ included process startup, shutdown and reply checks. It exercised both modes
 of the same helper; it did not measure Rust request handling, account-file
 reads or the full application launch.
 
-- Account reads protect files and hash identities through the .NET
+- In the tested build, account reads protected files and hashed identities through the .NET
   cryptography helper. Each operation started a new process (55–80 ms each,
-  16 before the first frame); one helper now serves the process, with an idle
+  16 before the first frame); one helper served the process, with an idle
   exit and cancellation-aware requests.
 - Unbracketed multi-character input still waits for a 50 ms text gap. A 5 ms
   quiet-queue experiment split fragmented file drops and oversized pastes, so
   it was removed. Single keys and completed bracketed pastes remain immediate;
   the experiment's roughly ninefold batch-input speedup does not describe the
   shipped behavior.
-- Standard output splits a console write into chunks of a few KB, and ConPTY
+- Standard output split a console write into chunks of a few KB, and ConPTY
   painted a synchronized frame that arrived in several writes at its next
-  tick. Frames now use `CONOUT$` to avoid that chunking.
+  tick. The tested frames used `CONOUT$` to avoid that chunking.
 - ConPTY reports a wheel notch as 128 units, so every 15th notch moved six
   rows. Notches are normalized to the native 120-unit scale while preserving
   fine-delta remainders across full notches and direction changes.
@@ -220,7 +223,8 @@ Wheel samples use random start offsets to avoid phase lock with frame pacing.
 The input probe deliberately sends the next key immediately after the previous
 frame, so its single-key timings include ConPTY's inter-frame delay.
 
-Final-code release probes on 2026-11-01 passed with these results (one run,
+Release probes using the final code available on 2026-11-01 passed with these
+results (one run,
 60 wheel samples per size and 100 input samples per condition):
 
 | Operation | Median | p95 |
@@ -249,12 +253,13 @@ history can be measured without sharing it. It copies the journal into a
 temporary home and accepts only settled conversations with no active turn,
 pending question or queued input. Collaborator auto-resume is disabled for
 the measurement. It prints only timings and byte counts; it does not continue
-agent work or call a provider:
+agent work or call a provider. On PowerShell:
 
-```text
-JECODE_MEASURE_JOURNAL=<path to a session folder's session.jsonl>
-JECODE_MEASURE_DIRECTORY=<the folder the session belongs to>
+```powershell
+$env:JECODE_MEASURE_JOURNAL = 'C:\path\to\session.jsonl'
+$env:JECODE_MEASURE_DIRECTORY = 'C:\path\to\project'
 cargo test --locked --offline --release tui::measurement_tests::own_history_scroll -- --exact --ignored --nocapture --test-threads=1
+Remove-Item Env:JECODE_MEASURE_JOURNAL, Env:JECODE_MEASURE_DIRECTORY
 ```
 
 Journals are at `sessions/<project>/<session>/session.jsonl` in the Jecode
@@ -264,15 +269,16 @@ home; the session folder's name identifies the conversation, and
 ### Model stream and file edits
 
 Recorded 2026-10-24. Parsing a 256 KiB tool argument delivered in 4,096 stream
-fragments takes about 6 ms, down from 399–467 ms at `674eba6`.
+fragments took about 6 ms, down from 399–467 ms at `674eba6`.
 
-A batch of ten edits on a 32 MiB file now composes the replacements and writes
+A batch of ten edits on a 32 MiB file composed the replacements and wrote
 the final content once: the pooled median fell from 778 ms to 327 ms against
 `97b4284`, with warm caches. Matching still scans the file once per edit.
 
 ### Session history
 
-Recorded 2026-10-01 with 128-byte messages, three samples per size.
+Recorded 2026-10-01 with 128-byte messages, three samples per size. These
+measurements predate 0.5.5's session-owned layout and context projection.
 
 | Operation | 1,000 messages | 5,000 messages |
 | --- | ---: | ---: |

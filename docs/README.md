@@ -48,7 +48,7 @@ repository root.
 | Page | Contents |
 | --- | --- |
 | [Release notes](../CHANGELOG.md) | What changed in each version, with upgrade notes. |
-| [Agent benchmark](development/AGENT_BENCHMARK.md) | Measured efficiency against Codex and Claude Code, with per-run results and limits. |
+| [Benchmark history](development/AGENT_BENCHMARK.md) | Dated measurements of earlier versions, their methods and limits. |
 | [Security](../SECURITY.md) | Stored data, credentials and reporting a vulnerability. |
 | [Contributing](../CONTRIBUTING.md) | How to propose a change. |
 
@@ -66,4 +66,4 @@ repository root.
 | [GitHub MCP App](development/GITHUB_MCP_APP.md) | App registration and public client ID for device sign-in. |
 | [Vercel MCP client](development/VERCEL_MCP_CLIENT.md) | Public OAuth metadata, hosting and Jecode client setup. |
 | [TUI theme](tui/THEME.md) | Colour tokens, grid and drawing rules. |
-| [Performance measurement](development/PERFORMANCE.md) | Local probes, transport latency, context reuse and recorded results. |
+| [Performance measurement](development/PERFORMANCE.md) | Reproducible probes and dated historical results. |

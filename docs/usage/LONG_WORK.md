@@ -47,10 +47,11 @@ prompt cache.
 When a request would exceed the threshold, the same model summarizes the work
 since the last compaction into a plain-text handoff of at most about 16 KiB. It
 first asks over the conversation's own request, with its tools and your selected
-effort, so the provider's cache is reused. If that does not fit or fails, it
-summarizes the work in portions at medium effort when the model supports it,
-with tools disabled. The summary keeps goals, constraints, decisions, completed
-work, errors and next steps. Your model and effort for the task do not change.
+effort, allowing the provider to reuse a cached prefix. If that does not fit or
+fails, it summarizes the work in portions at medium effort when the model
+supports it, with tools disabled. The summary keeps goals, constraints,
+decisions, completed work, errors and next steps. Your model and effort for
+the task do not change.
 Your context meter drops when this happens, and a notice says how many messages
 were summarized.
 

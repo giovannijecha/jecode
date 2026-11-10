@@ -1,19 +1,21 @@
-# Jecode vs Codex and Claude Code
+# Historical Jecode, Codex and Claude Code benchmarks
 
-For the current context work, see the [final tight GPT check](#final-tight-gpt-check-2026-11-08),
-the [normal-budget results](#selected-native-build-2026-11-08)
-and [forty-turn quality scores](#forty-turn-confirmation). The requested general
-25% reduction at equal quality remains unconfirmed. The five-turn results below
-are historical.
+These November 2026 measurements describe development builds through 0.4.5,
+not Jecode 0.5.5. The later context measurements used model-free native records;
+0.5.5 instead appends requests until the selected model compacts earlier work.
+There is no matched coding-agent benchmark for that current path, so this page
+supports no token-efficiency or whole-task speed claim for 0.5.5. The requested
+general 25% reduction at equal quality was not established even for the earlier
+design. The original results, methods and quality misses remain below.
 
-Jecode used fewer cost-weighted tokens than both first-party harnesses on the
-maintainer's five-turn coding benchmark. With Claude it also finished sooner;
-with GPT, Codex finished sooner. Every run passed all 21 hidden acceptance tests
-and its project test suite.
+In the maintainer's five-turn coding benchmark on 2026-11-04, the tested Jecode
+builds used fewer cost-weighted tokens than both first-party harnesses. With
+Claude they also finished sooner; with GPT, Codex finished sooner. Every run
+passed all 21 hidden acceptance tests and its project test suite.
 
-These measurements were recorded on 2026-11-04 on Windows. Jecode used account
-sign-in. They describe development builds before the transport, Unix and TUI
-changes prepared for 0.3.5, not a new benchmark of the 0.3.5 release.
+These measurements were recorded on Windows with Jecode account sign-in. They
+describe development builds before the transport, Unix and TUI changes prepared
+for 0.3.5, not a release benchmark.
 
 ## Results
 
@@ -169,7 +171,7 @@ historical counters do not establish a cost advantage for either lifetime.
 
 ### Selected native build, 2026-11-08
 
-The retained build includes the record and failure fixes plus provider-reported
+The then-retained build included the record and failure fixes plus provider-reported
 cache-write lifetimes. Two fresh GPT comparisons used four runs per harness,
 with Codex starting alongside Jecode in each block. All runs passed the 21 hidden
 tests. Jecode scored 6/6 recall points in every run; the no-tools probes made zero
@@ -226,7 +228,7 @@ The candidate spent **5.72% more weighted tokens than the control**. Mean fresh
 input rose from 306,258 to 345,940; output stayed near 20,240 tokens, and request
 count fell from 40.5 to 39.0. These small samples establish no general causal
 claim about rereads, but provide no reason to adopt the candidate. It was
-rejected and the retained context policy is unchanged. No additional Claude or
+rejected and that build's context policy was unchanged. No additional Claude or
 forty-turn session was needed to select a rejected candidate.
 
 The retained control still missed 25% in this fresh block: the required maximum
@@ -269,14 +271,14 @@ Jecode requests reported zero cached tokens after the previous request had
 reported 8,704. Their cause is unestablished; the raw totals include them.
 
 The 25% ceiling was 445,246, leaving 169,123 weighted tokens per Jecode run to
-remove. Earlier tight blocks measured -12.5% and -20.0%; this latest block
-supersedes them as the current comparison, while all original results remain
-above. The variation and latest miss leave the general token floor open.
+remove. Earlier tight blocks measured -12.5% and -20.0%; this was the last
+comparison for that 0.4.5 investigation, while all original results remain
+above. The variation and latest miss left the general token floor unconfirmed.
 
 ### Forty-turn confirmation
 
-The retained executable completed two 40-turn sessions per primary model.
-It reported version 0.3.5. The 0.4.5 preparation preserves that Windows
+The then-retained executable completed two 40-turn sessions per primary model.
+It reported version 0.3.5. The 0.4.5 preparation preserved that Windows
 model-facing runtime, except for later review fixes to the record lines of
 byte-range reads and of edits sent with empty placeholder fields, which were
 not measured again; Unix PTY changes have separate native regression checks.

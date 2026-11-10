@@ -6,10 +6,8 @@ agent; it writes the assignments, follows their progress, reviews what comes
 back and decides what to keep. You can watch with `/agents`, but reviewing and
 closing assignments is the main agent's job.
 
-The main agent is told that a collaborator starts without its context and usually
-costs more than doing the work itself, so it delegates only when you ask or when
-the work splits into independent parts that together would take many calls. To get
-collaborators for smaller work, ask for them.
+The main agent delegates when you ask or when the work splits into independent
+parts. Ask if you want collaborators for smaller work.
 
 ## How collaborators work
 
