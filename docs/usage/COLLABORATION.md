@@ -105,7 +105,7 @@ integration.
 | Action | Fields | Behavior |
 | --- | --- | --- |
 | `create` | `tasks`: one or more items with `title`, `instructions`, `workspace` and optional `context` | Queues collaborators, starts up to eight turns at once and returns IDs such as `a1`. |
-| `update` | `id` and `instructions` and/or `context` | Sends a new version; omitted fields keep their last values. Also starts follow-up work on a returned collaborator. |
+| `update` | `id` and `instructions` and/or `context` | Sends a new version; omitted fields keep their last values. Also starts follow-up work on a returned collaborator. Work not received during the active turn joins the end of the queue when that turn finishes. |
 | `list` | — | Open assignments. |
 | `inspect` | `id` | Activity, assignment versions and report evidence. |
 | `wait` | optional `id`, `timeout_ms` (0–60,000) | Waits for running work; stays cancellable. |

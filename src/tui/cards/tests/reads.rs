@@ -1,5 +1,37 @@
 use super::*;
 
+#[test]
+fn a_partial_read_keeps_completed_content_visible_beside_its_error() {
+    let arguments = Value::object([("paths", Value::Array(vec![Value::string("a.txt")]))]);
+    let result = Value::object([
+        (
+            "error",
+            Value::string("Could not save read results: storage unavailable"),
+        ),
+        (
+            "files",
+            Value::Array(vec![Value::object([
+                ("path", Value::string("a.txt")),
+                ("content", Value::string("1: retained content\n")),
+            ])]),
+        ),
+    ]);
+    let rows = draw(
+        "read",
+        &arguments,
+        Some(&result),
+        None,
+        100,
+        &Presentation {
+            expanded: true,
+            ..Presentation::default()
+        },
+    );
+    let text = plain(&rows);
+    assert!(text.contains("retained content"), "{text}");
+    assert!(text.contains("storage unavailable"), "{text}");
+}
+
 /// A compact read's facts: after the badge and path when they join the
 /// title row, else the single row hung on `└` below it.
 fn facts(rows: &[Line]) -> Line {

@@ -98,6 +98,12 @@ and `limit` like saved command output. `files_read`, `files_not_read` and
 in the result file. Successful skill references remain available to the
 conversation's instruction checkpoints after compaction or resume.
 
+If saving fails, completed inline reads remain in `files` alongside `error`.
+`paths_processed` counts attempted paths and `next_path_index`, when non-null,
+is the zero-based index of the first remaining path in the original `paths`.
+An existing saved prefix keeps its `result_file` reference with
+`result_file_incomplete: true`; that file may end with a partial entry.
+
 Images and PDFs are recognized from their contents. The result returns an
 `attachment:ID` reference to a stored copy, which stays readable after the
 original changes or the temporary area is cleared. Other binary files and
@@ -239,7 +245,7 @@ quoting or expansion. Details:
 | `list` | IDs, commands up to 200 characters, statuses, elapsed seconds and output references for this conversation's running and recent processes. The oldest finished ones leave the list once the model has seen them; 32 are kept. |
 | `poll` | New output and status for `process_id`. Optional `wait_ms`, default 0. |
 | `stop` | Stop the process and its descendants, waiting up to 10 seconds. If the status is `stopping`, poll again. |
-| `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. Text of any length is delivered in order, 64 KiB at a time, each part confirmed before the next; if a part is not confirmed, the error says how many bytes arrived first, that part may still arrive, and nothing after it is sent. |
+| `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. Text of any length is delivered in order, 64 KiB at a time, each part confirmed before the next. If a part is not confirmed or Ctrl+C interrupts the write, the error says how many bytes were confirmed first; no later part is queued. |
 | `resize` | Resize an interactive process to `cols` by `rows` (1–1000). |
 | `interrupt` | Send the terminal interrupt, as Ctrl+C would. |
 
@@ -277,8 +283,9 @@ does not reattach processes or automatically replay an outcome the model never
 received; the model can read its recorded result from `history:processes` before
 deciding whether another command is needed.
 
-A `write` receipt confirms delivery to the terminal, not that the program
-processed it. On Unix, `interrupt` follows the terminal's current `ISIG`,
+A `write` receipt confirms delivery to the bridge input pipe, not that the
+program processed it. A part already in flight may still arrive after Ctrl+C.
+On Unix, `interrupt` follows the terminal's current `ISIG`,
 `VINTR` and `NOFLSH` settings; in raw mode the program receives byte `0x03`. On
 Windows it sends Ctrl+C through ConPTY. Interrupting a `poll` wait leaves the
 process running.

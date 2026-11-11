@@ -113,7 +113,7 @@ impl Library {
             return String::new();
         }
         format!(
-            "Skills read in this conversation (reread if relevant): {}",
+            "Skill references from successful read requests (read or reread if relevant): {}",
             available.join(", ")
         )
     }

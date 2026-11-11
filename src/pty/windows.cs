@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 
 // Owned Windows boundary for an interactive terminal. The Rust process
 // supervisor owns this host's Job Object; CreateProcessW inherits that job.
-public static class JecodePty {
+public static partial class JecodePty {
     const uint CreateSuspended = 0x00000004;
     const uint ExtendedStartup = 0x00080000;
     const int PseudoConsoleAttribute = 0x00020016;
@@ -35,6 +35,10 @@ public static class JecodePty {
     [StructLayout(LayoutKind.Sequential)]
     struct ProcessInfo { public IntPtr Process, Thread; public uint Id, ThreadId; }
     sealed class ConsoleState { public IntPtr Handle; }
+    sealed class InputSequence {
+        public ulong Applied;
+        public ulong Cutoff;
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool CreatePipe(out IntPtr read, out IntPtr write, IntPtr security, uint size);
@@ -136,21 +140,26 @@ public static class JecodePty {
         }
         return true;
     }
-    static void InputLoop(Stream source, FileStream input) {
+    static void InputLoop(Stream source, Stream input, InputSequence sequence) {
         byte[] header = new byte[5];
         while (ReadExact(source, header)) {
             uint length = BitConverter.ToUInt32(header, 1);
-            if (length > 4096) throw new InvalidDataException("PTY input frame is too large");
+            if (length < 8 || length > 4104) throw new InvalidDataException("Invalid PTY input frame size");
             byte[] payload = new byte[length];
             if (!ReadExact(source, payload)) throw new EndOfStreamException("Incomplete PTY input payload");
             if (header[0] != 1) throw new InvalidDataException("Unknown PTY input operation");
-            if (payload.Length > 0) {
-                input.Write(payload, 0, payload.Length);
+            ulong generation = BitConverter.ToUInt64(payload, 0);
+            lock (sequence) {
+                while (generation > sequence.Applied) Monitor.Wait(sequence);
+                if (generation < sequence.Cutoff) continue;
+            }
+            if (payload.Length > 8) {
+                input.Write(payload, 8, payload.Length - 8);
                 input.Flush();
             }
         }
     }
-    static void ControlLoop(Stream source, FileStream input, ConsoleState state) {
+    static void ControlLoop(Stream source, Stream input, ConsoleState state, InputSequence sequence) {
         byte[] header = new byte[5];
         while (ReadExact(source, header)) {
             uint length = BitConverter.ToUInt32(header, 1);
@@ -169,9 +178,19 @@ public static class JecodePty {
                     }
                     break;
                 case 3:
-                    if (payload.Length != 0) throw new InvalidDataException("Invalid PTY interrupt frame");
+                    if (payload.Length != 8) throw new InvalidDataException("Invalid PTY interrupt frame");
+                    ulong generation = BitConverter.ToUInt64(payload, 0);
+                    lock (sequence) {
+                        if (sequence.Applied == ulong.MaxValue || generation != sequence.Applied + 1)
+                            throw new InvalidDataException("Invalid PTY interrupt sequence");
+                        sequence.Cutoff = generation;
+                    }
                     input.WriteByte(3); // ConPTY delivers Ctrl-C to the console client.
                     input.Flush();
+                    lock (sequence) {
+                        sequence.Applied = generation;
+                        Monitor.PulseAll(sequence);
+                    }
                     break;
                 default:
                     throw new InvalidDataException("Unknown PTY control operation");
@@ -207,6 +226,7 @@ public static class JecodePty {
         Thread reader = null;
         object gate = new object();
         var state = new ConsoleState();
+        var sequence = new InputSequence();
         Exception outputFailure = null, controlFailure = null, inputFailure = null;
         bool finished = false;
         try {
@@ -240,7 +260,7 @@ public static class JecodePty {
             inputChannel.WaitForConnection();
             control.WaitForConnection();
             var inputReader = new Thread(() => {
-                try { InputLoop(inputChannel, input); }
+                try { InputLoop(inputChannel, input, sequence); }
                 catch (Exception ex) {
                     lock (gate) inputFailure = ex;
                     TerminateProcess(child.Process, 125);
@@ -249,7 +269,7 @@ public static class JecodePty {
             inputReader.IsBackground = true;
             inputReader.Start();
             var controller = new Thread(() => {
-                try { ControlLoop(control, input, state); }
+                try { ControlLoop(control, input, state, sequence); }
                 catch (Exception ex) {
                     lock (gate) controlFailure = ex;
                     TerminateProcess(child.Process, 125);

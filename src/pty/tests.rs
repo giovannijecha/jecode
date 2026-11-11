@@ -216,8 +216,56 @@ fn an_interrupt_stops_a_segmented_write_and_reports_it() {
     ));
 }
 
-/// The input bytes of every frame in order; on Unix each frame's interrupt
-/// generation must be the write's.
+#[test]
+fn an_interrupt_during_the_last_receipt_does_not_report_success() {
+    use super::*;
+    let (control, receiver, controls) = queued_with_controls();
+    let sending = Arc::clone(&control);
+    let task = thread::spawn(move || sending.write(b"last", &Cancellation::default()));
+    let last = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(payload(&last.bytes), b"last");
+    control.interrupt_direct().unwrap();
+    assert_eq!(
+        controls.recv_timeout(Duration::from_secs(1)).unwrap().bytes[0],
+        3
+    );
+    last.receipt.unwrap().send(Ok(())).unwrap();
+    let error = task.join().unwrap().unwrap_err();
+    assert!(error.contains("interrupted after all 4 bytes"), "{error}");
+}
+
+#[test]
+fn an_interrupt_cannot_pass_a_segment_between_generation_check_and_enqueue() {
+    use super::*;
+    let (control, receiver, controls) = queued_with_controls();
+    let held_sender = control.sender.lock().unwrap();
+    let sending = Arc::clone(&control);
+    let task = thread::spawn(move || sending.write(b"segment", &Cancellation::default()));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while control.generation.try_lock().is_ok() {
+        assert!(Instant::now() < deadline, "write did not reach enqueue");
+        thread::sleep(Duration::from_millis(1));
+    }
+    let interrupting = Arc::clone(&control);
+    let interrupt = thread::spawn(move || interrupting.interrupt_direct());
+    assert!(matches!(
+        controls.recv_timeout(Duration::from_millis(30)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    drop(held_sender);
+    let input = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(payload(&input.bytes), b"segment");
+    interrupt.join().unwrap().unwrap();
+    assert_eq!(
+        controls.recv_timeout(Duration::from_secs(1)).unwrap().bytes[0],
+        3
+    );
+    input.receipt.unwrap().send(Ok(())).unwrap();
+    assert!(task.join().unwrap().unwrap_err().contains("interrupted"));
+}
+
+/// The input bytes of every frame in order; each frame carries the write's
+/// interrupt generation.
 fn payload(stream: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut rest = stream;
@@ -225,7 +273,6 @@ fn payload(stream: &[u8]) -> Vec<u8> {
         assert_eq!(rest[0], 1, "input frame");
         let length = u32::from_le_bytes(rest[1..5].try_into().unwrap()) as usize;
         let body = &rest[5..5 + length];
-        #[cfg(unix)]
         let body = {
             assert_eq!(&body[..8], &0u64.to_le_bytes());
             &body[8..]

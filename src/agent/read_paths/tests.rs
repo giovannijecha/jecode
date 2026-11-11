@@ -4,6 +4,8 @@ use crate::test_support::{Directory, HttpFixture, completion, tool_call};
 use crate::tools::Tools;
 use std::fs;
 
+mod failure;
+
 fn read(agent: &Agent, arguments: Value) -> Value {
     agent.execute_tool(&ToolCall {
         id: "batch".into(),

@@ -55,8 +55,8 @@ impl Agent {
     }
 }
 
-/// The skills a read result delivered: its own, each file's of a multi-path
-/// read, or those of the reads in a `steps` result.
+/// Skill references retained by successful reads, including results saved to
+/// a file. A reference does not claim the model has seen the resource's text.
 pub(super) fn delivered(result: &Value) -> impl Iterator<Item = &str> {
     let steps = result
         .get("steps")

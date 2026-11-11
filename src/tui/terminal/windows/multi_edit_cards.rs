@@ -248,6 +248,23 @@ pub(super) fn console(terminal: &Terminal) {
             "output:session:batch:stdout",
         ],
     );
+    let mut partial_pages = pages.clone();
+    if let Value::Object(fields) = &mut partial_pages {
+        fields.insert(
+            "error".into(),
+            Value::string("Could not save read results: storage unavailable"),
+        );
+    }
+    let partial_reads = Call {
+        result: &partial_pages,
+        ..reads
+    };
+    shown(
+        terminal,
+        partial_reads.rows(80, height, true),
+        80,
+        &["let limit = 10;", "storage unavailable"],
+    );
     for columns in [44, 80] {
         for expanded in [false, true] {
             shown(

@@ -15,6 +15,17 @@ impl Agent {
     /// route as a single read. Every entry reports its own result or error,
     /// so one missing file needs no retry of the others.
     pub(super) fn read_paths(&self, call: &ToolCall, arguments: &Value) -> Value {
+        self.read_paths_with(call, arguments, |first| {
+            Overflow::start(self.tools.outputs(), first)
+        })
+    }
+
+    fn read_paths_with(
+        &self,
+        call: &ToolCall,
+        arguments: &Value,
+        mut save: impl FnMut(usize) -> Result<Overflow, String>,
+    ) -> Value {
         let Some(paths) = arguments.get("paths").and_then(Value::as_array) else {
             return failure("paths must be an array of strings");
         };
@@ -29,7 +40,7 @@ impl Agent {
         let mut overflow: Option<Overflow> = None;
         let (mut read, mut not_read, mut lines) = (0usize, 0usize, 0usize);
         let mut skills = std::collections::BTreeSet::new();
-        for path in paths {
+        for (index, path) in paths.iter().enumerate() {
             let result = match path.as_str() {
                 Some(path) => entry(path, self.read_one(call, path)),
                 None => failure("paths must contain strings"),
@@ -55,7 +66,7 @@ impl Agent {
                 continue;
             }
             if overflow.is_none() {
-                match Overflow::start(self.tools.outputs(), inline.len()) {
+                match save(inline.len()) {
                     Ok(started) => overflow = Some(started),
                     // Without a result file the entry stays inline; the
                     // context view still keeps it recoverable from history.
@@ -68,29 +79,38 @@ impl Agent {
             if let Some(file) = &mut overflow
                 && let Err(error) = file.push(&result)
             {
-                return failure(&error);
+                inline.push(result);
+                return batch_result(
+                    inline,
+                    (read, not_read, lines),
+                    skills,
+                    Some(file.saved()),
+                    Some(ReadFailure {
+                        error,
+                        processed: index + 1,
+                        total: paths.len(),
+                    }),
+                );
             }
         }
-        let mut fields = std::collections::BTreeMap::new();
-        fields.insert("files".to_owned(), Value::Array(inline));
-        if let Some(file) = overflow {
-            match file.finish() {
-                Ok(saved) => {
-                    saved.describe(&mut fields);
-                    fields.insert("files_read".into(), Value::number(read));
-                    fields.insert("files_not_read".into(), Value::number(not_read));
-                    fields.insert("lines_read".into(), Value::number(lines));
-                    if !skills.is_empty() {
-                        fields.insert(
-                            "skill_references".into(),
-                            Value::Array(skills.into_iter().map(Value::string).collect()),
-                        );
-                    }
-                }
-                Err(error) => return failure(&error),
+        let mut saving_failure = None;
+        let saved = overflow.as_mut().map(|file| {
+            if let Err(error) = file.finish() {
+                saving_failure = Some(ReadFailure {
+                    error,
+                    processed: paths.len(),
+                    total: paths.len(),
+                });
             }
-        }
-        Value::Object(fields)
+            file.saved()
+        });
+        batch_result(
+            inline,
+            (read, not_read, lines),
+            skills,
+            saved,
+            saving_failure,
+        )
     }
 
     fn read_one(&self, call: &ToolCall, path: &str) -> Value {
@@ -130,6 +150,62 @@ struct Saved {
     count: usize,
 }
 
+struct ReadFailure {
+    error: String,
+    processed: usize,
+    total: usize,
+}
+
+fn batch_result(
+    files: Vec<Value>,
+    (read, not_read, lines): (usize, usize, usize),
+    skills: std::collections::BTreeSet<String>,
+    saved: Option<Saved>,
+    failure: Option<ReadFailure>,
+) -> Value {
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert("files".into(), Value::Array(files));
+    let has_saved = saved.as_ref().is_some_and(|saved| saved.count > 0);
+    if let Some(saved) = saved.filter(|saved| saved.count > 0) {
+        saved.describe(&mut fields);
+    }
+    if has_saved || failure.is_some() {
+        fields.insert("files_read".into(), Value::number(read));
+        fields.insert("files_not_read".into(), Value::number(not_read));
+        fields.insert("lines_read".into(), Value::number(lines));
+        if !skills.is_empty() {
+            fields.insert(
+                "skill_references".into(),
+                Value::Array(skills.into_iter().map(Value::string).collect()),
+            );
+        }
+    }
+    if let Some(ReadFailure {
+        error,
+        processed,
+        total,
+    }) = failure
+    {
+        fields.insert("error".into(), Value::string(error));
+        fields.insert("paths_processed".into(), Value::number(processed));
+        fields.insert(
+            "next_path_index".into(),
+            if processed < total {
+                Value::number(processed)
+            } else {
+                Value::Null
+            },
+        );
+        if has_saved {
+            fields.insert("result_file_incomplete".into(), Value::Bool(true));
+        }
+        fields.insert("notice".into(), Value::string(format!(
+            "Processed {processed} of {total} paths before saving failed. files retains the results still available inline. Any result_file may end with a partial entry. Resume remaining reads at paths[next_path_index] when non-null."
+        )));
+    }
+    Value::Object(fields)
+}
+
 impl Overflow {
     fn start(outputs: &output::Store, first: usize) -> Result<Self, String> {
         Ok(Self {
@@ -147,14 +223,17 @@ impl Overflow {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<Saved, String> {
+    fn finish(&mut self) -> Result<(), String> {
         self.logs.stdout.finish().map_err(saving)?;
-        self.logs.stderr.finish().map_err(saving)?;
-        Ok(Saved {
-            reference: self.logs.stdout_ref,
+        self.logs.stderr.finish().map_err(saving)
+    }
+
+    fn saved(&self) -> Saved {
+        Saved {
+            reference: self.logs.stdout_ref.clone(),
             first: self.first,
             count: self.count,
-        })
+        }
     }
 }
 

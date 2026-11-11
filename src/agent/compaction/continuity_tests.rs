@@ -449,7 +449,7 @@ fn compaction_saves_skill_references_even_when_the_model_summary_omits_them() {
         message
             .get("content")
             .and_then(Value::as_str)
-            .is_some_and(|text| text.contains("Skills read in this conversation"))
+            .is_some_and(|text| text.contains("Skill references from successful read requests"))
     }));
     assert_eq!(agent.current_system_message(), system);
     agent.checkpoint(crate::sessions::Stage::Ready).unwrap();

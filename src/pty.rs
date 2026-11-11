@@ -39,9 +39,8 @@ pub(crate) struct Control {
     failure: Arc<Mutex<Option<String>>>,
     closed: Arc<AtomicBool>,
     size: Mutex<(u16, u16)>,
-    /// Interrupt count. A tool write stops between segments once it changes;
-    /// on Unix it also tags input so the helper discards what an interrupt
-    /// overtook.
+    /// Interrupt count. Input frames carry it so the helper can discard input
+    /// that an interrupt overtook on either platform.
     generation: Mutex<u64>,
     _endpoint: Endpoint,
 }
@@ -224,26 +223,25 @@ fn frame(op: u8, bytes: &[u8]) -> Vec<u8> {
 }
 
 impl Control {
-    /// Input tagged with an interrupt generation: `None` takes the current
-    /// one, a write's later segments keep the generation it began with, so
-    /// an interrupt during the write still discards the rest of it.
-    #[cfg(unix)]
+    /// Each input frame carries the generation current when it was queued.
     fn enqueue_input(
         &self,
         bytes: &[u8],
-        tag: Option<u64>,
         receipt: Option<mpsc::SyncSender<Result<(), String>>>,
     ) -> Result<(), String> {
         let generation = self.generation.lock().unwrap();
-        let tag = tag.unwrap_or(*generation);
+        self.enqueue(Self::input_packet(bytes, *generation), false, receipt)
+    }
+
+    fn input_packet(bytes: &[u8], generation: u64) -> Vec<u8> {
         let mut packet = Vec::new();
         for chunk in bytes.chunks(4096) {
             let mut payload = Vec::with_capacity(chunk.len() + 8);
-            payload.extend_from_slice(&tag.to_le_bytes());
+            payload.extend_from_slice(&generation.to_le_bytes());
             payload.extend_from_slice(chunk);
             packet.extend(frame(1, &payload));
         }
-        self.enqueue(packet, false, receipt)
+        packet
     }
 
     fn enqueue_interrupt(
@@ -254,10 +252,7 @@ impl Control {
         let next = generation
             .checked_add(1)
             .ok_or("Terminal interrupt sequence exhausted")?;
-        #[cfg(unix)]
         let packet = frame(3, &next.to_le_bytes());
-        #[cfg(windows)]
-        let packet = frame(3, &[]);
         self.enqueue(packet, true, receipt)?;
         *generation = next;
         Ok(())
@@ -334,14 +329,6 @@ impl Control {
         }
     }
 
-    #[cfg(windows)]
-    fn input_packet(bytes: &[u8]) -> Vec<u8> {
-        bytes
-            .chunks(4096)
-            .flat_map(|chunk| frame(1, chunk))
-            .collect()
-    }
-
     /// Delivers input of any size in order, one confirmed segment at a time.
     /// A failure or an interrupt names how much was confirmed first; nothing
     /// after it is sent, and nothing is ever sent twice.
@@ -362,18 +349,21 @@ impl Control {
         let tag = *self.generation.lock().unwrap();
         let mut confirmed = 0;
         for segment in bytes.chunks(SEGMENT) {
-            if *self.generation.lock().unwrap() != tag {
+            let mut interrupted = false;
+            let result = self.deliver_with(cancellation, |receipt| {
+                let generation = self.generation.lock().unwrap();
+                if *generation != tag {
+                    interrupted = true;
+                    return Err("Terminal input was interrupted".into());
+                }
+                self.enqueue(Self::input_packet(segment, tag), false, receipt)
+            });
+            if interrupted {
                 return Err(format!(
                     "Terminal input was interrupted after {confirmed} of {} bytes were sent; later bytes were not sent.",
                     bytes.len()
                 ));
             }
-            #[cfg(unix)]
-            let result = self.deliver_with(cancellation, |receipt| {
-                self.enqueue_input(segment, Some(tag), receipt)
-            });
-            #[cfg(windows)]
-            let result = self.deliver(Self::input_packet(segment), false, cancellation);
             if let Err(error) = result {
                 return Err(if confirmed == 0 {
                     error
@@ -385,6 +375,12 @@ impl Control {
                 });
             }
             confirmed += segment.len();
+        }
+        if *self.generation.lock().unwrap() != tag {
+            return Err(format!(
+                "Terminal input was interrupted after all {} bytes were sent.",
+                bytes.len()
+            ));
         }
         Ok(())
     }
@@ -407,10 +403,7 @@ impl Control {
             }
         };
         loop {
-            #[cfg(unix)]
-            let result = self.enqueue_input(bytes, None, None);
-            #[cfg(windows)]
-            let result = self.enqueue(Self::input_packet(bytes), false, None);
+            let result = self.enqueue_input(bytes, None);
             match result {
                 Err(error) if error == QUEUE_FULL && Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(1));
