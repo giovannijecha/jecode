@@ -1,5 +1,24 @@
 # Release notes
 
+## 0.6.5
+
+Changes since 0.5.5.
+
+- **Anthropic continuity.** Tool calls, image and PDF views, and continuations
+  keep the signed message prefix stable across turns and resume. Compaction
+  removes thinking tied to the replaced prefix while keeping the original
+  saved history. See [Anthropic integration](docs/development/ANTHROPIC.md).
+- **Larger tool requests.** Removed arbitrary item and text quotas from file
+  batches, steps, plans, questions, searches and browser requests. Large reads
+  save overflow for paging and report an outcome for every path. See
+  [Tools](docs/usage/TOOLS.md).
+- **Collaborator queue.** Additional assignments wait for a slot while up to
+  eight collaborator turns run at once per conversation. See
+  [Collaboration](docs/usage/COLLABORATION.md).
+- **Documentation.** Guides, references, contributor procedures, maintainer
+  runbooks and dated reports have separate sections, with new OpenRouter and
+  local-file references. Start at the [documentation index](docs/README.md).
+
 ## 0.5.5
 
 Changes since 0.4.5.
