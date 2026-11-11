@@ -16,10 +16,9 @@ their models independently. Jecode does not retry a failed API request through
 subscription credentials, or a failed subscription request through an API key.
 You can configure several providers and switch between them per conversation.
 
-Whatever you choose, Jecode sends the conversation to that provider, including
-project files and command output the agent has read, and supported attachments.
-With OpenRouter, the request goes on to the model provider OpenRouter selects.
-See [Security](../../SECURITY.md#data-sent-to-providers).
+See [Security](../../SECURITY.md#data-sent-to-providers) for what each route
+sends to providers and [Credentials](../../SECURITY.md#credentials) for local
+storage and access permissions.
 
 ## Connect in the TUI
 
@@ -63,9 +62,8 @@ Create a key at <https://openrouter.ai/settings/keys>. In the TUI, choose
 type. In `jecode setup`, the key is entered hidden and checked with OpenRouter
 before you choose a model. Pressing Enter on an empty key keeps the saved one.
 
-The key is stored in plain text in `~/.jecode/config.json`. Keep that file
-private. OpenRouter-specific endpoint choices are described in
-[Configuration](CONFIGURATION.md#openrouter-endpoint-routing).
+OpenRouter-specific endpoint choices are described in
+[Configuration](../reference/CONFIGURATION.md#openrouter-endpoint-routing).
 
 ## OpenAI API key
 
@@ -88,8 +86,8 @@ project does not support; see the [OpenAI adapter reference](../development/OPEN
 ## Anthropic API key
 
 Create a workspace-scoped key at <https://platform.claude.com/settings/keys>,
-then choose **API keys** → **Anthropic API**. The same masked input and model
-selection flow stores it in `~/.jecode/config.json`. Requests go directly to
+then choose **API keys** → **Anthropic API**. Connect it through the same masked
+input and model selection flow. Requests go directly to
 the Claude Messages API using Jecode's identity; they do not use the Claude
 Code compatibility profile. Usage is billed to the API workspace, separately
 from a Claude subscription.
@@ -164,12 +162,11 @@ signed in in your browser.
 - **Sign out** deletes that account's local tokens. For ChatGPT, Jecode also
   asks OpenAI to revoke them; for Claude, the remote authorization is not
   revoked.
-- Account records are stored separately from `config.json`, under
-  `~/.jecode/accounts/openai/` and `~/.jecode/accounts/anthropic/`. They are
-  plain JSON files readable only by your user (owner-only permissions on Unix,
-  a current-user ACL on Windows).
-- Tokens refresh automatically. Jecode masks known tokens and keys in tool
-  output, saved conversations and exports.
+- Tokens refresh automatically.
+
+For token storage and access permissions, see
+[Credentials](../../SECURITY.md#credentials); for masking, see
+[Data sent to providers](../../SECURITY.md#data-sent-to-providers).
 
 ## Switch providers and models
 
@@ -178,7 +175,7 @@ and **Credentials**, using the same categories as provider settings. Choose a
 category, a configured provider, then the model and effort. The change applies
 to the current conversation only. `/settings` → **Default model** uses the same
 categories for the default of new conversations. See
-[Configuration](CONFIGURATION.md#models-and-effort).
+[Configuration](../reference/CONFIGURATION.md#models-and-effort).
 
 If the default provider loses its credentials, the TUI uses another configured
 provider for the conversation, restores that provider's last saved model when

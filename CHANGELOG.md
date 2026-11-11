@@ -25,7 +25,7 @@ Changes since 0.4.5.
   (`tmp/`) and collaborator data (`collaboration/`). Attachments stay shared per
   project. Temporary files last as long as the conversation: they survive exit
   and resume until `/tmp clean` or deletion. See
-  [Files Jecode keeps](docs/usage/CONFIGURATION.md#files-jecode-keeps).
+  [Files Jecode keeps](docs/reference/FILES.md).
 - Deleting a conversation keeps its lock and names any unrecognized entry left
   in its folder; retained collaborator work stays in its `collaboration/` folder.
 
@@ -42,7 +42,7 @@ Changes since 0.4.5.
   `edits` or `files`.
 - Configurations containing the retired root-level `openrouter` block are
   rejected without rewriting the file. Jecode uses `selection` and `backends`; see
-  [Configuration](docs/usage/CONFIGURATION.md).
+  [Configuration](docs/reference/CONFIGURATION.md).
 
 ### Upgrading from 0.4.5
 
@@ -131,7 +131,7 @@ Changes since 0.3.5.
   remains available for breaks. Configurations saved by 0.3.5 keep its one-hour
   default. Choose **5 minutes** in `/settings` → **Context** → **Prompt cache**
   to adopt the new default. One-hour writes cost more at Anthropic's API list
-  prices; see [Configuration](docs/usage/CONFIGURATION.md#prompt-cache).
+  prices; see [Configuration](docs/reference/CONFIGURATION.md#prompt-cache).
 
 ### Development
 
@@ -150,7 +150,7 @@ Changes since 0.3.5.
   checkpoints and sustained record growth without provider calls; they do not
   establish a ten-hour live result. See
   [context checks](docs/development/CONTEXT_CHECKS.md) and the
-  [benchmark conditions](docs/development/AGENT_BENCHMARK.md).
+  [benchmark conditions](docs/reports/AGENT_BENCHMARK_2026-11.md).
 
 ## 0.3.5
 
@@ -166,8 +166,8 @@ Changes since 0.2.5.
 - **More systems.** The npm package adds macOS on Intel and lowers the Linux
   floor from glibc 2.39 to 2.28. Release checks also enforce floors of macOS 11
   and Windows 10 1809, though not every floor has run Jecode yet; see the
-  [evidence for each one](docs/development/PLATFORMS.md#supported-versions).
-- **Lower token use.** A [five-turn benchmark](docs/development/AGENT_BENCHMARK.md)
+  [evidence for each one](docs/usage/PLATFORMS.md#supported-versions).
+- **Lower token use.** A [five-turn benchmark](docs/reports/AGENT_BENCHMARK_2026-11.md)
   recorded fewer weighted tokens than Codex and Claude Code on one project, with
   all hidden acceptance tests passing. With GPT, Codex finished sooner.
 - **A new terminal design.** Auto, Dark and Light themes keep your terminal's own
@@ -189,7 +189,7 @@ Changes since 0.2.5.
 
 - Native HTTP adapters reuse connections between requests on Windows, Linux and
   macOS. OpenAI conversations use WebSocket with HTTP fallback.
-  [Windows measurements](docs/development/PERFORMANCE.md#provider-transports)
+  [Windows measurements](docs/reports/PERFORMANCE_RESULTS.md#provider-transports)
   record lower first-update latency after the change.
 
 ### Terminal interface
@@ -208,7 +208,7 @@ Changes since 0.2.5.
 ### Tools and commands
 
 - The `bash` tool adds here-documents, here-strings, path patterns and the `grep`,
-  `head` and `tail` built-ins; see [Command language](docs/usage/SHELL.md).
+  `head` and `tail` built-ins; see [Command language](docs/reference/SHELL.md).
 - `write` creates a new file's missing parent directories.
 - In Workspace, commands can read Node.js runtimes installed through Volta, nvm,
   nvm-windows or fnm, and macOS locates the SDK first so Rust builds keep their

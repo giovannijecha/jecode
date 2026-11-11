@@ -8,9 +8,12 @@ toolchain, native compiler, third-party npm dependency, or install script. Node
 must remain available when launching this npm distribution. The existing
 standalone packages continue to run without Node.
 
+User installation, updates, removal and coexistence with standalone builds are
+covered in [Installation](../usage/INSTALLATION.md).
+
 ## OS floors
 
-[Platform support](PLATFORMS.md#supported-versions) lists the floors and what
+[Platform support](../usage/PLATFORMS.md#supported-versions) lists the floors and what
 has run on each. `npm/targets.cjs` holds their values. `release.mjs stage` audits
 the executable and every helper embedded in it, and fails rather than record a
 floor the build does not meet:
@@ -39,7 +42,7 @@ contains the launcher, the four executables, and public documentation and licens
 Keep `AGENTS.md`, local configuration, credentials, and internal reports out of
 the tarball.
 
-The checked-in [CI workflow](../../.github/workflows/CI.yml) runs the Rust
+The checked-in [CI workflow](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml) runs the Rust
 checks, launcher tests, release build, local native package, npm lifecycle
 fixture, and a native terminal check through the npm launcher on Windows x64
 and Linux x64 using the existing local runners, and on hosted macOS ARM64 and x64.
@@ -81,7 +84,7 @@ the native binary and npm's global install, update, and uninstall behavior.
 To check one platform from a local checkout, build its release executable with
 `cargo build --release --locked --offline` (on Linux, against the sysroot; on macOS,
 with `MACOSX_DEPLOYMENT_TARGET=11.0`; see
-[Development and testing](TESTING.md#os-floors)), then run:
+[Development and testing](../development/TESTING.md#os-floors)), then run:
 
 ```text
 node tools/npm/release.mjs stage <path-to-native-executable> target/npm-stage/<target>
@@ -142,20 +145,3 @@ The preparation workflow does none of this. For each published version:
 4. Create the GitHub release `Jecode <version>` from that tag, with the user-facing
    changes as its notes, and attach `giovannijecha-jecode-<version>.tgz` and
    `manifest.json`.
-
-## User lifecycle
-
-The npm commands are:
-
-```text
-npm install -g @giovannijecha/jecode
-jecode --version
-npm update -g @giovannijecha/jecode
-npm uninstall -g @giovannijecha/jecode
-```
-
-npm uninstall removes the npm package and command shim. It does not remove
-Jecode's configuration, credentials or conversations under `~/.jecode/`.
-The separate standalone installer may have added another
-`jecode` earlier on `PATH`; check `Get-Command jecode` on Windows or
-`command -v jecode` on Unix before and after migration.

@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-// Semantic roles of the design; docs/tui/THEME.md records their use and contrast.
+// Semantic roles of the design; docs/development/TUI_THEME.md records their use and contrast.
 // Every role carries its ink for dark and for light terminals, and painting picks
 // one, so the call sites never change with the theme. Jecode never paints the
 // terminal's background: cells without a surface keep SGR 49 in both. Weight and slant

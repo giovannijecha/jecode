@@ -41,7 +41,8 @@ content; Jecode does not inspect or redact secrets inside them.
   `~/.jecode/config.json`.
 - **ChatGPT and Claude tokens** are stored in plain JSON account records under
   `~/.jecode/accounts/`, readable only by your user: owner-only permissions on
-  Unix, an ACL restricted to the current user on Windows. Access tokens
+  Unix (directories `0700`, files `0600`), an ACL restricted to the current
+  user on Windows. Access tokens
   authenticate requests; refresh tokens are sent only to the issuing provider
   to renew them, and for ChatGPT to revoke them at sign-out. The verified
   ChatGPT ID token stays in the local record.
@@ -54,12 +55,17 @@ content; Jecode does not inspect or redact secrets inside them.
 
 ## Local data
 
-Jecode keeps local data under `~/.jecode/`, including sensitive copies of:
+The [local file reference](docs/reference/FILES.md) lists the Jecode home,
+its directories and locks, including the `JECODE_HOME` override. Local data
+includes sensitive copies of:
 
 - saved conversations, complete command output and attachment copies;
 - temporary files, web responses and browser data;
 - named browser profiles under `~/.jecode/browser/profiles/`, which can keep
   cookies and signed-in sessions.
+
+Conversations and command output hold project file contents, including files
+Git ignores such as `.env`.
 
 ## Boundaries
 

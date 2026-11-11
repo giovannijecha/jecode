@@ -64,7 +64,7 @@ new request from there.
 Compaction never deletes anything. The full original history stays in the saved
 conversation and export, and the model can read any part of it again with
 `history:N` or the complete list of your requests with `history:requests`; see
-the [Tool reference](TOOL_REFERENCE.md#read). Skills the model had read are
+the [Tool reference](../reference/TOOL_REFERENCE.md#read). Skills the model had read are
 remembered so it can read them again. Compaction happens inside the current
 turn: it does not send your draft or rerun a completed tool call.
 

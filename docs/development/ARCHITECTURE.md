@@ -112,7 +112,7 @@ is replayed through every provider's native function-call shape.
 `tui/state/rows.rs` forms a Work chapter from two or more contiguous eligible
 calls with the same normalized label and execution turn (`Presentation.turn_id`).
 `tui/cards/chapter.rs` derives the chapter's facts and status from its members.
-See [Tool activity](../tui/TOOL_ACTIVITY.md) for the user-visible result.
+See [Tool activity](../usage/TOOL_ACTIVITY.md) for the user-visible result.
 
 ### Context and compaction
 
@@ -367,7 +367,28 @@ Windows frames use `CONOUT$` to avoid the small writes made by standard output
 to a console. This reduces ConPTY frame delays; it does not bypass the host's
 own rendering or frame pacing. The terminal adapter selects UTF-8 output.
 `--plain` bypasses the terminal adapter entirely. Native fixtures and host
-checks are in [Platform support](PLATFORMS.md).
+checks are in [Development and testing](TESTING.md#native-terminal-fixtures).
+
+### Interactive terminal bridge
+
+`exec` with `tty: true` starts an owned native bridge. On Windows it uses ConPTY
+and current-user named pipes, and checks the opened pipe against the launched
+bridge's process ID before sending input. On Linux and macOS it uses a POSIX PTY
+and private Unix-domain sockets. Input and control use separate connections, so
+input backpressure cannot block a resize or an interrupt. Terminal output
+combines stdout and stderr and is saved like other command output.
+
+On Unix, interrupts pass through the terminal line discipline. The `VINTR`
+character produces a signal only while `ISIG` is enabled; otherwise the
+application reads a literal ETX byte. `NOFLSH` preserves pending input; when
+flushing is on, older input still in transit is discarded while later input is
+kept. Without a foreground process group, an interrupt is a no-op.
+
+The bridges are built during the Cargo build: with the system .NET compiler on
+Windows, and with `cc` on Linux and macOS (override with `CC`; cross builds need
+`CC_<target>` or `TARGET_CC`, except between macOS architectures, which use
+`cc -arch`). Debug builds treat C compiler warnings as errors. Linux cleans up
+interactive job-control groups through `/proc`; macOS uses `/bin/ps`.
 
 ## Provider transport
 
@@ -387,7 +408,7 @@ credential environment variables of every available backend before launch.
 
 | Adapter | Route | Reference |
 | --- | --- | --- |
-| `backend/openrouter/` | OpenRouter chat completions with an API key, endpoint routing and PDF parsing | [Configuration](../usage/CONFIGURATION.md#openrouter-endpoint-routing) |
+| `backend/openrouter/` | OpenRouter chat completions with an API key, endpoint routing and PDF parsing | [OpenRouter backend](OPENROUTER.md) |
 | `backend/openai/` | Stateless Responses requests with an API key (`openai-api`) or ChatGPT account (`openai`) | [OpenAI backend](OPENAI.md) |
 | `backend/anthropic/` | Streamed Messages requests with an API key (`anthropic-api`) or Claude compatibility account (`anthropic`) | [Anthropic backend](ANTHROPIC.md) |
 

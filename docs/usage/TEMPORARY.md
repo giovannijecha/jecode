@@ -10,7 +10,8 @@ throwaway files out of your project.
 
 The area belongs to the conversation, not to the running Jecode process. It is
 created on first use, inside the
-[conversation's folder](SESSIONS.md), and moves with `JECODE_HOME`. Complete
+[conversation's folder](../reference/FILES.md#stored-files), and moves with
+[`JECODE_HOME`](../reference/FILES.md#jecode-home). Complete
 command output is kept separately in the same folder's `outputs/`. A
 collaborator's area is in its own session folder, inside the main
 conversation's `collaboration/` folder.

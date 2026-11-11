@@ -20,7 +20,8 @@ mkdir -p "$(dirname "$package")"
 mkdir "$package"
 cp "$target_root/release/jecode" "$package/jecode"
 cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" \
-    "$script_dir/CHANGELOG.md" "$script_dir/SECURITY.md" "$script_dir/CONTRIBUTING.md" "$package/"
+    "$script_dir/CHANGELOG.md" "$script_dir/SECURITY.md" "$script_dir/CONTRIBUTING.md" \
+    "$script_dir/CODE_OF_CONDUCT.md" "$package/"
 mkdir -p "$package/docs"
 # Without -L, find neither follows nor matches symbolic links. Names match
 # without case, as they do in PACKAGE.ps1.

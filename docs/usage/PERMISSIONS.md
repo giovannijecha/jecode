@@ -43,7 +43,7 @@ It never asks for permission to edit: switch levels instead.
 | `/permissions` | Choose this conversation's level, or open **Remembered** approvals. |
 | `/permissions read`, `/permissions workspace`, `/permissions full` | Change this conversation's level directly. |
 | `/settings` → **Default permissions** | Save the level new conversations start at. |
-| `permissions.default` in [`config.json`](CONFIGURATION.md#the-configuration-file) | The same default, edited by hand. |
+| `permissions.default` in [`config.json`](../reference/CONFIGURATION.md#the-configuration-file) | The same default, edited by hand. |
 
 The TUI shows the current level as a chip on the composer's lower border. A
 level change applies to later tool calls. Calls already running, including

@@ -36,7 +36,7 @@ and does not run. The Ctrl+G sheet never queues: commands that wait stay listed 
 | --- | --- | --- |
 | `/model [ID]` | Choose API keys or Credentials, then provider, model and effort for this conversation. An ID switches the current provider's model directly. | Opens |
 | `/effort [NAME]` | Choose the reasoning effort for this conversation. | Opens |
-| `/routing` | Choose an OpenRouter endpoint for this conversation. See [Configuration](../usage/CONFIGURATION.md#openrouter-endpoint-routing). | Opens |
+| `/routing` | Choose an OpenRouter endpoint for this conversation. See [Configuration](CONFIGURATION.md#openrouter-endpoint-routing). | Opens |
 | `/permissions [LEVEL]` | Choose Read, Workspace or Full for this conversation, or review remembered approvals. See [Permissions](../usage/PERMISSIONS.md). | Now |
 
 ### Workspace
@@ -46,13 +46,13 @@ and does not run. The Ctrl+G sheet never queues: commands that wait stay listed 
 | `/init` | Have the model create or update the project's `AGENTS.md`. See [Project instructions](../usage/PROJECT_INSTRUCTIONS.md). | Waits |
 | `/skills` | List your personal skills. See [Skills](../usage/SKILLS.md). | Opens |
 | `/tmp [clean]` | Show, or clear, the conversation's temporary files. See [Temporary files](../usage/TEMPORARY.md). | Waits |
-| `/process [ID]` | Inspect, stop, background or type into running and recent processes; `/process stop ID` stops one. See [Terminal interface](INTERFACE.md#processes). | Now |
+| `/process [ID]` | Inspect, stop, background or type into running and recent processes; `/process stop ID` stops one. See [Terminal interface](../usage/INTERFACE.md#processes). | Now |
 
 ### Jecode
 
 | Command | Purpose | During a turn |
 | --- | --- | --- |
-| `/settings` | Change saved defaults and connect providers. Alias: `/setup`. See [Configuration](../usage/CONFIGURATION.md). | Opens |
+| `/settings` | Change saved defaults and connect providers. Alias: `/setup`. See [Configuration](CONFIGURATION.md). | Opens |
 | `/mcp` | Inspect globally configured MCP connections and their tools. Configure them in Settings → MCP. | Now |
 | `/lsp` | Inspect configured language servers and this conversation's observed instances without starting one. Configure in Settings → LSP. | Now |
 | `/help` | Show commands and keys, including Ctrl+G. | Opens |
@@ -87,7 +87,7 @@ a real one.
 | --- | --- |
 | Esc | Close the open menu or panel, or leave prompt history; otherwise stop the running turn. Never scrolls. |
 | Ctrl+C | Close a menu, leave prompt history, stop the running turn or, when idle, clear the draft. Never quits. |
-| Ctrl+O | Expand or collapse the tool cards of the latest finished turn. Works only when idle with no panel open; the key is shown on that turn only. See [Tool activity](TOOL_ACTIVITY.md#expand-with-ctrlo). |
+| Ctrl+O | Expand or collapse the tool cards of the latest finished turn. Works only when idle with no panel open; the key is shown on that turn only. See [Tool activity](../usage/TOOL_ACTIVITY.md#expand-with-ctrlo). |
 | Ctrl+Q | Quit, asking first while work is running. |
 | F1 | Open help, also during a turn. |
 | Page Up, Page Down, mouse wheel | Scroll the conversation. |

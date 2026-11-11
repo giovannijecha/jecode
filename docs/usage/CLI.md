@@ -16,7 +16,7 @@ jecode --version
 
 | You run | You get |
 | --- | --- |
-| `jecode` in an interactive terminal | The fullscreen TUI. See [Terminal interface](../tui/INTERFACE.md). |
+| `jecode` in an interactive terminal | The fullscreen TUI. See [Terminal interface](INTERFACE.md). |
 | `jecode --plain` | A line-based chat in the same terminal. |
 | `jecode "PROMPT"` | One task. The answer goes to stdout and progress to stderr. |
 | `jecode < task.md`, `... \| jecode` | One task read from redirected or piped stdin (up to 1 MiB). |

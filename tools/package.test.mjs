@@ -30,7 +30,7 @@ function fixture(t) {
   const script = windows ? 'PACKAGE.ps1' : 'PACKAGE.sh';
   fs.copyFileSync(path.join(root, script), path.join(directory, script));
   for (const name of [windows ? 'INSTALL.ps1' : 'INSTALL.sh', 'LICENSE', 'README.md',
-    'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md']) {
+    'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']) {
     fs.writeFileSync(path.join(directory, name), `fixture ${name}\n`);
   }
   const docs = path.join(directory, 'docs/development');
@@ -74,6 +74,7 @@ test('standalone packaging excludes private docs and refuses an existing destina
   const item = fixture(t);
   const first = run(item);
   assert.equal(first.status, 0, first.stderr || first.error?.message);
+  assert.ok(fs.existsSync(path.join(item.packageRoot, 'CODE_OF_CONDUCT.md')));
   const docs = path.join(item.packageRoot, 'docs/development');
   assert.ok(fs.existsSync(path.join(docs, 'PUBLIC.md')));
   for (const name of ['CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'Harness_Draft.md', 'AGENTS.md', 'CLAUDE.md']) {

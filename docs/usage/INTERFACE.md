@@ -3,7 +3,7 @@
 Running `jecode` in an interactive terminal opens the fullscreen interface
 (TUI). It shows one conversation above a composer where you type, and keeps
 working while you read, type or open menus. Every key is listed in
-[Commands and keys](COMMANDS.md).
+[Commands and keys](../reference/COMMANDS.md).
 
 ## The screen
 
@@ -14,7 +14,7 @@ From top to bottom:
   away with it.
 - **The status row.** What the agent is doing now, or how the last turn ended.
 - **The composer.** Your draft, between two horizontal borders. The lower border
-  carries the conversation's [permission level](../usage/PERMISSIONS.md) on the
+  carries the conversation's [permission level](PERMISSIONS.md) on the
   right and, while a draft exists, `Ctrl+G commands` on the left.
 - **The footer.** Your working directory on the left; the model, its effort and
   a context gauge on the right. Menus and panels open in place of the composer
@@ -23,9 +23,9 @@ From top to bottom:
 ### Startup screen
 
 While the conversation is empty, Jecode shows a startup screen: the `>_ jecode`
-mark, then the version, how many [personal skills](../usage/SKILLS.md) are
+mark, then the version, how many [personal skills](SKILLS.md) are
 available and whether the folder has an
-[`AGENTS.md`](../usage/PROJECT_INSTRUCTIONS.md). If this folder has saved
+[`AGENTS.md`](PROJECT_INSTRUCTIONS.md). If this folder has saved
 conversations, up to three recent ones are listed under **Recent in this
 folder**, with a `/resume` shortcut for all of them. A configured model with no
 local conversations shows **No saved conversations in this folder**. With saved
@@ -47,14 +47,14 @@ rows, and scrolls around the caret; an empty composer shows `Ask anything…`.
 
 Ctrl+P and Ctrl+N browse your last 50 sent messages (commands are excluded),
 and Esc returns to the draft you were writing. To attach files or a clipboard
-image, see [Attachments](../usage/ATTACHMENTS.md).
+image, see [Attachments](ATTACHMENTS.md).
 
 Type `/` to open the command list; your draft filters it. Up/Down select, Tab
 completes the name and Enter runs it. Press Ctrl+G instead to open the same
 commands in a **Commands** sheet with its own **Filter** field, leaving your
 draft untouched: it waits above the sheet as `draft kept`. Use `/` when the
 command takes arguments. `/help` (or F1) lists commands and common shortcuts;
-[Commands and keys](COMMANDS.md) has the full reference.
+[Commands and keys](../reference/COMMANDS.md) has the full reference.
 
 ## While the agent works
 
@@ -93,8 +93,8 @@ free; otherwise it waits above the status row as a `paused` draft, which is neve
 sent automatically. Up in an empty composer takes it back.
 
 Permission requests and questions from the agent take over the composer area
-until you answer; see [Permissions](../usage/PERMISSIONS.md#approval-requests)
-and [Questions and plans](../usage/QUESTIONS_AND_PLANS.md).
+until you answer; see [Permissions](PERMISSIONS.md#approval-requests)
+and [Questions and plans](QUESTIONS_AND_PLANS.md).
 
 ## Notices
 
@@ -107,7 +107,7 @@ conversation:
   message. When there is a fix, they name it as a key, such as
   `/settings update key` for a rejected API key.
 - **Retries** show `Retrying in 4s` with the attempt number and reason; see
-  [Long-running work](../usage/LONG_WORK.md#connection-problems).
+  [Long-running work](LONG_WORK.md#connection-problems).
 
 ## The footer
 
@@ -118,11 +118,11 @@ provider reading; a leading `~`, as in `~52%`, marks an estimate of the next
 request instead, shown while it differs from that reading by at least one point
 of the window. `<1%` means a little context is used; `?` means there is no
 reliable figure yet. See
-[Long-running work](../usage/LONG_WORK.md#context-and-compaction).
+[Long-running work](LONG_WORK.md#context-and-compaction).
 
 While collaborators are working or waiting for review, an `AGENTS` badge with
 counts replaces the directory; see
-[Collaborating agents](../usage/COLLABORATION.md#watch-in-the-tui). While processes
+[Collaborating agents](COLLABORATION.md#watch-in-the-tui). While processes
 keep running after their calls returned, a `PROCESS` badge with the count and the
 `/process` command does the same; with collaborators too, the `AGENTS` badge stays
 and counts them among its facts. On narrow
@@ -176,7 +176,7 @@ conversation. Completion creates no status-row notice: the current activity
 or the turn's final statistics stay visible. An idle conversation continues from
 there unless the last turn was stopped or failed, or queued messages, a menu, a
 question or a permission prompt come first. See
-[Processes](../usage/TOOLS.md#processes).
+[Processes](TOOLS.md#processes).
 
 ## Reading and scrolling
 
@@ -191,7 +191,7 @@ arrived. Scroll to the end, press Alt+End or send a message to follow again.
 Esc never moves the view.
 
 Mouse clicks and text selection are not supported; use
-[`/copy`](../usage/COPY_AND_EXPORT.md#copy) to copy answers. Your terminal's own
+[`/copy`](COPY_AND_EXPORT.md#copy) to copy answers. Your terminal's own
 scrolling shortcuts take precedence over Jecode's.
 
 When you resize the terminal, the composer and panels adapt at once and the
@@ -229,14 +229,14 @@ summary with the command to resume:
 The resume line appears only after a successful save of a conversation with at
 least one message; if saving failed, the summary says `autosave failed`. The
 conversation is never dumped into your terminal's scrollback; it stays in the
-[saved conversation](../usage/SESSIONS.md).
+[saved conversation](SESSIONS.md).
 
 ## Terminal compatibility
 
 - The TUI needs a VT-compatible terminal. If it cannot start, the error suggests
   `jecode --plain`.
 - Colors are 24-bit, or the 256-color palette on a Linux or macOS terminal that does
-  not declare 24-bit support; see [Theme](THEME.md). `NO_COLOR` is ignored. Jecode never paints a
+  not declare 24-bit support; see [Theme](../development/TUI_THEME.md). `NO_COLOR` is ignored. Jecode never paints a
   background: it keeps your terminal's own. The `appearance.theme` setting, or
   `/settings` › **Theme**, chooses inks for dark or light terminals; `auto`
   follows the terminal's reported background and assumes dark without a reply.

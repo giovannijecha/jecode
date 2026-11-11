@@ -2,7 +2,7 @@
 
 This is the visual reference for contributors changing the TUI: colour tokens,
 the screen grid and how each element is drawn. For how to use the interface, see
-[Terminal interface](INTERFACE.md) and [Tool activity](TOOL_ACTIVITY.md).
+[Terminal interface](../usage/INTERFACE.md) and [Tool activity](../usage/TOOL_ACTIVITY.md).
 
 The interactive TUI runs on the terminal's alternate screen. Jecode never paints
 a background, in either theme: cells without a surface keep the terminal's own
@@ -16,7 +16,7 @@ strikethrough look. Tokens live in
 ## Choosing the inks
 
 The `appearance.theme` setting (`auto`, `dark` or `light`; see
-[Configuration](../usage/CONFIGURATION.md#the-configuration-file)) chooses which
+[Configuration](../reference/CONFIGURATION.md#the-configuration-file)) chooses which
 inks are used. `dark` and `light` fix the choice. `auto`, the default, follows
 the terminal: the TUI queries OSC 11 once after setup, and a complete
 `rgb:R/G/B` reply with relative luminance above 0.5 selects the light inks. The
@@ -129,7 +129,7 @@ composer; see [Panels](#panels). Rules are `HAIRLINE` in every state. An empty
 draft shows its placeholder in `DIM`. While a draft exists and the composer
 holds the keys, the bottom rule names `Ctrl+G commands` on the left, in `MUTED`
 and `DIM`; it leaves first when the row is narrow. The level chip sits on the
-right. See [Terminal interface](INTERFACE.md).
+right. See [Terminal interface](../usage/INTERFACE.md).
 
 After the first prompt, the header reads `>_ jecode <version>`, with `>_`
 bold `ACCENT`, `jecode` bold `STRONG` and the version `MUTED`, shortened from
@@ -214,7 +214,7 @@ attachment labels, which become ` 1 Image ` or ` 2 wake.log ` chips in `LIT`
 on `BADGE_IDLE`.
 
 An answer opens with `●` in `ACCENT`, prose at column 2; see
-[Markdown responses](MARKDOWN.md). Reasoning stays hidden. A failed turn keeps
+[Markdown responses](../reference/MARKDOWN.md). Reasoning stays hidden. A failed turn keeps
 its diagnostic as the turn's last row: `✕` in bold `BAD`, then the text in
 `BODY`.
 
@@ -355,7 +355,7 @@ marks `GOOD` `+` and `BAD` `−`. Paired changed fragments alone use bold
 `GOOD`/`BAD` on the stronger surface; other changed code keeps its syntax
 colours; fragments snap to whole words, and in markup to whole tags and
 entities. Wrapped code breaks at token boundaries, as in
-[Markdown](MARKDOWN.md) code cards, and keeps an empty number gutter.
+[Markdown](../reference/MARKDOWN.md) code cards, and keeps an empty number gutter.
 Collapsed, a context line keeps one row and a changed line two, cut with a
 `DIM` `…`; when the changed fragment would fall past them, both partner rows
 open with `…` at one shared start about 12 cells before it, so the change
@@ -377,7 +377,7 @@ preview. See [Tools](../usage/TOOLS.md) for the execution boundary.
 ## Panels
 
 A panel is a sheet that takes the composer's place; see
-[Terminal interface](INTERFACE.md#menus-and-panels). From the top, the dock
+[Terminal interface](../usage/INTERFACE.md#menus-and-panels). From the top, the dock
 holds an optional queued row, a `draft kept` row in `DIM` when a draft exists,
 the status row, the title rule, an optional field on its own row, a blank row,
 tabs or the body, a blank row and the keys. Only `/` completion keeps the
@@ -428,4 +428,4 @@ single status row continues to describe the agent's work.
 After the alternate screen closes, the normal screen keeps the terminal's own
 colours. The exit summary uses only ANSI magenta for `>_`, bold for `jecode`,
 SGR dim for the facts and the default foreground for the resume command; see
-[Terminal interface](INTERFACE.md#quit).
+[Terminal interface](../usage/INTERFACE.md#quit).

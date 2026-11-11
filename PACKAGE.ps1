@@ -20,7 +20,7 @@ try {
     New-Item -ItemType Directory -Path (Split-Path -Parent $package) -Force | Out-Null
     New-Item -ItemType Directory -Path $package -ErrorAction Stop | Out-Null
     Copy-Item -LiteralPath $binary -Destination (Join-Path $package 'jecode.exe') -Force
-    foreach ($name in @('INSTALL.ps1', 'LICENSE', 'README.md', 'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md')) {
+    foreach ($name in @('INSTALL.ps1', 'LICENSE', 'README.md', 'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name) -Force
     }
     $docsRoot = Join-Path $PSScriptRoot 'docs'
