@@ -42,7 +42,7 @@ contains the launcher, the four executables, and public documentation and licens
 Keep `AGENTS.md`, local configuration, credentials, and internal reports out of
 the tarball.
 
-The checked-in [CI workflow](../../.github/workflows/CI.yml) runs the Rust
+The checked-in [CI workflow](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml) runs the Rust
 checks, launcher tests, release build, local native package, npm lifecycle
 fixture, and a native terminal check through the npm launcher on Windows x64
 and Linux x64 using the existing local runners, and on hosted macOS ARM64 and x64.

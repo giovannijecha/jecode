@@ -14,7 +14,8 @@ For key storage and access permissions, see [Credentials](../../SECURITY.md#cred
 `GET /models?supported_parameters=tools` supplies the selector catalog. Search
 adds a percent-encoded `q` and `limit=10`. Jecode keeps distinct, valid IDs whose
 entry declares `tools`; it reads display names, prompt and completion prices,
-and declared reasoning efforts. A `null` effort list offers every level.
+and declared reasoning efforts. A `null` effort list offers every level except
+`none` when reasoning is mandatory.
 Prices in the catalog are converted to USD per million tokens. The selected
 model's capacity comes from the same search with its ID: the exactly matching
 entry supplies its context length, optional top-provider output limit and input
@@ -25,8 +26,9 @@ metadata for the selected model is cached on its backend instance.
 limits, capabilities and available 30-minute performance statistics. Invalid or
 duplicate tags are skipped. Missing and invalid measurements remain unknown,
 not zero. A pinned endpoint narrows a known model context limit and supplies
-an unknown one; its reported output limit takes precedence when present. Endpoint metadata is fresh for ten
-minutes; a failed fetch waits one minute before another attempt.
+an unknown one; its reported output limit takes precedence when present.
+Endpoint metadata is fresh for ten minutes; a failed fetch waits one minute
+before another attempt.
 
 ## Request and routing
 

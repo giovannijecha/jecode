@@ -12,7 +12,7 @@ optional for inclusion in Vercel's supported-clients list.
 ## Public client identity
 
 Jecode's native public-client document is
-[`.well-known/mcp-oauth-client.json`](../../.well-known/mcp-oauth-client.json)
+[`.well-known/mcp-oauth-client.json`](https://github.com/giovannijecha/jecode/blob/main/.well-known/mcp-oauth-client.json)
 in the repository. Its `client_id` is
 `https://giovannijecha.github.io/jecode/mcp-oauth-client.json`. Publication
 maps that source document to the exact client ID URL on a static Pages branch;
