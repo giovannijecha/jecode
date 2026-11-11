@@ -4,9 +4,9 @@ Jecode is a coding agent for your terminal. Choose a model, describe a task,
 and let it read your project, edit files, run commands and check
 the result. Tool cards and diffs show the work as it happens.
 
-![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/8740ebd8c804ba010f5ea81e7371b356c6581a47/docs/images/jecode-startup.png)
+![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/37a695e4ce9e846e035e430bca8f9114360bcad5/docs/images/jecode-startup.png)
 
-*Jecode 0.5.5 in Windows Terminal, with GPT-6.1 Sol selected.*
+*Jecode 0.6.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Install
 
