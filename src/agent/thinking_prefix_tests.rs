@@ -11,6 +11,8 @@ use std::time::Duration;
 const KEY: &str = "fixture-anthropic-api-key";
 const MODEL: &str = "claude-fable-5-2";
 
+mod subscription_tests;
+
 pub(super) fn catalog() -> Response {
     Response::Json(
         200,
