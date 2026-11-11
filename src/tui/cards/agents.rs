@@ -184,7 +184,7 @@ pub(super) fn member(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
         return Vec::new();
     };
     let name = field(tool.arguments, "label");
-    let mut line = Line::new(&name.to_uppercase(), badge::ink(name).bold());
+    let mut line = Line::new(&name.to_uppercase(), badge::ink("Agents").bold());
     line.push(&format!(" {}", subject(event, true)), BODY);
     if let Some((fact, style)) = fact(event) {
         let suffix = format!("  {fact}");
@@ -247,7 +247,7 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
             for record in created(event) {
                 let mut head = Line::new(
                     &format!("AGENT {}", number(record, "number")),
-                    badge::ink("Agent").bold(),
+                    badge::ink("Agents").bold(),
                 );
                 head.push(&format!(" {}", inline(field(record, "title"))), STRONG);
                 head.push(&format!("  {}", workspace(record)), DIM);

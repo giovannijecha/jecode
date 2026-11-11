@@ -128,7 +128,7 @@ impl Layout {
     }
 }
 
-/// `Permission  MAIN AGENT  · 1 of 3`, then without the count.
+/// `Permission   MAIN   · 1 of 3`, then without the count.
 fn title(pending: &Pending) -> Vec<Line> {
     let head = Line::new("Permission", STRONG.bold())
         .append(Line::new(" ", MUTED))
