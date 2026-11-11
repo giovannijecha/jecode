@@ -8,6 +8,8 @@ use crate::json::Value;
 pub struct Inputs {
     pub image: Option<bool>,
     pub file: Option<bool>,
+    /// Tool views stay in every later request instead of expiring.
+    pub retained_views: bool,
 }
 
 /// Plain-text manifest for history reads and compaction summaries.
@@ -62,6 +64,15 @@ pub fn active_view_start(messages: &[Value]) -> usize {
         .iter()
         .rposition(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
         .map_or(0, |index| index + 1)
+}
+
+/// First message whose tool view the next request still includes.
+pub fn view_start(messages: &[Value], inputs: Inputs) -> usize {
+    if inputs.retained_views {
+        0
+    } else {
+        active_view_start(messages)
+    }
 }
 
 /// Estimated token cost of attachment views added to the next request.

@@ -123,8 +123,10 @@ available.
 
 Between compactions every request only appends to the previous one: the system
 message, the archived-request message and the summary when there is one, then
-the original messages from the context boundary, with runtime state anchored
-where it was first sent. Native reasoning and signed thinking replay unchanged,
+the original messages from the context boundary, with runtime state and
+continuation notes anchored where they were first sent. A continuation stays
+outside the source transcript and does not replace the latest runtime state.
+Native reasoning and signed thinking replay unchanged,
 so providers can reuse the whole earlier request as a cached prefix.
 
 There is one reduction. When the estimate of the next request reaches the
@@ -141,7 +143,10 @@ portions are shortened to previews that name their `history:N` original. A
 verbatim tail of recent messages is kept within a quarter of the input budget;
 a tool call and all its results stay on the same side of that boundary. Failed
 compaction leaves the previous context in place. Compaction rewrites the
-request prefix once; requests append again from there.
+request prefix once; requests append again from there. Each response records
+the context boundary it was generated after; retained responses from an
+earlier window replay without their signed thinking, which was bound to the
+replaced prefix, while the archived transcript keeps every block.
 
 Saved context from an earlier format, including the model-free records of
 0.4.5, is not migrated: the session reader rejects it and leaves the file

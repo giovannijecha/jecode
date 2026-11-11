@@ -278,29 +278,89 @@ fn adjacent_snapshot_and_state_share_one_mid_system_message() {
 
 #[test]
 fn mid_system_is_limited_to_documented_model_ids() {
-    let state = Value::object([
-        ("role", Value::string("user")),
-        ("content", Value::string("Runtime state")),
-        ("jecode_request_state", Value::Bool(true)),
-    ]);
+    let messages = [
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Prompt")),
+        ]),
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Runtime state")),
+            ("jecode_request_state", Value::Bool(true)),
+        ]),
+    ];
     for (model, role) in [
         ("claude-opus-5-5-20261031", "system"),
         ("claude-sonnet-5", "user"),
         ("unknown-model", "user"),
     ] {
+        let request =
+            wire::request(model, Effort::Default, &messages, None, None, None, None).unwrap();
+        let message = &request.get("messages").and_then(Value::as_array).unwrap()[1];
+        assert_eq!(message.get("role").and_then(Value::as_str), Some(role));
+    }
+}
+
+#[test]
+fn state_after_an_answer_or_first_stays_a_user_turn() {
+    let state = |text: &str| {
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string(text)),
+            ("jecode_request_state", Value::Bool(true)),
+        ])
+    };
+    let roles = |messages: &[Value]| {
         let request = wire::request(
-            model,
-            Effort::Default,
-            std::slice::from_ref(&state),
+            "claude-opus-5-5",
+            Effort::Medium,
+            messages,
             None,
             None,
             None,
             None,
         )
         .unwrap();
-        let message = &request.get("messages").and_then(Value::as_array).unwrap()[0];
-        assert_eq!(message.get("role").and_then(Value::as_str), Some(role));
-    }
+        request
+            .get("messages")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .map(|message| {
+                (
+                    message
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .unwrap()
+                        .to_owned(),
+                    message
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    // A mid-conversation system message must follow a user turn.
+    assert_eq!(roles(&[state("First")])[0].0, "user");
+    let answered = roles(&[
+        Value::object([
+            ("role", Value::string("user")),
+            ("content", Value::string("Prompt")),
+        ]),
+        Value::object([
+            ("role", Value::string("assistant")),
+            ("content", Value::string("Answer")),
+        ]),
+        state(crate::context::CONTINUATION),
+        state("Runtime state"),
+    ]);
+    assert_eq!(answered.len(), 3, "{answered:?}");
+    assert_eq!(answered[2].0, "user");
+    assert_eq!(
+        answered[2].1.as_deref(),
+        Some(format!("{}\n\nRuntime state", crate::context::CONTINUATION).as_str())
+    );
 }
 
 #[test]

@@ -3,10 +3,14 @@
 //! remains an identical, reusable prefix for provider prompt caches.
 //! Instruction snapshots and ordinary session state are two independent
 //! kinds: each update replaces only the latest one of its own kind.
+//! Continuations are anchored separately and do not replace either kind.
 
 use super::{Context, Value};
 
 const STATE_PREFIX: &str = "Jecode session state, current until a later session state update. This is runtime context, not a new user task. Continue the existing task using the current state below.";
+
+pub(crate) const CONTINUATION: &str =
+    "No new user message. Continue from the current session state.";
 
 /// Opens every instruction snapshot, the complete project instructions and
 /// skill catalog. Saved states keep their text, so the header is their kind.
@@ -26,10 +30,10 @@ impl RequestState {
     }
 }
 
-/// The request-only message that carries runtime state. An instruction
-/// snapshot already opens with its own header.
+/// The anchored message that carries runtime state. Instruction snapshots
+/// and continuations already have their own wording.
 pub fn state_message(text: &str) -> Value {
-    let content = if text.starts_with(SNAPSHOT_HEADER) {
+    let content = if text.starts_with(SNAPSHOT_HEADER) || text == CONTINUATION {
         text.to_owned()
     } else {
         format!("{STATE_PREFIX}\n\n{text}")
@@ -79,10 +83,11 @@ impl Context {
             .filter(move |state| state.before >= self.from)
     }
 
-    /// The latest visible instruction snapshot, or ordinary session state.
+    /// The latest visible instruction snapshot or ordinary session state;
+    /// continuations do not replace either.
     pub fn latest_state(&self, snapshot: bool) -> Option<&RequestState> {
         self.visible_states()
-            .filter(|state| state.is_snapshot() == snapshot)
+            .filter(|state| state.is_snapshot() == snapshot && state.text != CONTINUATION)
             .last()
     }
 
@@ -90,7 +95,16 @@ impl Context {
     /// state of the same kind is already visible, so it is not repeated.
     pub fn anchor_state(&mut self, before: usize, text: String) {
         let snapshot = text.starts_with(SNAPSHOT_HEADER);
-        if self.latest_state(snapshot).map(|state| state.text.as_str()) != Some(text.as_str()) {
+        // Each continuation has its own position, even when its text repeats.
+        // It does not replace the latest runtime state or instruction snapshot.
+        let unchanged = if text == CONTINUATION {
+            self.states
+                .iter()
+                .any(|state| state.before == before && state.text == text)
+        } else {
+            self.latest_state(snapshot).map(|state| state.text.as_str()) == Some(text.as_str())
+        };
+        if !unchanged {
             self.states.retain(|state| state.before <= before);
             self.states.push(RequestState { before, text });
         }

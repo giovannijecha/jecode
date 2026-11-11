@@ -55,7 +55,10 @@ supported images without that check, and the provider may reject them. OpenRoute
 saved and reused, so a PDF is not parsed twice.
 
 Images and PDFs you attach stay in the conversation's active context. Images a
-tool returns, such as browser screenshots, are sent with the next request only;
+tool returns, such as browser screenshots, stay in every later request on the
+Anthropic routes, where signed thinking depends on them, while their tool
+results remain in the active context. On
+the OpenAI and OpenRouter routes they are sent with the next request only;
 afterwards the model can read the `attachment:ID` again to see them, or read
 several together to compare. References stay valid after compaction, resume and
 temporary cleanup.

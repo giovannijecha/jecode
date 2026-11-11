@@ -212,7 +212,7 @@ impl Context {
         tokens: usize,
         inputs: Inputs,
     ) -> usize {
-        let active_start = crate::attachments::active_view_start(messages);
+        let active_start = crate::attachments::view_start(messages, inputs);
         let mut generated = 0usize;
         let mut bytes = 0usize;
         let mut media = 0usize;
@@ -245,7 +245,7 @@ impl Context {
     }
 
     fn retired_views(&self, messages: &[Value], inputs: Inputs) -> usize {
-        if crate::attachments::active_view_start(messages) <= self.measured_end {
+        if crate::attachments::view_start(messages, inputs) <= self.measured_end {
             return 0;
         }
         let measured = &messages[..self.measured_end.min(messages.len())];
@@ -265,7 +265,7 @@ fn text_bytes(messages: &[Value]) -> usize {
 }
 
 fn media_tokens(messages: &[Value], inputs: Inputs) -> usize {
-    let active_start = crate::attachments::active_view_start(messages);
+    let active_start = crate::attachments::view_start(messages, inputs);
     messages
         .iter()
         .enumerate()

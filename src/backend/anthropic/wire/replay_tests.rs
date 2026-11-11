@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn native_replay_uses_executed_arguments_and_preserves_signed_thinking() {
+fn native_replay_keeps_received_tool_input_while_canonical_call_holds_executed_arguments() {
     let original = r#"{"paths":"[\"a.rs\",\"b.rs\"]"}"#;
     let decoded = crate::tools::coerce::arguments("read", original).unwrap();
     let thinking = Value::object([
@@ -16,6 +16,11 @@ fn native_replay_uses_executed_arguments_and_preserves_signed_thinking() {
         ("input", crate::json::parse(original).unwrap()),
         ("provider_extension", Value::Bool(true)),
     ]);
+    let later = Value::object([
+        ("type", Value::string("redacted_thinking")),
+        ("data", Value::string("fixture-redacted")),
+    ]);
+    let native = vec![thinking, tool, later];
     let mut message = Value::object([
         ("role", Value::string("assistant")),
         (
@@ -29,30 +34,13 @@ fn native_replay_uses_executed_arguments_and_preserves_signed_thinking() {
                 .value(),
             ]),
         ),
-        (
-            "anthropic_blocks",
-            Value::Array(vec![thinking.clone(), tool.clone()]),
-        ),
+        ("anthropic_blocks", Value::Array(native.clone())),
     ]);
     let origin = crate::conversation::Origin::with_account("anthropic", "model", None);
     crate::conversation::stamp(&mut message, &origin);
-    let replayed = assistant(&crate::conversation::project(&message, &origin)).unwrap();
-    let blocks = replayed.get("content").and_then(Value::as_array).unwrap();
-    assert_eq!(blocks[0], thinking);
-    assert_eq!(
-        blocks[1].get("input"),
-        Some(&crate::json::parse(&decoded).unwrap())
-    );
-    assert_eq!(
-        blocks[1].get("provider_extension"),
-        Some(&Value::Bool(true))
-    );
-    let archived = crate::conversation::project(&message, &origin);
-    assert_eq!(
-        archived
-            .get("anthropic_blocks")
-            .and_then(Value::as_array)
-            .unwrap()[1],
-        tool
-    );
+    let projected = crate::conversation::project(&message, &origin);
+    let replayed = assistant(&projected).unwrap();
+    assert_eq!(replayed.get("content"), Some(&Value::Array(native)));
+    let canonical = ToolCall::parse(&projected.get("tool_calls").unwrap().as_array().unwrap()[0]);
+    assert_eq!(canonical.unwrap().arguments, decoded);
 }

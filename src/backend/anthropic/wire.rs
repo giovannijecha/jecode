@@ -81,7 +81,8 @@ fn build_request(
     };
     let mut wire = Vec::new();
     let mut results = Vec::new();
-    let active_start = attachments::active_view_start(messages);
+    // Signed thinking binds every earlier message, so a tool view stays where
+    // it was first sent instead of expiring after the next reply.
     let mut views = Vec::new();
     // Wire positions of request-state messages, in order.
     let mut states: Vec<usize> = Vec::new();
@@ -93,7 +94,7 @@ fn build_request(
         CacheRetention::Short => ephemeral(),
         CacheRetention::Long => long_lived(),
     };
-    for (index, message) in messages.iter().enumerate() {
+    for message in messages {
         let role = message.get("role").and_then(Value::as_str);
         if role != Some("tool") && !results.is_empty() {
             wire.push(Value::object([
@@ -127,9 +128,18 @@ fn build_request(
                 // Runtime state keeps its first position, so it is cacheable history.
                 let request_state = message.get("jecode_request_state") == Some(&Value::Bool(true));
                 let mut mapped = user(message, pool)?;
-                let system = request_state && subscription && supports_mid_system(model);
+                // A mid-conversation system message must follow a user turn;
+                // state after an answer, such as a continuation, stays a user turn.
+                let after_user = matches!(
+                    wire.last()
+                        .and_then(|previous: &Value| previous.get("role"))
+                        .and_then(Value::as_str),
+                    Some("user" | "system")
+                );
+                let system =
+                    request_state && after_user && subscription && supports_mid_system(model);
                 // An instruction snapshot and the runtime state that follows it
-                // share one system message: a system message is followed by an
+                // share one message: a system message is followed by an
                 // assistant turn or ends the request. Their adjacency is saved
                 // history, so the joined bytes stay stable.
                 if system
@@ -160,9 +170,7 @@ fn build_request(
                     ),
                     ("content", Value::string(field(message, "content")?)),
                 ]));
-                if index >= active_start
-                    && let Some(attachment) = attachments::requested(message)
-                {
+                if let Some(attachment) = attachments::requested(message) {
                     views.push(attachment);
                 }
             }
@@ -355,27 +363,12 @@ fn cache_breakpoint(message: &mut Value, control: &Value) -> bool {
 }
 
 fn assistant(message: &Value) -> Result<Value, String> {
+    // Native blocks replay exactly as received: later signed thinking binds
+    // them. Canonical calls keep the decoded arguments that were executed.
     if let Some(blocks) = message.get("anthropic_blocks").and_then(Value::as_array) {
-        let mut blocks = blocks.to_vec();
-        let calls = message
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .unwrap_or(&[]);
-        // The canonical call records the arguments actually executed, including
-        // decoded JSON-text containers. Keep the rest of the native reply intact.
-        for block in &mut blocks {
-            if block.get("type").and_then(Value::as_str) == Some("tool_use")
-                && let Some(call) = calls.iter().find(|call| call.get("id") == block.get("id"))
-            {
-                let call = ToolCall::parse(call)?;
-                if let Value::Object(fields) = block {
-                    fields.insert("input".into(), crate::json::parse(&call.arguments)?);
-                }
-            }
-        }
         return Ok(Value::object([
             ("role", Value::string("assistant")),
-            ("content", Value::Array(blocks)),
+            ("content", Value::Array(blocks.to_vec())),
         ]));
     }
     let mut blocks = Vec::new();
