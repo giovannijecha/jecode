@@ -128,9 +128,18 @@ fn build_request(
                 // Runtime state keeps its first position, so it is cacheable history.
                 let request_state = message.get("jecode_request_state") == Some(&Value::Bool(true));
                 let mut mapped = user(message, pool)?;
-                let system = request_state && subscription && supports_mid_system(model);
+                // A mid-conversation system message must follow a user turn;
+                // state after an answer, such as a continuation, stays a user turn.
+                let after_user = matches!(
+                    wire.last()
+                        .and_then(|previous: &Value| previous.get("role"))
+                        .and_then(Value::as_str),
+                    Some("user" | "system")
+                );
+                let system =
+                    request_state && after_user && subscription && supports_mid_system(model);
                 // An instruction snapshot and the runtime state that follows it
-                // share one system message: a system message is followed by an
+                // share one message: a system message is followed by an
                 // assistant turn or ends the request. Their adjacency is saved
                 // history, so the joined bytes stay stable.
                 if system

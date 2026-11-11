@@ -107,8 +107,9 @@ counted; access errors and a corrupt selected account remain explicit errors.
   anchored where it was first sent and added again only when it changes, so it
   stays in the cacheable history; only state sent for the first time at the end
   is covered by the automatic breakpoint alone. On the Claude plan, for models
-  documented to accept mid-conversation system messages, state is sent as a
-  `role: "system"` message; otherwise it is a user message. The shared built-in
+  documented to accept mid-conversation system messages, state that follows a
+  user turn is sent as a `role: "system"` message; otherwise, including a
+  continuation after an answer, it is a user message. The shared built-in
   block always lasts one hour. The other breakpoints follow the saved **Prompt
   cache** lifetime: the provider's five minutes by default, or one hour when chosen.
   Requests without that setting, such as standalone maintenance, use five minutes.
