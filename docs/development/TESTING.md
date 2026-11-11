@@ -79,9 +79,10 @@ use the ignored `.tmp/` or `target` directories.
 
 ## Documentation checks
 
-The normal suite checks internal file links and Markdown heading anchors,
-including same-repository GitHub links, and verifies that the documentation
-index covers every public page. To run only this check:
+The normal suite checks inline Markdown links and heading anchors in the root,
+`.github/`, `npm/` and `docs/` pages, including `blob/main/` links to this
+repository, and verifies that the documentation index covers every public page.
+To run only this check:
 
 ```text
 cargo test --locked --offline --test documentation

@@ -17,6 +17,7 @@ fn public_markdown(root: &Path) -> Vec<PathBuf> {
         }
     }
     files.push(root.join("npm/README.md"));
+    collect_markdown(&root.join(".github"), &mut files);
     collect_markdown(&root.join("docs"), &mut files);
     files.sort();
     files
@@ -81,6 +82,11 @@ fn visible_lines(
             }
             if !mask_inline_code {
                 return Some((index + 1, line.to_owned()));
+            }
+            // A code span never crosses a blank line, so a stray backtick cannot
+            // hide the links of later paragraphs.
+            if line.trim().is_empty() {
+                code_ticks = 0;
             }
 
             let mut masked = line.as_bytes().to_vec();
@@ -356,6 +362,9 @@ fn parser_ignores_code_and_tracks_nested_destinations() {
     let markdown = "```md\n[false](missing.md)\n```\n`[false](missing.md)` [real](folder/(draft).md#part)\n## Part\n## Part\n";
     let lines = visible_lines(markdown, true).collect::<Vec<_>>();
     assert_eq!(links(&lines[0].1), ["folder/(draft).md#part"]);
+    let stray = "A stray ` tick\n\n[after](after.md)\n";
+    let lines = visible_lines(stray, true).collect::<Vec<_>>();
+    assert_eq!(links(&lines[2].1), ["after.md"]);
     assert_eq!(
         anchors(markdown),
         HashSet::from(["part".into(), "part-1".into()])

@@ -47,9 +47,8 @@ See [Permissions](PERMISSIONS.md#platform-limits).
 | Linux | A VT-compatible terminal. The system OpenSSL libraries (`libssl.so.3` and `libcrypto.so.3`, or the 1.1 versions) for HTTPS and for hashing session and permission data. Minimal container images often lack them. | `libX11.so.6` or `libwayland-client.so.0` for clipboard images, GdkPixbuf for image conversion, and a terminal that accepts OSC 52 for `/copy`. |
 | macOS | A VT-compatible terminal. | None beyond the system tools. |
 
-The npm launcher also needs Node.js 22 or later. On macOS 11 to 13.4, use
-Node.js 22; Node.js 24 requires macOS 13.5 or later. A standalone executable
-does not need Node.js.
+The npm launcher also needs Node.js 22 or later; on macOS 11 to 13.4, use
+Node.js 22. A standalone executable does not need Node.js.
 
 ## Platform limitations
 

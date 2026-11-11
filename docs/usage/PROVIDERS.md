@@ -164,8 +164,9 @@ signed in in your browser.
   revoked.
 - Tokens refresh automatically.
 
-For token storage, access permissions and redaction, see
-[Credentials](../../SECURITY.md#credentials).
+For token storage and access permissions, see
+[Credentials](../../SECURITY.md#credentials); for masking, see
+[Data sent to providers](../../SECURITY.md#data-sent-to-providers).
 
 ## Switch providers and models
 

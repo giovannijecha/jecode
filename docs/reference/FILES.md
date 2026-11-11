@@ -27,7 +27,9 @@ The `mcp.lock`, `lsp.lock` and `session.lock` files coordinate access by
 Jecode processes. Account updates and token refresh use `accounts/openai/.lock`
 and `accounts/anthropic/.lock`; see the
 [OpenAI](../development/OPENAI.md#sign-in-with-chatgpt) and
-[Anthropic](../development/ANTHROPIC.md#account-lifecycle) adapters.
+[Anthropic](../development/ANTHROPIC.md#account-lifecycle) adapters. Each
+persistent browser profile holds a `.jecode-lease` lock, so one process uses
+it at a time.
 
 Empty file-modification locks live in the operating system's temporary
 directory, separately for each account: `jecode-file-locks-<uid>` on Unix and

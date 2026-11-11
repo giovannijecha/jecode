@@ -18,8 +18,8 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 ## Install
 
 Install with Node.js 22 or later and npm on Windows x64, Linux x64 or macOS
-(Apple silicon or Intel). Check [system requirements](docs/usage/PLATFORMS.md#supported-versions)
-for minimum OS versions, Node.js support and verification status.
+(Apple silicon or Intel). Check [Platform support](docs/usage/PLATFORMS.md)
+for verification status, minimum OS versions and Node.js support.
 
 ```sh
 npm install -g @giovannijecha/jecode
@@ -62,8 +62,10 @@ then works through the task in the same window:
 - `/` lists commands as you type, and Ctrl+G opens them without touching your
   draft;
 - Auto, Dark and Light themes keep your terminal's own background;
-- long conversations keep their original history available after compaction,
-  and `/process` lets you inspect running commands; see [Long-running work](docs/usage/LONG_WORK.md).
+- long conversations keep their original history available after compaction;
+  see [Long-running work](docs/usage/LONG_WORK.md);
+- `/process` lets you inspect running commands; see
+  [Processes](docs/usage/INTERFACE.md#processes).
 
 When you quit, Jecode prints a summary and the command to continue later:
 

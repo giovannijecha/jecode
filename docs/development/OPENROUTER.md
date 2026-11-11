@@ -14,17 +14,18 @@ For key storage and access permissions, see [Credentials](../../SECURITY.md#cred
 `GET /models?supported_parameters=tools` supplies the selector catalog. Search
 adds a percent-encoded `q` and `limit=10`. Jecode keeps distinct, valid IDs whose
 entry declares `tools`; it reads display names, prompt and completion prices,
-and declared reasoning efforts without guessing unsupported levels. Prices in
-the catalog are converted to USD per million tokens. A model's exact catalog
+and declared reasoning efforts. A `null` effort list offers every level.
+Prices in the catalog are converted to USD per million tokens. The selected
+model's capacity comes from the same search with its ID: the exactly matching
 entry supplies its context length, optional top-provider output limit and input
-modalities. Missing context stays unknown; metadata for the selected model is
-cached on its backend instance.
+modalities. Without a match among those results, context stays unknown;
+metadata for the selected model is cached on its backend instance.
 
 `GET /models/{author}/{slug}/endpoints` supplies endpoint tags, listed prices,
 limits, capabilities and available 30-minute performance statistics. Invalid or
 duplicate tags are skipped. Missing and invalid measurements remain unknown,
-not zero. A pinned endpoint narrows a known model context limit; its reported
-output limit takes precedence when present. Endpoint metadata is fresh for ten
+not zero. A pinned endpoint narrows a known model context limit and supplies
+an unknown one; its reported output limit takes precedence when present. Endpoint metadata is fresh for ten
 minutes; a failed fetch waits one minute before another attempt.
 
 ## Request and routing
@@ -33,7 +34,7 @@ Each generation sends `POST /chat/completions` with `stream: true`, the selected
 model, projected message history and function tool definitions when requested.
 An explicit output allowance becomes `max_completion_tokens`; a non-default
 effort becomes `reasoning.effort`. The adapter sends the API key as a Bearer
-header and requests OpenRouter metadata for this route. Canonical tool calls
+header, and this route adds `X-OpenRouter-Metadata: enabled`. Canonical tool calls
 are translated to function-call messages; compatible native reasoning and
 function-call data can be replayed to the same backend, account and model.
 
@@ -49,8 +50,9 @@ routing modes send a conversation `session_id` for cache affinity. An
 endpoint pin instead sends one `provider.order` entry with
 `allow_fallbacks: false` and excludes known sub-variants of that tag. Before a
 turn, a pin needs a fresh listing that contains a compatible endpoint; known
-lack of tools or required reasoning blocks it. A failed pinned request explains
-how to choose Auto or another endpoint with `/routing`.
+lack of tools or required reasoning blocks it. When a pinned request fails as
+temporary or terminal, the message explains how to choose Auto or another
+endpoint with `/routing`.
 
 ## Streaming and cache
 

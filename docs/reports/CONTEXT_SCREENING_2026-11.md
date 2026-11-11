@@ -4,7 +4,7 @@
 | --- | --- |
 | Dates | 2026-11-08 and 2026-11-09. |
 | Measured builds | Format-3 replay reader; frozen reference binary before stabilization fixes; reviewed journal-version-4, session-state-2 build. Exact binary revisions were not recorded. |
-| Platforms | Windows with Rust 1.95.0; the review also ran on Ubuntu under WSL, as detailed below. |
+| Platforms | Replay screening: Windows with Rust 1.95.0. Live screen: host and toolchain were not recorded. The review also ran on Ubuntu under WSL, as detailed below. |
 
 The format-3 and model-free-record results are historical. They do not measure
 0.5.5's append-only requests and model compaction, or establish a token or speed
