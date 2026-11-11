@@ -4,7 +4,10 @@ use crate::cancel::Cancellation;
 use crate::json::Value;
 use std::time::Duration;
 
-const MAX: usize = 10_000;
+/// The largest width and height DevTools accepts for
+/// `Emulation.setDeviceMetricsOverride`.
+/// https://chromedevtools.github.io/devtools-protocol/tot/Emulation/#method-setDeviceMetricsOverride
+const MAX: usize = 10_000_000;
 
 /// The requested CSS viewport, or `None` when neither dimension is given.
 pub(super) fn requested(arguments: &Value) -> Result<Option<(u32, u32)>, String> {

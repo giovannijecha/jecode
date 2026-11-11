@@ -12,18 +12,30 @@ pub fn file_changed(result: &Value) -> bool {
 }
 
 /// `changed 2 files; 1 failed`, `no files read; 2 not read`.
-pub(super) fn summary(name: &str, files: &[Value]) -> Option<String> {
-    let missed = files
+pub(super) fn summary(name: &str, files: &[Value], result: &Value) -> Option<String> {
+    let missed_inline = files
         .iter()
         .filter(|file| file.get("error").is_some())
         .count();
-    let (done, verb, missing) = match name {
+    let (done, missed, verb, missing) = match name {
         "edit" => (
             files.iter().filter(|file| file_changed(file)).count(),
+            missed_inline,
             "changed",
             "failed",
         ),
-        "read" => (files.len() - missed, "read", "not read"),
+        "read" => (
+            result
+                .get("files_read")
+                .and_then(Value::as_usize)
+                .unwrap_or(files.len() - missed_inline),
+            result
+                .get("files_not_read")
+                .and_then(Value::as_usize)
+                .unwrap_or(missed_inline),
+            "read",
+            "not read",
+        ),
         _ => return None,
     };
     let mut summary = match done {

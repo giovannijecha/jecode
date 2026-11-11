@@ -238,3 +238,177 @@ fn failed_parent_receipt_never_claims_a_confirmed_child_return() {
     observer.stop_all();
     assert_eq!(fixture.finish().len(), 2);
 }
+
+#[test]
+fn a_create_call_past_eight_assignments_creates_and_runs_them_all() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let total = 12;
+    let fixture = HttpFixture::new(
+        (0..total)
+            .map(|_| (200, completion("Report", vec![])))
+            .collect(),
+    );
+    let mut parent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    parent.enable_sessions(home.path()).unwrap();
+    let tasks = (0..total)
+        .map(|index| {
+            Value::object([
+                ("title", Value::string(format!("Inspect part {index}"))),
+                ("instructions", Value::string("Report the source state")),
+                ("workspace", Value::string("shared")),
+            ])
+        })
+        .collect();
+    let result = parent
+        .agent_tool(&Value::object([
+            ("action", Value::string("create")),
+            ("tasks", Value::Array(tasks)),
+        ]))
+        .unwrap();
+    assert!(result.get("error").is_none(), "{}", result.encode());
+    let created = result.get("created").and_then(Value::as_array).unwrap();
+    assert_eq!(created.len(), total);
+    let observer = parent.collaboration();
+    let started = std::time::Instant::now();
+    loop {
+        let records = observer.snapshot();
+        let returned = records
+            .iter()
+            .filter(|record| record.get("state").and_then(Value::as_str) == Some("returned"))
+            .count();
+        if returned == total {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "{returned} of {total} returned"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(fixture.finish().len(), total);
+}
+#[test]
+fn queued_stop_and_update_preserve_handoff_and_eight_active_workers() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let (release, gate) = std::sync::mpsc::channel();
+    let streamed = Value::object([(
+        "choices",
+        Value::Array(vec![Value::object([
+            ("index", Value::number(0)),
+            (
+                "delta",
+                Value::object([("content", Value::string("Report"))]),
+            ),
+            ("finish_reason", Value::string("stop")),
+        ])]),
+    )]);
+    let mut responses = vec![Response::GatedStream {
+        head: String::new(),
+        tail: format!("data: {}\n\ndata: [DONE]\n\n", streamed.encode()),
+        release: gate,
+    }];
+    responses.extend((0..8).map(|_| Response::Json(200, completion("Report", vec![]))));
+    let fixture = HttpFixture::streaming_with_wait(responses, Duration::from_secs(20));
+    let mut parent = Agent::new(
+        OpenRouter::fixture(fixture.endpoint.clone()),
+        Tools::new(project.path()).unwrap(),
+    );
+    parent.enable_sessions(home.path()).unwrap();
+    let tasks = (1..=10)
+        .map(|index| {
+            Value::object([
+                ("title", Value::string(format!("Inspect {index}"))),
+                ("instructions", Value::string("Original instruction")),
+                ("workspace", Value::string("shared")),
+            ])
+        })
+        .collect();
+    parent
+        .agent_tool(&Value::object([
+            ("action", Value::string("create")),
+            ("tasks", Value::Array(tasks)),
+        ]))
+        .unwrap();
+    let observer = parent.collaboration();
+    let started = std::time::Instant::now();
+    loop {
+        let (running, queue, busy) = observer.slot_stats();
+        if running == 8 && queue.len() == 2 {
+            assert_eq!(queue, ["a9", "a10"]);
+            assert_eq!(busy, 8);
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    parent
+        .agent_tool(&Value::object([
+            ("action", Value::string("stop")),
+            ("id", Value::string("a10")),
+        ]))
+        .unwrap();
+    let stopped = observer
+        .snapshot()
+        .into_iter()
+        .find(|record| record.get("id").and_then(Value::as_str) == Some("a10"))
+        .unwrap();
+    assert_eq!(
+        stopped.get("state").and_then(Value::as_str),
+        Some("stopped")
+    );
+    assert_eq!(stopped.get("received_version"), Some(&Value::number(0)));
+    assert!(!observer.events_since(0).1.iter().any(|event| {
+        event.get("id").and_then(Value::as_str) == Some("a10")
+            && event.get("kind").and_then(Value::as_str) == Some("received")
+    }));
+    parent
+        .agent_tool(&Value::object([
+            ("action", Value::string("update")),
+            ("id", Value::string("a9")),
+            ("instructions", Value::string("Latest instruction")),
+        ]))
+        .unwrap();
+    release.send(()).unwrap();
+    let records = observer
+        .wait(
+            Some("a9"),
+            Duration::from_secs(20),
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        records[0].get("state").and_then(Value::as_str),
+        Some("returned")
+    );
+    assert_eq!(records[0].get("received_version"), Some(&Value::number(2)));
+    // A slow worker may reach the fixture after a9; let every turn finish
+    // before the fixture stops accepting requests.
+    let records = observer
+        .wait(
+            None,
+            Duration::from_secs(20),
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap();
+    assert!(records.iter().all(|record| {
+        !matches!(
+            record.get("state").and_then(Value::as_str),
+            Some("running" | "stopping")
+        )
+    }));
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 9);
+    let updated = requests
+        .iter()
+        .find(|request| request.body.encode().contains("Latest instruction"))
+        .unwrap()
+        .body
+        .encode();
+    assert!(updated.contains("Assignment v2: Latest instruction"));
+    assert!(!updated.contains("Original instruction"));
+}

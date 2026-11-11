@@ -62,7 +62,9 @@ The list is refreshed at the start of each turn and whenever `/skills` runs.
 Within a turn, the first read of each file stays fixed; the next turn reads the
 files from disk again. Skills support your current request; they do not override
 your instructions or grant permission for extra work. After compaction, the
-model is reminded which skills it had read so it can read them again.
+model is reminded of skill references retained from successful read requests.
+This includes references in saved batch results whose text it may not have
+opened yet; the model can read or reread the resource when relevant.
 
 Skill references are read-only and cannot reach outside their skill directory.
 Each file can be up to 2 MiB, with 8 MiB of skill content per turn. A read also

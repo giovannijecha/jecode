@@ -116,6 +116,10 @@ impl Tools {
         &self.root
     }
 
+    pub(crate) fn outputs(&self) -> &crate::output::Store {
+        &self.outputs
+    }
+
     fn file_arguments(&self, arguments: &Value, create: bool) -> Result<(PathBuf, Value), String> {
         let path = required_string(arguments, "path")?;
         if path.starts_with("history:") {
@@ -341,6 +345,17 @@ pub(crate) fn optional_number(
         return Err(format!("{name} must be between {min} and {max}"));
     }
     Ok(number)
+}
+
+/// A page size: a larger request gets a full page and the next offset, never
+/// a refusal that makes the model send the call again.
+pub(crate) fn page_limit(
+    arguments: &Value,
+    name: &str,
+    default: usize,
+    max: usize,
+) -> Result<usize, String> {
+    Ok(optional_number(arguments, name, default, 1, usize::MAX)?.min(max))
 }
 
 #[cfg(test)]

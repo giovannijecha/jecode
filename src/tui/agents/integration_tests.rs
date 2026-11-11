@@ -27,7 +27,6 @@ fn nonzero_child_command_marks_failed_check() {
     );
     parent.enable_sessions(home.path()).unwrap();
     let observer = parent.collaboration();
-    let gate = Arc::new((Mutex::new(true), Condvar::new()));
     observer
         .create(
             project.path(),
@@ -47,9 +46,9 @@ fn nonzero_child_command_marks_failed_check() {
                     .set_level(crate::permissions::Level::Full)?;
                 Ok(child)
             },
-            gate,
         )
         .unwrap();
+    observer.release_created(&["a1".into()]);
     let started = Instant::now();
     let records = loop {
         let records = observer.snapshot();
@@ -134,7 +133,6 @@ fn delayed_child_return_restarts_idle_main_without_a_user_message() {
     app.state.editor.cursor = 7;
     let draft = app.state.editor.clone();
     let observer = app.agent.as_ref().unwrap().collaboration();
-    let gate = Arc::new((Mutex::new(false), Condvar::new()));
     observer
         .create(
             project.path(),
@@ -150,17 +148,12 @@ fn delayed_child_return_restarts_idle_main_without_a_user_message() {
                     Tools::new(root)?,
                 ))
             },
-            gate.clone(),
         )
         .unwrap();
     observer
         .receipt("created", None, 0, "Agents", vec![])
         .unwrap();
-    {
-        let (lock, ready) = &*gate;
-        *lock.lock().unwrap() = true;
-        ready.notify_all();
-    }
+    observer.release_created(&["a1".into()]);
     let mut saw_return = false;
     let mut restarted = false;
     while started.elapsed() < Duration::from_secs(8) {

@@ -17,7 +17,7 @@ impl Page {
         Ok(Self {
             rows: Vec::new(),
             offset: optional_number(arguments, "offset", 1, 1, usize::MAX)?,
-            limit: optional_number(arguments, "limit", default, 1, maximum)?,
+            limit: crate::tools::page_limit(arguments, "limit", default, maximum)?,
             seen: 0,
             bytes: 0,
             more: false,
@@ -42,14 +42,16 @@ impl Page {
             self.more = true;
             return Ok(false);
         }
-        let row = row()?;
-        let size = row.encode().len();
+        let mut row = row()?;
+        let mut size = row.encode().len();
         if self.bytes.saturating_add(size) > RESULT_BYTES {
-            if self.rows.is_empty() {
-                return Err("One result exceeds the output budget; reduce search context or narrow the path".into());
+            if !self.rows.is_empty() {
+                self.more = true;
+                return Ok(false);
             }
-            self.more = true;
-            return Ok(false);
+            // A page always holds its first row, shortened if it must be.
+            row = fit(row, RESULT_BYTES);
+            size = row.encode().len();
         }
         self.bytes += size;
         self.rows.push(row);
@@ -105,6 +107,7 @@ impl Page {
             ),
         ]);
         let mut result = Value::Object(fields);
+        let mut refitted = false;
         while result.encode().len() > super::super::OUTPUT_LIMIT {
             let Value::Object(fields) = &mut result else {
                 unreachable!()
@@ -113,10 +116,16 @@ impl Page {
                 unreachable!()
             };
             if rows.len() <= 1 {
-                return Err(
-                    "Discovery result exceeds the output budget; narrow the path or reduce context"
-                        .into(),
-                );
+                // A lone row shrinks rather than failing the call; anything
+                // still over is previewed in context with its history kept.
+                match rows.first_mut() {
+                    Some(row) if !refitted => {
+                        refitted = true;
+                        *row = fit(std::mem::replace(row, Value::Null), RESULT_BYTES / 4);
+                        continue;
+                    }
+                    _ => break,
+                }
             }
             rows.pop();
             let count = rows.len();
@@ -129,5 +138,57 @@ impl Page {
             fields.insert("complete".into(), Value::Bool(false));
         }
         Ok(result)
+    }
+}
+
+/// A row over `budget` keeps its shape with its long strings shortened and
+/// `clipped: true`; its path and line still lead to the full text. Context and
+/// other fields give way before the row's own `text`, so a match stays visible
+/// whenever the rest can absorb the cut.
+fn fit(mut row: Value, budget: usize) -> Value {
+    let mut clipped = false;
+    for own_text in [false, true] {
+        let mut limit = 1024;
+        while row.encode().len() > budget && limit > 16 {
+            limit /= 2;
+            clipped = true;
+            match &mut row {
+                Value::Object(fields) if !own_text => fields
+                    .iter_mut()
+                    .filter(|(key, _)| !matches!(key.as_str(), "path" | "text"))
+                    .for_each(|(_, item)| shorten(item, limit)),
+                _ => shorten(&mut row, limit),
+            }
+        }
+    }
+    if clipped && let Value::Object(fields) = &mut row {
+        fields.insert("clipped".into(), Value::Bool(true));
+    }
+    row
+}
+
+fn shorten(value: &mut Value, limit: usize) {
+    match value {
+        Value::String(text) if text.len() > limit => {
+            text.truncate(text.floor_char_boundary(limit));
+            text.push('…');
+        }
+        Value::Array(items) => items.iter_mut().for_each(|item| shorten(item, limit)),
+        Value::Object(fields) => {
+            let mut text_shortened = false;
+            for (key, item) in fields.iter_mut() {
+                if key == "path" {
+                    continue;
+                }
+                if key == "text" && matches!(item, Value::String(text) if text.len() > limit) {
+                    text_shortened = true;
+                }
+                shorten(item, limit);
+            }
+            if text_shortened {
+                fields.insert("text_truncated".into(), Value::Bool(true));
+            }
+        }
+        _ => {}
     }
 }

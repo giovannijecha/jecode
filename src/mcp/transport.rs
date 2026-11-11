@@ -4,7 +4,11 @@ use crate::cancel::Cancellation;
 use crate::mcp::types::{Error, ErrorKind};
 use std::time::Duration;
 
-const BODY_LIMIT: usize = 8 * 1024 * 1024;
+/// Responses are buffered whole and parsed as one JSON-RPC message, and a
+/// remote server may stream without end; this bounds the memory one response
+/// can claim. Requests are not bounded here: the server answers for itself.
+const RESPONSE_LIMIT: usize = 8 * 1024 * 1024;
+const OVERSIZED: &str = "The MCP server's response exceeded the 8 MiB Jecode holds in memory for one response; the remote operation may have run. Request a smaller result.";
 
 pub struct Response {
     pub status: u16,
@@ -113,12 +117,6 @@ fn request_inner(
             "Invalid MCP request header",
         ));
     }
-    if body.is_some_and(|bytes| bytes.len() > BODY_LIMIT) {
-        return Err(Error::new(
-            ErrorKind::Configuration,
-            "MCP request is too large",
-        ));
-    }
     let pairs: Vec<_> = headers
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -127,6 +125,7 @@ fn request_inner(
     let mut received = Vec::new();
     let mut sse = super::wire::SseScanner::default();
     let mut stream_complete = false;
+    let mut oversized = false;
     const COMPLETE: &str = "MCP_RESPONSE_RECEIVED";
     let timeout = Duration::from_secs(timeout_secs.clamp(1, 600));
     let output = crate::http::run(
@@ -142,8 +141,9 @@ fn request_inner(
         cancel,
         &mut |bytes| {
             decoder.feed(bytes, &mut |part| {
-                if received.len().saturating_add(part.len()) > BODY_LIMIT {
-                    return Err("MCP HTTP response is too large".into());
+                if received.len().saturating_add(part.len()) > RESPONSE_LIMIT {
+                    oversized = true;
+                    return Err(OVERSIZED.into());
                 }
                 received.extend_from_slice(part);
                 Ok(())
@@ -171,6 +171,9 @@ fn request_inner(
     // The observer's stop wins over any process cleanup detail appended to it,
     // so a received response stays complete whatever followed it.
     let early_complete = stream_complete;
+    if oversized && !cancel.requested() {
+        return Err(Error::new(ErrorKind::Transport, OVERSIZED));
+    }
     if !early_complete && output.is_err() {
         return Err(Error::new(ErrorKind::Transport, "MCP HTTP request failed"));
     }

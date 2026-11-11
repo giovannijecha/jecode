@@ -29,9 +29,9 @@ of them. Exact arguments and limits are in the
 
 | Tool | What it does |
 | --- | --- |
-| `read` | Read a text file a page at a time, up to 12 files in one call, or show an image or PDF to the model. Also reads saved command output, earlier conversation history, skills and attachments. |
+| `read` | Read a text file a page at a time, any number of files in one call, or show an image or PDF to the model. Also reads saved command output, earlier conversation history, skills and attachments. |
 | `write` | Create or replace a whole text file. |
-| `edit` | Apply exact text replacements to one file, or to up to 12 files in one call. Each file changes all or nothing; with several files, one that fails does not stop or undo the others. |
+| `edit` | Apply exact text replacements to one file, or to any number of files in one call. Each file changes all or nothing; with several files, one that fails does not stop or undo the others. |
 | `list` | List files and directories, optionally recursively and filtered by a pattern. |
 | `search` | Find literal text in project files, with line numbers and context. |
 | `bash` | Run commands in Jecode's own [command language](SHELL.md). |
@@ -42,7 +42,7 @@ of them. Exact arguments and limits are in the
 | `mcp` | Discover and call remote tools from globally configured [MCP connections](MCP.md). |
 | `lsp` | Query definitions, references and document diagnostics through enabled [language servers](LSP.md). |
 | `agent` | Delegate work to [collaborators](COLLABORATION.md). Main agent only. |
-| `ask_user` | Ask you up to four [questions](QUESTIONS_AND_PLANS.md) and wait for answers. Main agent only. |
+| `ask_user` | Ask you one or more [questions](QUESTIONS_AND_PLANS.md) and wait for answers. Main agent only. |
 | `todo_list` | Keep a [plan](QUESTIONS_AND_PLANS.md#plans) for the conversation. |
 | `steps` | Run several of these tools in order with [one call](TOOL_REFERENCE.md#steps). |
 

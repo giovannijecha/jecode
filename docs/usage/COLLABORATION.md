@@ -65,9 +65,12 @@ the same network and system access as anywhere else.
 
 ## Assignment lifecycle
 
-1. **Create.** The main agent creates one to eight assignments at a time, each
+1. **Create.** The main agent creates one or more assignments at a time, each
    with a title, instructions, a workspace and optional context. The interface
-   numbers them `AGENT 1`, `AGENT 2` and so on.
+   numbers them `AGENT 1`, `AGENT 2` and so on. At most eight collaborators of a
+   conversation work at once; the others wait, showing `Waiting for a free
+   slot`, and start in the order they were created. Stopping a waiting
+   collaborator ends it before it starts.
 2. **Update.** While a collaborator works, the main agent can send revised
    instructions or new context. The collaborator receives the new version at its
    next model request; a tool call already running finishes first. Reports say
@@ -101,8 +104,8 @@ integration.
 
 | Action | Fields | Behavior |
 | --- | --- | --- |
-| `create` | `tasks`: 1–8 items with `title`, `instructions`, `workspace` and optional `context` | Starts collaborators and returns IDs such as `a1`. |
-| `update` | `id` and `instructions` and/or `context` | Sends a new version; omitted fields keep their last values. Also starts follow-up work on a returned collaborator. |
+| `create` | `tasks`: one or more items with `title`, `instructions`, `workspace` and optional `context` | Queues collaborators, starts up to eight turns at once and returns IDs such as `a1`. |
+| `update` | `id` and `instructions` and/or `context` | Sends a new version; omitted fields keep their last values. Also starts follow-up work on a returned collaborator. Work not received during the active turn joins the end of the queue when that turn finishes. |
 | `list` | — | Open assignments. |
 | `inspect` | `id` | Activity, assignment versions and report evidence. |
 | `wait` | optional `id`, `timeout_ms` (0–60,000) | Waits for running work; stays cancellable. |

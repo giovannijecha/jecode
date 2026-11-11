@@ -3,9 +3,6 @@
 use crate::json::{self, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-const MAX_TASKS: usize = 40;
-const MAX_SNAPSHOT_BYTES: usize = 32 * 1024;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
     pub id: String,
@@ -17,14 +14,14 @@ pub struct Task {
 
 impl Task {
     fn parse(value: &Value) -> Result<Self, String> {
-        let id = required_text(value, "id", 48)?;
+        let id = required_text(value, "id")?;
         if !id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         {
             return Err("Task id must use letters, digits, '-' or '_'".into());
         }
-        let status = required_text(value, "status", 24)?;
+        let status = required_text(value, "status")?;
         if !matches!(
             status.as_str(),
             "pending" | "in_progress" | "waiting" | "done" | "cancelled"
@@ -33,10 +30,10 @@ impl Task {
         }
         Ok(Self {
             id,
-            title: required_text(value, "title", 200)?,
+            title: required_text(value, "title")?,
             status,
-            note: optional_text(value, "note", 800)?.unwrap_or_default(),
-            agent: optional_text(value, "agent", 80)?,
+            note: optional_text(value, "note")?.unwrap_or_default(),
+            agent: optional_text(value, "agent")?,
         })
     }
 
@@ -82,7 +79,7 @@ impl Plan {
         {
             String::new()
         } else {
-            required_text(value, "title", 200)?
+            required_text(value, "title")?
         };
         Ok(Self {
             title,
@@ -96,15 +93,11 @@ impl Plan {
             .map_or(0, |plan| plan.revision)
             .checked_add(1)
             .ok_or("Plan revision limit reached")?;
-        let plan = Self {
-            title: required_text(arguments, "title", 200)?,
+        Ok(Self {
+            title: required_text(arguments, "title")?,
             revision,
             tasks: parse_tasks(arguments)?,
-        };
-        if plan.value().encode().len() > MAX_SNAPSHOT_BYTES {
-            return Err("Plan snapshot exceeds 32 KiB".into());
-        }
-        Ok(plan)
+        })
     }
 
     pub fn value(&self) -> Value {
@@ -236,28 +229,22 @@ fn agent_number(agent: &str) -> Option<usize> {
         .flatten()
 }
 
-fn required_text(value: &Value, key: &str, limit: usize) -> Result<String, String> {
+fn required_text(value: &Value, key: &str) -> Result<String, String> {
     let text = value
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{key} must be a string"))?;
-    if text.trim().is_empty() || text.len() > limit || text.chars().any(char::is_control) {
-        return Err(format!(
-            "{key} must be nonempty, single-line text of at most {limit} bytes"
-        ));
+    if text.trim().is_empty() || text.chars().any(char::is_control) {
+        return Err(format!("{key} must be nonempty, single-line text"));
     }
     Ok(text.to_owned())
 }
 
-fn optional_text(value: &Value, key: &str, limit: usize) -> Result<Option<String>, String> {
+fn optional_text(value: &Value, key: &str) -> Result<Option<String>, String> {
     match value.get(key) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(text)) if text.len() <= limit && !text.chars().any(char::is_control) => {
-            Ok(Some(text.clone()))
-        }
-        _ => Err(format!(
-            "{key} must be single-line text of at most {limit} bytes"
-        )),
+        Some(Value::String(text)) if !text.chars().any(char::is_control) => Ok(Some(text.clone())),
+        _ => Err(format!("{key} must be single-line text")),
     }
 }
 
@@ -266,9 +253,6 @@ fn parse_tasks(value: &Value) -> Result<Vec<Task>, String> {
         .get("tasks")
         .and_then(Value::as_array)
         .ok_or("tasks must be an array")?;
-    if items.len() > MAX_TASKS {
-        return Err(format!("tasks supports at most {MAX_TASKS} items"));
-    }
     let mut ids = BTreeSet::new();
     let mut tasks = Vec::with_capacity(items.len());
     for item in items {

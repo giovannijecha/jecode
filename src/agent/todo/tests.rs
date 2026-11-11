@@ -135,3 +135,55 @@ fn saved_plan_survives_resume_and_context_projection() {
     resumed.resume(&old_id).unwrap();
     assert_eq!(resumed.todo_plan().unwrap(), plan);
 }
+
+#[test]
+fn a_plan_past_the_former_caps_is_set_saved_and_resumed() {
+    // 150 tasks with long titles and notes: past the former 40 tasks,
+    // 200/800-byte fields and the 32 KiB snapshot.
+    let directory = Directory::new();
+    let home = Directory::new();
+    let mut first = agent(&directory);
+    first.enable_sessions(home.path()).unwrap();
+    let id = first.sessions().unwrap().id();
+    first.messages.lock().unwrap().push(Value::object([
+        ("role", Value::string("user")),
+        ("content", Value::string("Plan the migration")),
+    ]));
+    let tasks = (0..150)
+        .map(|index| {
+            Value::object([
+                ("id", Value::string(format!("task-{index}"))),
+                (
+                    "title",
+                    Value::string(format!("Step {index} {}", "t".repeat(400))),
+                ),
+                ("status", Value::string("pending")),
+                ("note", Value::string("n".repeat(2000))),
+            ])
+        })
+        .collect();
+    let call = crate::backend::ToolCall {
+        id: "large".into(),
+        name: "todo_list".into(),
+        arguments: Value::object([
+            ("action", Value::string("set")),
+            ("title", Value::string("p".repeat(1000))),
+            ("tasks", Value::Array(tasks)),
+        ])
+        .encode(),
+    };
+    let result = record(&mut first, &call);
+    assert!(result.get("error").is_none(), "{}", result.encode());
+    assert!(result.encode().len() > 32 * 1024);
+    let plan = first.todo_plan().unwrap();
+    assert_eq!(plan.tasks.len(), 150);
+    // Each request carries a bounded preview that points at the full plan.
+    let environment = first.request_environment();
+    assert!(environment.contains("action=get for the full plan"));
+    first.save_session().unwrap();
+    drop(first);
+    let mut resumed = agent(&directory);
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    assert_eq!(resumed.todo_plan().unwrap(), plan);
+}

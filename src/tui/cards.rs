@@ -238,17 +238,19 @@ fn file_card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let mut hidden = false;
     let mut diff = false;
     if let Some(result) = tool.result {
-        let mut body =
-            if result.get("error").is_some() || (tool.name == "edit" && status != Status::Done) {
-                Body::new(Vec::new())
-            } else if let Some(change) = change.filter(|change| change.created) {
-                content::created(change, field(tool.arguments, "path"), columns, expanded)
-            } else if let Some(change) = change {
-                diff = true;
-                diff::render(change, field(tool.arguments, "path"), columns, expanded)
-            } else {
-                content::render(&tool, result, status, columns, expanded)
-            };
+        let mut body = if (result.get("error").is_some()
+            && !(tool.name == "read" && result.get("files").is_some()))
+            || (tool.name == "edit" && status != Status::Done)
+        {
+            Body::new(Vec::new())
+        } else if let Some(change) = change.filter(|change| change.created) {
+            content::created(change, field(tool.arguments, "path"), columns, expanded)
+        } else if let Some(change) = change {
+            diff = true;
+            diff::render(change, field(tool.arguments, "path"), columns, expanded)
+        } else {
+            content::render(&tool, result, status, columns, expanded)
+        };
         if body.hidden > 0 {
             hidden = true;
             let origin = body

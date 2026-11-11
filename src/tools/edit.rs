@@ -1,9 +1,6 @@
 use super::required_string;
 use crate::json::Value;
 
-/// Files one edit call may change.
-pub(crate) const MAX_FILES: usize = 12;
-
 /// Parses the edit tool's ordered replacements.
 pub(crate) fn steps(arguments: &Value) -> Result<Vec<(&str, &str)>, String> {
     match arguments.get("edits") {
@@ -24,7 +21,7 @@ pub(crate) fn files(arguments: &Value) -> Result<Option<Vec<(&str, &Value)>>, St
     let single = arguments.get("path").is_some_and(|path| !placeholder(path));
     if placeholder(files) {
         return match files {
-            Value::Array(_) if !single => Err(count()),
+            Value::Array(_) if !single => Err(EMPTY.into()),
             _ => Ok(None),
         };
     }
@@ -42,9 +39,6 @@ pub(crate) fn files(arguments: &Value) -> Result<Option<Vec<(&str, &Value)>>, St
     let Value::Array(files) = files else {
         return Err("files must be an array of {path, edits} objects".into());
     };
-    if files.len() > MAX_FILES {
-        return Err(count());
-    }
     let mut entries: Vec<(&str, &Value)> = Vec::with_capacity(files.len());
     for file in files {
         let path = file
@@ -68,9 +62,7 @@ pub(crate) fn several(arguments: &Value) -> bool {
     !matches!(files(arguments), Ok(None))
 }
 
-fn count() -> String {
-    format!("files must contain 1-{MAX_FILES} entries; split larger changes across calls")
-}
+const EMPTY: &str = "files must contain at least one {path, edits} entry";
 
 /// Native calls may send unused fields empty.
 pub(crate) fn placeholder(value: &Value) -> bool {

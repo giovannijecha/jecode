@@ -107,7 +107,6 @@ fn sequential_closure_releases_workers_and_preserves_monotonic_ids_after_resume(
     let observer = parent.collaboration();
 
     let run_one = |observer: &Observer, expected: usize| {
-        let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let created = observer
             .create(
                 project.path(),
@@ -123,7 +122,6 @@ fn sequential_closure_releases_workers_and_preserves_monotonic_ids_after_resume(
                         Tools::new(root)?,
                     ))
                 },
-                gate.clone(),
             )
             .unwrap();
         let id = format!("a{expected}");
@@ -131,9 +129,7 @@ fn sequential_closure_releases_workers_and_preserves_monotonic_ids_after_resume(
         observer
             .receipt("created", None, 0, "Agents", vec![id.clone()])
             .unwrap();
-        let (lock, ready) = &*gate;
-        *lock.lock().unwrap() = true;
-        ready.notify_all();
+        observer.release_created(std::slice::from_ref(&id));
         let records = observer
             .wait(Some(&id), Duration::from_secs(5), &Cancellation::default())
             .unwrap();
@@ -241,7 +237,6 @@ fn removed_isolated_workspace_can_be_closed_after_failed_receipt_and_resume() {
     );
     parent.enable_sessions(home.path()).unwrap();
     let observer = parent.collaboration();
-    let gate = Arc::new((Mutex::new(false), Condvar::new()));
     observer
         .create(
             &project,
@@ -257,15 +252,12 @@ fn removed_isolated_workspace_can_be_closed_after_failed_receipt_and_resume() {
                     Tools::new(root)?,
                 ))
             },
-            gate.clone(),
         )
         .unwrap();
     observer
         .receipt("created", None, 0, "Agents", vec!["a1".into()])
         .unwrap();
-    let (lock, ready) = &*gate;
-    *lock.lock().unwrap() = true;
-    ready.notify_all();
+    observer.release_created(&["a1".into()]);
     observer
         .wait(Some("a1"), Duration::from_secs(5), &Cancellation::default())
         .unwrap();

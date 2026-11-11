@@ -309,15 +309,14 @@ pub(super) fn execute(
         }
         "logs" => {
             let filter = logs::Filter::parse(arguments.get("filter").and_then(Value::as_str))?;
+            // A larger limit gets a full page and the next cursor.
             let limit = match arguments.get("limit") {
                 None => logs::DEFAULT_LIMIT,
                 Some(limit) => limit
                     .as_usize()
-                    .filter(|n| (1..=logs::MAX_LIMIT).contains(n))
-                    .ok_or(format!(
-                        "browser logs limit must be an integer from 1 to {}",
-                        logs::MAX_LIMIT
-                    ))?,
+                    .filter(|n| *n >= 1)
+                    .ok_or("browser logs limit must be a positive integer")?
+                    .min(logs::MAX_LIMIT),
             };
             // Receives the events queued since the previous DevTools call.
             connection.call(

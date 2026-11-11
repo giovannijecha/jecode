@@ -128,7 +128,6 @@ pub(super) fn todo() -> Value {
                 Value::object([
                     ("type", Value::string("array")),
                     ("items", task),
-                    ("maxItems", Value::number(40)),
                     (
                         "description",
                         Value::string(
@@ -182,25 +181,20 @@ pub(super) fn ask_user() -> Value {
             ),
             (
                 "options",
-                Value::object([
-                    ("type", Value::string("array")),
-                    ("items", option),
-                    ("maxItems", Value::number(6)),
-                ]),
+                Value::object([("type", Value::string("array")), ("items", option)]),
             ),
         ]),
         &["id", "title", "question"],
     );
     super::tool(
         "ask_user",
-        "Ask the user one to four focused questions and wait for explicit answers; they are answered one at a time and sent together. Each question may offer single or multiple choice options, and the user can always answer in their own words. Nothing is preselected and a recommendation is not an answer. The result lists each question's chosen option IDs and typed text. If interactive input is unavailable or the questions are dismissed, report that no answer was supplied; do not infer consent. Collaborators cannot ask the user directly. Calls run in order even with parallel:true.",
+        "Ask the user one or more focused questions and wait for explicit answers; they are answered one at a time and sent together. Each question may offer single or multiple choice options, and the user can always answer in their own words. Nothing is preselected and a recommendation is not an answer. The result lists each question's chosen option IDs and typed text. If interactive input is unavailable or the questions are dismissed, report that no answer was supplied; do not infer consent. Collaborators cannot ask the user directly. Calls run in order even with parallel:true.",
         Value::object([(
             "questions",
             Value::object([
                 ("type", Value::string("array")),
                 ("items", question),
                 ("minItems", Value::number(1)),
-                ("maxItems", Value::number(4)),
             ]),
         )]),
         &["questions"],
@@ -276,10 +270,7 @@ mod tests {
             .get("properties")
             .and_then(|properties| properties.get("questions"))
             .unwrap();
-        assert_eq!(
-            questions.get("maxItems").map(Value::encode),
-            Some("4".into())
-        );
+        assert!(questions.get("maxItems").is_none());
         assert_eq!(
             questions
                 .get("items")

@@ -82,23 +82,60 @@ fn a_failed_file_stays_unchanged_while_the_others_are_written() {
 }
 
 #[test]
+fn a_call_may_edit_any_number_of_files() {
+    let root = Directory::new();
+    let names: Vec<String> = (0..40).map(|index| format!("f{index:02}.rs")).collect();
+    for name in &names {
+        fs::write(root.path().join(name), format!("let {} = 1;\n", &name[..3])).unwrap();
+    }
+    let tools = Tools::new(root.path()).unwrap();
+    let entries = names
+        .iter()
+        .map(|name| {
+            // One file in the middle misses; it alone stays unchanged.
+            let old = if name == "f17.rs" { "missing" } else { " = 1" };
+            entry(name, vec![replace(old, " = 2")])
+        })
+        .collect();
+    let execution = run(&tools, &files(entries), Begun::default());
+    let results = execution
+        .result
+        .get("files")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| panic!("{:?}", execution.result));
+    let paths: Vec<_> = results.iter().map(|entry| text(entry, "path")).collect();
+    assert_eq!(paths, names);
+    for (name, result) in names.iter().zip(results) {
+        let content = fs::read_to_string(root.path().join(name)).unwrap();
+        if name == "f17.rs" {
+            assert!(text(result, "error").contains("old text was not found"));
+            assert_eq!(content, "let f17 = 1;\n");
+        } else {
+            assert!(result.get("error").is_none(), "{name}: {result:?}");
+            assert_eq!(content, format!("let {} = 2;\n", &name[..3]));
+        }
+    }
+    assert_eq!(execution.change.unwrap().files.len(), 39);
+    assert_eq!(
+        crate::events::tool_summary("edit", &execution.result),
+        "changed 39 files; 1 failed"
+    );
+}
+
+#[test]
 fn malformed_calls_are_refused_before_any_file_changes() {
     let root = Directory::new();
     fs::write(root.path().join("a.rs"), "one\n").unwrap();
     fs::write(root.path().join("b.rs"), "two\n").unwrap();
     let tools = Tools::new(root.path()).unwrap();
     let a = || entry("a.rs", vec![replace("one", "1")]);
-    let many: Vec<_> = (0..=edit::MAX_FILES)
-        .map(|index| entry(&format!("f{index}.rs"), vec![replace("x", "y")]))
-        .collect();
     let mut mixed = files(vec![a()]);
     if let Value::Object(fields) = &mut mixed {
         fields.insert("path".into(), Value::string("b.rs"));
         fields.insert("edits".into(), Value::Array(vec![replace("two", "2")]));
     }
     for (arguments, expected) in [
-        (files(vec![]), "1-12 entries"),
-        (files(many), "1-12 entries"),
+        (files(vec![]), "at least one {path, edits} entry"),
         (files(vec![a(), a()]), "names a.rs more than once"),
         (
             files(vec![a(), entry("./a.rs", vec![replace("one", "2")])]),

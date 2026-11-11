@@ -50,6 +50,56 @@ fn ask(width: usize) -> State {
     state
 }
 
+/// Twelve questions of twenty options, on the last one.
+fn many_questions(width: usize) -> State {
+    let mut state = state(width);
+    let options = (0..20)
+        .map(|id| format!(r#"{{"id":"o{id}","label":"Option {id}"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let questions = (0..12)
+        .map(|id| {
+            format!(
+                r#"{{"id":"q{id}","title":"Decision {id:02}","question":"Which option for part {id}?","options":[{options}]}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let request = Request::parse(
+        "audit-many",
+        &json::parse(&format!(r#"{{"questions":[{questions}]}}"#)).unwrap(),
+    )
+    .unwrap();
+    let mut panel = Panel::new(&request, None);
+    for _ in 0..11 {
+        panel.switch(&request, true);
+    }
+    panel.entries[11].row = usize::MAX;
+    state.question = Some(request);
+    state.ask_panel = Some(panel);
+    state
+}
+
+/// A 120-task plan in /todo.
+fn long_plan(width: usize) -> State {
+    let mut state = state(width);
+    state.todo_plan = Some(crate::todo::Plan {
+        title: "Session storage migration".into(),
+        revision: 1,
+        tasks: (0..120)
+            .map(|index| crate::todo::Task {
+                id: format!("t{index}"),
+                title: format!("Task {index}"),
+                status: if index < 98 { "done" } else { "pending" }.into(),
+                note: String::new(),
+                agent: None,
+            })
+            .collect(),
+    });
+    state.todo_panel = Some(crate::tui::todo::Panel::default());
+    state
+}
+
 fn models() -> State {
     let mut state = state(40);
     let models = ["sonnet", "opus", "haiku"].map(|name| Model {
@@ -81,6 +131,12 @@ fn alignment() {
     let scenes = [
         ("Ask over a draft", ask(80), false),
         ("Ask over a draft, narrow", ask(40), false),
+        (
+            "Ask, twelve questions of twenty options",
+            many_questions(80),
+            false,
+        ),
+        ("Todo, 120 tasks", long_plan(80), false),
         ("Model, primary action and exit", models(), false),
         ("Permissions, recursive workspace", permissions, false),
         ("Completion statistics", done, false),

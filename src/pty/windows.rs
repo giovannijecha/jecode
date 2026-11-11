@@ -148,6 +148,42 @@ mod tests {
     use std::io::{BufRead, BufReader};
 
     #[test]
+    fn helper_orders_future_input_and_discards_stale_input_after_interrupt() {
+        let directory = crate::test_support::Directory::new();
+        let executable = directory.path().join("pty-sequence-tests.exe");
+        let compiler = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("Microsoft.NET/Framework64/v4.0.30319/csc.exe");
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let compiled = Command::new(compiler)
+            .args(["/nologo", "/target:exe", "/main:JecodePtySequenceTests"])
+            .arg(format!(
+                "/out:{}",
+                executable.to_string_lossy().replace('/', "\\")
+            ))
+            .args(
+                [
+                    source.join("src/pty/windows.cs"),
+                    source.join("src/process/windows_command.cs"),
+                    source.join("src/pty/windows_sequence_tests.cs"),
+                ]
+                .map(|path| path.to_string_lossy().replace('/', "\\")),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stdout)
+        );
+        let result = Command::new(executable).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
     fn host_gets_an_ordinary_directory_and_no_empty_marker() {
         let mut target = Command::new("cmd.exe");
         target.current_dir(r"\\?\C:\Windows").env(MARKER, "");

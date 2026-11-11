@@ -10,7 +10,6 @@ use std::{
     fs,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{Arc, Condvar, Mutex},
     thread,
     time::Instant,
 };
@@ -175,7 +174,6 @@ fn prepare_then_stop() {
     agent.prepare_turn("Delegate the inspection").unwrap();
     agent.save_session().unwrap();
     let session = agent.sessions().unwrap().id();
-    let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let _ = agent.collaboration().create(
         &project,
         Spec {
@@ -193,7 +191,6 @@ fn prepare_then_stop() {
                 thread::sleep(Duration::from_secs(1));
             }
         },
-        gate,
     );
 }
 

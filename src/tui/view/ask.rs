@@ -164,24 +164,57 @@ fn max_key_rows(request: &Request, panel: &Panel, columns: usize) -> usize {
 
 /// `☑` before each answered title, the current one in bold `accent`, and
 /// `N of M` in `dim` ending two cells from the edge.
+/// When the titles do not fit, earlier ones leave behind `…` so the current
+/// title stays in view.
 fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
+    let count = format!("{} of {}", panel.step + 1, request.questions.len());
+    let count_cells = text::cells(&count);
+    let titles: Vec<(String, bool)> = request
+        .questions
+        .iter()
+        .zip(&panel.entries)
+        .map(|(question, entry)| {
+            let title = text::clean(&question.title).replace('\n', " ");
+            (title, entry.answer(question).is_some())
+        })
+        .collect();
+    let cells = |index: usize| {
+        let (title, answered) = &titles[index];
+        text::cells(title)
+            + if *answered && index != panel.step {
+                2
+            } else {
+                0
+            }
+    };
+    // The two-cell indent, and the `…` that cuts any later titles, leave less
+    // room for titles `first..=step`.
+    let later = usize::from(panel.step + 1 < titles.len());
+    let room = columns.saturating_sub(count_cells + 6 + later);
+    // Titles `first..=step` with their gaps, after `…` and its gap if any.
+    let mut span = (0..=panel.step).map(cells).sum::<usize>() + 3 * panel.step;
+    let mut first = 0;
+    while first < panel.step && span + if first > 0 { 4 } else { 0 } > room {
+        span -= cells(first) + 3;
+        first += 1;
+    }
     let mut row = Line::new("  ", MUTED);
-    for (index, (question, entry)) in request.questions.iter().zip(&panel.entries).enumerate() {
+    if first > 0 {
+        row.push("…", MUTED);
+    }
+    for (index, (title, answered)) in titles.iter().enumerate().skip(first) {
         if index > 0 {
             row.push("   ", MUTED);
         }
-        let title = text::clean(&question.title).replace('\n', " ");
         if index == panel.step {
-            row.push(&title, ACCENT.bold());
-        } else if entry.answer(question).is_some() {
+            row.push(title, ACCENT.bold());
+        } else if *answered {
             row.push("☑ ", ACCENT);
-            row.push(&title, MUTED);
+            row.push(title, MUTED);
         } else {
-            row.push(&title, MUTED);
+            row.push(title, MUTED);
         }
     }
-    let count = format!("{} of {}", panel.step + 1, request.questions.len());
-    let count_cells = text::cells(&count);
     let mut row = row.shortened(columns.saturating_sub(count_cells + 4));
     let used = panel::cells(&row);
     row.push(
@@ -212,16 +245,7 @@ fn keys(request: &Request, panel: &Panel, step: usize) -> Vec<Key<'static>> {
         keys.push(key("Space", "toggle"));
     }
     if entry.row == usize::MAX {
-        let numbers = match question.options.len() + 1 {
-            1 => "1",
-            2 => "1–2",
-            3 => "1–3",
-            4 => "1–4",
-            5 => "1–5",
-            6 => "1–6",
-            _ => "1–7",
-        };
-        keys.push(key(numbers, "choose"));
+        keys.push(key(digits(question.options.len() + 1), "choose"));
     } else {
         keys.push(key("Enter", verb));
     }
@@ -241,4 +265,11 @@ fn keys(request: &Request, panel: &Panel, step: usize) -> Vec<Key<'static>> {
     keys.push(key("Esc", "back to chat"));
     keys.push(key("Ctrl+D", "dismiss"));
     keys
+}
+
+/// The digits that choose a row: one key per digit, so rows past the ninth
+/// are reached with ↑↓.
+fn digits(rows: usize) -> &'static str {
+    const RANGES: [&str; 9] = ["1", "1–2", "1–3", "1–4", "1–5", "1–6", "1–7", "1–8", "1–9"];
+    RANGES[rows.clamp(1, 9) - 1]
 }

@@ -6,8 +6,7 @@ use crate::{agent::Agent, attachments::Prompt, events::Event, json::Value};
 use std::{
     collections::VecDeque,
     path::Path,
-    sync::{Arc, Condvar, Mutex, mpsc},
-    thread,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -17,7 +16,6 @@ impl Observer {
         project: &Path,
         spec: Spec,
         make_child: impl FnOnce(&str, &Path) -> Result<Agent, String>,
-        start_gate: Arc<(Mutex<bool>, Condvar)>,
     ) -> Result<Value, String> {
         let Spec {
             title,
@@ -52,7 +50,6 @@ impl Observer {
         let session_events = Some(child.archive().events);
         let inbox = child.inbox();
         let cancellation = child.cancellation();
-        let (wake, receive) = mpsc::channel();
         let record = Record {
             id: id.clone(),
             number: 0,
@@ -78,7 +75,7 @@ impl Observer {
                 instructions,
                 context,
             }]),
-            activity: "Starting".into(),
+            activity: "Waiting for a free slot".into(),
             updates: vec![],
             updates_truncated: false,
             tools: vec![],
@@ -99,47 +96,17 @@ impl Observer {
             state
                 .records
                 .push(Tracked::new(Record { number, ..record }));
+            state.queue.push_back(id.clone());
+            state.workers.push(Worker {
+                id: id.clone(),
+                child: Arc::new(Mutex::new(child)),
+                inbox,
+                cancellation,
+                ready: false,
+                busy: false,
+            });
             number
         };
-        // The child outlives this call; its receipts carry no call label.
-        let observer = Self(Arc::clone(&self.0), None);
-        let thread_id = id.clone();
-        let task = thread::Builder::new()
-            .name(format!("jecode-agent-{id}"))
-            .spawn(move || {
-                let (lock, ready) = &*start_gate;
-                let mut started = lock.lock().unwrap();
-                while !*started {
-                    started = ready.wait(started).unwrap();
-                }
-                drop(started);
-                observer.run_child(thread_id, child, receive)
-            });
-        let task = match task {
-            Ok(task) => task,
-            Err(error) => {
-                let record = self
-                    .0
-                    .state
-                    .lock()
-                    .unwrap()
-                    .records
-                    .pop()
-                    .unwrap()
-                    .into_inner();
-                if let Some(workspace) = record.workspace {
-                    let _ = workspace.close();
-                }
-                return Err(format!("Could not start collaborator: {error}"));
-            }
-        };
-        self.0.state.lock().unwrap().workers.push(Worker {
-            id: id.clone(),
-            inbox,
-            cancellation,
-            wake,
-            task: Some(task),
-        });
         let mut created =
             Value::object([("id", Value::string(id)), ("number", Value::number(number))]);
         if let (Value::Object(fields), Some(omitted)) = (&mut created, omitted) {
@@ -148,177 +115,158 @@ impl Observer {
         Ok(created)
     }
 
-    fn run_child(&self, id: String, mut child: Agent, receive: mpsc::Receiver<()>) {
-        loop {
-            if child.cancellation().requested() {
-                break;
-            }
-            let assignment = {
-                let mut state = self.0.state.lock().unwrap();
-                let Some(record) = state.record(&id) else {
-                    break;
-                };
-                if record.state == "stopping" {
-                    None
-                } else {
-                    let assignment = record.pending.back().cloned();
-                    if assignment.is_some() {
-                        // The selected assignment becomes the initial prompt.
-                        // Updates sent after this handoff remain in the inbox.
-                        // Keep sent values available until received installs them.
-                        child.inbox().with(|entries| {
-                            entries.drain();
-                        });
-                    }
-                    assignment
-                }
-            };
-            let Some(assignment) = assignment else {
-                if self
-                    .0
-                    .state
-                    .lock()
-                    .unwrap()
-                    .records
-                    .iter()
-                    .any(|record| record.id == id && record.state == "stopping")
-                {
-                    break;
-                }
-                if receive.recv().is_err() {
-                    break;
-                }
-                continue;
-            };
-            // Superseded sent revisions remain receipts, but only the newest is received.
-            if self.received(&id, &assignment).is_err() {
-                break;
-            }
-            let prompt = format!(
-                "Assignment v{}: {}\n\nRelevant context:\n{}\n\nReport the changes, checks, and unresolved issues.",
-                assignment.version, assignment.instructions, assignment.context
-            );
-            let mut report = String::new();
-            let result = child.run_turn(Prompt::plain(prompt), &mut |event| {
-                match event {
-                    Event::Message { text } => {
-                        self.message(&id, &text);
-                        if !report.is_empty() {
-                            report.push_str("\n\n");
-                        }
-                        report.push_str(&text);
-                    }
-                    Event::Streaming { text } => self.progress(&id, &text),
-                    Event::ToolStarted {
-                        id: call_id,
-                        name,
-                        arguments,
-                    } => self.tool_started(&id, &call_id, &name, &arguments),
-                    Event::ToolFinished {
-                        id: call_id,
-                        name,
-                        summary,
-                        result,
-                    } => self.tool_finished(&id, &call_id, &name, &summary, &result),
-                    Event::ToolChanged {
-                        id: call_id,
-                        change,
-                    } => self.tool_changed(&id, &call_id, &change),
-                    Event::Accepted { prompts } => {
-                        let mut accepted = Vec::new();
-                        {
-                            let mut state = self.0.state.lock().unwrap();
-                            if let Some(record) = state.record(&id) {
-                                accepted.extend(record.pending.iter().take(prompts.len()).cloned());
-                            }
-                        }
-                        for assignment in accepted {
-                            self.received(&id, &assignment)?;
-                        }
-                    }
-                    _ => {}
-                }
-                Ok(())
-            });
-            if self
-                .0
-                .state
-                .lock()
-                .unwrap()
-                .records
-                .iter()
-                .any(|record| record.id == id && record.state == "unknown")
+    pub(super) fn run_child(&self, id: &str, child: &mut Agent) {
+        // Select the newest revision only when this turn actually starts.
+        // Updates before this handoff replace the initial prompt; later ones
+        // enter the active turn through the inbox.
+        let assignment = {
+            let mut state = self.0.state.lock().unwrap();
+            if child.cancellation().requested()
+                && let Some(record) = state.record(id)
+                && record.state == "running"
             {
-                break;
+                record.state = "stopping";
             }
-            let (kind, version, title, details) = {
-                let mut state = self.0.state.lock().unwrap();
-                let Some(record) = state.record(&id) else {
-                    break;
+            let record = state.record(id);
+            if let Some(record) = record.filter(|record| record.state == "running") {
+                let assignment = record.pending.back().cloned();
+                if assignment.is_some() {
+                    child.inbox().with(|entries| {
+                        entries.drain();
+                    });
+                }
+                assignment
+            } else {
+                None
+            }
+        };
+        let Some(assignment) = assignment else {
+            self.finish_stopped(id);
+            return;
+        };
+        if self.received(id, &assignment).is_err() {
+            self.finish_stopped(id);
+            return;
+        }
+        let prompt = format!(
+            "Assignment v{}: {}\n\nRelevant context:\n{}\n\nReport the changes, checks, and unresolved issues.",
+            assignment.version, assignment.instructions, assignment.context
+        );
+        let mut report = String::new();
+        let result = child.run_turn(Prompt::plain(prompt), &mut |event| {
+            match event {
+                Event::Message { text } => {
+                    self.message(id, &text);
+                    if !report.is_empty() {
+                        report.push_str("\n\n");
+                    }
+                    report.push_str(&text);
+                }
+                Event::Streaming { text } => self.progress(id, &text),
+                Event::ToolStarted {
+                    id: call_id,
+                    name,
+                    arguments,
+                } => self.tool_started(id, &call_id, &name, &arguments),
+                Event::ToolFinished {
+                    id: call_id,
+                    name,
+                    summary,
+                    result,
+                } => self.tool_finished(id, &call_id, &name, &summary, &result),
+                Event::ToolChanged {
+                    id: call_id,
+                    change,
+                } => self.tool_changed(id, &call_id, &change),
+                Event::Accepted { prompts } => {
+                    let accepted = {
+                        let mut state = self.0.state.lock().unwrap();
+                        state.record(id).map_or_else(Vec::new, |record| {
+                            record.pending.iter().take(prompts.len()).cloned().collect()
+                        })
+                    };
+                    for assignment in accepted {
+                        self.received(id, &assignment)?;
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        });
+        if self
+            .0
+            .state
+            .lock()
+            .unwrap()
+            .records
+            .iter()
+            .any(|record| record.id == id && record.state == "unknown")
+        {
+            return;
+        }
+        let (kind, version, title, details) = {
+            let mut state = self.0.state.lock().unwrap();
+            let Some(record) = state.record(id) else {
+                return;
+            };
+            if record.state == "stopping" {
+                record.state = "stopped";
+                record.log.push(Entry::Stopped);
+                (
+                    "stopped",
+                    record.received_version,
+                    record.title.clone(),
+                    Vec::new(),
+                )
+            } else {
+                let version = record.received_version;
+                record.log.push(Entry::Returned(version));
+                record.report = Some((version, report));
+                record.reviewed = false;
+                record.activity = if result.is_ok() {
+                    "Returned".into()
+                } else {
+                    "Failed".into()
                 };
+                record.error = result.as_ref().err().cloned();
+                record.state = if !record.pending.is_empty() {
+                    "running"
+                } else if result.is_ok() {
+                    "returned"
+                } else {
+                    "failed"
+                };
+                (
+                    "returned",
+                    version,
+                    record.title.clone(),
+                    result.err().into_iter().collect(),
+                )
+            }
+        };
+        if let Err(error) = self.receipt(kind, Some(id), version, &title, details) {
+            self.persistence_failed(id, error);
+        }
+        self.0.changed.notify_all();
+    }
+
+    pub(super) fn finish_stopped(&self, id: &str) {
+        let stopped = {
+            let mut state = self.0.state.lock().unwrap();
+            state.record(id).and_then(|record| {
                 if record.state == "stopping" {
                     record.state = "stopped";
                     record.log.push(Entry::Stopped);
-                    (
-                        "stopped",
-                        record.received_version,
-                        record.title.clone(),
-                        Vec::new(),
-                    )
+                    Some((record.received_version, record.title.clone()))
                 } else {
-                    let version = record.received_version;
-                    record.log.push(Entry::Returned(version));
-                    record.report = Some((version, report.clone()));
-                    record.reviewed = false;
-                    record.activity = if result.is_ok() {
-                        "Returned".into()
-                    } else {
-                        "Failed".into()
-                    };
-                    record.error = result.as_ref().err().cloned();
-                    record.state = if !record.pending.is_empty() {
-                        "running"
-                    } else if result.is_ok() {
-                        "returned"
-                    } else {
-                        "failed"
-                    };
-                    (
-                        "returned",
-                        version,
-                        record.title.clone(),
-                        result.err().into_iter().collect(),
-                    )
+                    None
                 }
-            };
-            if let Err(error) = self.receipt(kind, Some(&id), version, &title, details) {
-                self.persistence_failed(&id, error);
-                break;
-            }
-            if kind == "stopped" {
-                break;
-            }
-        }
-        let stopped = {
-            let mut state = self.0.state.lock().unwrap();
-            state
-                .records
-                .iter_mut()
-                .find(|record| record.id == id)
-                .and_then(|record| {
-                    if record.state == "stopping" {
-                        record.state = "stopped";
-                        record.log.push(Entry::Stopped);
-                        Some((record.received_version, record.title.clone()))
-                    } else {
-                        None
-                    }
-                })
+            })
         };
         if let Some((version, title)) = stopped
-            && let Err(error) = self.receipt("stopped", Some(&id), version, &title, vec![])
+            && let Err(error) = self.receipt("stopped", Some(id), version, &title, vec![])
         {
-            self.persistence_failed(&id, error);
+            self.persistence_failed(id, error);
         }
         self.0.changed.notify_all();
     }
@@ -329,6 +277,9 @@ impl Observer {
             let Some(record) = state.record(id) else {
                 return Err("Unknown collaborator".into());
             };
+            if record.state != "running" {
+                return Err("Collaborator is not running".into());
+            }
             record.received_version = assignment.version;
             record.instructions = assignment.instructions.clone();
             record.context = assignment.context.clone();
@@ -348,7 +299,7 @@ impl Observer {
             .inspect_err(|error| self.persistence_failed(id, error.clone()))
     }
 
-    fn persistence_failed(&self, id: &str, error: String) {
+    pub(super) fn persistence_failed(&self, id: &str, error: String) {
         let mut state = self.0.state.lock().unwrap();
         if let Some(record) = state.record(id) {
             record.state = "unknown";

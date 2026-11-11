@@ -195,7 +195,7 @@ fn base_definitions() -> Vec<Value> {
     vec![
         routine(
             "read",
-            "Read a project file or tmp:relative/path, or several at once with paths: when a step needs more than one file, read them in one call (each with the default window, results in order, outside paths and media need a single path). UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary), history:processes (saved process outcomes). Input withdrawn to the composer is excluded from history reads. History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (max 2000), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
+            "Read a project file or tmp:relative/path, or several at once with paths: when a step needs more than one file, read them in one call (each with the default window, results in order, outside paths and media need a single path; results past the inline size are saved in order to result_file, read it with offset and limit). UTF-8 text is paged; images/PDFs are detected by content, copied, and shown next request. Their attachment:ID survives source changes. Other paths: skill:<name>[/relative-path] (SKILL.md by default); output:SESSION:ID:stdout/:stderr (older output:ID refs also work); attachment:ID (text pages, media shown again, other files return a path); history:INDEX (zero-based original message), history:requests (ordered user requests), history:memory (conversation summary), history:processes (saved process outcomes). Input withdrawn to the composer is excluded from history reads. History, skills, attachments and output survive compaction/resume. Text pages default to offset 1 and limit 200 (at most 2000 returned per page), capped at 64 KiB. Follow next_offset, or next_byte_offset with byte_offset for split long lines. byte_offset takes precedence and returns unnumbered text. Paging arguments do not crop media. For context_truncated results, read history_reference in small pages. total_lines appears at EOF in line mode.",
             Value::object([
                 ("path", string()),
                 (
@@ -203,15 +203,11 @@ fn base_definitions() -> Vec<Value> {
                     Value::object([
                         ("type", Value::string("array")),
                         ("minItems", Value::number(1)),
-                        (
-                            "maxItems",
-                            Value::number(crate::agent::read_paths::MAX_PATHS),
-                        ),
                         ("items", string()),
                     ]),
                 ),
                 ("offset", integer(1, None)),
-                ("limit", integer(1, Some(2000))),
+                ("limit", integer(1, None)),
                 ("byte_offset", integer(0, None)),
             ]),
             &[],
@@ -233,7 +229,6 @@ fn base_definitions() -> Vec<Value> {
                     Value::object([
                         ("type", Value::string("array")),
                         ("minItems", Value::number(1)),
-                        ("maxItems", Value::number(super::edit::MAX_FILES)),
                         (
                             "items",
                             Value::object([
@@ -285,16 +280,13 @@ fn base_definitions() -> Vec<Value> {
                         ),
                     ]),
                 ),
-                (
-                    "output_limit_bytes",
-                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
-                ),
+                ("output_limit_bytes", integer(1, None)),
             ]),
             &["command"],
         ),
         routine(
             "process",
-            "Manage conversation-owned Bash and exec processes, active and recently finished. list recovers IDs, status, elapsed time, commands and output refs. poll waits up to wait_ms (default 0) and returns the next unread output window; output_mode:tail jumps to the newest unread bytes and reports skipped bytes, still readable from the saved file. A finished process is reported to you once at your next request, so poll to read output or to wait with nothing else to do, not to learn that it ended. moved_to_background means the user released that wait; the process keeps running. stop terminates the process and descendants; poll if it returns stopping. For tty exec, write sends text or one key (see key enum), resize changes cols/rows and interrupt sends Ctrl+C. write accepts at most 64 KiB. A write receipt confirms control-pipe delivery, not command completion; unconfirmed input may still arrive, so inspect before retrying. Output windows default to 16 KiB per stream; output_limit_bytes is capped at 256 KiB. Poll until drained or read the saved file with byte_offset. Empty output does not prove readiness; check status. exit_code appears after exit. wait_cancelled interrupts only the wait. Processes end on conversation change or Jecode exit; saved output remains readable.",
+            "Manage conversation-owned Bash and exec processes, active and recently finished. list recovers IDs, status, elapsed time, commands and output refs. poll waits up to wait_ms (default 0) and returns the next unread output window; output_mode:tail jumps to the newest unread bytes and reports skipped bytes, still readable from the saved file. A finished process is reported to you once at your next request, so poll to read output or to wait with nothing else to do, not to learn that it ended. moved_to_background means the user released that wait; the process keeps running. stop terminates the process and descendants; poll if it returns stopping. For tty exec, write sends text or one key (see key enum), resize changes cols/rows and interrupt sends Ctrl+C. Text writes accept any length and send confirmed segments in order; after unconfirmed delivery, later bytes are not sent and nothing is retried. A write receipt confirms control-pipe delivery, not command completion; unconfirmed input may still arrive, so inspect before retrying. Output windows default to 16 KiB per stream; output_limit_bytes is capped at 256 KiB. Poll until drained or read the saved file with byte_offset. Empty output does not prove readiness; check status. exit_code appears after exit. wait_cancelled interrupts only the wait. Processes end on conversation change or Jecode exit; saved output remains readable.",
             Value::object([
                 (
                     "action",
@@ -344,10 +336,7 @@ fn base_definitions() -> Vec<Value> {
                 ("cols", integer(1, Some(1000))),
                 ("rows", integer(1, Some(1000))),
                 ("wait_ms", integer(0, None)),
-                (
-                    "output_limit_bytes",
-                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
-                ),
+                ("output_limit_bytes", integer(1, None)),
                 (
                     "output_mode",
                     Value::object([
@@ -391,10 +380,7 @@ fn base_definitions() -> Vec<Value> {
                 ("rows", integer(1, Some(1000))),
                 ("wait_ms", integer(0, None)),
                 ("timeout_seconds", integer(1, None)),
-                (
-                    "output_limit_bytes",
-                    integer(1, Some(super::processes::MAX_OUTPUT_LIMIT)),
-                ),
+                ("output_limit_bytes", integer(1, None)),
             ]),
             &["executable"],
         ),

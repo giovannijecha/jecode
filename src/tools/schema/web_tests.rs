@@ -76,7 +76,7 @@ fn browser_advertises_viewport_bounds_and_log_paging() {
         .unwrap()
         .get("properties")
         .unwrap();
-    for (name, maximum) in [("width", 10_000), ("height", 10_000), ("limit", 200)] {
+    for (name, maximum) in [("width", 10_000_000), ("height", 10_000_000)] {
         let field = properties.get(name).unwrap();
         assert_eq!(field.get("minimum"), Some(&Value::number(1)), "{name}");
         assert_eq!(
@@ -85,6 +85,9 @@ fn browser_advertises_viewport_bounds_and_log_paging() {
             "{name}"
         );
     }
+    let limit = properties.get("limit").unwrap();
+    assert_eq!(limit.get("minimum"), Some(&Value::number(1)));
+    assert!(limit.get("maximum").is_none());
     let filters = properties.get("filter").unwrap().get("enum").unwrap();
     assert_eq!(
         filters,

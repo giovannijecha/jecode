@@ -337,7 +337,7 @@ fn invalid_arguments_and_cancellation_fail_without_writing() {
                 ("context", Value::number(11)),
             ]),
         ),
-        ("list", Value::object([("limit", Value::number(2001))])),
+        ("list", Value::object([("limit", Value::number(0))])),
         (
             "list",
             Value::object([("recursive", Value::string("true"))]),

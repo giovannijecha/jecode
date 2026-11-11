@@ -4,7 +4,7 @@ use crate::json::Value;
 pub(super) fn definition() -> Value {
     routine(
         "mcp",
-        "Use globally configured MCP connections. list shows configured connections only; tools discovers exact remote tool names and input schemas (query/offset/limit page them); call forwards the remote tool and arguments unchanged. Use a connection's stable id from list. Remote permissions come from the enabled connection and its service, independently of local Read/Workspace/Full. Jecode cannot undo remote actions. If an outcome is unknown, inspect the remote state before repeating the operation.",
+        "Use globally configured MCP connections. list shows configured connections only; tools discovers exact remote tool names and input schemas (query/offset/limit page them, with at most 50 tools returned per page); call forwards the remote tool and arguments unchanged. Use a connection's stable id from list. Remote permissions come from the enabled connection and its service, independently of local Read/Workspace/Full. Jecode cannot undo remote actions. If an outcome is unknown, inspect the remote state before repeating the operation.",
         Value::object([
             (
                 "action",
@@ -27,7 +27,7 @@ pub(super) fn definition() -> Value {
             ),
             ("query", string()),
             ("offset", super::integer(0, None)),
-            ("limit", super::integer(1, Some(50))),
+            ("limit", super::integer(1, None)),
         ]),
         &["action"],
     )

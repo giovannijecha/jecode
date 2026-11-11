@@ -492,7 +492,7 @@ fn logs_action_pages_compact_entries_and_saves_raw_records() {
     assert_eq!(texts(entries), ["2 console log tick 7"]);
     for (key, value) in [
         ("limit", Value::number(0)),
-        ("limit", Value::number(201)),
+        ("limit", Value::string("5")),
         ("filter", Value::string("debug")),
         ("cursor", Value::string("bogus")),
     ] {

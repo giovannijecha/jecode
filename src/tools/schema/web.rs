@@ -43,7 +43,7 @@ pub(super) fn web() -> Value {
 pub(super) fn browser() -> Value {
     routine(
         "browser",
-        "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). width+height set the page viewport on open (before url) or screenshot. Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives elements with refs such as @1, role, name and state; selector accepts refs or CSS. press sends a key or chord (Ctrl+z, Meta+z, Shift+Tab); modifiers is a CDP bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8. type sends text as keyboard events, with newlines as Enter and tabs as Tab; optional selector focuses once, then input follows page focus. fill replaces an input value without per-character key events. Use type/press to test keyboard behavior. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. logs pages events (default console and errors); pass next_cursor as cursor; missed counts evicted events. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
+        "Control installed Chromium locally via CDP. open defaults to isolated headless mode; visible:true opens a window, and profile names persistent profiles (default temporary). width+height set the page viewport on open (before url) or screenshot. Omitted browser_id selects newest; omitted tab_id selects an available tab, so specify it when needed. snapshot gives elements with refs such as @1, role, name and state; selector accepts refs or CSS. press sends a key or chord (Ctrl+z, Meta+z, Shift+Tab); modifiers is a CDP bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8. type sends text as keyboard events, with newlines as Enter and tabs as Tab; optional selector focuses once, then input follows page focus. fill replaces an input value without per-character key events. Use type/press to test keyboard behavior. wait uses selector/text. screenshot saves tmp:browser/, delivers an attachment next request, and the ref survives temporary cleanup. logs pages events (default console and errors, at most 200 returned per page); pass next_cursor as cursor; missed counts evicted events. cdp sends a raw DevTools method. Use visible mode for login or two-factor prompts. Chromium must be installed; JECODE_BROWSER can name its executable.",
         Value::object([
             (
                 "action",
@@ -95,8 +95,8 @@ pub(super) fn browser() -> Value {
                 "delta_y",
                 Value::object([("type", Value::string("integer"))]),
             ),
-            ("width", integer(1, Some(10_000))),
-            ("height", integer(1, Some(10_000))),
+            ("width", integer(1, Some(10_000_000))),
+            ("height", integer(1, Some(10_000_000))),
             (
                 "filter",
                 Value::object([
@@ -111,7 +111,7 @@ pub(super) fn browser() -> Value {
                     ),
                 ]),
             ),
-            ("limit", integer(1, Some(200))),
+            ("limit", integer(1, None)),
             ("cursor", string()),
         ]),
         &["action"],

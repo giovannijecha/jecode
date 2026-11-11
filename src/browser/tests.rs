@@ -10,9 +10,12 @@ pub(super) fn frame(opcode: u8, final_fragment: bool, payload: &[u8]) -> Vec<u8>
     let mut bytes = vec![(if final_fragment { 0x80 } else { 0 }) | opcode];
     if payload.len() < 126 {
         bytes.push(payload.len() as u8);
-    } else {
+    } else if payload.len() <= usize::from(u16::MAX) {
         bytes.push(126);
         bytes.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    } else {
+        bytes.push(127);
+        bytes.extend_from_slice(&(payload.len() as u64).to_be_bytes());
     }
     bytes.extend_from_slice(payload);
     bytes

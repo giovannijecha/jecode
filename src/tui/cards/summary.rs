@@ -225,12 +225,22 @@ pub(super) fn paths(arguments: &Value) -> String {
 
 pub(super) fn read(arguments: &Value, result: &Value) -> String {
     if let Some(files) = result.get("files").and_then(Value::as_array) {
-        let failed = files
+        let inline_failed = files
             .iter()
             .filter(|file| file.get("error").is_some())
             .count();
-        let read = files.len() - failed;
-        let lines = files.iter().map(lines).sum::<usize>();
+        let failed = result
+            .get("files_not_read")
+            .and_then(Value::as_usize)
+            .unwrap_or(inline_failed);
+        let read = result
+            .get("files_read")
+            .and_then(Value::as_usize)
+            .unwrap_or(files.len() - inline_failed);
+        let lines = result
+            .get("lines_read")
+            .and_then(Value::as_usize)
+            .unwrap_or_else(|| files.iter().map(lines).sum::<usize>());
         let mut summary = format!(
             "{read} {} · {lines} {}",
             if read == 1 { "file" } else { "files" },
@@ -238,6 +248,9 @@ pub(super) fn read(arguments: &Value, result: &Value) -> String {
         );
         if failed > 0 {
             summary.push_str(&format!(" · {failed} not read"));
+        }
+        if let Some(saved) = result.get("saved_files").and_then(Value::as_usize) {
+            summary.push_str(&format!(" · {saved} saved"));
         }
         return summary;
     }

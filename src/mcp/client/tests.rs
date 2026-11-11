@@ -452,3 +452,6 @@ fn legacy_catalog_keeps_valid_tools_through_sse_noise() {
     assert_eq!(catalog.tools[0].name, "kept");
     assert!(server.finish()[3].contains("MCP-Protocol-Version: 2025-03-26"));
 }
+
+#[path = "paging_tests.rs"]
+mod paging;

@@ -343,3 +343,22 @@ fn substitution_inherits_the_active_compound_error_stream() {
     assert_eq!(read(&directory, "piped_out"), "upstream\n");
     assert_eq!(read(&directory, "piped_err"), "nested\n");
 }
+
+#[test]
+fn seq_and_counted_for_run_past_one_million_and_seq_streams() {
+    let (directory, mut shell) = shell();
+    assert_eq!(shell.run("seq 1 1500000 | tail -n 1 > last"), 0);
+    assert_eq!(read(&directory, "last"), "1500000\n");
+    assert_eq!(shell.run("seq 3 1 > down"), 0);
+    assert_eq!(read(&directory, "down"), "3\n2\n1\n");
+    // Streaming: a reader that stops early ends a range far too large to buffer.
+    let started = Instant::now();
+    shell.run("seq 1 9000000000 | head -n 2 > first");
+    assert_eq!(read(&directory, "first"), "1\n2\n");
+    assert!(started.elapsed() < Duration::from_secs(30));
+    assert_eq!(
+        shell.run("for ((i=0; i<1000005; i++)); do last=$i; done; echo $last > counted"),
+        0
+    );
+    assert_eq!(read(&directory, "counted"), "1000004\n");
+}

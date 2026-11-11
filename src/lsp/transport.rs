@@ -7,17 +7,23 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-const MAX_FRAME: usize = 8 * 1024 * 1024;
+/// Backlog of ordinary frames beyond one large reply. The reader cannot wait
+/// for the receiver here: the server may be waiting for Jecode to write.
 const MAX_QUEUED_FRAMES: usize = 4096;
 const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
 const QUEUE_OVERFLOW: &str = "LSP incoming queue overflow";
 type WriteRequest = (Vec<u8>, SyncSender<Result<(), String>>);
-type Incoming = Result<(Value, usize), String>;
+/// A queued frame with the ordinary bytes it counts; `None` marks the one
+/// frame admitted beyond the ordinary backlog.
+type Incoming = Result<(Value, Option<usize>), String>;
 
 #[derive(Default)]
 struct QueueState {
     frames: usize,
+    /// Bytes in queued frames other than the one large frame, which is any
+    /// frame that did not fit the ordinary backlog when it arrived.
     bytes: usize,
+    jumbo: bool,
     overflow: bool,
 }
 
@@ -94,9 +100,6 @@ impl Transport {
 
     pub fn send(&mut self, message: Value) -> Result<(), String> {
         let json = message.encode();
-        if json.len() > MAX_FRAME {
-            return Err("LSP message exceeds 8 MiB".into());
-        }
         let mut bytes = format!("Content-Length: {}\r\n\r\n", json.len()).into_bytes();
         bytes.extend_from_slice(json.as_bytes());
         let (ack, result) = mpsc::sync_channel(1);
@@ -150,14 +153,22 @@ fn queue_frame(
     frame: (Value, usize),
 ) -> bool {
     let mut state = queue.lock().expect("LSP incoming queue");
-    if state.frames >= MAX_QUEUED_FRAMES || state.bytes.saturating_add(frame.1) > MAX_QUEUED_BYTES {
+    let (value, bytes) = frame;
+    let ordinary = state.bytes.saturating_add(bytes) <= MAX_QUEUED_BYTES;
+    if state.frames >= MAX_QUEUED_FRAMES || !ordinary && state.jumbo {
         state.overflow = true;
         return false;
     }
     state.frames += 1;
-    state.bytes += frame.1;
+    let counted = if ordinary {
+        state.bytes += bytes;
+        Some(bytes)
+    } else {
+        state.jumbo = true;
+        None
+    };
     drop(state);
-    sender.send(Ok(frame)).is_ok()
+    sender.send(Ok((value, counted))).is_ok()
 }
 
 fn receive_frame(
@@ -172,7 +183,10 @@ fn receive_frame(
         Ok(Ok((value, bytes))) => {
             let mut state = queue.lock().expect("LSP incoming queue");
             state.frames -= 1;
-            state.bytes -= bytes;
+            match bytes {
+                Some(bytes) => state.bytes -= bytes,
+                None => state.jumbo = false,
+            }
             if state.overflow {
                 Err(QUEUE_OVERFLOW.into())
             } else {
@@ -221,13 +235,16 @@ fn read_frame(input: &mut impl Read) -> Result<(Value, usize), String> {
         }
     }
     let length = length.ok_or("Missing LSP Content-Length")?;
-    if length > MAX_FRAME {
-        return Err("LSP frame exceeds 8 MiB".into());
-    }
-    let mut body = vec![0; length];
+    // Memory follows the bytes that arrive, not the length a header claims.
+    let mut body = Vec::new();
     input
-        .read_exact(&mut body)
+        .by_ref()
+        .take(length as u64)
+        .read_to_end(&mut body)
         .map_err(|e| format!("Incomplete LSP frame: {e}"))?;
+    if body.len() < length {
+        return Err("Incomplete LSP frame: stream ended".into());
+    }
     let value = json::parse(std::str::from_utf8(&body).map_err(|_| "LSP frame is not UTF-8")?)?;
     Ok((value, length))
 }
@@ -270,8 +287,91 @@ mod tests {
         let (sender, incoming) = mpsc::channel();
         let queue = Mutex::new(QueueState::default());
         for _ in 0..2 {
-            assert!(queue_frame(&sender, &queue, (Value::Null, MAX_FRAME)));
+            assert!(queue_frame(
+                &sender,
+                &queue,
+                (Value::Null, MAX_QUEUED_BYTES / 2)
+            ));
         }
+        // One frame beyond the full backlog is admitted; the next overflows.
+        assert!(queue_frame(&sender, &queue, (Value::Null, 1)));
+        assert!(!queue_frame(&sender, &queue, (Value::Null, 1)));
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap_err(),
+            QUEUE_OVERFLOW
+        );
+    }
+
+    #[test]
+    fn one_frame_past_the_former_8_mib_is_read_and_queued() {
+        let text = "x".repeat(10 * 1024 * 1024);
+        let json = Value::object([("text", Value::string(&text))]).encode();
+        let mut stream = format!("Content-Length: {}\r\n\r\n", json.len()).into_bytes();
+        stream.extend_from_slice(json.as_bytes());
+        let (value, length) = read_frame(&mut stream.as_slice()).unwrap();
+        assert_eq!(
+            value.get("text").and_then(Value::as_str),
+            Some(text.as_str())
+        );
+        // The frame enters and leaves the receive queue.
+        let (sender, incoming) = mpsc::channel();
+        let queue = Mutex::new(QueueState::default());
+        assert!(queue_frame(&sender, &queue, (value, length)));
+        assert!(receive_frame(&incoming, &queue, Duration::ZERO).is_ok());
+        // A header claiming more than arrives fails without allocating it.
+        let mut short = b"Content-Length: 99999999999\r\n\r\n{}".as_slice();
+        assert!(read_frame(&mut short).unwrap_err().contains("Incomplete"));
+    }
+
+    #[test]
+    fn a_reply_that_overflows_the_backlog_is_the_one_large_frame_whatever_its_size() {
+        let (sender, incoming) = mpsc::channel();
+        let queue = Mutex::new(QueueState::default());
+        let mib = 1024 * 1024;
+        assert!(queue_frame(&sender, &queue, (Value::Null, 3 * mib)));
+        assert!(queue_frame(
+            &sender,
+            &queue,
+            (Value::string("reply"), 14 * mib)
+        ));
+        assert!(receive_frame(&incoming, &queue, Duration::ZERO).is_ok());
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap(),
+            Some(Value::string("reply"))
+        );
+        let state = queue.lock().unwrap();
+        assert_eq!((state.frames, state.bytes, state.jumbo), (0, 0, false));
+    }
+
+    #[test]
+    fn large_reply_and_following_notification_share_a_bounded_queue() {
+        let (sender, incoming) = mpsc::channel();
+        let queue = Mutex::new(QueueState::default());
+        let large = MAX_QUEUED_BYTES + 1;
+        assert!(queue_frame(
+            &sender,
+            &queue,
+            (Value::string("reply"), large)
+        ));
+        assert!(queue_frame(
+            &sender,
+            &queue,
+            (Value::string("notification"), 1)
+        ));
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap(),
+            Some(Value::string("reply"))
+        );
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap(),
+            Some(Value::string("notification"))
+        );
+        assert!(queue_frame(&sender, &queue, (Value::Null, large)));
+        assert!(queue_frame(
+            &sender,
+            &queue,
+            (Value::Null, MAX_QUEUED_BYTES)
+        ));
         assert!(!queue_frame(&sender, &queue, (Value::Null, 1)));
         assert_eq!(
             receive_frame(&incoming, &queue, Duration::ZERO).unwrap_err(),

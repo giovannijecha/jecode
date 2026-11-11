@@ -11,7 +11,7 @@ mod question;
 mod reply;
 pub use draft::{AnswerDraft, Draft};
 pub(crate) use persistence::{recovery, validate_answer};
-pub use question::{MAX_OPTIONS, MAX_QUESTIONS, Question, Request};
+pub use question::{Question, Request};
 pub(crate) use reply::Reply;
 pub use reply::{Answer, TEXT_LIMIT};
 

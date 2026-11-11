@@ -2,10 +2,6 @@
 
 use crate::json::Value;
 
-/// At most this many questions share one call.
-pub const MAX_QUESTIONS: usize = 4;
-/// At most this many options belong to one question, besides `Other`.
-pub const MAX_OPTIONS: usize = 6;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Choice {
     pub id: String,
@@ -34,11 +30,11 @@ impl Request {
     /// The call's questions from its arguments, `{"questions": [...]}`.
     pub fn parse(id: &str, arguments: &Value) -> Result<Self, String> {
         let questions = match arguments.get("questions") {
-            Some(Value::Array(items)) if (1..=MAX_QUESTIONS).contains(&items.len()) => items
+            Some(Value::Array(items)) if !items.is_empty() => items
                 .iter()
                 .map(Question::parse)
                 .collect::<Result<Vec<_>, _>>()?,
-            _ => return Err("questions must contain one to four questions".into()),
+            _ => return Err("questions must contain at least one question".into()),
         };
         for (index, question) in questions.iter().enumerate() {
             if questions[..index]
@@ -92,20 +88,13 @@ impl Question {
             Some(Value::Bool(true)) => true,
             _ => return Err("multiple must be a boolean".into()),
         };
-        if id.is_empty()
-            || id.len() > 80
-            || title.trim().is_empty()
-            || title.len() > 160
-            || question.trim().is_empty()
-            || question.len() > 4096
-            || context.len() > 4096
-        {
-            return Err("Question ID, title, text or context is invalid".into());
+        if id.is_empty() || title.trim().is_empty() || question.trim().is_empty() {
+            return Err("Question ID, title and text must be nonempty".into());
         }
         let options = match value.get("options") {
             None => &[][..],
-            Some(Value::Array(options)) if options.len() <= MAX_OPTIONS => options.as_slice(),
-            _ => return Err("options must contain at most six choices".into()),
+            Some(Value::Array(options)) => options.as_slice(),
+            _ => return Err("options must be an array of choices".into()),
         };
         let mut parsed: Vec<Choice> = Vec::new();
         for option in options {
@@ -161,12 +150,7 @@ impl Choice {
             Some(Value::Bool(true)) => true,
             _ => return Err("recommended must be a boolean".into()),
         };
-        if id.is_empty()
-            || id.len() > 80
-            || label.trim().is_empty()
-            || label.len() > 160
-            || description.len() > 512
-        {
+        if id.is_empty() || label.trim().is_empty() {
             return Err("Question option is invalid or duplicated".into());
         }
         Ok(Self {

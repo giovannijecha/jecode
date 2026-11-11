@@ -109,11 +109,11 @@ fn a_read_skill_receipt_remains_reloadable_after_compaction_and_resume() {
         message
             .get("content")
             .and_then(Value::as_str)
-            .is_some_and(|text| text.contains("Skills read in this conversation"))
+            .is_some_and(|text| text.contains("Skill references from successful read requests"))
     }));
     resumed.prepare_turn("Continue").unwrap();
     let instructions = resumed.skill_checkpoint_instructions();
-    assert!(instructions.contains("Skills read in this conversation"));
+    assert!(instructions.contains("Skill references from successful read requests"));
     assert!(instructions.contains("skill:audit"));
     let page = resumed.execute_tool(&skill_call("skill:audit"));
     assert!(page.get("error").is_none(), "{}", page.encode());

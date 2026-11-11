@@ -85,7 +85,6 @@ pub(super) fn definition() -> Value {
                 Value::object([
                     ("type", Value::string("array")),
                     ("minItems", Value::number(1)),
-                    ("maxItems", Value::number(8)),
                     ("items", task),
                     (
                         "description",

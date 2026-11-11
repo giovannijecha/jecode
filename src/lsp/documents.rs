@@ -2,8 +2,6 @@ use crate::json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MAX_DOCUMENT: u64 = 8 * 1024 * 1024;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Encoding {
     Utf8,
@@ -23,8 +21,8 @@ pub(super) struct Document {
 impl Document {
     pub fn read(path: &Path, language: &str, version: i64) -> Result<Self, String> {
         let meta = fs::metadata(path).map_err(|e| format!("Cannot read LSP document: {e}"))?;
-        if !meta.is_file() || meta.len() > MAX_DOCUMENT {
-            return Err("LSP document must be a file under 8 MiB".into());
+        if !meta.is_file() {
+            return Err("LSP document must be a file".into());
         }
         let path = fs::canonicalize(path).map_err(|e| e.to_string())?;
         let text = fs::read_to_string(&path)

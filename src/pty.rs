@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Write;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,7 +17,10 @@ use unix as platform;
 #[cfg(windows)]
 use windows as platform;
 
-pub(crate) const MAX_INPUT: usize = 64 * 1024;
+/// One confirmed unit of a write: input of any size is delivered segment by
+/// segment, each confirmed before the next is queued, so a stall or a
+/// cancellation leaves at most one segment unconfirmed and sends nothing after.
+const SEGMENT: usize = 64 * 1024;
 const QUEUE_FULL: &str = "Terminal input queue is full; poll before sending more";
 const DIRECT_WAIT: Duration = Duration::from_millis(250);
 const DELIVERY: Duration = Duration::from_secs(2);
@@ -28,12 +31,16 @@ struct Message {
 }
 
 pub(crate) struct Control {
+    /// Held across a tool write's segments and each direct write, so input
+    /// from the user cannot interleave within one tool write.
+    writing: Mutex<()>,
     sender: Mutex<Option<mpsc::SyncSender<Message>>>,
     controls: Mutex<Option<mpsc::SyncSender<Message>>>,
     failure: Arc<Mutex<Option<String>>>,
     closed: Arc<AtomicBool>,
     size: Mutex<(u16, u16)>,
-    #[cfg(unix)]
+    /// Interrupt count. Input frames carry it so the helper can discard input
+    /// that an interrupt overtook on either platform.
     generation: Mutex<u64>,
     _endpoint: Endpoint,
 }
@@ -154,12 +161,12 @@ pub(crate) fn start(
     Ok((
         started,
         Arc::new(Control {
+            writing: Mutex::new(()),
             sender: Mutex::new(Some(sender)),
             controls: Mutex::new(Some(controls)),
             failure,
             closed,
             size: Mutex::new(size),
-            #[cfg(unix)]
             generation: Mutex::new(0),
             _endpoint: endpoint,
         }),
@@ -216,18 +223,17 @@ fn frame(op: u8, bytes: &[u8]) -> Vec<u8> {
 }
 
 impl Control {
-    #[cfg(unix)]
+    /// Each input frame carries the generation current when it was queued.
     fn enqueue_input(
         &self,
         bytes: &[u8],
         receipt: Option<mpsc::SyncSender<Result<(), String>>>,
     ) -> Result<(), String> {
-        if bytes.len() > MAX_INPUT {
-            return Err(format!(
-                "Terminal input must be at most {MAX_INPUT} bytes per call"
-            ));
-        }
         let generation = self.generation.lock().unwrap();
+        self.enqueue(Self::input_packet(bytes, *generation), false, receipt)
+    }
+
+    fn input_packet(bytes: &[u8], generation: u64) -> Vec<u8> {
         let mut packet = Vec::new();
         for chunk in bytes.chunks(4096) {
             let mut payload = Vec::with_capacity(chunk.len() + 8);
@@ -235,10 +241,9 @@ impl Control {
             payload.extend_from_slice(chunk);
             packet.extend(frame(1, &payload));
         }
-        self.enqueue(packet, false, receipt)
+        packet
     }
 
-    #[cfg(unix)]
     fn enqueue_interrupt(
         &self,
         receipt: Option<mpsc::SyncSender<Result<(), String>>>,
@@ -247,7 +252,8 @@ impl Control {
         let next = generation
             .checked_add(1)
             .ok_or("Terminal interrupt sequence exhausted")?;
-        self.enqueue(frame(3, &next.to_le_bytes()), true, receipt)?;
+        let packet = frame(3, &next.to_le_bytes());
+        self.enqueue(packet, true, receipt)?;
         *generation = next;
         Ok(())
     }
@@ -323,36 +329,81 @@ impl Control {
         }
     }
 
-    #[cfg(windows)]
-    fn input_packet(bytes: &[u8]) -> Result<Vec<u8>, String> {
-        if bytes.len() > MAX_INPUT {
+    /// Delivers input of any size in order, one confirmed segment at a time.
+    /// A failure or an interrupt names how much was confirmed first; nothing
+    /// after it is sent, and nothing is ever sent twice.
+    pub fn write(&self, bytes: &[u8], cancellation: &Cancellation) -> Result<(), String> {
+        let _writing = loop {
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
+            match self.writing.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(5)),
+                Err(TryLockError::Poisoned(error)) => panic!("{error}"),
+            }
+        };
+        if bytes.is_empty() {
+            return self.deliver(Vec::new(), false, cancellation);
+        }
+        let tag = *self.generation.lock().unwrap();
+        let mut confirmed = 0;
+        for segment in bytes.chunks(SEGMENT) {
+            let mut interrupted = false;
+            let result = self.deliver_with(cancellation, |receipt| {
+                let generation = self.generation.lock().unwrap();
+                if *generation != tag {
+                    interrupted = true;
+                    return Err("Terminal input was interrupted".into());
+                }
+                self.enqueue(Self::input_packet(segment, tag), false, receipt)
+            });
+            if interrupted {
+                return Err(format!(
+                    "Terminal input was interrupted after {confirmed} of {} bytes were sent; later bytes were not sent.",
+                    bytes.len()
+                ));
+            }
+            if let Err(error) = result {
+                return Err(if confirmed == 0 {
+                    error
+                } else {
+                    format!(
+                        "{error} The first {confirmed} of {} bytes were delivered before it; later bytes were not sent.",
+                        bytes.len()
+                    )
+                });
+            }
+            confirmed += segment.len();
+        }
+        if *self.generation.lock().unwrap() != tag {
             return Err(format!(
-                "Terminal input must be at most {MAX_INPUT} bytes per call"
+                "Terminal input was interrupted after all {} bytes were sent.",
+                bytes.len()
             ));
         }
-        Ok(bytes
-            .chunks(4096)
-            .flat_map(|chunk| frame(1, chunk))
-            .collect())
-    }
-
-    pub fn write(&self, bytes: &[u8], cancellation: &Cancellation) -> Result<(), String> {
-        #[cfg(unix)]
-        return self.deliver_with(cancellation, |receipt| self.enqueue_input(bytes, receipt));
-        #[cfg(windows)]
-        self.deliver(Self::input_packet(bytes)?, false, cancellation)
+        Ok(())
     }
 
     /// Local user input is not a tool call or a conversation message. Each key is
-    /// one message, so a burst can outrun the writer for a moment: only a program
-    /// that stopped reading turns a full queue into a failure.
+    /// one message, so a burst can outrun the writer for a moment. A direct
+    /// write waits only briefly for a tool write or a full queue.
     pub fn write_direct(&self, bytes: &[u8]) -> Result<(), String> {
         let deadline = Instant::now() + DIRECT_WAIT;
+        let _writing = loop {
+            match self.writing.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(TryLockError::WouldBlock) => {
+                    return Err("Terminal input is busy; poll before sending more".into());
+                }
+                Err(TryLockError::Poisoned(error)) => panic!("{error}"),
+            }
+        };
         loop {
-            #[cfg(unix)]
             let result = self.enqueue_input(bytes, None);
-            #[cfg(windows)]
-            let result = self.enqueue(Self::input_packet(bytes)?, false, None);
             match result {
                 Err(error) if error == QUEUE_FULL && Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(1));
@@ -379,17 +430,11 @@ impl Control {
     }
 
     pub fn interrupt(&self, cancellation: &Cancellation) -> Result<(), String> {
-        #[cfg(unix)]
-        return self.deliver_with(cancellation, |receipt| self.enqueue_interrupt(receipt));
-        #[cfg(windows)]
-        self.deliver(frame(3, &[]), true, cancellation)
+        self.deliver_with(cancellation, |receipt| self.enqueue_interrupt(receipt))
     }
 
     pub fn interrupt_direct(&self) -> Result<(), String> {
-        #[cfg(unix)]
-        return self.enqueue_interrupt(None);
-        #[cfg(windows)]
-        self.enqueue(frame(3, &[]), true, None)
+        self.enqueue_interrupt(None)
     }
 }
 

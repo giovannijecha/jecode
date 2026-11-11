@@ -47,7 +47,6 @@ fn update_before_worker_handoff_is_received_once_as_initial_assignment() {
     );
     parent.enable_sessions(home.path()).unwrap();
     let observer = parent.collaboration();
-    let gate = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
     observer
         .create(
             project.path(),
@@ -58,7 +57,6 @@ fn update_before_worker_handoff_is_received_once_as_initial_assignment() {
                 mode: Mode::Shared,
             },
             |id, root| parent.new_child(id, root, Mode::Shared),
-            gate.clone(),
         )
         .unwrap();
     observer
@@ -67,9 +65,7 @@ fn update_before_worker_handoff_is_received_once_as_initial_assignment() {
     observer
         .update("a1", Some("Version two".into()), None)
         .unwrap();
-    let (lock, changed) = &*gate;
-    *lock.lock().unwrap() = true;
-    changed.notify_all();
+    observer.release_created(&["a1".into()]);
     let records = observer
         .wait(
             Some("a1"),

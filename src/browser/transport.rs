@@ -341,16 +341,22 @@ impl Cdp {
                     u64::from_be_bytes(b)
                 }
             };
-            if length > 16_000_000 {
-                return Err("Oversized DevTools frame".into());
-            }
             let mut mask = [0u8; 4];
             let masked = head[1] & 0x80 != 0;
             if masked {
                 self.read_exact(&mut mask, deadline, cancellation)?;
             }
-            let mut body = vec![0; length as usize];
-            self.read_exact(&mut body, deadline, cancellation)?;
+            // Large screenshots and evaluations are legitimate; memory grows
+            // with the bytes that arrive, never with the length a header claims.
+            let mut body = Vec::new();
+            let mut left = length;
+            while left > 0 {
+                let part = left.min(1 << 20) as usize;
+                let start = body.len();
+                body.resize(start + part, 0);
+                self.read_exact(&mut body[start..], deadline, cancellation)?;
+                left -= part as u64;
+            }
             if masked {
                 for (i, b) in body.iter_mut().enumerate() {
                     *b ^= mask[i % 4];
@@ -368,9 +374,6 @@ impl Cdp {
                 }
                 0 if fragment => collected.extend(body),
                 _ => return Err("Unexpected DevTools frame".into()),
-            }
-            if collected.len() > 16_000_000 {
-                return Err("Oversized DevTools message".into());
             }
             if fragment && head[0] & 0x80 != 0 {
                 return Ok(Some(collected));

@@ -45,7 +45,7 @@ fn read_source(
     cancellation: &Cancellation,
 ) -> Result<Value, String> {
     let offset = optional_number(arguments, "offset", 1, 1, usize::MAX)?;
-    let limit = optional_number(arguments, "limit", 200, 1, 2000)?;
+    let limit = crate::tools::page_limit(arguments, "limit", 200, 2000)?;
     let byte_mode = arguments.get("byte_offset").is_some();
     if let Some(byte_offset) = arguments.get("byte_offset") {
         let byte_offset = byte_offset

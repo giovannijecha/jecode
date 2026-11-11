@@ -8,16 +8,17 @@ conversation that you can check at any time.
 
 When the agent asks, the questions replace the composer under a
 `Waiting for you` marker, and an open menu or panel closes so they show at once.
-One request holds up to four questions, answered one at a time and sent
-together. A question can offer up to six options, single or multiple choice,
-and then ends with **Other**, where you type your own answer; a question without
+One request holds one or more questions, answered one at a time and sent
+together; when their titles do not fit the step row, earlier ones give way to
+`…` so the current one stays in view. A question can offer any number of
+options, single or multiple choice, and then ends with **Other**, where you type your own answer; a question without
 options takes typed text only. Nothing is preselected; an option marked as
 recommended is only a suggestion.
 
 | Key | Action |
 | --- | --- |
 | Up/Down | Move between options without choosing. |
-| `1`–`N` | Choose an option directly when nothing is focused; the last number focuses **Other**. |
+| `1`–`N` | Choose an option directly when nothing is focused; the last number focuses **Other**. Digits reach the first nine rows; Up/Down reach the rest. |
 | Space | Select the highlighted option; for multiple choice, toggle it. |
 | Typing | Fill **Other**; Ctrl+J adds a line. |
 | Enter | Choose the highlighted option and move on; on the last question, send all answers. |
@@ -115,6 +116,9 @@ exists). `set` replaces the whole plan:
 
 Statuses are `pending`, `in_progress`, `waiting`, `done` and `cancelled`. `note`
 (visible only to the model) and `agent` (a collaborator such as `a1`) are
-optional. A plan holds up to 40 tasks. Each successful update returns the full
+optional. A plan holds any number of tasks; `/todo` scrolls, and its rule shows
+only `N of M done` when one cell per task would be too wide. Each request
+carries a short view of the plan, and `get` returns all of it. Each successful
+update returns the full
 plan with a new revision number; an invalid update leaves the previous plan
 unchanged. A `set` after every task is done or cancelled starts a new plan.

@@ -9,8 +9,6 @@ use std::collections::{HashMap, HashSet};
 
 mod handshake;
 
-const MAX_PAGES: usize = 100;
-const MAX_TOOLS: usize = 10_000;
 const GITHUB_TOOLSETS: &str = "context,issues,pull_requests,repos,users,actions";
 
 #[derive(Clone)]
@@ -59,7 +57,12 @@ impl Client {
         let mut tools = Vec::new();
         let mut cursors = HashSet::new();
         let mut cursor: Option<String> = None;
-        for _ in 0..MAX_PAGES {
+        // A server may page its catalog as it likes; a repeated cursor is the
+        // only loop it can cause, and cancellation ends a long listing.
+        loop {
+            if cancel.requested() {
+                return Err(Error::new(ErrorKind::Cancelled, "MCP request cancelled"));
+            }
             let mut params = Value::object([]);
             if let Some(ref cursor) = cursor
                 && let Value::Object(ref mut entries) = params
@@ -71,9 +74,6 @@ impl Client {
                 .get("tools")
                 .and_then(Value::as_array)
                 .ok_or_else(|| wire::protocol("MCP tools/list response has no tools array"))?;
-            if tools.len().saturating_add(page.len()) > MAX_TOOLS {
-                return Err(wire::protocol("MCP tool catalog is too large"));
-            }
             // A malformed entry costs only that tool; header annotations
             // matter only where Modern mode sends them.
             tools.extend(
@@ -103,7 +103,6 @@ impl Client {
                 });
             }
         }
-        Err(wire::protocol("MCP tool catalog exceeded page limit"))
     }
 
     pub fn call(

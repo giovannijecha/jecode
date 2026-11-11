@@ -50,8 +50,8 @@ impl Agent {
                     .get("tasks")
                     .and_then(Value::as_array)
                     .ok_or("tasks must be an array")?;
-                if tasks.is_empty() || tasks.len() > 8 {
-                    return Err("tasks must contain 1-8 assignments".into());
+                if tasks.is_empty() {
+                    return Err("tasks must contain at least one assignment".into());
                 }
                 let tasks = tasks
                     .iter()
@@ -68,8 +68,6 @@ impl Agent {
                     })
                     .collect::<Result<Vec<_>, String>>()?;
                 let mut created = Vec::new();
-                let gate =
-                    std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
                 let mut failure = None;
                 for (title, instructions, context, mode) in tasks {
                     match observer.create(
@@ -81,7 +79,6 @@ impl Agent {
                             mode,
                         },
                         |id, root| self.new_child(id, root, mode),
-                        gate.clone(),
                     ) {
                         Ok(value) => created.push(value),
                         Err(error) => {
@@ -102,13 +99,16 @@ impl Agent {
                             .filter_map(|value| value.get("id").and_then(Value::as_str))
                             .map(str::to_owned)
                             .collect::<Vec<_>>();
-                        observer.abort_created(&ids, &gate);
+                        observer.abort_created(&ids);
                         return Err(error);
                     }
                 }
-                let (lock, ready) = &*gate;
-                *lock.lock().unwrap() = true;
-                ready.notify_all();
+                let ids = created
+                    .iter()
+                    .filter_map(|value| value.get("id").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                observer.release_created(&ids);
                 if let Some(error) = failure {
                     if created.is_empty() {
                         return Err(error);
