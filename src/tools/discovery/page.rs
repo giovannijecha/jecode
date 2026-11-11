@@ -107,6 +107,7 @@ impl Page {
             ),
         ]);
         let mut result = Value::Object(fields);
+        let mut refitted = false;
         while result.encode().len() > super::super::OUTPUT_LIMIT {
             let Value::Object(fields) = &mut result else {
                 unreachable!()
@@ -118,7 +119,8 @@ impl Page {
                 // A lone row shrinks rather than failing the call; anything
                 // still over is previewed in context with its history kept.
                 match rows.first_mut() {
-                    Some(row) if row.get("clipped").is_none() => {
+                    Some(row) if !refitted => {
+                        refitted = true;
                         *row = fit(std::mem::replace(row, Value::Null), RESULT_BYTES / 4);
                         continue;
                     }
@@ -140,14 +142,26 @@ impl Page {
 }
 
 /// A row over `budget` keeps its shape with its long strings shortened and
-/// `clipped: true`; its path and line still lead to the full text.
+/// `clipped: true`; its path and line still lead to the full text. Context and
+/// other fields give way before the row's own `text`, so a match stays visible
+/// whenever the rest can absorb the cut.
 fn fit(mut row: Value, budget: usize) -> Value {
-    let mut limit = 1024;
-    while row.encode().len() > budget && limit > 16 {
-        limit /= 2;
-        shorten(&mut row, limit);
+    let mut clipped = false;
+    for own_text in [false, true] {
+        let mut limit = 1024;
+        while row.encode().len() > budget && limit > 16 {
+            limit /= 2;
+            clipped = true;
+            match &mut row {
+                Value::Object(fields) if !own_text => fields
+                    .iter_mut()
+                    .filter(|(key, _)| !matches!(key.as_str(), "path" | "text"))
+                    .for_each(|(_, item)| shorten(item, limit)),
+                _ => shorten(&mut row, limit),
+            }
+        }
     }
-    if let Value::Object(fields) = &mut row {
+    if clipped && let Value::Object(fields) = &mut row {
         fields.insert("clipped".into(), Value::Bool(true));
     }
     row

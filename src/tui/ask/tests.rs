@@ -300,6 +300,55 @@ fn switching_questions_with_different_key_rows_keeps_the_dock_height() {
 }
 
 #[test]
+fn the_current_title_is_never_clipped_by_the_indent_or_a_trailing_ellipsis() {
+    // At 80 columns `N of 5` leaves 70 cells. The last title ends exactly
+    // there once the two-cell indent counts; the middle title is followed by
+    // later titles, whose cut adds `…`.
+    for (titles, step) in [
+        (
+            [
+                "Question one",
+                "Question two",
+                "Question 333",
+                "Question 444",
+                "Last item",
+            ],
+            4,
+        ),
+        (
+            [
+                "Title one is twenty.",
+                "Title two is twenty.",
+                "Current title, 23 wide.",
+                "Later",
+                "Later still",
+            ],
+            2,
+        ),
+    ] {
+        let questions = titles
+            .iter()
+            .enumerate()
+            .map(|(id, title)| {
+                format!(
+                    r#"{{"id":"q{id}","title":"{title}","question":"Pick","options":[{{"id":"a","label":"A"}},{{"id":"b","label":"B"}}]}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let request = request(&format!(r#"{{"questions":[{questions}]}}"#));
+        let mut panel = Panel::new(&request, None);
+        for _ in 0..step {
+            assert!(panel.switch(&request, true));
+        }
+        let rows = plain(&dock(&request, &panel, 80, 24));
+        let count = format!("{} of 5", step + 1);
+        let steps = rows.iter().find(|row| row.ends_with(&count)).unwrap();
+        assert!(steps.contains(titles[step]), "{steps}");
+    }
+}
+
+#[test]
 fn many_questions_and_options_stay_reachable_and_restore() {
     // Twelve questions of twenty options each, past the former four and six.
     let option = |id: usize| format!(r#"{{"id":"o{id}","label":"Option {id}"}}"#);

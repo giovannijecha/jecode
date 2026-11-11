@@ -187,7 +187,10 @@ fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
                 0
             }
     };
-    let room = columns.saturating_sub(count_cells + 4);
+    // The two-cell indent, and the `…` that cuts any later titles, leave less
+    // room for titles `first..=step`.
+    let later = usize::from(panel.step + 1 < titles.len());
+    let room = columns.saturating_sub(count_cells + 6 + later);
     // Titles `first..=step` with their gaps, after `…` and its gap if any.
     let mut span = (0..=panel.step).map(cells).sum::<usize>() + 3 * panel.step;
     let mut first = 0;

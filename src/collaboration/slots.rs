@@ -87,8 +87,9 @@ impl Observer {
         while let Some((id, child)) = take_next(&mut state, &mut cancelled) {
             let observer = Self(Arc::clone(&self.0), None);
             let thread_id = id.clone();
+            // A worker goes on to run later queued turns, so its name is generic.
             let start = thread::Builder::new()
-                .name(format!("jecode-agent-{id}"))
+                .name("jecode-collaborator".into())
                 .spawn(move || observer.run_worker(thread_id, child));
             if let Err(error) = start {
                 state.running -= 1;
@@ -99,7 +100,12 @@ impl Observer {
                     record.state = "failed";
                     record.error = Some(format!("Could not start collaborator: {error}"));
                     record.activity = "Failed".into();
-                    failures.push((id, record.title.clone(), record.error.clone().unwrap()));
+                    failures.push((
+                        id,
+                        record.received_version,
+                        record.title.clone(),
+                        record.error.clone().unwrap(),
+                    ));
                 }
             }
         }
@@ -108,8 +114,8 @@ impl Observer {
         for id in cancelled {
             self.finish_stopped(&id);
         }
-        for (id, title, error) in failures {
-            if let Err(error) = self.receipt("returned", Some(&id), 0, &title, vec![error]) {
+        for (id, version, title, error) in failures {
+            if let Err(error) = self.receipt("returned", Some(&id), version, &title, vec![error]) {
                 self.persistence_failed(&id, error);
             }
         }
@@ -121,39 +127,56 @@ impl Observer {
                 let mut child = child.lock().unwrap_or_else(|error| error.into_inner());
                 self.run_child(&id, &mut child);
             }));
-            let mut cancelled = Vec::new();
-            let mut state = self.0.state.lock().unwrap();
-            state.running -= 1;
-            if let Some(worker) = state.workers.iter_mut().find(|worker| worker.id == id) {
-                worker.busy = false;
-            }
-            if ran.is_err()
-                && let Some(record) = state.record(&id)
-            {
-                record.state = "unknown";
-                record.error = Some("Collaborator worker panicked".into());
-                record.activity = "Outcome could not be confirmed".into();
-            }
-            if state.records.iter().any(|record| {
-                record.id == id && record.state == "running" && !record.pending.is_empty()
-            }) && !state.queue.contains(&id)
-            {
-                state.queue.push_back(id.clone());
-                if let Some(record) = state.record(&id) {
-                    record.activity = "Waiting for a free slot".into();
-                }
-            }
-            let next = take_next(&mut state, &mut cancelled);
-            drop(state);
-            self.0.changed.notify_all();
-            for cancelled in cancelled {
-                self.finish_stopped(&cancelled);
-            }
-            let Some((next_id, next_child)) = next else {
+            let Some((next_id, next_child)) = self.finish_turn(&id, ran.is_err()) else {
                 break;
             };
             id = next_id;
             child = next_child;
         }
+    }
+
+    /// Releases a finished turn's slot and takes the next queued turn.
+    pub(super) fn finish_turn(
+        &self,
+        id: &str,
+        panicked: bool,
+    ) -> Option<(String, Arc<Mutex<Agent>>)> {
+        let id = id.to_owned();
+        let mut cancelled = Vec::new();
+        let mut state = self.0.state.lock().unwrap();
+        state.running -= 1;
+        if let Some(worker) = state.workers.iter_mut().find(|worker| worker.id == id) {
+            worker.busy = false;
+        }
+        if panicked && let Some(record) = state.record(&id) {
+            record.state = "unknown";
+            record.error = Some("Collaborator worker panicked".into());
+            record.activity = "Outcome could not be confirmed".into();
+        }
+        // A stop that arrived after the turn settled its outcome still needs
+        // its receipt.
+        if state
+            .records
+            .iter()
+            .any(|record| record.id == id && record.state == "stopping")
+        {
+            cancelled.push(id.clone());
+        }
+        if state.records.iter().any(|record| {
+            record.id == id && record.state == "running" && !record.pending.is_empty()
+        }) && !state.queue.contains(&id)
+        {
+            state.queue.push_back(id.clone());
+            if let Some(record) = state.record(&id) {
+                record.activity = "Waiting for a free slot".into();
+            }
+        }
+        let next = take_next(&mut state, &mut cancelled);
+        drop(state);
+        self.0.changed.notify_all();
+        for cancelled in cancelled {
+            self.finish_stopped(&cancelled);
+        }
+        next
     }
 }

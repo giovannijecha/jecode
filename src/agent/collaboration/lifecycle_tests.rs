@@ -386,6 +386,21 @@ fn queued_stop_and_update_preserve_handoff_and_eight_active_workers() {
         Some("returned")
     );
     assert_eq!(records[0].get("received_version"), Some(&Value::number(2)));
+    // A slow worker may reach the fixture after a9; let every turn finish
+    // before the fixture stops accepting requests.
+    let records = observer
+        .wait(
+            None,
+            Duration::from_secs(20),
+            &crate::cancel::Cancellation::default(),
+        )
+        .unwrap();
+    assert!(records.iter().all(|record| {
+        !matches!(
+            record.get("state").and_then(Value::as_str),
+            Some("running" | "stopping")
+        )
+    }));
     let requests = fixture.finish();
     assert_eq!(requests.len(), 9);
     let updated = requests

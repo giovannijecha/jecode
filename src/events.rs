@@ -322,7 +322,7 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         && let Some(mut summary) = batch::summary(name, files, result)
     {
         if let Some(saved) = result.get("saved_files").and_then(Value::as_usize) {
-            summary.push_str(&format!("; {saved} more saved to result_file"));
+            summary.push_str(&format!("; {saved} saved to result_file"));
         }
         return summary;
     }

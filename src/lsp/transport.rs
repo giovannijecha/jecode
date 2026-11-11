@@ -13,12 +13,15 @@ const MAX_QUEUED_FRAMES: usize = 4096;
 const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
 const QUEUE_OVERFLOW: &str = "LSP incoming queue overflow";
 type WriteRequest = (Vec<u8>, SyncSender<Result<(), String>>);
-type Incoming = Result<(Value, usize), String>;
+/// A queued frame with the ordinary bytes it counts; `None` marks the one
+/// frame admitted beyond the ordinary backlog.
+type Incoming = Result<(Value, Option<usize>), String>;
 
 #[derive(Default)]
 struct QueueState {
     frames: usize,
-    /// Bytes in queued frames other than the one large frame.
+    /// Bytes in queued frames other than the one large frame, which is any
+    /// frame that did not fit the ordinary backlog when it arrived.
     bytes: usize,
     jumbo: bool,
     overflow: bool,
@@ -150,22 +153,22 @@ fn queue_frame(
     frame: (Value, usize),
 ) -> bool {
     let mut state = queue.lock().expect("LSP incoming queue");
-    let jumbo = frame.1 > MAX_QUEUED_BYTES;
-    if state.frames >= MAX_QUEUED_FRAMES
-        || jumbo && state.jumbo
-        || !jumbo && state.bytes.saturating_add(frame.1) > MAX_QUEUED_BYTES
-    {
+    let (value, bytes) = frame;
+    let ordinary = state.bytes.saturating_add(bytes) <= MAX_QUEUED_BYTES;
+    if state.frames >= MAX_QUEUED_FRAMES || !ordinary && state.jumbo {
         state.overflow = true;
         return false;
     }
     state.frames += 1;
-    if jumbo {
-        state.jumbo = true;
+    let counted = if ordinary {
+        state.bytes += bytes;
+        Some(bytes)
     } else {
-        state.bytes += frame.1;
-    }
+        state.jumbo = true;
+        None
+    };
     drop(state);
-    sender.send(Ok(frame)).is_ok()
+    sender.send(Ok((value, counted))).is_ok()
 }
 
 fn receive_frame(
@@ -180,10 +183,9 @@ fn receive_frame(
         Ok(Ok((value, bytes))) => {
             let mut state = queue.lock().expect("LSP incoming queue");
             state.frames -= 1;
-            if bytes > MAX_QUEUED_BYTES {
-                state.jumbo = false;
-            } else {
-                state.bytes -= bytes;
+            match bytes {
+                Some(bytes) => state.bytes -= bytes,
+                None => state.jumbo = false,
             }
             if state.overflow {
                 Err(QUEUE_OVERFLOW.into())
@@ -291,6 +293,8 @@ mod tests {
                 (Value::Null, MAX_QUEUED_BYTES / 2)
             ));
         }
+        // One frame beyond the full backlog is admitted; the next overflows.
+        assert!(queue_frame(&sender, &queue, (Value::Null, 1)));
         assert!(!queue_frame(&sender, &queue, (Value::Null, 1)));
         assert_eq!(
             receive_frame(&incoming, &queue, Duration::ZERO).unwrap_err(),
@@ -317,6 +321,26 @@ mod tests {
         // A header claiming more than arrives fails without allocating it.
         let mut short = b"Content-Length: 99999999999\r\n\r\n{}".as_slice();
         assert!(read_frame(&mut short).unwrap_err().contains("Incomplete"));
+    }
+
+    #[test]
+    fn a_reply_that_overflows_the_backlog_is_the_one_large_frame_whatever_its_size() {
+        let (sender, incoming) = mpsc::channel();
+        let queue = Mutex::new(QueueState::default());
+        let mib = 1024 * 1024;
+        assert!(queue_frame(&sender, &queue, (Value::Null, 3 * mib)));
+        assert!(queue_frame(
+            &sender,
+            &queue,
+            (Value::string("reply"), 14 * mib)
+        ));
+        assert!(receive_frame(&incoming, &queue, Duration::ZERO).is_ok());
+        assert_eq!(
+            receive_frame(&incoming, &queue, Duration::ZERO).unwrap(),
+            Some(Value::string("reply"))
+        );
+        let state = queue.lock().unwrap();
+        assert_eq!((state.frames, state.bytes, state.jumbo), (0, 0, false));
     }
 
     #[test]

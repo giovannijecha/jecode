@@ -384,7 +384,7 @@ fn a_saved_read_failure_remains_visible_in_the_batch_summary() {
     let rows = plain(&card(tool("read", &args, &result, &presentation), 120, false).rows);
     assert!(
         rows.join("\n")
-            .contains("60 files · 120 lines · 1 not read · 60 more saved"),
+            .contains("60 files · 120 lines · 1 not read · 60 saved"),
         "{rows:?}"
     );
 }

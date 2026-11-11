@@ -78,6 +78,9 @@ fn a_match_too_large_for_one_page_is_returned_clipped_not_refused() {
     assert_eq!(found.get("line"), Some(&Value::number(11)));
     assert_eq!(found.get("clipped"), Some(&Value::Bool(true)));
     assert_eq!(found.get("text_truncated"), Some(&Value::Bool(true)));
+    // Context gives way first, so the clipped row still shows the match.
+    let shown = found.get("text").and_then(Value::as_str).unwrap();
+    assert!(shown.contains("needle"), "{shown:?}");
     let before = found.get("before").and_then(Value::as_array).unwrap();
     assert_eq!(before[0].get("text_truncated"), Some(&Value::Bool(true)));
     let after = found.get("after").and_then(Value::as_array).unwrap();

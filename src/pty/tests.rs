@@ -70,7 +70,6 @@ fn piped() -> (std::sync::Arc<super::Control>, std::io::PipeReader) {
         failure,
         closed,
         size: Mutex::new((80, 24)),
-        #[cfg(unix)]
         generation: Mutex::new(0),
         _endpoint: Endpoint::new().unwrap(),
     };
@@ -81,9 +80,19 @@ fn queued() -> (
     std::sync::Arc<super::Control>,
     std::sync::mpsc::Receiver<super::Message>,
 ) {
+    let (control, receiver, _) = queued_with_controls();
+    (control, receiver)
+}
+
+/// Like `queued`, also returning the control channel's receiver.
+fn queued_with_controls() -> (
+    std::sync::Arc<super::Control>,
+    std::sync::mpsc::Receiver<super::Message>,
+    std::sync::mpsc::Receiver<super::Message>,
+) {
     use super::*;
     let (sender, receiver) = mpsc::sync_channel(16);
-    let (controls, _) = mpsc::sync_channel(16);
+    let (controls, control_receiver) = mpsc::sync_channel(16);
     (
         Arc::new(Control {
             writing: Mutex::new(()),
@@ -92,11 +101,11 @@ fn queued() -> (
             failure: Arc::new(Mutex::new(None)),
             closed: Arc::new(AtomicBool::new(false)),
             size: Mutex::new((80, 24)),
-            #[cfg(unix)]
             generation: Mutex::new(0),
             _endpoint: Endpoint::new().unwrap(),
         }),
         receiver,
+        control_receiver,
     )
 }
 
@@ -182,6 +191,29 @@ fn waiting_for_another_write_observes_cancellation() {
     ));
     pending.receipt.unwrap().send(Ok(())).unwrap();
     first.join().unwrap().unwrap();
+}
+
+#[test]
+fn an_interrupt_stops_a_segmented_write_and_reports_it() {
+    use super::*;
+    let (control, receiver, controls) = queued_with_controls();
+    let input = pattern(3 * SEGMENT);
+    let sending = Arc::clone(&control);
+    let expected = input.clone();
+    let task = thread::spawn(move || sending.write(&expected, &Cancellation::default()));
+    let first = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(payload(&first.bytes), input[..SEGMENT]);
+    control.interrupt_direct().unwrap();
+    let interrupt = controls.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(interrupt.bytes[0], 3);
+    first.receipt.unwrap().send(Ok(())).unwrap();
+    let error = task.join().unwrap().unwrap_err();
+    let sent = format!("interrupted after {SEGMENT} of {} bytes", input.len());
+    assert!(error.contains(&sent), "{error}");
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 }
 
 /// The input bytes of every frame in order; on Unix each frame's interrupt

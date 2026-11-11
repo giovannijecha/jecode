@@ -244,7 +244,7 @@ pub(super) fn console(terminal: &Terminal) {
         80,
         &[
             "60 files · 120 lines · 2 not read",
-            "60 more saved",
+            "60 saved",
             "output:session:batch:stdout",
         ],
     );

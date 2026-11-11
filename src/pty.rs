@@ -39,7 +39,9 @@ pub(crate) struct Control {
     failure: Arc<Mutex<Option<String>>>,
     closed: Arc<AtomicBool>,
     size: Mutex<(u16, u16)>,
-    #[cfg(unix)]
+    /// Interrupt count. A tool write stops between segments once it changes;
+    /// on Unix it also tags input so the helper discards what an interrupt
+    /// overtook.
     generation: Mutex<u64>,
     _endpoint: Endpoint,
 }
@@ -166,7 +168,6 @@ pub(crate) fn start(
             failure,
             closed,
             size: Mutex::new(size),
-            #[cfg(unix)]
             generation: Mutex::new(0),
             _endpoint: endpoint,
         }),
@@ -245,7 +246,6 @@ impl Control {
         self.enqueue(packet, false, receipt)
     }
 
-    #[cfg(unix)]
     fn enqueue_interrupt(
         &self,
         receipt: Option<mpsc::SyncSender<Result<(), String>>>,
@@ -254,7 +254,11 @@ impl Control {
         let next = generation
             .checked_add(1)
             .ok_or("Terminal interrupt sequence exhausted")?;
-        self.enqueue(frame(3, &next.to_le_bytes()), true, receipt)?;
+        #[cfg(unix)]
+        let packet = frame(3, &next.to_le_bytes());
+        #[cfg(windows)]
+        let packet = frame(3, &[]);
+        self.enqueue(packet, true, receipt)?;
         *generation = next;
         Ok(())
     }
@@ -339,8 +343,8 @@ impl Control {
     }
 
     /// Delivers input of any size in order, one confirmed segment at a time.
-    /// A failure names how much was confirmed first; nothing after the
-    /// unconfirmed segment is sent, and nothing is ever sent twice.
+    /// A failure or an interrupt names how much was confirmed first; nothing
+    /// after it is sent, and nothing is ever sent twice.
     pub fn write(&self, bytes: &[u8], cancellation: &Cancellation) -> Result<(), String> {
         let _writing = loop {
             if cancellation.requested() {
@@ -355,10 +359,15 @@ impl Control {
         if bytes.is_empty() {
             return self.deliver(Vec::new(), false, cancellation);
         }
-        #[cfg(unix)]
         let tag = *self.generation.lock().unwrap();
         let mut confirmed = 0;
         for segment in bytes.chunks(SEGMENT) {
+            if *self.generation.lock().unwrap() != tag {
+                return Err(format!(
+                    "Terminal input was interrupted after {confirmed} of {} bytes were sent; later bytes were not sent.",
+                    bytes.len()
+                ));
+            }
             #[cfg(unix)]
             let result = self.deliver_with(cancellation, |receipt| {
                 self.enqueue_input(segment, Some(tag), receipt)
@@ -428,17 +437,11 @@ impl Control {
     }
 
     pub fn interrupt(&self, cancellation: &Cancellation) -> Result<(), String> {
-        #[cfg(unix)]
-        return self.deliver_with(cancellation, |receipt| self.enqueue_interrupt(receipt));
-        #[cfg(windows)]
-        self.deliver(frame(3, &[]), true, cancellation)
+        self.deliver_with(cancellation, |receipt| self.enqueue_interrupt(receipt))
     }
 
     pub fn interrupt_direct(&self) -> Result<(), String> {
-        #[cfg(unix)]
-        return self.enqueue_interrupt(None);
-        #[cfg(windows)]
-        self.enqueue(frame(3, &[]), true, None)
+        self.enqueue_interrupt(None)
     }
 }
 

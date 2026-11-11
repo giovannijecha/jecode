@@ -250,7 +250,7 @@ pub(super) fn read(arguments: &Value, result: &Value) -> String {
             summary.push_str(&format!(" · {failed} not read"));
         }
         if let Some(saved) = result.get("saved_files").and_then(Value::as_usize) {
-            summary.push_str(&format!(" · {saved} more saved"));
+            summary.push_str(&format!(" · {saved} saved"));
         }
         return summary;
     }

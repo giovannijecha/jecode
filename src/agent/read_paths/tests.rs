@@ -284,7 +284,7 @@ fn a_large_batch_reads_every_path_and_saves_what_exceeds_the_inline_size() {
     );
     assert_eq!(
         crate::events::tool_summary("read", &result),
-        format!("read 60 files; 1 not read; {saved} more saved to result_file")
+        format!("read 60 files; 1 not read; {saved} saved to result_file")
     );
 }
 
