@@ -314,8 +314,8 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
         [
             "   1  ☑ Inspect the report                                     done",
             "   2  ☐ Write the exporter                                     in progress",
-            "   3  ☐ Cover edge cases                             AGENT 1   awaiting review",
-            "   4  ☐ Benchmark large files                        AGENT 2   failed",
+            "   3  ☐ Cover edge cases                           AGENTS  #1  awaiting review",
+            "   4  ☐ Benchmark large files                      AGENTS  #2  failed",
             "   5  ☐ Ask about encoding                                     waiting",
             "      ☐ Support XML                                            cancelled",
             "   6  ☐ Update the docs",
@@ -326,11 +326,11 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
     assert_eq!(
         rows(48),
         [
-            "  ☑ Inspect the report             done",
-            "  ☐ Write the exporter             in progress",
-            "  ☐ Cover edge cases     AGENT 1   review",
-            "  ☐ Benchmark large fi…  AGENT 2   failed",
-            "  ☐ Ask about encoding             waiting",
+            "  ☑ Inspect the rep…               done",
+            "  ☐ Write the expor…               in progress",
+            "  ☐ Cover edge cases   AGENTS  #1  review",
+            "  ☐ Benchmark large…   AGENTS  #2  failed",
+            "  ☐ Ask about encod…               waiting",
             "  ☐ Support XML                    cancelled",
             "  ☐ Update the docs",
         ]

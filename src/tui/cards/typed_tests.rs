@@ -60,7 +60,7 @@ fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
     let shown = presentation(0, false);
     for (name, arguments, label, family) in [
         ("read", object([("path", "a.rs")]), "  READ  ", BADGE_READ),
-        ("write", object([("path", "a.rs")]), " WRITE ", BADGE_EDIT),
+        ("write", object([("path", "a.rs")]), "  SAVE  ", BADGE_EDIT),
         ("bash", object([("command", "ls")]), "  BASH  ", BADGE_SHELL),
     ] {
         let result = Value::object([("exit_code", Value::number(0))]);
@@ -79,7 +79,7 @@ fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
 
 #[test]
 fn coordination_badges_are_distinct_from_read_badges() {
-    for label in ["AGENT 1", "Agents", "Todo", "Ask user"] {
+    for label in ["Main", "Agents", "Todo", "Ask user"] {
         let row = super::badge::badge(label, Status::Done);
         assert_eq!(row.spans[0].background, Some(BADGE_COORD), "{label}");
     }
@@ -92,8 +92,8 @@ fn coordination_badges_are_distinct_from_read_badges() {
 /// The badge block as plain text: the word centred in eight cells, then the gap.
 fn centred(label: &str) -> String {
     let cells = label.chars().count();
-    let side = if cells > 8 { 1 } else { (8 - cells) / 2 };
-    let tail = if cells > 8 { 1 } else { 8 - cells - side };
+    let side = (8 - cells) / 2;
+    let tail = 8 - cells - side;
     format!("{}{label}{} ", " ".repeat(side), " ".repeat(tail))
 }
 
@@ -102,13 +102,13 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
     let arguments = object([("path", "fixture.rs"), ("command", "cargo build")]);
     for (name, label) in [
         ("read", "READ"),
-        ("write", "WRITE"),
+        ("write", "SAVE"),
         ("edit", "UPDATE"),
         ("bash", "BASH"),
-        ("process", "PROCESS"),
-        ("web", "WEB"),
-        ("browser", "BROWSER"),
-        ("future_tool", "FUTURE_TOOL"),
+        ("process", "PROC"),
+        ("web", "HTTP"),
+        ("browser", "BROWSE"),
+        ("steps", "SEQUENCE"),
     ] {
         let mut bands = Vec::new();
         for frame in 0..label.len() + 8 {
@@ -376,7 +376,7 @@ fn pages_and_captures_summarise_what_came_back() {
         ),
     ]);
     let rows = plain(&card(tool("browser", &capture, &image, &shown), 80, false).rows);
-    assert_eq!(rows[0], "BROWSER  screenshot");
+    assert_eq!(rows[0], " BROWSE  screenshot");
     assert_eq!(rows[1], "  │ tab-1");
     assert_eq!(
         rows[2],

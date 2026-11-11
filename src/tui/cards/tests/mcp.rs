@@ -43,7 +43,7 @@ fn mcp_cards_follow_the_shared_rhythm_and_preserve_remote_uncertainty() {
         );
         let value = plain(&rows);
         assert!(
-            value.starts_with("  MCP    GitHub › create_issue"),
+            value.starts_with("MCP CALL GitHub › create_issue"),
             "{value}"
         );
         assert!(value.contains("│ title \"Fix sleep\""), "{value}");
@@ -161,7 +161,7 @@ fn work_keeps_each_mcp_connection_and_result_visible() {
         assert!(plain(&header.rows).contains("1 MCP call"));
         let rows = chapter_exception(&tool, width);
         let value = plain(&rows);
-        assert!(value.contains("MCP GitHub"), "{value}");
+        assert!(value.contains("MCP CALL GitHub"), "{value}");
         assert!(value.contains("Created #7"), "{value}");
         assert!(rows.iter().all(|row| text::cells(&row.plain()) <= width));
     }

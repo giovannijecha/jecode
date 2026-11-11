@@ -88,7 +88,8 @@ a progress bar, `N of M done`, and each task with its number, owner and state
 task not started shows no state). Arrow keys scroll; Esc closes. It makes no
 model request. In `--plain`, `/todo` prints the same information.
 
-A task can name the collaborator working on it, shown as an `AGENT N` badge.
+A task can name the collaborator working on it, shown as an `AGENTS` badge
+followed by its display number, such as `#3`, outside the colored block.
 When that collaborator returns, the task shows `awaiting review` (or `failed`)
 until the main agent updates it; a collaborator's return never completes a task
 by itself. Collaborators keep their own plans.

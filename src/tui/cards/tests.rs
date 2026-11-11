@@ -48,7 +48,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("url", Value::string("https://example.org/")),
             ]),
             Value::object([("status", Value::number(200)), ("bytes", Value::number(42))]),
-            "  WEB    fetch https://example.org/",
+            "  HTTP   fetch https://example.org/",
             "HTTP 200 · 42 B",
         ),
         (
@@ -58,7 +58,7 @@ fn web_and_browser_cards_show_action_target_and_result() {
                 ("tab_id", Value::string("tab-1")),
             ]),
             Value::object([("screenshot_path", Value::string("tmp:browser/shot.png"))]),
-            "BROWSER  screenshot",
+            " BROWSE  screenshot",
             "Screenshot · tmp:browser/shot.png",
         ),
     ];
@@ -338,9 +338,9 @@ fn process_states_and_lists_name_their_actual_outcomes() {
         assert_eq!(
             rows[0].plain(),
             if background {
-                "PROCESS  poll p1 &"
+                "  PROC   poll p1 &"
             } else {
-                "PROCESS  poll p1"
+                "  PROC   poll p1"
             }
         );
         assert!(plain(&rows).contains(expected));
@@ -433,7 +433,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
         80,
         &Presentation::default(),
     );
-    assert!(plain(&rows).starts_with(" WRITE   notes.txt  Wrote 1 line"));
+    assert!(plain(&rows).starts_with("  SAVE   notes.txt  Wrote 1 line"));
     assert!(rows.iter().all(|row| row.background.is_none()));
     let change = Change::between(None, "").unwrap();
     let rows = draw(
@@ -446,7 +446,7 @@ fn empty_creations_and_unavailable_previous_content_are_honest() {
     );
     // The fact joins the title and no preview rows are invented.
     assert_eq!(rows.len(), 1);
-    assert_eq!(plain(&rows), " WRITE   notes.txt  New file · 0 lines");
+    assert_eq!(plain(&rows), "  SAVE   notes.txt  New file · 0 lines");
 }
 
 #[test]

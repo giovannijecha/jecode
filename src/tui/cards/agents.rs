@@ -1,6 +1,7 @@
 //! Collaboration events as tool rows. A lone event is one row under its
-//! AGENT N badge, a Work chapter member keeps one row, and Ctrl+O opens the
-//! full receipt: instruction, workspace, changed files and report.
+//! AGENTS badge and a separate #N identity, a Work chapter member keeps one row,
+//! and Ctrl+O opens the full receipt: instruction, workspace, changed files
+//! and report.
 
 use super::{Card, Status, Tool, badge, field, hint, line_rows, rhythm};
 use crate::{
@@ -339,7 +340,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         };
     };
     let name = field(tool.arguments, "label");
-    let mut title = badge::badge(name, status(event));
+    let mut title = badge::agent(name, status(event));
     title.push(&format!(" {}", subject(event, false)), BODY);
     let title = title.at_source(0).shortened(columns);
     let expanded = tool.presentation.expanded;

@@ -76,7 +76,7 @@ pub(super) fn console(terminal: &Terminal) {
             terminal,
             state.rows().into_iter().flatten().collect(),
             columns,
-            &[" STEPS   edit, ask_user", "ask_user cannot run as a step"],
+            &["SEQUENCE edit, ask_user", "ask_user cannot run as a step"],
         );
     }
 }

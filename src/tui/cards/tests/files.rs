@@ -16,7 +16,7 @@ fn new_file_previews_six_numbered_lines_and_expands_all_source() {
         &Presentation::default(),
     );
     let text = plain(&compact);
-    assert!(text.starts_with(" WRITE   new.rs  New file · 9 lines\n"));
+    assert!(text.starts_with("  SAVE   new.rs  New file · 9 lines\n"));
     assert!(text.contains("  │ 1   const value_1 = 1;"));
     assert!(text.contains("  │ 6   const value_6 = 6;"));
     assert!(!text.contains("value_7"));

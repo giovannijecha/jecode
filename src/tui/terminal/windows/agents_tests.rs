@@ -171,7 +171,7 @@ pub(super) fn console() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(shown.contains("Preserve ordering for empty queries"));
-    assert!(shown.contains("AGENT 1  Returned · Inspect the search view"));
+    assert!(shown.contains("AGENTS  #1 Returned · Inspect the search view"));
     assert!(
         inside
             .live

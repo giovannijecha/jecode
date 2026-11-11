@@ -65,7 +65,7 @@ fn running_processes_take_the_paths_place_and_name_their_panel() {
         ..State::default()
     };
     let wide = footer(&state(100, 2));
-    assert!(wide.starts_with("PROCESS  2 running"), "{wide}");
+    assert!(wide.starts_with("  PROC   2 running"), "{wide}");
     assert!(wide.contains("/process"), "{wide}");
     assert!(wide.ends_with("▰▰▰▰▰▰▱▱ 61%"), "{wide}");
     assert!(!wide.contains(r"C:\project"), "{wide}");
@@ -73,14 +73,14 @@ fn running_processes_take_the_paths_place_and_name_their_panel() {
     let frame = frame(&state(100, 1), "provider/model", r"C:\project");
     let line = frame.live.last().unwrap();
     assert!(line.spans.iter().any(|span| {
-        span.text == "PROCESS"
+        span.text == "  PROC  "
             && span.style == crate::tui::theme::LIT
             && span.background == Some(crate::tui::theme::BADGE_IDLE)
     }));
     // Narrow rows give up the model, then the hint; the gauge stays.
     for width in [60, 44, 34, 28] {
         let narrow = footer(&state(width, 1));
-        assert!(narrow.starts_with("PROCESS"), "{width}: {narrow}");
+        assert!(narrow.starts_with("  PROC  "), "{width}: {narrow}");
         assert!(narrow.ends_with(" 61%"), "{width}: {narrow}");
         assert!(text::cells(&narrow) <= width, "{width}: {narrow}");
     }

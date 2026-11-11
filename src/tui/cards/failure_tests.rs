@@ -91,7 +91,7 @@ fn a_refused_steps_call_names_its_tools() {
         80,
         false,
     );
-    assert_eq!(rendered.rows[0].plain(), " STEPS   edit, ask_user");
+    assert_eq!(rendered.rows[0].plain(), "SEQUENCE edit, ask_user");
     assert!(rendered.rows[1].plain().contains("ask_user cannot run"));
 }
 

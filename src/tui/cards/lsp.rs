@@ -12,7 +12,7 @@ use crate::{
 
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
-    let mut title = badge::badge("LSP", status);
+    let mut title = badge::badge("LSP call", status);
     let label = if tool.presentation.expanded {
         "collapse"
     } else {

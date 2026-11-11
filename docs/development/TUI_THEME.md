@@ -101,11 +101,11 @@ surface follows the theme, and its label with it.
 
 | Badge surface | Dark | Light | Use |
 | --- | --- | --- | --- |
-| `BADGE_READ` | `#4852A0` | `#4852A0` | Read, List, Search, Skill, Web, Browser; the Read level chip. |
-| `BADGE_EDIT` | `#7F3C93` | `#7F3C93` | Update, Write; the Workspace level chip. |
-| `BADGE_SHELL` | `#036387` | `#036387` | Bash, Exec, Process; the Full level chip. |
-| `BADGE_COORD` | `#226558` | `#226558` | Agents, Todo, Ask user, `AGENT N` and `MAIN AGENT`. |
-| `BADGE_IDLE` | `#3A3B42` | `#D8DBE0` | Running and background badges, and the finished MCP, LSP, WORK and other tools without a family (label in `STRONG`); attachment chips and the footer `AGENTS` badge. |
+| `BADGE_READ` | `#4852A0` | `#4852A0` | Read, List, Search, Skills, HTTP, Browse; the Read level chip. |
+| `BADGE_EDIT` | `#7F3C93` | `#7F3C93` | Update, Save; the Workspace level chip. |
+| `BADGE_SHELL` | `#036387` | `#036387` | Bash, Exec, Proc; the Full level chip. |
+| `BADGE_COORD` | `#226558` | `#226558` | Agents, Todo, Ask user and Main. Collaborator numbers follow the badge. |
+| `BADGE_IDLE` | `#3A3B42` | `#D8DBE0` | Running and background badges, and the finished MCP CALL, LSP CALL, WORK and other tools without a family (label in `STRONG`); attachment chips and the footer `AGENTS` badge. |
 | `BADGE_BAD` | `#7A2E3A` | `#7A2E3A` | Failed calls. |
 | `BADGE_WARN` | `#6B5222` | `#6B5222` | Stopped or timed-out calls. |
 
@@ -221,35 +221,35 @@ its diagnostic as the turn's last row: `✕` in bold `BAD`, then the text in
 ## Tool rows
 
 Each call opens with a badge, then the target one space after in `BODY`. The
-badge takes eight cells with its name centred in bold. An even name fills all
-eight; an odd name fills seven and leaves one unfilled cell after the badge,
-because a word only centres on the cell grid when its gap is even. A name wider
-than eight keeps its natural width with one cell on each side. So the target of
-every call with a name of eight cells or fewer starts on column 9, where diff
-code starts when line numbers have two digits.
+badge fills exactly eight cells with its name centred in bold. Tool labels have
+even widths of at most eight cells, leaving equal padding on both sides. Every
+target starts on column 9, where diff code starts when line numbers have two
+digits. Unrecognized tool names keep the same filled footprint, clipping long
+names and rounding odd-width padding to a cell.
 
 There is no separate status dot: a finished call keeps its family colour, a
 running one shimmers on `BADGE_IDLE`, a background one shows a `LIT` name on
 `BADGE_IDLE`, a failed one turns `BADGE_BAD` and a stopped one `BADGE_WARN`.
-Finished badges with a family colour use `BADGE_TEXT`; the quiet ones (MCP, LSP,
-WORK and tools without a family) use `STRONG`. The names are READ, SKILL (a
-`read` of a skill's `SKILL.md`), UPDATE, WRITE, BASH, EXEC, PROCESS, WEB, BROWSER,
-LIST, SEARCH and AGENTS, plus STEPS on a refused `steps` call. List and
+Finished badges with a family colour use `BADGE_TEXT`; the quiet ones (MCP CALL,
+LSP CALL, WORK and tools without a family) use `STRONG`. The names are READ,
+SKILLS (a `read` of a skill's `SKILL.md`), UPDATE, SAVE, BASH, EXEC, PROC, HTTP,
+BROWSE, LIST, SEARCH and AGENTS, plus SEQUENCE on a refused `steps` call. List and
 Search use the read-family surface; an optional description keeps the
 concrete target on the following tree row. A permission request names the main
-agent as `MAIN AGENT`, on the coordination surface.
+agent with a centred `MAIN` badge on the coordination surface.
 
 Successful writes to existing files show UPDATE when their retained change
 confirms the earlier file, including whole-file replacements. Captured new
-files show WRITE. Pending or failed writes, and writes without a retained
-change, keep WRITE. The same rule applies when expanding a card or restoring
+files show SAVE. Pending or failed writes, and writes without a retained
+change, keep SAVE. The same rule applies when expanding a card or restoring
 its saved history; the renderer does not inspect the current file to choose
 the earlier operation's label.
 
 Collaboration creation, sent/received assignments, returned reports, review and
-closure use immutable chronological receipts. Creation expands from `AGENTS` to
-complete numbered badges such as `AGENT 1`; identity never appears as a detached
-`a1`. Current state belongs to `/agents`. Inspection, wait, diff and integration
+closure use immutable chronological receipts. Every collaborator badge reads
+`AGENTS`, with the display number outside its surface, such as `#1`. The number
+does not resize the badge; raw internal IDs such as `a1` remain hidden. Current
+state belongs to `/agents`. Inspection, wait, diff and integration
 calls retain standard `AGENTS` tool cards with their action and target; calls
 already represented by receipts avoid duplicate cards. Errors remain visible.
 

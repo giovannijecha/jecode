@@ -119,7 +119,7 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
         80,
     );
     // The background call ends its title target in a bold `&`.
-    assert_eq!(card.rows[0].plain(), "PROCESS  Serve preview &");
+    assert_eq!(card.rows[0].plain(), "  PROC   Serve preview &");
     assert_eq!(card.rows[0].spans.last().unwrap().text, " &");
     assert_eq!(card.rows[0].spans.last().unwrap().style, LIT.bold());
     assert_eq!(badge(&card), (LIT.bold(), Some(BADGE_IDLE)));
@@ -151,7 +151,7 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
     )]);
     let shown = Presentation::default();
     let card = draw("browser", &args, Some(&result), &shown, 80);
-    assert_eq!(card.rows[0].plain(), "BROWSER  evaluate");
+    assert_eq!(card.rows[0].plain(), " BROWSE  evaluate");
     assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
     assert!(
         card.rows[1]
@@ -184,7 +184,7 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
         },
         80,
     );
-    assert_eq!(rows[0].plain(), "  ⎿ BROWSER evaluate Read title");
+    assert_eq!(rows[0].plain(), "  ⎿ BROWSE evaluate Read title");
     assert!(rows[1].plain().starts_with("    TypeError"));
 }
 
@@ -334,7 +334,7 @@ fn browser_actions_without_a_payload_open_their_result_on_the_first_tree_row() {
                 ..Presentation::default()
             };
             let card = draw("browser", &args, Some(&result), &shown, 80);
-            assert_eq!(card.rows[0].plain(), format!("BROWSER  {action}"));
+            assert_eq!(card.rows[0].plain(), format!(" BROWSE  {action}"));
             // No empty command row opens the tree; this result has no blank line.
             let empty = |row: &Line| row.plain().trim_start_matches([' ', '│', '└']).is_empty();
             assert!(!card.rows[1..].iter().any(empty), "{}", plain(&card));

@@ -166,7 +166,7 @@ pub(super) fn console() {
     );
     assert!(todo.live.iter().any(|row| {
         let row = row.plain();
-        row.contains("Check CSV encoding") && row.contains("AGENT 1") && row.contains("review")
+        row.contains("Check CSV encoding") && row.contains("AGENTS  #1") && row.contains("review")
     }));
     assert_eq!(state.editor, draft);
     paint(todo.live, width, height);

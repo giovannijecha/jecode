@@ -123,7 +123,7 @@ reliable figure yet. See
 While collaborators are working or waiting for review, an `AGENTS` badge with
 counts replaces the directory; see
 [Collaborating agents](COLLABORATION.md#watch-in-the-tui). While processes
-keep running after their calls returned, a `PROCESS` badge with the count and the
+keep running after their calls returned, a `PROC` badge with the count and the
 `/process` command does the same; with collaborators too, the `AGENTS` badge stays
 and counts them among its facts. On narrow
 terminals the footer drops the provider name, then shows the project name
@@ -171,7 +171,7 @@ command whose call is still in its default wait; processes already in the backgr
 keep running.
 
 Tool cards show a process's state when the call returned. When a process that no
-call is waiting for ends, a `PROCESS` row reports it at that point in the
+call is waiting for ends, a `PROC` row reports it at that point in the
 conversation. Completion creates no status-row notice: the current activity
 or the turn's final statistics stay visible. An idle conversation continues from
 there unless the last turn was stopped or failed, or queued messages, a menu, a

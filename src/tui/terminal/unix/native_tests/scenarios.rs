@@ -265,7 +265,7 @@ fn native_unix_direct_input() {
     t.wait("Ask anything");
     command(&mut t, "start terminal");
     t.wait("Native terminal started.");
-    t.wait("PROCESS  1 running");
+    t.wait("  PROC   1 running");
     command(&mut t, "/process");
     t.wait("1 running");
     t.send(b"\r");

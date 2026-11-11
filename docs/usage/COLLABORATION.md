@@ -122,9 +122,10 @@ after the first one is closed.
 ## Watch in the TUI
 
 Collaboration events appear as rows in the conversation: `AGENTS` when
-collaborators are created, then `AGENT N` rows for sent and received
-assignments, returns, reviews, stops and closures. Failures show in red and
-uncertain outcomes in amber. Ctrl+O shows each event's full receipt: the
+collaborators are created, then `AGENTS` cards with a separate display number,
+such as `#1`, for sent and received assignments, returns, reviews, stops and
+closures. Plain Work chapter member rows keep the `AGENT N` identity. Failures
+show in red and uncertain outcomes in amber. Ctrl+O shows each event's full receipt: the
 instructions, workspace, changed files with line counts, report and review
 state. See [Tool activity](TOOL_ACTIVITY.md#collaborators).
 

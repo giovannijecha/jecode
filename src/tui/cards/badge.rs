@@ -16,12 +16,10 @@ const BLOCK: usize = 8;
 /// The family surface: read, edit, shell, coordination, then the quiet one for the rest.
 fn family(name: &str) -> Surface {
     match name {
-        "Read" | "List" | "Search" | "Skill" | "Web" | "Browser" => BADGE_READ,
-        "Update" | "Write" => BADGE_EDIT,
-        "Bash" | "Exec" | "Process" => BADGE_SHELL,
-        "Agents" | "Todo" | "Ask user" => BADGE_COORD,
-        name if name.starts_with("AGENT") || name.starts_with("Agent") => BADGE_COORD,
-        name if name.starts_with("MAIN AGENT") => BADGE_COORD,
+        "Read" | "List" | "Search" | "Skills" | "HTTP" | "Browse" => BADGE_READ,
+        "Update" | "Save" => BADGE_EDIT,
+        "Bash" | "Exec" | "Proc" => BADGE_SHELL,
+        "Agents" | "Todo" | "Ask user" | "Main" => BADGE_COORD,
         _ => BADGE_IDLE,
     }
 }
@@ -75,23 +73,35 @@ pub(super) fn badge(name: &str, status: Status) -> Line {
     block(word, surface)
 }
 
-/// One block with the word centred exactly: eight cells for an even name, seven for an
-/// odd one, because a word only centres on a cell grid when its gap is even. Either way
-/// the badge takes eight cells. A wider name keeps its natural width.
+/// Eight filled cells. The tool vocabulary has even widths, so both sides match.
+/// Unknown tool names are clipped to the same footprint and rounded to a cell.
 fn block(word: Line, surface: Surface) -> Line {
+    let word = word.shortened(BLOCK);
     let cells = text::cells(&word.plain());
-    let side = " ".repeat(BLOCK.saturating_sub(cells) / 2);
-    let side = if cells > BLOCK { " " } else { side.as_str() };
+    let left = (BLOCK - cells) / 2;
+    let right = BLOCK - cells - left;
     let style = word.spans.first().map_or(BODY, |span| span.style);
     let mut line = Line::default();
-    line.push_on(side, style, surface);
+    line.push_on(&" ".repeat(left), style, surface);
     for span in word.spans {
         line.push_on(&span.text, span.style, surface);
     }
     let last = line.spans.last().map_or(style, |span| span.style);
-    line.push_on(side, last, surface);
-    if cells < BLOCK && cells % 2 == 1 {
-        line.push(" ", BODY);
+    line.push_on(&" ".repeat(right), last, surface);
+    line
+}
+
+/// Keep variable collaborator identities outside the fixed coordination badge.
+pub(super) fn agent(name: &str, status: Status) -> Line {
+    let label = name.to_ascii_uppercase();
+    if label == "MAIN AGENT" {
+        return badge("Main", status);
+    }
+    let mut line = badge("Agents", status);
+    if let Some(number) = label.strip_prefix("AGENT ") {
+        line.push(&format!(" #{number}"), STRONG);
+    } else if label != "AGENTS" {
+        line.push(&format!(" {}", text::clean(name)), STRONG);
     }
     line
 }
@@ -129,8 +139,18 @@ fn tree(row: &Line) -> bool {
 mod tests {
     use super::*;
 
-    const NAMES: [&str; 10] = [
-        "Web", "MCP", "LSP", "Read", "List", "Bash", "Write", "Search", "Update", "Process",
+    const NAMES: &[&str] = &[
+        "HTTP", "MCP call", "LSP call", "Read", "List", "Bash", "Save", "Search", "Update", "Proc",
+        "Browse", "Skills", "Sequence", "Agents", "Todo", "Ask user", "Work", "Exec", "Main",
+    ];
+
+    const STATES: [Status; 6] = [
+        Status::Done,
+        Status::Running,
+        Status::Background,
+        Status::Failed,
+        Status::Stopped,
+        Status::Unknown,
     ];
 
     /// The filled cells, and whatever follows them.
@@ -152,12 +172,7 @@ mod tests {
 
     #[test]
     fn every_badge_takes_eight_cells_with_its_word_exactly_centred() {
-        for status in [
-            Status::Done,
-            Status::Running,
-            Status::Failed,
-            Status::Stopped,
-        ] {
+        for status in STATES {
             for name in NAMES {
                 let line = badge(name, status);
                 assert_eq!(text::cells(&line.plain()), BLOCK, "{name}");
@@ -167,24 +182,43 @@ mod tests {
                 let right = filled.len() - filled.trim_end().len();
                 assert_eq!(filled.trim(), word, "{name}");
                 assert_eq!(left, right, "{name}: {filled:?}");
-                // Odd names leave the gap outside the block, unfilled.
-                let odd = word.len() % 2 == 1;
-                assert_eq!(rest, if odd { " " } else { "" }, "{name}");
-                assert_eq!(filled.len(), if odd { 7 } else { 8 }, "{name}");
+                assert!(rest.is_empty(), "{name}");
+                assert_eq!(filled.len(), BLOCK, "{name}");
             }
         }
     }
 
     #[test]
-    fn a_wider_name_keeps_its_natural_width() {
-        let line = badge("MAIN AGENT", Status::Done);
-        assert_eq!(line.plain(), " MAIN AGENT ");
-        assert_eq!(line.spans[0].background, Some(BADGE_COORD));
+    fn unfamiliar_names_keep_the_eight_filled_cell_footprint() {
+        for name in ["Odd", "Unknown", "Future tool with a long name", "漢字"] {
+            let line = badge(name, Status::Done);
+            assert_eq!(text::cells(&line.plain()), BLOCK, "{name}");
+            assert!(line.spans.iter().all(|span| span.background.is_some()));
+        }
+    }
+
+    #[test]
+    fn collaborator_numbers_do_not_resize_or_recentre_the_badge() {
+        for status in STATES {
+            for number in [1, 12, 123, usize::MAX] {
+                for name in [format!("AGENT {number}"), format!("Agent {number}")] {
+                    let line = agent(&name, status);
+                    let (filled, rest) = parts(&line);
+                    assert_eq!(filled, " AGENTS ");
+                    assert_eq!(rest, format!(" #{number}"));
+                }
+            }
+            let (filled, rest) = parts(&agent("MAIN AGENT", status));
+            assert_eq!(filled, "  MAIN  ");
+            assert!(rest.is_empty());
+            assert_eq!(agent("AGENTS", status).plain(), " AGENTS ");
+            assert_eq!(agent("Agents", status).plain(), " AGENTS ");
+        }
     }
 
     #[test]
     fn quiet_surfaces_read_strong_and_family_surfaces_keep_their_label() {
-        for name in ["MCP", "LSP", "Work", "Unknown"] {
+        for name in ["MCP call", "LSP call", "Work", "Unknown"] {
             let line = badge(name, Status::Done);
             assert_eq!(line.spans[0].background, Some(BADGE_IDLE), "{name}");
             assert_eq!(line.spans[0].style, STRONG.bold(), "{name}");
@@ -202,8 +236,8 @@ mod tests {
             ("Update", KEYWORD),
             ("Bash", LIT),
             ("Agents", MUTED),
-            ("AGENT 1", MUTED),
-            ("MCP", MUTED),
+            ("Main", MUTED),
+            ("MCP call", MUTED),
         ] {
             assert_eq!(ink(name), style, "{name}");
         }

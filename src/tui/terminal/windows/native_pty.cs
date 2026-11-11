@@ -333,7 +333,7 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Wait("Ask anything");
                 pty.Send("start terminal"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("Native terminal started.");
-                pty.Wait("PROCESS  1 running");
+                pty.Wait("  PROC   1 running");
                 pty.Send("/process"); Thread.Sleep(150); pty.Send("\r");
                 pty.Wait("1 running");
                 pty.Send("\r");

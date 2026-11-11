@@ -30,10 +30,10 @@ fn plain(rows: &[Line]) -> String {
 #[test]
 fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     let running = draw("skill:review", None, false);
-    assert!(plain(&running).starts_with(" SKILL   review"));
+    assert!(plain(&running).starts_with(" SKILLS  review"));
     assert_eq!(running[0].spans[0].background, Some(BADGE_IDLE));
     let ink = &running[0].spans[0];
-    assert_eq!((ink.text.as_str(), ink.style), (" SKILL ", DIM.bold()));
+    assert_eq!((ink.text.as_str(), ink.style), (" SKILLS ", DIM.bold()));
 
     let result = Value::object([
         ("content", Value::string("1: # Review\n2: Check changes.\n")),
@@ -43,7 +43,7 @@ fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     let done = draw("skill:review", Some(&result), false);
     assert_eq!(badge(&done), (BADGE_TEXT.bold(), Some(BADGE_READ)));
     // The fact joins the one-row title.
-    assert_eq!(plain(&done), " SKILL   review  Loaded skill · 2 lines");
+    assert_eq!(plain(&done), " SKILLS  review  Loaded skill · 2 lines");
     assert_eq!(done.len(), 1);
     let expanded = draw("skill:review", Some(&result), true);
     assert!(plain(&expanded).contains("2   Check changes."));
@@ -59,6 +59,6 @@ fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     assert!(!plain(&resource).contains("Loaded skill"));
 
     let explicit_root = draw("skill:review/SKILL.md", Some(&result), false);
-    assert!(plain(&explicit_root).starts_with(" SKILL   review"));
+    assert!(plain(&explicit_root).starts_with(" SKILLS  review"));
     assert!(plain(&explicit_root).contains("Loaded skill"));
 }

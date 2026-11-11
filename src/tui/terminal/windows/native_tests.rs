@@ -19,6 +19,9 @@ mod work_tests;
 #[path = "card_tests.rs"]
 mod card_tests;
 
+#[path = "badge_cards.rs"]
+mod badge_cards;
+
 #[path = "multi_edit_cards.rs"]
 mod multi_edit_cards;
 

@@ -119,7 +119,7 @@ mod tests {
         assert!(!state.tool_details.active);
         assert!(state.tool_details_available(), "Ctrl+O opens this row");
         let shown = rows(&state);
-        assert!(shown.contains("PROCESS"), "{shown}");
+        assert!(shown.contains("PROC"), "{shown}");
         assert!(shown.contains("cargo test --locked"), "{shown}");
         assert!(shown.contains("Exit 1"), "{shown}");
     }
