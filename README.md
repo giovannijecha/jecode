@@ -62,7 +62,7 @@ jecode "Explain the structure of this project"
 Install Jecode with Node.js 22 or later and npm on Windows 10 1809 or later (x64),
 Linux x64 (glibc 2.28 or newer), or macOS 11 or later on Apple silicon or Intel.
 On macOS 11–13.4, use Node.js 22: Node.js 24 needs macOS 13.5 or later.
-[Platform support](docs/development/PLATFORMS.md#supported-versions) records what
+[Platform support](docs/usage/PLATFORMS.md#supported-versions) records what
 has actually run on each of them.
 
 ```sh
@@ -95,7 +95,7 @@ quit, and `/help` or F1 for commands and common shortcuts.
 
 - [Providers](docs/usage/PROVIDERS.md): account setup, usage and provider-specific
   compatibility limits.
-- [Terminal interface](docs/tui/INTERFACE.md): sending, queueing, stopping and
+- [Terminal interface](docs/usage/INTERFACE.md): sending, queueing, stopping and
   reading the agent's work.
 - [Permissions](docs/usage/PERMISSIONS.md): what the agent may do, and approvals.
 - [MCP connections](docs/usage/MCP.md): connect remote tools from Settings.
@@ -117,7 +117,7 @@ default.
 
 - Windows x64, Linux x64, and macOS on Apple silicon and Intel have native
   builds and terminal fixtures in CI. Interactive use on macOS has not been
-  verified. See [Platform support](docs/development/PLATFORMS.md).
+  verified. See [Platform support](docs/usage/PLATFORMS.md).
 - Command confinement in the Workspace permission level needs Landlock on Linux and a
   recent Windows, and uses Seatbelt on macOS. Hosts without confinement need the
   Full level; macOS terminal hosts still need manual validation.

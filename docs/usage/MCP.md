@@ -38,13 +38,13 @@ on 2026-11-03 completed OAuth, token refresh and tool discovery with all four
 services. Cloudflare returned four entry-point tools; access to account resources
 was not exercised. These checks do not run remote mutations. Vercel accepts
 [unreviewed clients with public metadata](https://vercel.com/changelog/vercel-mcp-now-supports-client-id-metadata-documents);
-you still approve each connection. See the [GitHub App setup](../development/GITHUB_MCP_APP.md)
+you still approve each connection. See the [GitHub App setup](../maintainers/GITHUB_MCP_APP.md)
 for browser sign-in, which is optional for token connections.
 Jecode ships its public GitHub client ID; users do not register an App or
 configure an identifier. They authorize Jecode and choose the repositories
 they grant it access to. A public server with no authentication reads
 **Not needed**; a token-only server still asks for the explicit Token choice.
-The [Vercel client setup](../development/VERCEL_MCP_CLIENT.md) records the
+The [Vercel client setup](../maintainers/VERCEL_MCP_CLIENT.md) records the
 public metadata URL and publication requirement. Vercel CLI/API tokens are not
 assumed to authorize the MCP endpoint; access follows its OAuth grants.
 

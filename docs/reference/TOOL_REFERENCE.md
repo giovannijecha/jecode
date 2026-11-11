@@ -1,16 +1,16 @@
 # Tool reference
 
 Exact arguments, defaults and limits of the tools Jecode gives the model. For an
-overview, read [Tools](TOOLS.md) first. The model receives these contracts as
+overview, read [Tools](../usage/TOOLS.md) first. The model receives these contracts as
 tool schemas; this page is for understanding results, diagnosing behavior and
-writing [skills](SKILLS.md).
+writing [skills](../usage/SKILLS.md).
 
 ## Arguments
 
 Every tool except `steps` accepts an optional boolean `parallel`. The routine tools `read`,
 `list`, `search`, `bash`, `exec`, `process`, `web`, `browser`, `mcp` and `lsp` also
 accept two display-only strings: `work`, a short label that groups related calls
-into a [Work chapter](../tui/TOOL_ACTIVITY.md#work-chapters), and
+into a [Work chapter](../usage/TOOL_ACTIVITY.md#work-chapters), and
 `description`, a caption for the call's card. `agent` accepts `work` too.
 Neither changes what the call does.
 
@@ -28,9 +28,9 @@ Neither changes what the call does.
 | `browser` | `action`; `url` for `navigate`; `key` for `press`; `text` for `fill`/`type`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `modifiers`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |
 | `mcp` | `action`: `list`, `tools` or `call`; `connection` for `tools` and `call`; `tool` for `call` | `arguments` (JSON object), `query`, `offset`, `limit` |
 | `lsp` | `action`: `status`, `definition`, `references` or `diagnostics`; `path` except for status; `line` and `column` for positional actions | `server`, `include_declaration` |
-| `agent` | `action` | See [Collaborating agents](COLLABORATION.md#agent-actions). |
-| `ask_user` | `questions` | See [Questions and plans](QUESTIONS_AND_PLANS.md#question-format). |
-| `todo_list` | `action` | See [Questions and plans](QUESTIONS_AND_PLANS.md#plan-format). |
+| `agent` | `action` | See [Collaborating agents](../usage/COLLABORATION.md#agent-actions). |
+| `ask_user` | `questions` | See [Questions and plans](../usage/QUESTIONS_AND_PLANS.md#question-format). |
+| `todo_list` | `action` | See [Questions and plans](../usage/QUESTIONS_AND_PLANS.md#plan-format). |
 | `steps` | `steps` | See [below](#steps). |
 
 ## Steps
@@ -113,7 +113,7 @@ invalid UTF-8 fail.
 
 | Reference | Content |
 | --- | --- |
-| `tmp:relative/path` | A file in the conversation's [temporary area](TEMPORARY.md). Also accepted by `write` and `edit`. A read that finds nothing there falls back to the areas of the agents above, or for a main agent of its collaborators; if several match, the error names them. |
+| `tmp:relative/path` | A file in the conversation's [temporary area](../usage/TEMPORARY.md). Also accepted by `write` and `edit`. A read that finds nothing there falls back to the areas of the agents above, or for a main agent of its collaborators; if several match, the error names them. |
 | `tmp:AGENT:relative/path` | A file in one collaborator's temporary area, for example `tmp:a2:report.txt`. Read-only. |
 | `output:SESSION_ID:OUTPUT_ID:stdout` or `:stderr` | A command's complete saved stream, including one saved by the main agent or, for a main agent, by its collaborators. |
 | `history:N` | The original message at zero-based index `N`. |
@@ -391,6 +391,6 @@ and blob data are replaced by a placeholder with the MIME type and size. A
 result that still exceeds 64 KiB keeps a text preview and `truncated: true`;
 in both cases `result_file` is an `output:` reference to the full result,
 readable with `read`. A remote `isError` is a tool failure; `outcome: unknown`
-means the service may already have acted. See [MCP](MCP.md).
+means the service may already have acted. See [MCP](../usage/MCP.md).
 An interruption before dispatch returns `outcome: not_executed` and is displayed
 as Cancelled; no remote call was sent.

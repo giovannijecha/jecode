@@ -34,7 +34,7 @@ API keys use API billing separately from subscription plans.
 Press Enter to send a task, Ctrl+G to open commands while keeping your draft,
 Esc to stop a turn, and Ctrl+Q to quit. `/help` or F1 lists commands and common
 shortcuts, and `jecode resume` continues saved work. Read the
-[terminal guide](https://github.com/giovannijecha/jecode/blob/main/docs/tui/INTERFACE.md)
+[terminal guide](https://github.com/giovannijecha/jecode/blob/main/docs/usage/INTERFACE.md)
 for themes, tool cards and shortcuts.
 
 The default permission level, Workspace, confines the agent's commands to your

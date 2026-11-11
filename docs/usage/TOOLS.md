@@ -4,7 +4,7 @@ The model works in your project by calling tools. Jecode runs each call, checks
 it against the applicable [permissions](PERMISSIONS.md) and returns
 the result to the model. This page explains what the tools do and what you see
 of them. Exact arguments and limits are in the
-[Tool reference](TOOL_REFERENCE.md).
+[Tool reference](../reference/TOOL_REFERENCE.md).
 
 ## How tool calls run
 
@@ -17,7 +17,7 @@ of them. Exact arguments and limits are in the
   at the same time. The model can also mark other adjacent calls as independent
   to run them in parallel, at most four at once. Results always enter the
   conversation in the original call order.
-- The model can send several tools as one [`steps`](TOOL_REFERENCE.md#steps)
+- The model can send several tools as one [`steps`](../reference/TOOL_REFERENCE.md#steps)
   call when later ones do not need earlier results, such as an edit followed by
   the tests. You still see one card and one permission check per step, and it
   saves the request that would otherwise resend the conversation between them.
@@ -34,7 +34,7 @@ of them. Exact arguments and limits are in the
 | `edit` | Apply exact text replacements to one file, or to any number of files in one call. Each file changes all or nothing; with several files, one that fails does not stop or undo the others. |
 | `list` | List files and directories, optionally recursively and filtered by a pattern. |
 | `search` | Find literal text in project files, with line numbers and context. |
-| `bash` | Run commands in Jecode's own [command language](SHELL.md). |
+| `bash` | Run commands in Jecode's own [command language](../reference/SHELL.md). |
 | `exec` | Run a program directly with exact arguments, optionally in an interactive terminal. |
 | `process` | Check, control or stop commands left running in the background. |
 | `web` | Fetch, download or crawl web pages over HTTP(S). |
@@ -44,7 +44,7 @@ of them. Exact arguments and limits are in the
 | `agent` | Delegate work to [collaborators](COLLABORATION.md). Main agent only. |
 | `ask_user` | Ask you one or more [questions](QUESTIONS_AND_PLANS.md) and wait for answers. Main agent only. |
 | `todo_list` | Keep a [plan](QUESTIONS_AND_PLANS.md#plans) for the conversation. |
-| `steps` | Run several of these tools in order with [one call](TOOL_REFERENCE.md#steps). |
+| `steps` | Run several of these tools in order with [one call](../reference/TOOL_REFERENCE.md#steps). |
 
 Collaborators get every tool except `agent` and `ask_user`.
 
@@ -87,7 +87,7 @@ expressions the model can run an installed program through `bash` or `exec`.
 
 `bash` runs commands in Jecode's own command language, the same on every
 platform. It is not GNU Bash and never starts an installed shell; see
-[Command language](SHELL.md) for what it supports. `exec` runs one program with
+[Command language](../reference/SHELL.md) for what it supports. `exec` runs one program with
 exact arguments and no shell parsing. Both start in the working folder and
 receive `JECODE_TMP` and `TMPDIR` pointing to the conversation's
 [temporary area](TEMPORARY.md), and `TEMP` and `TMP` too, except on Windows
@@ -132,7 +132,7 @@ is closed, switched or deleted, and are never restarted.
 To see, stop or background processes yourself, use `/process`: it lists the
 conversation's running and recent processes and shows their output without adding
 anything to the conversation. See
-[Terminal interface](../tui/INTERFACE.md#processes).
+[Terminal interface](INTERFACE.md#processes).
 
 Saved completion rows remain available after reopening a conversation, including
 in plain chat. The model can read `history:processes` to recover a recorded outcome
@@ -177,4 +177,4 @@ are sent to your model provider.
 In the TUI, each call appears as a compact card: a badge with the tool name,
 its target and a one-line result. Related routine calls group into a Work
 chapter, file changes show a diff, and Ctrl+O expands everything from the latest
-turn. See [Tool activity](../tui/TOOL_ACTIVITY.md).
+turn. See [Tool activity](TOOL_ACTIVITY.md).

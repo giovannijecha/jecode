@@ -65,7 +65,7 @@ before you choose a model. Pressing Enter on an empty key keeps the saved one.
 
 The key is stored in plain text in `~/.jecode/config.json`. Keep that file
 private. OpenRouter-specific endpoint choices are described in
-[Configuration](CONFIGURATION.md#openrouter-endpoint-routing).
+[Configuration](../reference/CONFIGURATION.md#openrouter-endpoint-routing).
 
 ## OpenAI API key
 
@@ -178,7 +178,7 @@ and **Credentials**, using the same categories as provider settings. Choose a
 category, a configured provider, then the model and effort. The change applies
 to the current conversation only. `/settings` → **Default model** uses the same
 categories for the default of new conversations. See
-[Configuration](CONFIGURATION.md#models-and-effort).
+[Configuration](../reference/CONFIGURATION.md#models-and-effort).
 
 If the default provider loses its credentials, the TUI uses another configured
 provider for the conversation, restores that provider's last saved model when

@@ -10,7 +10,7 @@ standalone packages continue to run without Node.
 
 ## OS floors
 
-[Platform support](PLATFORMS.md#supported-versions) lists the floors and what
+[Platform support](../usage/PLATFORMS.md#supported-versions) lists the floors and what
 has run on each. `npm/targets.cjs` holds their values. `release.mjs stage` audits
 the executable and every helper embedded in it, and fails rather than record a
 floor the build does not meet:
@@ -81,7 +81,7 @@ the native binary and npm's global install, update, and uninstall behavior.
 To check one platform from a local checkout, build its release executable with
 `cargo build --release --locked --offline` (on Linux, against the sysroot; on macOS,
 with `MACOSX_DEPLOYMENT_TARGET=11.0`; see
-[Development and testing](TESTING.md#os-floors)), then run:
+[Development and testing](../development/TESTING.md#os-floors)), then run:
 
 ```text
 node tools/npm/release.mjs stage <path-to-native-executable> target/npm-stage/<target>

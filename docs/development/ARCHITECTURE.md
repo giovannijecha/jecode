@@ -112,7 +112,7 @@ is replayed through every provider's native function-call shape.
 `tui/state/rows.rs` forms a Work chapter from two or more contiguous eligible
 calls with the same normalized label and execution turn (`Presentation.turn_id`).
 `tui/cards/chapter.rs` derives the chapter's facts and status from its members.
-See [Tool activity](../tui/TOOL_ACTIVITY.md) for the user-visible result.
+See [Tool activity](../usage/TOOL_ACTIVITY.md) for the user-visible result.
 
 ### Context and compaction
 
@@ -367,7 +367,7 @@ Windows frames use `CONOUT$` to avoid the small writes made by standard output
 to a console. This reduces ConPTY frame delays; it does not bypass the host's
 own rendering or frame pacing. The terminal adapter selects UTF-8 output.
 `--plain` bypasses the terminal adapter entirely. Native fixtures and host
-checks are in [Platform support](PLATFORMS.md).
+checks are in [Platform support](../usage/PLATFORMS.md).
 
 ## Provider transport
 
@@ -387,7 +387,7 @@ credential environment variables of every available backend before launch.
 
 | Adapter | Route | Reference |
 | --- | --- | --- |
-| `backend/openrouter/` | OpenRouter chat completions with an API key, endpoint routing and PDF parsing | [Configuration](../usage/CONFIGURATION.md#openrouter-endpoint-routing) |
+| `backend/openrouter/` | OpenRouter chat completions with an API key, endpoint routing and PDF parsing | [Configuration](../reference/CONFIGURATION.md#openrouter-endpoint-routing) |
 | `backend/openai/` | Stateless Responses requests with an API key (`openai-api`) or ChatGPT account (`openai`) | [OpenAI backend](OPENAI.md) |
 | `backend/anthropic/` | Streamed Messages requests with an API key (`anthropic-api`) or Claude compatibility account (`anthropic`) | [Anthropic backend](ANTHROPIC.md) |
 

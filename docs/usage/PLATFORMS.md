@@ -2,7 +2,7 @@
 
 Jecode runs natively on Windows, Linux and macOS from one codebase. Platform
 differences come from the native adapters described in
-[Architecture](ARCHITECTURE.md#native-boundaries). This page records what has
+[Architecture](../development/ARCHITECTURE.md#native-boundaries). This page records what has
 been verified on each platform, the limitations that remain, and how to check a
 terminal host by hand.
 
@@ -38,7 +38,7 @@ Workspace command confinement needs Process Security Environment support, which 
 recent Windows releases have; elsewhere commands require the Full level, as on Linux
 kernels below 5.13. HTTP/2 needs Windows 10 1607, below the floor, so every supported
 system has it.
-See [Permissions](../usage/PERMISSIONS.md#platform-limits).
+See [Permissions](PERMISSIONS.md#platform-limits).
 
 ## Platform limitations
 
@@ -47,7 +47,7 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
   Seatbelt on macOS. Hosts without them refuse those commands until you choose the
   Full level. Seatbelt's policy is exercised by macOS CI; macOS 11 remains
   unverified. See
-  [Permissions](../usage/PERMISSIONS.md#platform-limits).
+  [Permissions](PERMISSIONS.md#platform-limits).
 - **Interactive terminals.** Interactive `exec` (`tty: true`) requires Full on
   every platform. The `/process` view shows a transcript of the output; it does
   not emulate full-screen terminal applications.
@@ -58,11 +58,11 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
   Parallel tests on `/mnt/c` have intermittently failed to open files that were
   present; the cause is not established.
 - **Clipboard.** Copying uses PowerShell on Windows, `pbcopy` on macOS and the
-  terminal's OSC 52 support on Linux. See [Copy and export](../usage/COPY_AND_EXPORT.md#platform-requirements).
+  terminal's OSC 52 support on Linux. See [Copy and export](COPY_AND_EXPORT.md#platform-requirements).
 - **Image attachments.** Clipboard images and image conversion depend on
   PowerShell (Windows and WSL), `osascript` and `sips` (macOS), or X11 or
   Wayland data control and GdkPixbuf (Linux). See
-  [Attachments](../usage/ATTACHMENTS.md#platform-requirements).
+  [Attachments](ATTACHMENTS.md#platform-requirements).
 - **File names.** Windows compares root prefixes without case. On Linux and
   macOS, differently spelled prefixes must identify the same directory on the
   filesystem. This preserves case-sensitive volumes and lets the filesystem
@@ -78,7 +78,7 @@ See [Permissions](../usage/PERMISSIONS.md#platform-limits).
   HTTP/1.1. Provider latency has been measured only on Windows; no comparable Linux
   or macOS timing is recorded. Linux and macOS share the owned
   HTTP/1.1 parser, connection cache and replay policy, with OS TLS underneath. See
-  [Performance](PERFORMANCE.md#provider-transports).
+  [Performance](../development/PERFORMANCE.md#provider-transports).
 
 ## Interactive terminal bridge
 
@@ -104,7 +104,7 @@ interactive job-control groups through `/proc`; macOS uses `/bin/ps`.
 ## Native fixtures
 
 The terminal, confinement and browser fixtures and the opt-in live checks are listed
-in [Development and testing](TESTING.md#native-terminal-fixtures). The fixtures use
+in [Development and testing](../development/TESTING.md#native-terminal-fixtures). The fixtures use
 isolated files, with loopback HTTP and synthetic credentials where they need them.
 Live provider and MCP checks contact real services with real accounts, and the native
 TLS check contacts public hosts without credentials.

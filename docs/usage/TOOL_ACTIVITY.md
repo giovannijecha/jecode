@@ -3,7 +3,7 @@
 Every tool call the agent makes appears in the conversation as a compact card,
 so you can follow the work without reading full output. This page explains
 what the cards show. The tools themselves are described in
-[Tools](../usage/TOOLS.md).
+[Tools](TOOLS.md).
 
 ## Tool cards
 
@@ -126,12 +126,12 @@ produced them, and appear in the same place live and after resume. Failures are
 red, unknown outcomes amber. Ctrl+O shows each event's full receipt:
 instructions, workspace, changed files with `+` and `−` line counts, report and
 review state. For a collaborator's current state, use `/agents`; see
-[Collaborating agents](../usage/COLLABORATION.md#watch-in-the-tui).
+[Collaborating agents](COLLABORATION.md#watch-in-the-tui).
 
 ## Other rows
 
 - **TODO** marks the creation of a plan, with its title and task count; see
-  [Questions and plans](../usage/QUESTIONS_AND_PLANS.md#plans).
+  [Questions and plans](QUESTIONS_AND_PLANS.md#plans).
 - **ASK USER** shows the answers you gave to the agent's questions.
 - Answers start with `●`, and Markdown in them is formatted; see
-  [Markdown display](MARKDOWN.md). Reasoning is not shown.
+  [Markdown display](../reference/MARKDOWN.md). Reasoning is not shown.

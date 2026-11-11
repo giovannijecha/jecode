@@ -32,7 +32,7 @@ Token ranges show the lowest and highest run; `k` means 1,000 weighted tokens.
 
 Relative to Codex, Jecode used **21% fewer weighted tokens** and took **11%
 longer**. Relative to Claude Code, it used **36% fewer weighted tokens** and
-took **30% less active time**. The [per-run CSV](AGENT_BENCHMARK.csv) contains
+took **30% less active time**. The [per-run CSV](AGENT_BENCHMARK_2026-11.csv) contains
 the scalar measurements behind these means.
 
 ## Workload and controls
@@ -123,14 +123,14 @@ repository**.
 These results support lower weighted token use on this workload. They do not
 establish universal superiority, a plan-usage multiplier, API-key performance,
 or results on Linux and macOS. The later native HTTP and WebSocket work has
-separate [before/after measurements](PERFORMANCE.md#provider-transports);
+separate [before/after measurements](../development/PERFORMANCE.md#provider-transports);
 those results must not be added to this comparison to predict a new lead.
 
 ## Exact records, development branch, 2026-11-07
 
 This section is historical. It measured the model-free native records of the
 0.4.5 context design, which Jecode has since retired; requests now append until
-a model summary is needed, as [Architecture](ARCHITECTURE.md) describes. These
+a model summary is needed, as [Architecture](../development/ARCHITECTURE.md) describes. These
 figures do not measure the current context path, and the commands and settings
 they name may no longer exist.
 
@@ -243,7 +243,7 @@ screened beforehand: a simple-design sentence, removal of duplicated tool
 instructions, and general guidance on preserving valid behavior and reconciling
 changed artifacts. None showed a consistent quality improvement across the
 prepared late-session cases; no prompt change was adopted. These one-turn
-screens are described in [context checks](CONTEXT_CHECKS.md).
+screens are described in [context checks](../development/CONTEXT_CHECKS.md).
 
 Four retained-build runs and four fresh Codex controls then used the same
 six-turn fixture and a budget near 60k, from 12:18 to 12:49 UTC. Two matched
@@ -352,6 +352,6 @@ explicitly naming the removed flag. This supports no finding of lost requirement
 from compaction. Reconstructed projection does not prove the complete historical
 wire request or how the provider attended to it; those bodies were not saved.
 
-For cheaper screening, [offline context checks](CONTEXT_CHECKS.md) replay saved
+For cheaper screening, [offline context checks](../development/CONTEXT_CHECKS.md) replay saved
 context checkpoints without provider calls. Their results
 remain separate from live quality, cache and weighted-token comparisons.

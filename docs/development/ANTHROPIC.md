@@ -142,8 +142,8 @@ sign-in, model listing, a streamed reply, a two-request signed tool round trip, 
 ordinary CLI `read` turn, a forced token refresh with rotation, and resuming that
 conversation from a separate process. Sonnet 5.5 ran the transport probe in
 [Performance](PERFORMANCE.md#provider-transports) and the
-[benchmark](AGENT_BENCHMARK.md). The API-key route has also run live conversations
-under WSL; see [Platform support](PLATFORMS.md). Attachments, other models, the
+[benchmark](../reports/AGENT_BENCHMARK_2026-11.md). The API-key route has also run live conversations
+under WSL; see [Platform support](../usage/PLATFORMS.md). Attachments, other models, the
 account route on Linux, and any live use on macOS have not been exercised.
 
 The opt-in live checks are listed in

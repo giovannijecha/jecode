@@ -65,7 +65,7 @@ On the maintainer's Windows host with Rust 1.95.0 and the release test profile:
 | Saved Sonnet session 2 | 1,346 | 731 | 7.36 s |
 
 The four saved sessions are the completed 40-turn runs in the
-[benchmark report](AGENT_BENCHMARK.md#forty-turn-confirmation). All 6,499 saved
+[benchmark report](../reports/AGENT_BENCHMARK_2026-11.md#forty-turn-confirmation). All 6,499 saved
 checkpoints passed in 79.61 seconds of replay processing. The first release-test
 compilation took 6m48s separately. Source journal hashes were identical before
 and after, and no benchmark provider call was made. These are local screening

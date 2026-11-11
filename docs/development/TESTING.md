@@ -312,7 +312,7 @@ for example `tui::specimen::chapter_live::chapter_live` or
 
 For checks that need a real terminal host, such as physical input, fonts and
 clipboard delivery, use the checklist in
-[Platform support](PLATFORMS.md#check-a-terminal-host).
+[Platform support](../usage/PLATFORMS.md#check-a-terminal-host).
 
 ## Development binary and installers
 
@@ -357,7 +357,7 @@ node --test npm/launcher.test.cjs
 node --test tools/npm/release.test.mjs
 ```
 
-The [release runbook](RELEASING.md) describes staging and packing the platform
+The [release runbook](../maintainers/RELEASING.md) describes staging and packing the platform
 binaries. After preparing a tarball, replace the path below with the actual
 tarball path and `<version>` with the package version from `Cargo.toml`. Run the
 lifecycle fixture on each supported platform:
@@ -386,7 +386,7 @@ the matching fixture through the packaged launcher and real terminal bridge.
 
 ## OS floors
 
-[Platform support](PLATFORMS.md#supported-versions) lists the floors. To reproduce
+[Platform support](../usage/PLATFORMS.md#supported-versions) lists the floors. To reproduce
 a Linux release that meets its floor, link against the Debian 10 sysroot. This
 needs `curl`, `sha256sum`, `dpkg-deb` and `cc`, and keeps its own target directory
 because Cargo does not track the compiler wrapper's contents:

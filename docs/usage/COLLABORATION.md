@@ -24,7 +24,7 @@ approvals. They cannot delegate further and cannot ask you questions; they
 report questions to the main agent. Each collaborator has its own processes,
 browsers, temporary files and history. Within one conversation `tmp:` and
 `output:` references still resolve between a main agent and its collaborators
-(see [Tool reference](TOOL_REFERENCE.md#read)), and `tmp:<agent>:path` lets the
+(see [Tool reference](../reference/TOOL_REFERENCE.md#read)), and `tmp:<agent>:path` lets the
 main agent name one collaborator's temporary file. Those reads never write.
 
 Attachments are shared: the main agent can pass an `attachment:ID` in an
@@ -126,7 +126,7 @@ collaborators are created, then `AGENT N` rows for sent and received
 assignments, returns, reviews, stops and closures. Failures show in red and
 uncertain outcomes in amber. Ctrl+O shows each event's full receipt: the
 instructions, workspace, changed files with line counts, report and review
-state. See [Tool activity](../tui/TOOL_ACTIVITY.md#collaborators).
+state. See [Tool activity](TOOL_ACTIVITY.md#collaborators).
 
 While collaborators work or need review, the footer shows an `AGENTS` badge with
 counts.

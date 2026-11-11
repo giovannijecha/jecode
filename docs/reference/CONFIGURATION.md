@@ -2,8 +2,8 @@
 
 Jecode keeps one personal configuration for your user account. There is no
 project-level configuration file; project rules belong in
-[`AGENTS.md`](PROJECT_INSTRUCTIONS.md). Connecting providers is covered in
-[Providers](PROVIDERS.md).
+[`AGENTS.md`](../usage/PROJECT_INSTRUCTIONS.md). Connecting providers is covered in
+[Providers](../usage/PROVIDERS.md).
 
 ## Change settings
 
@@ -21,12 +21,12 @@ Most settings have two scopes:
 | **Default model** | API keys or Credentials, then provider, model and effort for new conversations. |
 | **Default effort** | Reasoning effort for the default model. |
 | **Default routing** | OpenRouter endpoint choice for the default model. |
-| **Default permissions** | The [permission level](PERMISSIONS.md) new conversations start at. |
+| **Default permissions** | The [permission level](../usage/PERMISSIONS.md) new conversations start at. |
 | **Context** | **Auto-compact at** and **Prompt cache**; both apply immediately, including to the current conversation. |
 | **Theme** | Which inks the interface uses: **Auto**, **Dark** or **Light**. Applies at once, to the current conversation and to new ones; see [Theme](#theme). |
-| **Providers** | API keys and account sign-in; see [Providers](PROVIDERS.md). |
-| **MCP** | Global remote connections; see [MCP](MCP.md). |
-| **LSP** | Global, explicitly enabled local language servers; see [Language servers](LSP.md). |
+| **Providers** | API keys and account sign-in; see [Providers](../usage/PROVIDERS.md). |
+| **MCP** | Global remote connections; see [MCP](../usage/MCP.md). |
+| **LSP** | Global, explicitly enabled local language servers; see [Language servers](../usage/LSP.md). |
 
 In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 
@@ -59,7 +59,7 @@ model's context window, set by **Auto-compact at** (default 80%), Jecode only
 appends to it, so earlier messages can come from the provider's prompt cache.
 At that point the model summarizes earlier work and keeps the recent messages
 verbatim. The original history stays saved and readable. See
-[Long-running work](LONG_WORK.md#context-and-compaction) for what is kept.
+[Long-running work](../usage/LONG_WORK.md#context-and-compaction) for what is kept.
 
 Set the threshold in `/settings` → **Context** → **Auto-compact at** as a whole
 number from 1 to 99, with or without `%`. A saved change applies from the next model request,
@@ -95,7 +95,7 @@ chooses the inks the text and surfaces use:
 
 A choice that does not match the terminal reads badly, because no background is
 drawn to make up for it. The change applies at once, to the current conversation
-and to new ones. See [TUI theme](../tui/THEME.md) for how the terminal is
+and to new ones. See [TUI theme](../development/TUI_THEME.md) for how the terminal is
 queried.
 
 ## OpenRouter endpoint routing
@@ -191,12 +191,12 @@ error.
 | Path | Contents |
 | --- | --- |
 | `config.json` | Settings and saved provider API keys. |
-| `mcp.json`, `mcp.lock` | Global [MCP connections](MCP.md), credentials and the shared configuration lock. |
-| `lsp.json`, `lsp.lock` | Global [language servers](LSP.md), environment values and their configuration lock. |
+| `mcp.json`, `mcp.lock` | Global [MCP connections](../usage/MCP.md), credentials and the shared configuration lock. |
+| `lsp.json`, `lsp.lock` | Global [language servers](../usage/LSP.md), environment values and their configuration lock. |
 | `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
-| `skills/` | Your [personal skills](SKILLS.md). |
-| `sessions/<project>/` | [Saved conversations](SESSIONS.md), grouped by project directory, with the project's shared [attachments](ATTACHMENTS.md) in `attachments/`. |
-| `sessions/<project>/<session>/` | One conversation: its journal `session.jsonl`, lock `session.lock` and listing cache `summary.json`, with recovery copies beside them; its complete command output in `outputs/`, its [temporary files](TEMPORARY.md) in `tmp/` and its [collaborators](COLLABORATION.md) in `collaboration/`. |
+| `skills/` | Your [personal skills](../usage/SKILLS.md). |
+| `sessions/<project>/` | [Saved conversations](../usage/SESSIONS.md), grouped by project directory, with the project's shared [attachments](../usage/ATTACHMENTS.md) in `attachments/`. |
+| `sessions/<project>/<session>/` | One conversation: its journal `session.jsonl`, lock `session.lock` and listing cache `summary.json`, with recovery copies beside them; its complete command output in `outputs/`, its [temporary files](../usage/TEMPORARY.md) in `tmp/` and its [collaborators](../usage/COLLABORATION.md) in `collaboration/`. |
 | `browser/profiles/` | Named persistent browser profiles. |
 | `cache/native/` | Native helpers extracted from the executable on first use. This directory must be writable. |
 
@@ -216,7 +216,7 @@ as `.env`.
 | --- | --- |
 | `JECODE_HOME` | Absolute path of the Jecode home. |
 | `JECODE_BROWSER` | Path to the browser executable for the `browser` tool. |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Configure a run when no `config.json` exists; see [Providers](PROVIDERS.md#environment-variables). |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Configure a run when no `config.json` exists; see [Providers](../usage/PROVIDERS.md#environment-variables). |
 
 ## Network proxies
 

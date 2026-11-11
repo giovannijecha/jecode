@@ -11,7 +11,7 @@ built-in commands are launched directly by the operating system and must be
 installed or present in the project.
 
 Use `exec` instead when a program needs exact literal arguments or an
-interactive terminal; see [Tools](TOOLS.md#commands).
+interactive terminal; see [Tools](../usage/TOOLS.md#commands).
 
 ## Syntax
 

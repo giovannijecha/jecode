@@ -8,7 +8,7 @@ storage changed. Results were measured on Windows unless stated; CI on other
 platforms does not establish their performance.
 
 For comparisons with other coding agents, see the
-[historical Jecode vs Codex and Claude Code benchmark](AGENT_BENCHMARK.md). It
+[historical Jecode vs Codex and Claude Code benchmark](../reports/AGENT_BENCHMARK_2026-11.md). It
 records coding work with earlier Jecode account routes; the probes below measure
 separate parts of Jecode and do not establish a lead over another harness.
 

@@ -19,14 +19,14 @@ own toolchain. Jecode never installs or downloads programs to enable its tools.
 
 All four native targets are built and tested in CI, including terminal fixtures.
 Windows and Linux have recorded live-provider use; manual interactive use on a
-Mac remains unverified. See [Platform support](../development/PLATFORMS.md).
+Mac remains unverified. See [Platform support](PLATFORMS.md).
 Where the system cannot confine commands, they require the Full
 [permission level](PERMISSIONS.md#platform-limits).
 
 ## Install with npm
 
 The npm package supports the systems in the table above; see
-[Platform support](../development/PLATFORMS.md#supported-versions) for what has
+[Platform support](PLATFORMS.md#supported-versions) for what has
 actually run on each. Install Node.js 22 or later and npm. On macOS 11 to 13.4
 use Node.js 22, because Node.js 24 needs macOS 13.5. Then run:
 
@@ -241,4 +241,4 @@ conversations in `~/.jecode/` are not touched.
 
 This does not remove `~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows), which
 holds your configuration, credentials and saved conversations;
-see [Configuration](CONFIGURATION.md#files-jecode-keeps).
+see [Configuration](../reference/CONFIGURATION.md#files-jecode-keeps).
