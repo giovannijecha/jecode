@@ -83,6 +83,26 @@ fn buffered_output_error_sets_failure_status() {
 
 #[test]
 fn buffered_broken_pipe_marks_output_closed() {
+    #[cfg(unix)]
+    {
+        // A concurrent fork can retain the reader until exec, so isolate the
+        // pipe from other tests that start processes.
+        const ISOLATED: &str = "JECODE_GREP_BROKEN_PIPE_ISOLATED";
+        if std::env::var_os(ISOLATED).is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "shell::builtins::grep::tests::buffered_broken_pipe_marks_output_closed",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(ISOLATED, "1")
+                .status()
+                .unwrap();
+            assert!(status.success(), "isolated pipe test: {status}");
+            return;
+        }
+    }
     let directory = crate::test_support::Directory::new();
     fs::write(directory.path().join("input"), "hit\n").unwrap();
     let mut shell = Shell::new().unwrap();
