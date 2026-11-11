@@ -45,7 +45,7 @@ only when supported by known metadata; unknown models keep the provider default.
 Keys have separate hashed identities for provider-owned history
 and usage. Key errors never retry with an account, and the existing account
 backend ID keeps saved subscription conversations on their original route.
-Keys are stored under `backends.openai-api.api_key` in the user configuration.
+For key storage and access permissions, see [Credentials](../../SECURITY.md#credentials).
 
 ## Sign in with ChatGPT
 
@@ -78,10 +78,9 @@ depends on the Codex CLI.
    `https://api.openai.com/v1`, and requires the granted
    `chatgpt.tokens.use.direct` scope before inference.
 
-Account records are plaintext JSON under `~/.jecode/accounts/openai/`, separate
-from `config.json`. Newly created Unix directories use mode `0700` and files
-`0600`; on Windows the files get an ACL restricted to the current user. The host
-identity and each verified registration survive sign-out. Refresh rereads the
+Credential storage and access permissions are described in
+[Security](../../SECURITY.md#credentials). The host identity and each verified
+registration survive sign-out. Refresh rereads the
 record under an OS file lock and replaces the rotating token set atomically. An
 omitted or null `refresh_token` in a refresh response keeps the previous one, as
 [RFC 6749 section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6) allows.
@@ -127,10 +126,11 @@ define this route; it is narrower than the API-key Responses API.
   sampling parameters are sent.
 - **WebSocket.** Conversations send the same request as a
   `response.create` event over one WebSocket on the same path, on both the
-  ChatGPT and API-key routes; it answers about a second sooner than HTTP POST
-  (see [Performance](PERFORMANCE.md#provider-transports)). The full history is
-  still sent and `previous_response_id` is not used, because it measured no
-  better, so nothing depends on connection state. A refused upgrade or a
+  ChatGPT and API-key routes. The full history is sent and
+  `previous_response_id` is not used, so nothing depends on connection state.
+  Dated transport comparisons are in the
+  [performance report](../reports/PERFORMANCE_RESULTS.md#provider-transports).
+  A refused upgrade or a
   connection that closes twice before answering sends the request over HTTP and
   keeps that conversation on HTTP for 5 minutes. A connection that closes during
   a response is an ordinary temporary failure. Connections are replaced after 55

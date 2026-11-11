@@ -8,6 +8,9 @@ toolchain, native compiler, third-party npm dependency, or install script. Node
 must remain available when launching this npm distribution. The existing
 standalone packages continue to run without Node.
 
+User installation, updates, removal and coexistence with standalone builds are
+covered in [Installation](../usage/INSTALLATION.md).
+
 ## OS floors
 
 [Platform support](../usage/PLATFORMS.md#supported-versions) lists the floors and what
@@ -142,20 +145,3 @@ The preparation workflow does none of this. For each published version:
 4. Create the GitHub release `Jecode <version>` from that tag, with the user-facing
    changes as its notes, and attach `giovannijecha-jecode-<version>.tgz` and
    `manifest.json`.
-
-## User lifecycle
-
-The npm commands are:
-
-```text
-npm install -g @giovannijecha/jecode
-jecode --version
-npm update -g @giovannijecha/jecode
-npm uninstall -g @giovannijecha/jecode
-```
-
-npm uninstall removes the npm package and command shim. It does not remove
-Jecode's configuration, credentials or conversations under `~/.jecode/`.
-The separate standalone installer may have added another
-`jecode` earlier on `PATH`; check `Get-Command jecode` on Windows or
-`command -v jecode` on Unix before and after migration.

@@ -69,8 +69,8 @@ main agent.
 
 ## Storage
 
-Copies live in the project's session storage, under
-`~/.jecode/sessions/<project>/attachments/`. Drafts, staged and queued messages,
+Copies live in the project's shared `attachments/` directory; see
+[Files Jecode keeps](../reference/FILES.md#stored-files). Drafts, staged and queued messages,
 prompt history and saved messages keep their attachments across cancellation,
 switching conversations, restarts and crash recovery.
 

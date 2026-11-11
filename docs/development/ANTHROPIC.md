@@ -17,20 +17,16 @@ with a Bearer API key and `anthropic-version: 2023-06-01`. Its normal
 `x-app: cli` or a Claude Code system prefix. It shares model metadata,
 streaming, tool translation and cache accounting with the account adapter.
 
-Keys are stored under `backends.anthropic-api.api_key` and have separate hashed
-identities for provider-owned history. The adapter supports workspace-scoped
+API keys have separate hashed identities for provider-owned history. For
+storage and access permissions, see [Credentials](../../SECURITY.md#credentials).
+The adapter supports workspace-scoped
 keys; it does not currently configure the workspace header required by unscoped
 keys. An API rejection never causes a retry with subscription credentials.
 
 ## Compatibility status
 
-This is a compatibility route, not an approved integration. Anthropic's
-[Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) states
-that, unless previously approved, Anthropic does not allow third-party
-developers to offer claude.ai login or rate limits for their products. Jecode
-has no such approval. A working request shows technical interoperability only;
-Anthropic can restrict or reject the route at any time, independently of Jecode
-releases.
+Read the [Claude account caveat](../usage/PROVIDERS.md#claude-account) before
+using the subscription route. The technical compatibility profile is below.
 
 Jecode calls the service through its own native HTTP adapter. It does not
 install or run Claude Code, an Agent SDK, another agent CLI or a proxy, and it
@@ -68,10 +64,9 @@ requests identify as `jecode/0.1` and send only the `oauth-2025-04-20` beta.
    UUID and display label. Signing in again must match the selected saved
    identity.
 
-Account records are plaintext JSON under `~/.jecode/accounts/anthropic/`,
-separate from `config.json`. Newly created Unix directories use mode `0700` and
-files `0600`; on Windows the files get an ACL restricted to the current user. An
-OS file lock serializes updates and refreshes. A refresh rereads the record and
+Credential storage and access permissions are described in
+[Security](../../SECURITY.md#credentials). An OS file lock serializes account
+updates and refreshes. A refresh rereads the record and
 atomically replaces the access token, the rotating refresh token, the expiry
 and scopes. Redaction keeps both old and new token values masked.
 
@@ -141,7 +136,7 @@ The account route has been exercised live on Windows only. With an isolated
 sign-in, model listing, a streamed reply, a two-request signed tool round trip, an
 ordinary CLI `read` turn, a forced token refresh with rotation, and resuming that
 conversation from a separate process. Sonnet 5.5 ran the transport probe in
-[Performance](PERFORMANCE.md#provider-transports) and the
+[Performance](../reports/PERFORMANCE_RESULTS.md#provider-transports) and the
 [benchmark](../reports/AGENT_BENCHMARK_2026-11.md). The API-key route has also run live conversations
 under WSL; see [Platform support](../usage/PLATFORMS.md). Attachments, other models, the
 account route on Linux, and any live use on macOS have not been exercised.

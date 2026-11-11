@@ -12,6 +12,7 @@ should check.
 
 ## Ground rules
 
+- Follow the [Code of conduct](CODE_OF_CONDUCT.md) in discussions and contributions.
 - Jecode is one Cargo package using the Rust standard library and original
   project code. Do not add external crates, copied implementations or
   third-party runtime libraries.

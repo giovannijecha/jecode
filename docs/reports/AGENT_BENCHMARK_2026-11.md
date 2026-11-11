@@ -1,5 +1,11 @@
 # Historical Jecode, Codex and Claude Code benchmarks
 
+| Record | Scope |
+| --- | --- |
+| Dates | 2026-11-04, 2026-11-07 and 2026-11-08. |
+| Measured builds | Multiple development builds through the work prepared for 0.4.5; exact binary revisions were not recorded. Build labels and differences are preserved below. |
+| Platform | Windows; account sign-in routes, as detailed per experiment. |
+
 These November 2026 measurements describe development builds through 0.4.5,
 not Jecode 0.5.5. The later context measurements used model-free native records;
 0.5.5 instead appends requests until the selected model compacts earlier work.
@@ -123,7 +129,7 @@ repository**.
 These results support lower weighted token use on this workload. They do not
 establish universal superiority, a plan-usage multiplier, API-key performance,
 or results on Linux and macOS. The later native HTTP and WebSocket work has
-separate [before/after measurements](../development/PERFORMANCE.md#provider-transports);
+separate [before/after measurements](PERFORMANCE_RESULTS.md#provider-transports);
 those results must not be added to this comparison to predict a new lead.
 
 ## Exact records, development branch, 2026-11-07
@@ -243,7 +249,8 @@ screened beforehand: a simple-design sentence, removal of duplicated tool
 instructions, and general guidance on preserving valid behavior and reconciling
 changed artifacts. None showed a consistent quality improvement across the
 prepared late-session cases; no prompt change was adopted. These one-turn
-screens are described in [context checks](../development/CONTEXT_CHECKS.md).
+screens use the decision-screening method in
+[context checks](../development/CONTEXT_CHECKS.md#spend-live-calls-where-they-decide-something).
 
 Four retained-build runs and four fresh Codex controls then used the same
 six-turn fixture and a budget near 60k, from 12:18 to 12:49 UTC. Two matched

@@ -54,7 +54,9 @@ content; Jecode does not inspect or redact secrets inside them.
 
 ## Local data
 
-Jecode keeps local data under `~/.jecode/`, including sensitive copies of:
+The [local file reference](docs/reference/FILES.md) lists the Jecode home,
+its directories and locks, including the `JECODE_HOME` override. Local data
+includes sensitive copies of:
 
 - saved conversations, complete command output and attachment copies;
 - temporary files, web responses and browser data;

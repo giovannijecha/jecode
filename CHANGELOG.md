@@ -25,7 +25,7 @@ Changes since 0.4.5.
   (`tmp/`) and collaborator data (`collaboration/`). Attachments stay shared per
   project. Temporary files last as long as the conversation: they survive exit
   and resume until `/tmp clean` or deletion. See
-  [Files Jecode keeps](docs/reference/CONFIGURATION.md#files-jecode-keeps).
+  [Files Jecode keeps](docs/reference/FILES.md).
 - Deleting a conversation keeps its lock and names any unrecognized entry left
   in its folder; retained collaborator work stays in its `collaboration/` folder.
 
@@ -189,7 +189,7 @@ Changes since 0.2.5.
 
 - Native HTTP adapters reuse connections between requests on Windows, Linux and
   macOS. OpenAI conversations use WebSocket with HTTP fallback.
-  [Windows measurements](docs/development/PERFORMANCE.md#provider-transports)
+  [Windows measurements](docs/reports/PERFORMANCE_RESULTS.md#provider-transports)
   record lower first-update latency after the change.
 
 ### Terminal interface

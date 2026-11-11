@@ -2,9 +2,8 @@
 
 Jecode runs natively on Windows, Linux and macOS from one codebase. Platform
 differences come from the native adapters described in
-[Architecture](../development/ARCHITECTURE.md#native-boundaries). This page records what has
-been verified on each platform, the limitations that remain, and how to check a
-terminal host by hand.
+[Architecture](../development/ARCHITECTURE.md#native-boundaries). This page lists
+system requirements, verification status and remaining platform limitations.
 
 ## Verification status
 
@@ -40,6 +39,18 @@ kernels below 5.13. HTTP/2 needs Windows 10 1607, below the floor, so every supp
 system has it.
 See [Permissions](PERMISSIONS.md#platform-limits).
 
+### Runtime and feature requirements
+
+| Platform | Required | Needed only for some features |
+| --- | --- | --- |
+| Windows | The native console. | Windows PowerShell 5.1 for `/copy` and clipboard images (Alt+V). |
+| Linux | A VT-compatible terminal. The system OpenSSL libraries (`libssl.so.3` and `libcrypto.so.3`, or the 1.1 versions) for HTTPS and for hashing session and permission data. Minimal container images often lack them. | `libX11.so.6` or `libwayland-client.so.0` for clipboard images, GdkPixbuf for image conversion, and a terminal that accepts OSC 52 for `/copy`. |
+| macOS | A VT-compatible terminal. | None beyond the system tools. |
+
+The npm launcher also needs Node.js 22 or later. On macOS 11 to 13.4, use
+Node.js 22; Node.js 24 requires macOS 13.5 or later. A standalone executable
+does not need Node.js.
+
 ## Platform limitations
 
 - **Command confinement.** Workspace confinement for `bash` and `exec` uses a
@@ -54,9 +65,6 @@ See [Permissions](PERMISSIONS.md#platform-limits).
 - **Unix control sockets.** Interactive terminals need a native Unix temporary
   filesystem. Under WSL, Windows-backed mounts such as `/mnt/c` do not support
   them.
-- **WSL test runs.** Run the test suite from a copy on a native Linux filesystem.
-  Parallel tests on `/mnt/c` have intermittently failed to open files that were
-  present; the cause is not established.
 - **Clipboard.** Copying uses PowerShell on Windows, `pbcopy` on macOS and the
   terminal's OSC 52 support on Linux. See [Copy and export](COPY_AND_EXPORT.md#platform-requirements).
 - **Image attachments.** Clipboard images and image conversion depend on
@@ -78,54 +86,4 @@ See [Permissions](PERMISSIONS.md#platform-limits).
   HTTP/1.1. Provider latency has been measured only on Windows; no comparable Linux
   or macOS timing is recorded. Linux and macOS share the owned
   HTTP/1.1 parser, connection cache and replay policy, with OS TLS underneath. See
-  [Performance](../development/PERFORMANCE.md#provider-transports).
-
-## Interactive terminal bridge
-
-`exec` with `tty: true` starts an owned native bridge. On Windows it uses ConPTY
-and current-user named pipes, and checks the opened pipe against the launched
-bridge's process ID before sending input. On Linux and macOS it uses a POSIX PTY
-and private Unix-domain sockets. Input and control use separate connections, so
-input backpressure cannot block a resize or an interrupt. Terminal output
-combines stdout and stderr and is saved like other command output.
-
-On Unix, interrupts pass through the terminal line discipline. The `VINTR`
-character produces a signal only while `ISIG` is enabled; otherwise the
-application reads a literal ETX byte. `NOFLSH` preserves pending input; when
-flushing is on, older input still in transit is discarded while later input is
-kept. Without a foreground process group, an interrupt is a no-op.
-
-The bridges are built during the Cargo build: with the system .NET compiler on
-Windows, and with `cc` on Linux and macOS (override with `CC`; cross builds need
-`CC_<target>` or `TARGET_CC`, except between macOS architectures, which use
-`cc -arch`). Debug builds treat C compiler warnings as errors. Linux cleans up
-interactive job-control groups through `/proc`; macOS uses `/bin/ps`.
-
-## Native fixtures
-
-The terminal, confinement and browser fixtures and the opt-in live checks are listed
-in [Development and testing](../development/TESTING.md#native-terminal-fixtures). The fixtures use
-isolated files, with loopback HTTP and synthetic credentials where they need them.
-Live provider and MCP checks contact real services with real accounts, and the native
-TLS check contacts public hosts without credentials.
-
-## Check a terminal host
-
-Synthetic fixtures cannot establish physical input, key interception, font and
-emoji rendering or clipboard delivery. After the automated checks, use a
-disposable conversation (for example with `JECODE_HOME` set to an absolute
-scratch directory) in the terminal you want to support, and record the OS
-version, architecture and terminal with the result.
-
-| Check | Expected result |
-| --- | --- |
-| Compare `/help` and a diff with the 24-bit colours | Text is readable on every surface and added and removed rows look different. Without declared 24-bit colour, the palette's greener and redder diff rows are expected. |
-| Paste multiline Unicode text, then press Ctrl+J | The text stays in the composer until you send it. Shift+Enter and Alt+Enter work only if the terminal reports them. |
-| Scroll up during a response, then resize wide and narrow | The reading position stays anchored; Alt+End returns to following new output. |
-| Open `/help`, `/settings` and `/routing` with a draft | Each panel keeps the draft and caret; Esc returns to the previous state. |
-| Queue a message, interrupt, quit and resume | Drafts and pending messages are restored without an interrupted command running again. |
-| Delete a disposable conversation from `/resume` | Ctrl+D marks it, Enter confirms, the list stays open and the content stays gone after a resize. |
-| Quit with Ctrl+Q | The previous shell screen and terminal modes are restored. |
-| `/copy` an answer with Unicode, trailing spaces, a code block and a quote | Each pasted selection matches the source exactly. |
-| Drop a file whose path contains spaces, and paste an image with Alt+V or, on Linux and macOS, Ctrl+V | Both attach; after resume and `/export`, the export references the attachment without copying it. |
-| On a Mac, type `@`, `[` and `{` with Option on your keyboard layout | The characters appear in the draft; none triggers a shortcut. |
+  [Performance](../reports/PERFORMANCE_RESULTS.md#provider-transports).

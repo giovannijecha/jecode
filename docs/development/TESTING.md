@@ -33,6 +33,9 @@ CI and release preparation run the complete suite with `-- --test-threads=4`
 to bound concurrent native processes. Use the same option for a matching local
 run. Individual native terminal fixtures retain `--test-threads=1`.
 
+On WSL, use a checkout on a native Linux filesystem. Parallel tests on `/mnt/c`
+have intermittently failed to open existing files; the cause is not established.
+
 All four must succeed before a change is delivered. The test suite uses original
 Rust fixtures, synthetic credentials, isolated directories under `target` and
 loopback HTTP. It exercises the native HTTP adapter and process boundaries
@@ -73,6 +76,21 @@ Check the reported count: a command that matched no tests verified nothing. Use
 
 Keep credentials, logs, screenshots and temporary drivers out of tracked files;
 use the ignored `.tmp/` or `target` directories.
+
+## Documentation checks
+
+The normal suite checks internal file links and Markdown heading anchors,
+including same-repository GitHub links, and verifies that the documentation
+index covers every public page. To run only this check:
+
+```text
+cargo test --locked --offline --test documentation
+```
+
+Keep user guides in `docs/usage/`, lookup pages in `docs/reference/`, contributor
+procedures in `docs/development/`, account-dependent operations in
+`docs/maintainers/`, and dated evidence in `docs/reports/`. Update
+[the index](../README.md) and inbound links when moving a page.
 
 ## Offline long-context checks
 
@@ -154,9 +172,8 @@ cargo test --locked --offline mcp::auth::live::provider_oauth_roundtrip -- --exa
 ```
 
 Choose `github`, `supabase`, `cloudflare` or `vercel`. GitHub also checks that
-the Actions toolset is visible. On Windows on 2026-11-03 all four completed
-authorization, refresh and discovery; Vercel returned 241 tools, Supabase 31,
-Cloudflare 4 and GitHub 48. Resource access and remote mutations were not tested.
+the Actions toolset is visible. The latest recorded live results are in
+[MCP OAuth checks, 2026-11-03](../reports/MCP_OAUTH_2026-11-03.md).
 
 On Unix, `cc` builds the interactive `exec` helper during the Cargo build, and the
 test suite uses it again for strict-warning and PTY contract checks. Under test the
@@ -310,9 +327,26 @@ for example `tui::specimen::chapter_live::chapter_live` or
 `tui::specimen::discovery::discovery_cards`. Run them with
 `-- --exact --ignored --nocapture` to inspect the output.
 
-For checks that need a real terminal host, such as physical input, fonts and
-clipboard delivery, use the checklist in
-[Platform support](../usage/PLATFORMS.md#check-a-terminal-host).
+### Check a terminal host
+
+Synthetic fixtures cannot establish physical input, key interception, font and
+emoji rendering or clipboard delivery. After the automated checks, use a
+disposable conversation (for example with `JECODE_HOME` set to an absolute
+scratch directory) in the terminal you want to support, and record the OS
+version, architecture and terminal with the result.
+
+| Check | Expected result |
+| --- | --- |
+| Compare `/help` and a diff with the 24-bit colours | Text is readable on every surface and added and removed rows look different. Without declared 24-bit colour, the palette's greener and redder diff rows are expected. |
+| Paste multiline Unicode text, then press Ctrl+J | The text stays in the composer until you send it. Shift+Enter and Alt+Enter work only if the terminal reports them. |
+| Scroll up during a response, then resize wide and narrow | The reading position stays anchored; Alt+End returns to following new output. |
+| Open `/help`, `/settings` and `/routing` with a draft | Each panel keeps the draft and caret; Esc returns to the previous state. |
+| Queue a message, interrupt, quit and resume | Drafts and pending messages are restored without an interrupted command running again. |
+| Delete a disposable conversation from `/resume` | Ctrl+D marks it, Enter confirms, the list stays open and the content stays gone after a resize. |
+| Quit with Ctrl+Q | The previous shell screen and terminal modes are restored. |
+| `/copy` an answer with Unicode, trailing spaces, a code block and a quote | Each pasted selection matches the source exactly. |
+| Drop a file whose path contains spaces, and paste an image with Alt+V or, on Linux and macOS, Ctrl+V | Both attach; after resume and `/export`, the export references the attachment without copying it. |
+| On a Mac, type `@`, `[` and `{` with Option on your keyboard layout | The characters appear in the draft; none triggers a shortcut. |
 
 ## Development binary and installers
 

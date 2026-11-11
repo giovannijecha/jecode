@@ -15,55 +15,11 @@ available; read the [provider caveat](docs/usage/PROVIDERS.md#claude-account).
 
 *Jecode 0.5.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
-## Long conversations and processes
-
-Requests only grow until they near the configured share of the context window;
-then the model summarizes earlier work and keeps recent messages verbatim. The
-full conversation stays saved, and the model can retrieve the originals by
-reference. See [Long-running work](docs/usage/LONG_WORK.md).
-
-Use `/process` to inspect running and recent commands, read their saved output
-or move a waiting call into the background. Completed commands report their
-outcome to the model and conversation while the status row keeps the current
-activity and final turn statistics visible.
-
-## Work in your project
-
-Start `jecode` in a project directory and type a request, such as *"The tests in
-`src/parser` fail since the last change. Find out why and fix it."* The agent
-then works through the task in the same window:
-
-- each file it reads, search it runs and command it executes appears as a compact
-  card, and edits appear as diffs;
-- you can keep typing to add instructions, which it picks up before its next
-  step, or press Esc to stop it;
-- at the default permission level, it asks you before touching anything outside
-  the project directory;
-- `/` lists commands as you type, and Ctrl+G opens them without touching your
-  draft;
-- Auto, Dark and Light themes keep your terminal's own background.
-
-When you quit, Jecode prints a summary and the command to continue later:
-
-```text
->_ jecode closed · 3 prompts · 12 tools · 4m 12s
-   jecode resume 1793721600123-4812-0
-```
-
-You can also run one task without the fullscreen interface, or pipe one in; see
-[Command line](docs/usage/CLI.md):
-
-```sh
-jecode "Explain the structure of this project"
-```
-
 ## Install
 
-Install Jecode with Node.js 22 or later and npm on Windows 10 1809 or later (x64),
-Linux x64 (glibc 2.28 or newer), or macOS 11 or later on Apple silicon or Intel.
-On macOS 11–13.4, use Node.js 22: Node.js 24 needs macOS 13.5 or later.
-[Platform support](docs/usage/PLATFORMS.md#supported-versions) records what
-has actually run on each of them.
+Install with Node.js 22 or later and npm on Windows x64, Linux x64 or macOS
+(Apple silicon or Intel). Check [system requirements](docs/usage/PLATFORMS.md#supported-versions)
+for minimum OS versions, Node.js support and verification status.
 
 ```sh
 npm install -g @giovannijecha/jecode
@@ -90,6 +46,38 @@ Instead of steps 2 and 3, you can run `jecode setup` for a guided prompt.
 
 To continue later, run `jecode resume` from the same directory. Press Ctrl+Q to
 quit, and `/help` or F1 for commands and common shortcuts.
+
+## Work in your project
+
+Start `jecode` in a project directory and type a request, such as *"The tests in
+`src/parser` fail since the last change. Find out why and fix it."* The agent
+then works through the task in the same window:
+
+- each file it reads, search it runs and command it executes appears as a compact
+  card, and edits appear as diffs;
+- you can keep typing to add instructions, which it picks up before its next
+  step, or press Esc to stop it;
+- at the default permission level, it asks you before touching anything outside
+  the project directory;
+- `/` lists commands as you type, and Ctrl+G opens them without touching your
+  draft;
+- Auto, Dark and Light themes keep your terminal's own background;
+- long conversations keep their original history available after compaction,
+  and `/process` lets you inspect running commands; see [Long-running work](docs/usage/LONG_WORK.md).
+
+When you quit, Jecode prints a summary and the command to continue later:
+
+```text
+>_ jecode closed · 3 prompts · 12 tools · 4m 12s
+   jecode resume 1793721600123-4812-0
+```
+
+You can also run one task without the fullscreen interface, or pipe one in; see
+[Command line](docs/usage/CLI.md):
+
+```sh
+jecode "Explain the structure of this project"
+```
 
 ## Learn more
 
@@ -126,9 +114,8 @@ default.
 ## Privacy and security
 
 Jecode sends your conversation, including file contents and command output the
-agent has read, to the provider you select. Your API keys, account
-tokens and conversations are stored locally under `~/.jecode/`. See
-[SECURITY.md](SECURITY.md) for details and how to report a vulnerability.
+agent has read, to the provider you select. See [Security](SECURITY.md) for
+credential storage, local data and how to report a vulnerability.
 
 ## Contributing
 

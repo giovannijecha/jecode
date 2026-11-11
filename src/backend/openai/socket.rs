@@ -1,7 +1,7 @@
 //! The Responses WebSocket: one connection per conversation on its own adapter
-//! process. It answers about a second sooner than HTTP POST on the same account
-//! and model (`docs/development/PERFORMANCE.md`). Every request still carries the
-//! full history, so nothing depends on connection state, and HTTP stays the fallback.
+//! process. Every request carries the full history, so nothing depends on
+//! connection state, and HTTP stays the fallback. Dated transport measurements
+//! are recorded in `docs/reports/PERFORMANCE_RESULTS.md`.
 
 use super::stream::Stream;
 use super::{Api, Credential};

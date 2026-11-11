@@ -9,7 +9,7 @@ Each conversation owns one folder, `sessions/<project>/<session>/`, holding its
 history, complete command output, [temporary files](TEMPORARY.md) and
 [collaborator](COLLABORATION.md) data; the project's
 [attachments](ATTACHMENTS.md) are shared in `sessions/<project>/attachments/`.
-See [Files Jecode keeps](../reference/CONFIGURATION.md#files-jecode-keeps). The folder is
+See [Files Jecode keeps](../reference/FILES.md). The folder is
 created when the conversation first saves or uses one of those areas; only a
 folder with a saved history is a conversation you can resume.
 

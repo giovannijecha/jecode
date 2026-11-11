@@ -3,7 +3,8 @@
 Jecode keeps one personal configuration for your user account. There is no
 project-level configuration file; project rules belong in
 [`AGENTS.md`](../usage/PROJECT_INSTRUCTIONS.md). Connecting providers is covered in
-[Providers](../usage/PROVIDERS.md).
+[Providers](../usage/PROVIDERS.md). See [Files Jecode keeps](FILES.md) for the
+local layout and [Security](../../SECURITY.md#credentials) for credential storage.
 
 ## Change settings
 
@@ -157,7 +158,7 @@ the default:
 | --- | --- |
 | `selection` | The default `backend`, `model` and `effort` for new conversations. API-key IDs are `openrouter`, `openai-api` and `anthropic-api`; subscription IDs remain `openai` and `anthropic`. |
 | `backends.<id>.model` | The last saved model for each provider, used when Jecode falls back to that provider. |
-| `backends.<id>.api_key` | The API key for `openrouter`, `openai-api` or `anthropic-api`, in plain text. Account tokens are never stored here. |
+| `backends.<id>.api_key` | The API key for `openrouter`, `openai-api` or `anthropic-api`. See [credential storage](../../SECURITY.md#credentials). |
 | `backends.<id>.routing` | Saved routing per model ID. |
 | `context.auto_compact_percent` | Compaction threshold, 1–99. Default 80. |
 | `context.prompt_cache` | How long Claude prompt caches last: `5m` or `1h`. Default `5m`. |
@@ -181,40 +182,11 @@ Rules for the file:
   new directory `0700`; on Windows the file inherits your profile's permissions.
 - Jecode never reads `.env` files.
 
-## Files Jecode keeps
-
-Everything personal lives under the Jecode home, `~/.jecode/`
-(`%USERPROFILE%\.jecode\` on Windows). Set `JECODE_HOME` to an absolute path to
-use another directory, for example for an isolated test; a relative path is an
-error.
-
-| Path | Contents |
-| --- | --- |
-| `config.json` | Settings and saved provider API keys. |
-| `mcp.json`, `mcp.lock` | Global [MCP connections](../usage/MCP.md), credentials and the shared configuration lock. |
-| `lsp.json`, `lsp.lock` | Global [language servers](../usage/LSP.md), environment values and their configuration lock. |
-| `accounts/openai/`, `accounts/anthropic/` | ChatGPT and Claude account records and tokens. |
-| `skills/` | Your [personal skills](../usage/SKILLS.md). |
-| `sessions/<project>/` | [Saved conversations](../usage/SESSIONS.md), grouped by project directory, with the project's shared [attachments](../usage/ATTACHMENTS.md) in `attachments/`. |
-| `sessions/<project>/<session>/` | One conversation: its journal `session.jsonl`, lock `session.lock` and listing cache `summary.json`, with recovery copies beside them; its complete command output in `outputs/`, its [temporary files](../usage/TEMPORARY.md) in `tmp/` and its [collaborators](../usage/COLLABORATION.md) in `collaboration/`. |
-| `browser/profiles/` | Named persistent browser profiles. |
-| `cache/native/` | Native helpers extracted from the executable on first use. This directory must be writable. |
-
-Empty file-modification locks live in the operating system's temporary
-directory, separately for each account: `jecode-file-locks-<uid>` on Unix and
-`jecode-file-locks` in the account's temporary directory on Windows. The 256
-lock files contain no project data and coordinate processes using different
-`JECODE_HOME` directories.
-
-All of these files are local and can contain sensitive data: conversations
-and command output hold project file contents, including files Git ignores such
-as `.env`.
-
 ## Environment variables
 
 | Variable | Effect |
 | --- | --- |
-| `JECODE_HOME` | Absolute path of the Jecode home. |
+| `JECODE_HOME` | Absolute path of the [Jecode home](FILES.md#jecode-home); relative paths are rejected. |
 | `JECODE_BROWSER` | Path to the browser executable for the `browser` tool. |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Configure a run when no `config.json` exists; see [Providers](../usage/PROVIDERS.md#environment-variables). |
 

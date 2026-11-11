@@ -6,11 +6,9 @@ Install Jecode with npm, or build a standalone executable from source.
 
 ### Running Jecode
 
-| Platform | Required | Needed only for some features |
-| --- | --- | --- |
-| Windows 10 1809 or later, x64 | The native console. | Windows PowerShell 5.1 for `/copy` and clipboard images (Alt+V). |
-| Linux x64, glibc 2.28 or newer | A VT-compatible terminal. The system OpenSSL libraries (`libssl.so.3` and `libcrypto.so.3`, or the 1.1 versions) for HTTPS and for hashing session and permission data. Minimal container images often lack them. | `libX11.so.6` or `libwayland-client.so.0` for clipboard images, GdkPixbuf for image conversion, and a terminal that accepts OSC 52 for `/copy`. |
-| macOS 11 or later, Apple silicon or Intel | A VT-compatible terminal. | None beyond the system tools. |
+Windows x64, Linux x64 and macOS on Apple silicon or Intel are supported.
+See [Platform support](PLATFORMS.md#supported-versions) for minimum OS versions,
+required system libraries and feature-specific requirements.
 
 The `browser` tool needs Google Chrome or Microsoft Edge, or another browser
 named by `JECODE_BROWSER`; see [Tools](TOOLS.md#web-and-browser). Commands that
@@ -25,10 +23,9 @@ Where the system cannot confine commands, they require the Full
 
 ## Install with npm
 
-The npm package supports the systems in the table above; see
-[Platform support](PLATFORMS.md#supported-versions) for what has
-actually run on each. Install Node.js 22 or later and npm. On macOS 11 to 13.4
-use Node.js 22, because Node.js 24 needs macOS 13.5. Then run:
+Install Node.js 22 or later and npm, using a version supported by your OS
+(see [runtime requirements](PLATFORMS.md#runtime-and-feature-requirements)).
+Then run:
 
 ```sh
 npm install -g @giovannijecha/jecode
@@ -241,4 +238,4 @@ conversations in `~/.jecode/` are not touched.
 
 This does not remove `~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows), which
 holds your configuration, credentials and saved conversations;
-see [Configuration](../reference/CONFIGURATION.md#files-jecode-keeps).
+see [Files Jecode keeps](../reference/FILES.md).

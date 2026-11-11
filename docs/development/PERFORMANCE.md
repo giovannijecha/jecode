@@ -1,11 +1,10 @@
 # Performance measurement
 
 Jecode includes opt-in probes for UI work, model-stream parsing, file edits,
-session storage and process startup. This page explains how to run the current
-probes and preserves dated results from earlier builds. Those results are not
-release measurements of 0.5.5, particularly where its context and session
-storage changed. Results were measured on Windows unless stated; CI on other
-platforms does not establish their performance.
+session storage and process startup. This page explains how to run the probes
+and interpret their scope. The latest recorded measurements are in
+[Historical performance results](../reports/PERFORMANCE_RESULTS.md); each
+section identifies its measured date and host.
 
 For comparisons with other coding agents, see the
 [historical Jecode vs Codex and Claude Code benchmark](../reports/AGENT_BENCHMARK_2026-11.md). It
@@ -46,207 +45,7 @@ The live cache and compaction checks in
 [Development and testing](TESTING.md#live-provider-checks) use real accounts and
 are not reproducible probes.
 
-## Recorded results
-
-### Provider transports
-
-Recorded 2026-11-05 on Windows 11 over one home connection, with real accounts.
-A throwaway probe sent the same synthetic conversation over each transport in
-A/B/B/A blocks, at high effort with short replies. Medians to the first output
-item, with 14 samples per cell at about 153 KB (GPT-6.1 Sol, 39k tokens; Claude
-Sonnet 5.5, 53k tokens) and 10 at about 544 KB:
-
-| Transport | GPT 153 KB | GPT 544 KB | Claude 153 KB | Claude 543 KB |
-| --- | ---: | ---: | ---: | ---: |
-| New HTTP connection per request | 4.23 s | | 3.36 s | |
-| Reused HTTP connection | 3.83 s | 4.15 s | 3.00 s | 2.03 s |
-| Reused connection, gzip request body | 4.33 s | | 3.39 s | 2.66 s |
-| WebSocket, full input | 2.56 s | 3.28 s | | |
-| WebSocket, `previous_response_id` | 2.46 s | 3.85 s | | |
-
-Both routes accepted gzip bodies and `previous_response_id` worked over the
-ChatGPT route's WebSocket, but neither improved latency in these samples, so
-the tested adapters used neither.
-A connection failed by the provider's message limit (between 7 and 27 MB here)
-falls back to HTTP after about 3 s. On a minimal request, a new WinHTTP process
-spent about 60 ms starting, 25 ms on TCP and 100 ms on TLS, 230–370 ms in all
-depending on the host. One host answered a reused connection in 118 ms, and
-HTTP/2 lowered that to 81 ms. Turning off automatic proxy detection and
-certificate revocation changed nothing measurable.
-
-The whole five-turn benchmark then compared the previous transport (`20a5ba1`)
-with the reused adapters, HTTP/2 and the WebSocket. Both ran in the same hour,
-four runs a side, eight sessions at once, on Windows only. Every run passed all
-21 hidden tests and no socket fell back to HTTP:
-
-| Measure | GPT before | GPT after | Claude before | Claude after |
-| --- | ---: | ---: | ---: | ---: |
-| First update, median | 4.53 s | 3.58 s | 2.73 s | 2.19 s |
-| First update, lower quartile | 3.75 s | 2.69 s | 1.91 s | 1.55 s |
-| Time per request | 18.3 s | 16.6 s | 10.2 s | 9.3 s |
-| Requests per run | 28.8 | 30.5 | 34.0 | 38.0 |
-| Wall time per run | 551 s | 522 s | 364 s | 371 s |
-| Cost-weighted tokens per run | 445k | 494k | 743k | 813k |
-
-Tokens per request, cache hit rate and generation speed were comparable in these
-samples; four runs a side cannot rule out a transport-related difference. The
-token totals also follow the number of requests the model chose, which varies
-between runs. Provider cache drops added 28k to the GPT average after the change
-and 4k before, mostly from one drop in one run; such drops also occur in earlier HTTP
-runs. With four runs a side, wall time does not resolve a saving this size: read
-the first-update line, which amounts to about 30 s per GPT run and 20 s per Claude
-run. The harness starts a new process each turn, so these runs lose the reused
-connection five times per conversation. They say nothing about Linux or macOS,
-other networks or task quality.
-
-Separate Windows review checks exercised the real terminal renderer through
-ConPTY with OpenAI and Anthropic API keys in isolated configuration. Both
-completed two consecutive turns, stopped an in-flight request with Esc, completed
-the next turn and exited cleanly. OpenAI's request records confirmed `socket` for
-all four conversation requests, including the cancelled one, and `http` for the
-session title. These were functional checks, not latency benchmarks. Live MCP
-and OAuth sign-in or refresh through the pooled adapter were not repeated.
-
-Linux was checked on 2026-11-05 from WSL2 on the same PC, with API keys. A loopback
-server that counted connections saw four HTTPS requests share one, with OpenSSL 3.5
-and with OpenSSL 1.1 on Debian 10 and AlmaLinux 8. A connection closed while idle
-was replaced. One that died holding a request repeated a GET and reported a POST
-without resending it. Four-turn `--plain` conversations on Ubuntu 26.04 and Debian
-10 recorded `socket` for every OpenAI conversation request and `http` for the title.
-Linux latency was not benchmarked, and none of this has run on macOS. Unix adapters
-drop a cached connection after 90 seconds idle, because no close arrives after a
-computer sleeps and a request sent on it would wait out the receive limit.
-
-The same day and machine, an idle TUI on a Linux PTY created no process in 3 s and
-repainted 51 ms after a resize. A typed key reached the terminal in a median of
-1.5 ms over 200 keys (95th percentile 1.9 ms, maximum 2.4 ms), through `script`:
-`scenarios::measure_unix_input_to_vt_latency`.
-
-### Instruction discovery metadata
-
-Recorded 2026-11-05 on Windows 11 with Rust 1.95.0, using an optimized standalone
-driver of the instruction loader against the `jecode-fast` checkout. Four
-alternating before/after/after/before blocks each warmed up five scans and measured
-21 batches of three scans. Median scan times were 15.1 and 15.3 ms before, and
-11.1 and 10.4 ms after. Every scan returned the same 4,351 bytes of instructions.
-These measured instruction discovery alone, not a model request or whole turn.
-
-The tested loader obtained directory metadata from its existing `DirEntry` rather
-than looking up the path again. On Windows, that metadata was already available
-from directory enumeration; on Unix, the loader retained the same metadata lookup. See
-the [standard-library contract](https://doc.rust-lang.org/std/fs/struct.DirEntry.html#method.metadata).
-The search still includes `target` and other build output outside its skip list
-(`.git`, `.tmp`, `node_modules`, `.venv` and `vendor`), and still skips directory
-links and junctions. No instruction selection rule changed.
-
-### Subscription context reuse
-
-Recorded 2026-10-31 with bounded live requests, synthetic reference records and
-a minimal reply. The warm request appended the previous answer and a new user
-message and changed only the request-only session state. This predates 0.5.5's
-context path and does not measure its cache reuse.
-
-| Route and model | Warm input tokens | Cached tokens | Cached share |
-| --- | ---: | ---: | ---: |
-| Claude account, Opus 5.5, medium effort | 31,637 | 31,589 | 99.85% |
-| ChatGPT account, GPT-6.1 Sol, low effort | 13,280 | 13,056 | 98.31% |
-
-These results show cache reuse across one growing conversation boundary. They
-do not measure long-session hit rates, task quality or how a subscription
-weights its usage. New tool results, cache expiry and provider routing lower the
-share. Single-request latency varied too much to claim a speedup.
-
-A separate live check compacted 20–40 KiB of synthetic task notes with Opus 5.5
-at medium effort (about 5 s, 1.1 KB summary), then resumed the saved session and
-read the facts back at high effort. The original messages stayed byte-identical.
-This does not establish lossless compression for arbitrary histories.
-
-### TUI responsiveness
-
-Recorded 2026-10-15 at a 120 x 40 viewport, comparing revision `25fb62b` with
-the optimized source of that date (three warmups, 21 samples, A/B/B/A).
-
-| Operation | Before | After |
-| --- | ---: | ---: |
-| Type at the end of a 256 KiB draft | 57.8–66.6 ms | 0.06–0.09 ms |
-| Append formatted text to a 256 KiB response | 19.1–19.3 ms | 0.09–0.12 ms |
-| Select a settled tool among 5,000 history items | 69.4–70.5 ms | 0.05–0.06 ms |
-| Capture a short draft with 5,000 saved 4 KiB messages | 5.0–6.7 ms | < 0.001 ms |
-
-The measured gains came from caching composer layout, reusing stable Markdown prefixes,
-invalidating only affected tool cards and saving outside the document lock.
-Scrolling showed no change beyond run variation.
-
-On 2026-10-30, expanding tools with Ctrl+O after a 750,000-byte answer took a
-longest single layout pass of 4.4–6.1 ms, down from 85–148 ms, because the
-tested rebuild yielded in bounded steps. Total layout work stayed about the same.
-
-### Windows startup, typing and scrolling
-
-The initial implementation was measured on Windows 11 on 2026-11-01, using
-release builds under a ConPTY host in A/B/B/A blocks. Reusing the cryptography
-helper reduced launch-to-first-frame medians from 948–1,077 ms to 147–148 ms
-with one ChatGPT account, one Claude account and an OpenRouter key (10 launches
-per block). With an empty adapter cache, medians were 1.35–1.53 s versus
-0.44–0.49 s (four launches per block). These startup measurements preceded
-the subsequent cancellation and helper-lifetime fixes; they are not final-build
-startup timings. An empty configuration showed little change.
-
-A review microbenchmark on the final C# helper repeated the 16-operation
-sequence with synthetic files: nine file protections, five hashes and two
-directory protections. In A/B/B/A blocks with three warmups and ten samples
-each, median times were 1,141.66 / 82.85 / 81.95 / 1,129.45 ms. The pooled
-medians were 1,130.63 ms for one process per operation and 82.85 ms for the
-reused helper (13.65 times faster for that sequence). The PowerShell driver
-included process startup, shutdown and reply checks. It exercised both modes
-of the same helper; it did not measure Rust request handling, account-file
-reads or the full application launch.
-
-- In the tested build, account reads protected files and hashed identities through the .NET
-  cryptography helper. Each operation started a new process (55–80 ms each,
-  16 before the first frame); one helper served the process, with an idle
-  exit and cancellation-aware requests.
-- Unbracketed multi-character input still waits for a 50 ms text gap. A 5 ms
-  quiet-queue experiment split fragmented file drops and oversized pastes, so
-  it was removed. Single keys and completed bracketed pastes remain immediate;
-  the experiment's roughly ninefold batch-input speedup does not describe the
-  shipped behavior.
-- Standard output split a console write into chunks of a few KB, and ConPTY
-  painted a synchronized frame that arrived in several writes at its next
-  tick. The tested frames used `CONOUT$` to avoid that chunking.
-- ConPTY reports a wheel notch as 128 units, so every 15th notch moved six
-  rows. Notches are normalized to the native 120-unit scale while preserving
-  fine-delta remainders across full notches and direction changes.
-
-Native probes observe ConPTY's VT output, not Windows Terminal's pixels.
-Wheel samples use random start offsets to avoid phase lock with frame pacing.
-The input probe deliberately sends the next key immediately after the previous
-frame, so its single-key timings include ConPTY's inter-frame delay.
-
-Release probes using the final code available on 2026-11-01 passed with these
-results (one run,
-60 wheel samples per size and 100 input samples per condition):
-
-| Operation | Median | p95 |
-| --- | ---: | ---: |
-| Wheel notch to changed reading counter, 80 x 24 | 1.58 ms | 2.09 ms |
-| Wheel notch to changed reading counter, 160 x 50 | 2.96 ms | 3.98 ms |
-| Ten-notch flick to changed reading counter, 80 x 24, from last notch | 9.45 ms | 14.21 ms |
-| Ten-notch flick to changed reading counter, 160 x 50, from last notch | 10.82 ms | 13.92 ms |
-| Four-character unbracketed batch, idle | 63.18 ms | 65.48 ms |
-| One key sent after the preceding frame, idle | 15.08 ms | 15.98 ms |
-
-Every notch moved exactly three rows; every ten-notch flick moved thirty.
-The last output byte after a notch arrived at a median 15.42 ms (80 x 24) or
-15.76 ms (160 x 50). Inspection of three additional 80 x 24 samples found
-only `ESC[m` style resets after the counter update, with no further cell text.
-Do not interpret first-counter timings as time to a completely quiet stream.
-
-For 1,000 settled mixed turns, Jecode's own wheel step took a median 0.15 ms
-at 80 x 24 and 0.56 ms at 160 x 50 (21 samples; maxima 0.29 and 1.11 ms).
-Settled event-loop polling took 0.2–0.3 microseconds at the median.
-
-### Measuring your own conversation
+## Measuring your own conversation
 
 `own_history_scroll` scrolls a copy of one saved conversation, so a slow
 history can be measured without sharing it. It copies the journal into a
@@ -263,28 +62,6 @@ Remove-Item Env:JECODE_MEASURE_JOURNAL, Env:JECODE_MEASURE_DIRECTORY
 ```
 
 Journals are at `sessions/<project>/<session>/session.jsonl` in the Jecode
-home; the session folder's name identifies the conversation, and
+home (see [Files Jecode keeps](../reference/FILES.md)); the session folder's
+name identifies the conversation, and
 `JECODE_MEASURE_DIRECTORY` is the folder where it was started.
-
-### Model stream and file edits
-
-Recorded 2026-10-24. Parsing a 256 KiB tool argument delivered in 4,096 stream
-fragments took about 6 ms, down from 399–467 ms at `674eba6`.
-
-A batch of ten edits on a 32 MiB file composed the replacements and wrote
-the final content once: the pooled median fell from 778 ms to 327 ms against
-`97b4284`, with warm caches. Matching still scans the file once per edit.
-
-### Session history
-
-Recorded 2026-10-01 with 128-byte messages, three samples per size. These
-measurements predate 0.5.5's session-owned layout and context projection.
-
-| Operation | 1,000 messages | 5,000 messages |
-| --- | ---: | ---: |
-| Load journal | 1.3–1.5 ms | 5.7–10.5 ms |
-| Resume and save | 6.7–11.2 ms | 22.4–25.9 ms |
-| Project active context | 0.4–0.5 ms | 1.9–2.1 ms |
-| List one cached session | 0.3–0.5 ms | 0.3–0.4 ms |
-| List one uncached session | 5.7–11.0 ms | 8.7–12.8 ms |
-| Journal size | 169 kB | 845 kB |
