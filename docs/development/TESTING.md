@@ -133,7 +133,10 @@ Windows fixtures cover permission requests
 (`native_tests::native_permissions::native_windows_permissions`) and the inks chosen
 on light terminals, with no background painted (`native_tests::native_background::`). The fullscreen
 fixture also paints tool cards through the console, including multi-file edits
-and the steps of one `steps` call.
+and the steps of one `steps` call. Its badge matrix checks the renamed tool
+labels at 40 and 80 columns in both palettes and running, finished, failed and
+stopped states. It verifies eight-cell background runs in the emitted VT and
+reads the displayed text back from the native console.
 
 Linux and macOS run the same conversations, from `tui::terminal::fixtures`, through
 one filter: permissions, direct terminal input, startup with and without a provider,

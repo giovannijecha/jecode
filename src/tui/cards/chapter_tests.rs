@@ -397,7 +397,7 @@ fn compact_process_hides_streams_and_activity_skips_a_visible_failure() {
     let shown = Presentation::default();
     let rows = chapter::exception(&tool("process", &args, Some(&result), &shown), 80);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].plain(), "  ⎿ PROCESS poll  background");
+    assert_eq!(rows[0].plain(), "  ⎿ PROC poll  background");
     assert!(!rows[0].plain().contains("private-pid"));
     assert!(!rows[0].plain().contains("raw process output"));
 

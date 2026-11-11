@@ -224,7 +224,7 @@ fn panel_list_inside_and_nested_escape_keep_the_exact_main_draft() {
     assert!(inside.contains("Implement search"), "{inside}");
     assert!(inside.contains(" UPDATE  src/search.rs"), "{inside}");
     assert!(
-        inside.contains("AGENT 2  Returned · Search part 2"),
+        inside.contains("AGENTS  #2 Returned · Search part 2"),
         "{inside}"
     );
     assert_eq!(inside.matches("Esc").count(), 1, "{inside}");
@@ -412,7 +412,7 @@ fn reviewed_open_records_remain_inspectable_without_a_pending_footer() {
     state.agents_panel = Some(Panel::default());
     let panel = text(&view::composer_frame(&state, "fixture/model", "fixture").live);
     assert!(
-        panel.contains("AGENT 1") && panel.contains("reviewed"),
+        panel.contains("AGENTS  #1") && panel.contains("reviewed"),
         "{panel}"
     );
 }

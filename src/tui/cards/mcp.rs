@@ -12,7 +12,7 @@ use crate::{
 
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
-    let mut title = badge::badge("MCP", status);
+    let mut title = badge::badge("MCP call", status);
     title.push(&format!(" {}", target(&tool)), BODY);
     let mut rows = if keycap && tool.result.is_some() {
         hint(

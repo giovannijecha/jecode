@@ -229,7 +229,7 @@ fn fresh_launch_is_empty_and_numbered_resume_restores_tools_local_details_and_un
         .collect::<Vec<_>>()
         .join("\n");
     assert!(rows.contains("Answer preserved"));
-    assert!(rows.contains(" WRITE   file.txt  New file · 1 line"));
+    assert!(rows.contains("  SAVE   file.txt  New file · 1 line"));
     assert!(rows.contains("original"));
     assert!(resumed.state.items.iter().any(|item| matches!(item, state::Item::Tool { name, change: Some(change), .. } if name == "write" && change.created && change.added == 1)));
     assert!(

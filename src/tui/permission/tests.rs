@@ -303,7 +303,7 @@ fn a_request_holds_the_keys_and_a_remembered_grant_can_be_revoked() {
     for expected in [
         "Waiting for permission",
         "Permission",
-        "AGENT 1",
+        "AGENTS  #1",
         "· 1 of 2",
         "READ",
         "Read access outside this folder",
@@ -335,7 +335,7 @@ fn a_request_holds_the_keys_and_a_remembered_grant_can_be_revoked() {
     assert!(notice(&app).contains("Permission: Reads of this file · remembered"));
     // The main agent's request follows, with the asking agent's badge.
     let shown = screen(&app);
-    assert!(shown.contains("MAIN AGENT") && !shown.contains("1 of"));
+    assert!(shown.contains("  MAIN  ") && !shown.contains("1 of"));
     text(&mut app, "3");
     assert!(app.state.permission.is_none());
     assert!(screen(&app).contains("kept draft"));

@@ -61,7 +61,7 @@ pub(super) fn console() {
                 paint(columns, sheet(columns, long_output()), "exited 1");
                 paint(columns, sheet(columns, long_output()), "2m 14s");
             }
-            paint(columns, footer(columns), "PROCESS");
+            paint(columns, footer(columns), "PROC");
             paint(columns, footer(columns), "2 running");
             paint(columns, api_context(columns), "27%");
             paint(

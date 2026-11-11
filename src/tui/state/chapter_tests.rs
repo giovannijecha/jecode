@@ -160,7 +160,7 @@ fn a_live_mixed_chapter_never_loses_rows_and_keeps_its_last_activity() {
         );
         check(&state, "browser finishes");
         let activity = block(&state.rows()[4]);
-        assert!(activity.contains("BROWSER snapshot tab-1"), "{activity}");
+        assert!(activity.contains("BROWSE snapshot tab-1"), "{activity}");
         state.close_tools();
         state.finish_tool_turn();
         check(&state, "turn closes");
@@ -236,16 +236,16 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     assert!(!summary.contains("What happened") && !summary.contains("BASH"));
     assert!(block(&rows[1]).contains("BASH printf example"));
     assert!(rows[2..4].iter().all(Vec::is_empty));
-    assert!(block(&rows[4]).contains("BROWSER screenshot"));
+    assert!(block(&rows[4]).contains("BROWSE screenshot"));
 
     assert_eq!(state.toggle_tools(), Some((true, 5)));
     let opened = state.rows();
     for (index, target) in [
         "  READ   src/main.rs",
         "  BASH   printf example",
-        "  WEB    fetch",
-        "BROWSER  screenshot",
-        "PROCESS  list",
+        "  HTTP   fetch",
+        " BROWSE  screenshot",
+        "  PROC   list",
     ]
     .into_iter()
     .enumerate()
@@ -263,7 +263,7 @@ fn mixed_routine_calls_share_one_summary_and_expand_to_original_cards() {
     let closed = state.rows();
     assert!(block(&closed[1]).contains("BASH printf example"));
     assert!(closed[2..4].iter().all(Vec::is_empty));
-    assert!(block(&closed[4]).contains("BROWSER screenshot"));
+    assert!(block(&closed[4]).contains("BROWSE screenshot"));
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn narration_mutations_and_skill_reads_break_chapters() {
             .count(),
         5
     );
-    for expected in [" WRITE   ", " UPDATE  ", " SKILL   "] {
+    for expected in ["  SAVE   ", " UPDATE  ", " SKILLS  "] {
         assert!(
             headings.iter().any(|text| text.contains(expected)),
             "{headings:?}"

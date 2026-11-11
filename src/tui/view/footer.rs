@@ -178,8 +178,7 @@ fn agents_line(state: &State, model: &str, columns: usize) -> Option<Line> {
 }
 
 /// The footer while processes keep running with nothing else to review: the
-/// agents' summary, in the `PROCESS` family name. The name takes seven cells,
-/// so the facts start on column 9 too.
+/// agents' summary, in the eight-cell `PROC` badge.
 fn processes_line(state: &State, model: &str, columns: usize) -> Option<Line> {
     let count = state.background_processes;
     if count == 0 {
@@ -187,9 +186,9 @@ fn processes_line(state: &State, model: &str, columns: usize) -> Option<Line> {
     }
     let summary = |short: bool| {
         let mut line = Line::default();
-        line.push_on("PROCESS", LIT, BADGE_IDLE);
+        line.push_on("  PROC  ", LIT, BADGE_IDLE);
         let label = if short { "run" } else { "running" };
-        line.push(&format!("  {count} {label}"), MUTED);
+        line.push(&format!(" {count} {label}"), MUTED);
         line
     };
     Some(activity_line(state, model, columns, "/process", summary))

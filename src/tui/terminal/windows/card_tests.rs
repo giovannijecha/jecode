@@ -117,11 +117,11 @@ pub(super) fn console() {
     );
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("  WEB    fetch https://example.org/"))
+            .any(|row| row.plain().contains("  HTTP   fetch https://example.org/"))
     );
     assert!(
         rows.iter()
-            .any(|row| row.plain().contains("BROWSER  screenshot"))
+            .any(|row| row.plain().contains(" BROWSE  screenshot"))
     );
     let plain: Vec<_> = rows.iter().map(crate::tui::line::Line::plain).collect();
     assert!(plain.iter().any(|row| row.contains("tab-1")), "{plain:#?}");
@@ -150,6 +150,7 @@ pub(super) fn console() {
     io::stdout().flush().unwrap();
     let snapshot = probe();
     assert_eq!(snapshot.lines().nth(1).unwrap(), expected);
+    super::badge_cards::console(&terminal);
     discovery_console(&terminal);
     concurrent_cards(&terminal);
     node_failures(&terminal);

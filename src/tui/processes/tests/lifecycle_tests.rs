@@ -214,7 +214,7 @@ fn an_idle_conversation_shows_the_outcome_once_and_continues() {
     wait_until(&mut app, |app| app.worker.is_none());
     app.poll().unwrap();
     let running = footer(&app);
-    assert!(running.contains("PROCESS  1 running"), "{running}");
+    assert!(running.contains("  PROC   1 running"), "{running}");
     assert!(running.contains("/process"), "{running}");
     assert_eq!(completion_rows(&app), 0);
 
@@ -227,9 +227,9 @@ fn an_idle_conversation_shows_the_outcome_once_and_continues() {
     assert_eq!(app.state.editor.prompt().text, "half a thought");
     assert_eq!(completion_rows(&app), 1);
     let transcript = rows(&app);
-    assert!(transcript.contains("PROCESS"), "{transcript}");
+    assert!(transcript.contains("PROC"), "{transcript}");
     assert!(transcript.contains(GATED), "{transcript}");
-    assert!(!footer(&app).contains("PROCESS"));
+    assert!(!footer(&app).contains("PROC"));
 
     poll_a_while(&mut app);
     assert_eq!(completion_rows(&app), 1);

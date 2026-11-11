@@ -161,11 +161,11 @@ pub fn render(tool: Tool<'_>, columns: usize) -> Vec<Line> {
     card(tool, columns, false).rows
 }
 
-/// The `/agents` name badge for a collaborator in `state`: shimmering while
+/// A fixed-width badge and separate collaborator identity: shimmering while
 /// it works, red after a failure, amber when stopped, lit on the quiet
 /// surface when unknown.
 pub(in crate::tui) fn agent_badge(name: &str, state: &str) -> Line {
-    badge::badge(
+    badge::agent(
         name,
         match state {
             "running" | "stopping" => Status::Running,
@@ -290,7 +290,7 @@ fn heading<'a>(tool: &Tool<'a>) -> (&'a str, String) {
         .then(|| skill_name(field(tool.arguments, "path")))
         .flatten();
     let name = match tool.name {
-        "read" if skill.is_some() => "Skill",
+        "read" if skill.is_some() => "Skills",
         "write"
             if Status::of(tool) == Status::Done
                 && tool.change.is_some_and(|change| !change.created) =>
@@ -315,16 +315,17 @@ fn title_name(tool: &str) -> &str {
         "read" => "Read",
         "list" => "List",
         "search" => "Search",
-        "write" => "Write",
+        "write" => "Save",
         "edit" => "Update",
         "bash" => "Bash",
         "exec" => "Exec",
-        "process" => "Process",
-        "web" => "Web",
-        "browser" => "Browser",
+        "process" => "Proc",
+        "web" => "HTTP",
+        "browser" => "Browse",
         "agent" => "Agents",
-        "mcp" => "MCP",
-        "lsp" => "LSP",
+        "mcp" => "MCP call",
+        "lsp" => "LSP call",
+        "steps" => "Sequence",
         other => other,
     }
 }
