@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use std::{
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };

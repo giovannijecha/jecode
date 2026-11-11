@@ -21,27 +21,63 @@ fn answer(id: &str, choices: &[&str], text: &str) -> Answer {
 }
 
 #[test]
-fn questions_are_bounded_unique_and_round_trip_as_arguments() {
+fn questions_are_unique_and_round_trip_as_arguments() {
     let parsed = request(TWO).unwrap();
     assert_eq!(parsed.subject(), "2 questions");
     assert!(parsed.questions[1].is_multiple());
     assert_eq!(Request::parse("call", &parsed.arguments()).unwrap(), parsed);
     let question = |id: usize| format!(r#"{{"id":"q{id}","title":"T","question":"Q"}}"#);
-    let many = (0..=MAX_QUESTIONS).map(question).collect::<Vec<_>>();
-    assert!(request(&format!(r#"{{"questions":[{}]}}"#, many.join(","))).is_err());
     assert!(request(r#"{"questions":[]}"#).is_err());
     assert!(request(&format!(r#"{{"questions":[{0},{0}]}}"#, question(1))).is_err());
-    let options = (0..=MAX_OPTIONS)
-        .map(|id| format!(r#"{{"id":"o{id}","label":"L"}}"#))
-        .collect::<Vec<_>>();
+    assert!(request(r#"{"questions":[{"title":"T","question":"Q"}]}"#).is_err());
+    assert!(request(r#"{"questions":[{"id":"q","title":" ","question":"Q"}]}"#).is_err());
+    let duplicate = r#"{"id":"o","label":"L"}"#;
     assert!(
         request(&format!(
-            r#"{{"questions":[{{"id":"q","title":"T","question":"Q","options":[{}]}}]}}"#,
-            options.join(",")
+            r#"{{"questions":[{{"id":"q","title":"T","question":"Q","options":[{duplicate},{duplicate}]}}]}}"#
         ))
         .is_err()
     );
-    assert!(request(r#"{"questions":[{"title":"T","question":"Q"}]}"#).is_err());
+}
+
+#[test]
+fn many_questions_options_and_long_texts_are_accepted() {
+    // Past the former four questions, six options and per-field byte caps.
+    let long = "word ".repeat(2000);
+    let options = (0..20)
+        .map(|id| {
+            Value::object([
+                (
+                    "id",
+                    Value::string(format!("option-{id}-{}", "x".repeat(100))),
+                ),
+                ("label", Value::string(format!("Label {id} {long}"))),
+                ("description", Value::string(&long)),
+            ])
+        })
+        .collect::<Vec<_>>();
+    let questions = (0..12)
+        .map(|id| {
+            Value::object([
+                ("id", Value::string(format!("q{id}"))),
+                (
+                    "title",
+                    Value::string(format!("Title {id} {}", "t".repeat(300))),
+                ),
+                ("question", Value::string(&long)),
+                ("context", Value::string(&long)),
+                ("options", Value::Array(options.clone())),
+            ])
+        })
+        .collect::<Vec<_>>();
+    let arguments = Value::object([("questions", Value::Array(questions))]);
+    let parsed = Request::parse("call", &arguments).unwrap();
+    assert_eq!(parsed.questions.len(), 12);
+    assert_eq!(parsed.questions[11].options.len(), 20);
+    assert_eq!(Request::parse("call", &parsed.arguments()).unwrap(), parsed);
+    let last = &parsed.questions[11];
+    let chosen = answer("q11", &[&last.options[19].id], "");
+    last.check_answer(&chosen).unwrap();
 }
 
 #[test]

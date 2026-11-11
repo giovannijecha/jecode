@@ -145,6 +145,11 @@ fn files(result: &Value, columns: usize) -> Vec<Line> {
             rows.extend(notices("read", file, columns, true));
         }
     }
+    if let Some(saved) = result.get("saved_files").and_then(Value::as_usize) {
+        let reference = text::clean(field(result, "result_file"));
+        let label = Line::new(&format!("{saved} more saved · {reference}"), MUTED);
+        rows.extend(line_rows(&label, columns, origin, "    ", "    ", DIM));
+    }
     rows
 }
 

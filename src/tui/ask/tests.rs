@@ -298,3 +298,51 @@ fn switching_questions_with_different_key_rows_keeps_the_dock_height() {
         }
     }
 }
+
+#[test]
+fn many_questions_and_options_stay_reachable_and_restore() {
+    // Twelve questions of twenty options each, past the former four and six.
+    let option = |id: usize| format!(r#"{{"id":"o{id}","label":"Option {id}"}}"#);
+    let options = (0..20).map(option).collect::<Vec<_>>().join(",");
+    let questions = (0..12)
+        .map(|id| {
+            format!(
+                r#"{{"id":"q{id}","title":"Decision {id:02}","question":"Pick one for {id}","options":[{options}]}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let request = request(&format!(r#"{{"questions":[{questions}]}}"#));
+    let mut panel = Panel::new(&request, None);
+    for _ in 0..11 {
+        assert!(panel.switch(&request, true));
+    }
+    let question = &request.questions[11];
+    panel.entries[11].row = usize::MAX;
+    let rows = plain(&dock(&request, &panel, 80, 24));
+    let steps = rows.iter().find(|row| row.ends_with("12 of 12")).unwrap();
+    assert!(steps.contains("Decision 11"), "{steps}");
+    assert!(steps.trim_start().starts_with('…'), "{steps}");
+    assert!(
+        rows.iter().any(|row| row.contains("1–9 choose")),
+        "{rows:?}"
+    );
+
+    // The cursor reaches the twentieth option and the window follows it.
+    panel.entries[11].row = 0;
+    for _ in 0..19 {
+        assert!(panel.move_row(question, false));
+    }
+    assert!(panel.select(question));
+    let rows = plain(&dock(&request, &panel, 80, 24));
+    assert!(rows.iter().any(|row| row.contains("Option 19")), "{rows:?}");
+    assert_eq!(panel.entry().answer(question).unwrap().choices, ["o19"]);
+
+    // The saved draft restores every answer in progress.
+    let draft = panel.draft(&request);
+    let parsed = Draft::parse(&draft.value()).unwrap();
+    assert_eq!(parsed, draft);
+    let restored = Panel::new(&request, Some(&parsed));
+    assert_eq!(restored.entries[11].picked, [19]);
+    assert_eq!(restored.step, 11);
+}

@@ -319,8 +319,11 @@ fn outcome_summary(name: &str, result: &Value) -> String {
         return summary;
     }
     if let Some(files) = result.get("files").and_then(Value::as_array)
-        && let Some(summary) = batch::summary(name, files)
+        && let Some(mut summary) = batch::summary(name, files, result)
     {
+        if let Some(saved) = result.get("saved_files").and_then(Value::as_usize) {
+            summary.push_str(&format!("; {saved} more saved to result_file"));
+        }
         return summary;
     }
     if let Some(bytes) = result.get("bytes_written").and_then(Value::as_usize) {

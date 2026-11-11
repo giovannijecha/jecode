@@ -70,7 +70,16 @@ pub(super) fn delivered(result: &Value) -> impl Iterator<Item = &str> {
             let files = item.get("files").and_then(Value::as_array);
             std::iter::once(item).chain(files.into_iter().flatten())
         })
-        .filter_map(|item| item.get("skill_reference")?.as_str())
+        .flat_map(|item| {
+            let single = item.get("skill_reference").and_then(Value::as_str);
+            let saved = item
+                .get("skill_references")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str);
+            single.into_iter().chain(saved)
+        })
         .filter_map(|reference| crate::skills::parse_reference(reference).ok())
         .map(|(name, _)| name)
 }

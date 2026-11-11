@@ -7,6 +7,9 @@ mod numbering_tests;
 mod placement;
 mod restore;
 mod runtime;
+mod slots;
+#[cfg(test)]
+mod slots_tests;
 #[cfg(test)]
 mod snapshot_tests;
 mod temporary;
@@ -18,11 +21,13 @@ pub mod workspace;
 const MAX_UPDATES: usize = 64;
 const UPDATE_CHARS: usize = 2000;
 
-use crate::{cancel::Cancellation, export::Archive, inbox::Inbox, json::Value, sessions::Handle};
+use crate::{
+    agent::Agent, cancel::Cancellation, export::Archive, inbox::Inbox, json::Value,
+    sessions::Handle,
+};
 use std::{
     collections::VecDeque,
-    sync::{Arc, Condvar, Mutex, mpsc},
-    thread::JoinHandle,
+    sync::{Arc, Condvar, Mutex},
 };
 use tracked::Tracked;
 use workspace::Workspace;
@@ -52,6 +57,9 @@ struct State {
     /// whether one was.
     turns: usize,
     calls: usize,
+    /// Turns running now, and collaborators waiting in creation/follow-up order.
+    running: usize,
+    queue: std::collections::VecDeque<String>,
 }
 
 impl State {
@@ -90,10 +98,11 @@ fn sequence(record: &Value) -> usize {
 
 struct Worker {
     id: String,
+    child: Arc<Mutex<Agent>>,
     inbox: Inbox,
     cancellation: Cancellation,
-    wake: mpsc::Sender<()>,
-    task: Option<JoinHandle<()>>,
+    ready: bool,
+    busy: bool,
 }
 
 #[derive(Clone)]
@@ -362,38 +371,21 @@ impl Observer {
             .map(|record| record.number)
     }
 
-    pub(crate) fn abort_created(&self, ids: &[String], gate: &Arc<(Mutex<bool>, Condvar)>) {
-        let workers = {
+    pub(crate) fn abort_created(&self, ids: &[String]) {
+        let (workers, workspaces) = {
             let mut state = self.0.state.lock().unwrap();
-            for record in &mut state.records {
-                if ids.contains(&record.id) {
-                    record.state = "unknown";
-                }
-            }
+            state.queue.retain(|id| !ids.contains(id));
             let mut workers = Vec::new();
             let mut index = 0;
             while index < state.workers.len() {
                 if ids.contains(&state.workers[index].id) {
                     let worker = state.workers.remove(index);
                     worker.cancellation.cancel();
-                    let _ = worker.wake.send(());
                     workers.push(worker);
                 } else {
                     index += 1;
                 }
             }
-            workers
-        };
-        let (lock, ready) = &**gate;
-        *lock.lock().unwrap() = true;
-        ready.notify_all();
-        for mut worker in workers {
-            if let Some(task) = worker.task.take() {
-                let _ = task.join();
-            }
-        }
-        let workspaces = {
-            let mut state = self.0.state.lock().unwrap();
             let mut workspaces = Vec::new();
             state.records.retain(|record| {
                 if ids.contains(&record.id) {
@@ -405,11 +397,13 @@ impl Observer {
                     true
                 }
             });
-            workspaces
+            (workers, workspaces)
         };
+        drop(workers);
         for workspace in workspaces {
             let _ = workspace.close();
         }
+        self.dispatch();
     }
 
     pub fn snapshot(&self) -> Vec<Value> {
@@ -500,17 +494,16 @@ impl Observer {
                     record.state = "stopping";
                 }
             }
+            state.queue.clear();
             for worker in &state.workers {
                 worker.cancellation.cancel();
-                let _ = worker.wake.send(());
+            }
+            while state.running > 0 {
+                state = self.0.changed.wait(state).unwrap();
             }
             std::mem::take(&mut state.workers)
         };
-        for mut worker in workers {
-            if let Some(task) = worker.task.take() {
-                let _ = task.join();
-            }
-        }
+        drop(workers);
         let stopped = {
             let mut state = self.0.state.lock().unwrap();
             state

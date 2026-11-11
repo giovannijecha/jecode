@@ -238,21 +238,21 @@ fn live_chromium_viewport_dimensions_and_validation() {
         (vec![("height", Value::number(760))], "together"),
         (
             vec![("width", Value::number(0)), ("height", Value::number(760))],
-            "from 1 to 10000",
+            "from 1 to 10000000",
         ),
         (
             vec![
-                ("width", Value::number(20000)),
+                ("width", Value::number(10_000_001)),
                 ("height", Value::number(760)),
             ],
-            "from 1 to 10000",
+            "from 1 to 10000000",
         ),
         (
             vec![
                 ("width", Value::string("1100")),
                 ("height", Value::number(760)),
             ],
-            "from 1 to 10000",
+            "from 1 to 10000000",
         ),
     ] {
         let error = session.run("open", fields).unwrap_err();
@@ -286,6 +286,20 @@ fn live_chromium_viewport_dimensions_and_validation() {
         .unwrap_err();
     assert!(error.contains("together"), "{error}");
     assert_eq!(session.inner_size(&tab), (width, height));
+
+    // A real DevTools viewport past the former application maximum works
+    // without allocating a giant screenshot.
+    let wide = session
+        .run(
+            "open",
+            vec![
+                ("url", Value::string(format!("{}next", site.url))),
+                ("width", Value::number(12_000)),
+                ("height", Value::number(400)),
+            ],
+        )
+        .unwrap();
+    assert_eq!(session.inner_size(&tab_of(&wide)), (12_000, 400));
 }
 
 #[test]

@@ -363,6 +363,33 @@ fn multi_path_reads_name_their_files_and_expand_under_each_path() {
 }
 
 #[test]
+fn a_saved_read_failure_remains_visible_in_the_batch_summary() {
+    let args = Value::object([("paths", Value::Array(vec![Value::string("a.txt")]))]);
+    let result = Value::object([
+        (
+            "files",
+            Value::Array(vec![Value::object([
+                ("path", Value::string("a.txt")),
+                ("content", Value::string("1: first\n")),
+                ("lines_returned", Value::number(1)),
+            ])]),
+        ),
+        ("files_read", Value::number(60)),
+        ("files_not_read", Value::number(1)),
+        ("lines_read", Value::number(120)),
+        ("saved_files", Value::number(60)),
+        ("result_file", Value::string("output:session:batch:stdout")),
+    ]);
+    let presentation = Presentation::default();
+    let rows = plain(&card(tool("read", &args, &result, &presentation), 120, false).rows);
+    assert!(
+        rows.join("\n")
+            .contains("60 files · 120 lines · 1 not read · 60 more saved"),
+        "{rows:?}"
+    );
+}
+
+#[test]
 fn a_binary_attachment_in_a_multi_path_read_keeps_its_note_on_expansion() {
     let reference = "attachment:blob";
     let args = Value::object([("paths", Value::Array(vec![Value::string(reference)]))]);

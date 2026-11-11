@@ -223,6 +223,31 @@ pub(super) fn console(terminal: &Terminal) {
         change: None,
         result: &pages,
     };
+    let mut saved_pages = pages.clone();
+    if let Value::Object(fields) = &mut saved_pages {
+        fields.insert("files_read".into(), Value::number(60));
+        fields.insert("files_not_read".into(), Value::number(2));
+        fields.insert("lines_read".into(), Value::number(120));
+        fields.insert("saved_files".into(), Value::number(60));
+        fields.insert(
+            "result_file".into(),
+            Value::string("output:session:batch:stdout"),
+        );
+    }
+    let saved_reads = Call {
+        result: &saved_pages,
+        ..reads
+    };
+    shown(
+        terminal,
+        saved_reads.rows(80, height, true),
+        80,
+        &[
+            "60 files · 120 lines · 2 not read",
+            "60 more saved",
+            "output:session:batch:stdout",
+        ],
+    );
     for columns in [44, 80] {
         for expanded in [false, true] {
             shown(

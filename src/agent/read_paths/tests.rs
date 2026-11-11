@@ -158,8 +158,134 @@ fn invalid_batches_fail_before_reading() {
     }
     assert!(read(&agent, both).get("error").is_some());
     assert!(read(&agent, paths(&[])).get("error").is_some());
-    let many = vec!["a.txt"; MAX_PATHS + 1];
-    assert!(read(&agent, paths(&many)).get("error").is_some());
+}
+
+#[test]
+fn a_skill_saved_after_the_inline_results_stays_tracked_after_a_rebuild() {
+    let project = Directory::new();
+    let home = Directory::new();
+    let package = home.path().join("skills/audit");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(
+        package.join("SKILL.md"),
+        "---\nname: audit\ndescription: Audit a change.\n---\n\n# Audit\n",
+    )
+    .unwrap();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        fs::write(
+            project.path().join(name),
+            format!("{}\n", "x".repeat(50_000)),
+        )
+        .unwrap();
+    }
+    let mut agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(project.path()).unwrap(),
+    );
+    agent.enable_sessions(home.path()).unwrap();
+    agent.prepare_turn("Inspect").unwrap();
+    let call = ToolCall {
+        id: "batch".into(),
+        name: "read".into(),
+        arguments: paths(&["a.txt", "b.txt", "c.txt", "skill:audit"]).encode(),
+    };
+    let result = agent.execute_tool(&call);
+    assert!(result.get("saved_files").and_then(Value::as_usize) >= Some(1));
+    assert!(
+        result
+            .get("files")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .all(|file| file.get("skill_reference").is_none())
+    );
+    agent.tool_result(&call, &result);
+    assert!(
+        agent
+            .skill_checkpoint_instructions()
+            .contains("skill:audit")
+    );
+    agent.used_skills.clear();
+    agent.rebuild_used_skills();
+    assert!(
+        agent
+            .skill_checkpoint_instructions()
+            .contains("skill:audit")
+    );
+}
+
+#[test]
+fn a_large_batch_reads_every_path_and_saves_what_exceeds_the_inline_size() {
+    let directory = Directory::new();
+    // 60 files of about 4 KiB each: past the former 12-path cap and well past
+    // the inline size, so most results go to the result file.
+    let names: Vec<String> = (0..60).map(|index| format!("f{index:02}.txt")).collect();
+    for (index, name) in names.iter().enumerate() {
+        let body = format!("marker-{index:02}\n{}\n", "x".repeat(4000));
+        fs::write(directory.path().join(name), body).unwrap();
+    }
+    let mut requested: Vec<&str> = names.iter().map(String::as_str).collect();
+    requested.insert(30, "missing.txt");
+    let agent = Agent::new(
+        OpenRouter::fixture("http://127.0.0.1:1".into()),
+        Tools::new(directory.path()).unwrap(),
+    );
+    let result = read(&agent, paths(&requested));
+    assert!(result.get("error").is_none(), "{}", result.encode());
+    let inline = result.get("files").and_then(Value::as_array).unwrap();
+    assert!(!inline.is_empty() && inline.len() < requested.len());
+    assert!(result.encode().len() < 100 * 1024);
+    let saved = result.get("saved_files").and_then(Value::as_usize).unwrap();
+    assert_eq!(inline.len() + saved, requested.len());
+    assert_eq!(result.get("files_read"), Some(&Value::number(60)));
+    assert_eq!(result.get("files_not_read"), Some(&Value::number(1)));
+    assert_eq!(result.get("lines_read"), Some(&Value::number(120)));
+
+    // The saved entries are the rest of the call, in order, through the
+    // ordinary read of an output reference.
+    let reference = result.get("result_file").and_then(Value::as_str).unwrap();
+    let mut text = String::new();
+    let mut offset = 1;
+    loop {
+        let page = agent.execute_tool(&ToolCall {
+            id: "page".into(),
+            name: "read".into(),
+            arguments: Value::object([
+                ("path", Value::string(reference)),
+                ("offset", Value::number(offset)),
+                ("limit", Value::number(2000)),
+            ])
+            .encode(),
+        });
+        text.push_str(page.get("content").and_then(Value::as_str).unwrap());
+        match page.get("next_offset").and_then(Value::as_usize) {
+            Some(next) => offset = next,
+            None => break,
+        }
+    }
+    let path_of = |entry: &Value| {
+        entry
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    let mut order: Vec<String> = inline.iter().map(path_of).collect();
+    order.extend(
+        text.lines()
+            .filter_map(|line| line.split_once("\"path\": \"").map(|(_, rest)| rest))
+            .map(|rest| rest.trim_end_matches(['"', ',']).to_owned()),
+    );
+    assert_eq!(order, requested);
+    assert!(text.contains("marker-59"));
+    assert!(
+        text.contains("\"error\""),
+        "the missing file keeps its own error"
+    );
+    assert_eq!(
+        crate::events::tool_summary("read", &result),
+        format!("read 60 files; 1 not read; {saved} more saved to result_file")
+    );
 }
 
 #[test]

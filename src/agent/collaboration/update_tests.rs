@@ -102,7 +102,6 @@ fn partial_updates_inherit_the_latest_queued_assignment() {
     );
     parent.enable_sessions(home.path()).unwrap();
     let observer = parent.collaboration();
-    let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
     observer
         .create(
             project.path(),
@@ -113,7 +112,6 @@ fn partial_updates_inherit_the_latest_queued_assignment() {
                 mode: Mode::Shared,
             },
             |id, root| parent.new_child(id, root, Mode::Shared),
-            gate.clone(),
         )
         .unwrap();
     let results = [
@@ -128,9 +126,7 @@ fn partial_updates_inherit_the_latest_queued_assignment() {
             (key, Value::string(text)),
         ]))
     });
-    let (lock, changed) = &*gate;
-    *lock.lock().unwrap() = true;
-    changed.notify_all();
+    observer.release_created(&["a1".into()]);
     for result in results {
         result.unwrap();
     }

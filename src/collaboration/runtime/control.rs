@@ -10,7 +10,7 @@ impl Observer {
         if instructions.is_none() && context.is_none() {
             return Err("update requires instructions or context".into());
         }
-        let (version, received_version, wake) = {
+        let (version, received_version) = {
             let mut state = self.0.state.lock().unwrap();
             let index = state
                 .records
@@ -23,7 +23,7 @@ impl Observer {
                 .find(|worker| worker.id == id)
                 .ok_or("Collaborator worker is unavailable")?;
             let inbox = worker.inbox.clone();
-            let wake = worker.wake.clone();
+            let busy = worker.busy;
             let record = &mut state.records[index];
             if matches!(record.state, "stopping" | "stopped" | "unknown") {
                 return Err("Collaborator is not available".into());
@@ -38,7 +38,6 @@ impl Observer {
             });
             let context =
                 context.unwrap_or_else(|| latest.map_or(&record.context, |a| &a.context).clone());
-            let running = record.state == "running";
             let old_state = record.state;
             let old_reviewed = record.reviewed;
             record.state = "running";
@@ -69,7 +68,7 @@ impl Observer {
                 record.reviewed = old_reviewed;
                 return Err(error);
             }
-            if running {
+            if busy {
                 // The worker can only select an initial assignment while holding
                 // this same state lock. Its handoff drains the inbox atomically.
                 let queued = inbox.with(|entries| {
@@ -88,10 +87,13 @@ impl Observer {
                 if !queued {
                     state.records[index].activity = "Update queued for follow-up".into();
                 }
+            } else if !state.queue.iter().any(|queued| queued == id) {
+                state.queue.push_back(id.to_owned());
+                state.records[index].activity = "Waiting for a free slot".into();
             }
-            (version, received_version, wake)
+            (version, received_version)
         };
-        let _ = wake.send(());
+        self.dispatch();
         Ok(Value::object([
             ("id", Value::string(id)),
             ("sent_version", Value::number(version)),
@@ -216,7 +218,7 @@ impl Observer {
     }
 
     pub(crate) fn stop(&self, id: &str) -> Result<Value, String> {
-        let title = {
+        let (title, idle) = {
             let mut state = self.0.state.lock().unwrap();
             if !state.records.iter().any(|record| record.id == id) {
                 return Err("Unknown collaborator".into());
@@ -239,11 +241,19 @@ impl Observer {
                 .iter()
                 .find(|w| w.id == id)
                 .ok_or("Collaborator worker is unavailable")?;
+            let idle = !worker.busy;
             worker.cancellation.cancel();
-            let _ = worker.wake.send(());
-            title
+            if idle {
+                state.queue.retain(|queued| queued != id);
+            }
+            (title, idle)
         };
-        self.receipt("sent", Some(id), 0, &title, vec!["Stop requested".into()])
+        let receipt = self.receipt("sent", Some(id), 0, &title, vec!["Stop requested".into()]);
+        if idle {
+            self.finish_stopped(id);
+            self.dispatch();
+        }
+        receipt
     }
 
     pub(crate) fn review(
@@ -360,7 +370,7 @@ impl Observer {
             }
             return self.finish_close(id, Value::object([("closed", Value::Bool(true))]));
         }
-        let worker = {
+        let idle = {
             let mut state = self.0.state.lock().unwrap();
             let index = state.workers.iter().position(|w| w.id == id);
             let record = state
@@ -371,16 +381,34 @@ impl Observer {
             if index.is_some() && record.state == "running" {
                 record.state = "stopping";
             }
-            index.map(|index| {
-                let worker = state.workers.remove(index);
+            let idle = index.map(|index| {
+                let worker = &state.workers[index];
                 worker.cancellation.cancel();
-                let _ = worker.wake.send(());
-                worker
-            })
+                !worker.busy
+            });
+            state.queue.retain(|queued| queued != id);
+            idle
         };
-        if let Some(task) = worker.and_then(|worker| worker.task) {
-            let _ = task.join();
+        if idle == Some(true) {
+            self.finish_stopped(id);
         }
+        let worker = {
+            let mut state = self.0.state.lock().unwrap();
+            while state
+                .workers
+                .iter()
+                .any(|worker| worker.id == id && worker.busy)
+            {
+                state = self.0.changed.wait(state).unwrap();
+            }
+            state
+                .workers
+                .iter()
+                .position(|worker| worker.id == id)
+                .map(|index| state.workers.remove(index))
+        };
+        drop(worker);
+        self.dispatch();
         let workspace = self.workspace(id)?;
         let result = workspace.close()?;
         {

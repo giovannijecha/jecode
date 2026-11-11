@@ -222,10 +222,8 @@ impl Shell {
             io.report(parser::COUNTED_FOR);
             return 2;
         };
-        if (limit as i128 - start as i128).abs() > 1_000_000 {
-            io.report("for: iteration limit exceeded");
-            return 2;
-        }
+        // Like while and until, a long loop ends by its own condition or by
+        // the command's timeout or cancellation, never by a count.
         let mut status = 0;
         for value in start..limit {
             self.variables.set(&name, value.to_string());

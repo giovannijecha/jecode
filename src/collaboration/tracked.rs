@@ -29,10 +29,6 @@ impl<T> Tracked<T> {
     pub fn revision(&self) -> u64 {
         self.revision
     }
-
-    pub fn into_inner(self) -> T {
-        self.value
-    }
 }
 
 impl<T> Deref for Tracked<T> {

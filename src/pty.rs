@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Write;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,7 +17,10 @@ use unix as platform;
 #[cfg(windows)]
 use windows as platform;
 
-pub(crate) const MAX_INPUT: usize = 64 * 1024;
+/// One confirmed unit of a write: input of any size is delivered segment by
+/// segment, each confirmed before the next is queued, so a stall or a
+/// cancellation leaves at most one segment unconfirmed and sends nothing after.
+const SEGMENT: usize = 64 * 1024;
 const QUEUE_FULL: &str = "Terminal input queue is full; poll before sending more";
 const DIRECT_WAIT: Duration = Duration::from_millis(250);
 const DELIVERY: Duration = Duration::from_secs(2);
@@ -28,6 +31,9 @@ struct Message {
 }
 
 pub(crate) struct Control {
+    /// Held across a tool write's segments and each direct write, so input
+    /// from the user cannot interleave within one tool write.
+    writing: Mutex<()>,
     sender: Mutex<Option<mpsc::SyncSender<Message>>>,
     controls: Mutex<Option<mpsc::SyncSender<Message>>>,
     failure: Arc<Mutex<Option<String>>>,
@@ -154,6 +160,7 @@ pub(crate) fn start(
     Ok((
         started,
         Arc::new(Control {
+            writing: Mutex::new(()),
             sender: Mutex::new(Some(sender)),
             controls: Mutex::new(Some(controls)),
             failure,
@@ -216,22 +223,22 @@ fn frame(op: u8, bytes: &[u8]) -> Vec<u8> {
 }
 
 impl Control {
+    /// Input tagged with an interrupt generation: `None` takes the current
+    /// one, a write's later segments keep the generation it began with, so
+    /// an interrupt during the write still discards the rest of it.
     #[cfg(unix)]
     fn enqueue_input(
         &self,
         bytes: &[u8],
+        tag: Option<u64>,
         receipt: Option<mpsc::SyncSender<Result<(), String>>>,
     ) -> Result<(), String> {
-        if bytes.len() > MAX_INPUT {
-            return Err(format!(
-                "Terminal input must be at most {MAX_INPUT} bytes per call"
-            ));
-        }
         let generation = self.generation.lock().unwrap();
+        let tag = tag.unwrap_or(*generation);
         let mut packet = Vec::new();
         for chunk in bytes.chunks(4096) {
             let mut payload = Vec::with_capacity(chunk.len() + 8);
-            payload.extend_from_slice(&generation.to_le_bytes());
+            payload.extend_from_slice(&tag.to_le_bytes());
             payload.extend_from_slice(chunk);
             packet.extend(frame(1, &payload));
         }
@@ -324,35 +331,77 @@ impl Control {
     }
 
     #[cfg(windows)]
-    fn input_packet(bytes: &[u8]) -> Result<Vec<u8>, String> {
-        if bytes.len() > MAX_INPUT {
-            return Err(format!(
-                "Terminal input must be at most {MAX_INPUT} bytes per call"
-            ));
-        }
-        Ok(bytes
+    fn input_packet(bytes: &[u8]) -> Vec<u8> {
+        bytes
             .chunks(4096)
             .flat_map(|chunk| frame(1, chunk))
-            .collect())
+            .collect()
     }
 
+    /// Delivers input of any size in order, one confirmed segment at a time.
+    /// A failure names how much was confirmed first; nothing after the
+    /// unconfirmed segment is sent, and nothing is ever sent twice.
     pub fn write(&self, bytes: &[u8], cancellation: &Cancellation) -> Result<(), String> {
+        let _writing = loop {
+            if cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
+            match self.writing.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(5)),
+                Err(TryLockError::Poisoned(error)) => panic!("{error}"),
+            }
+        };
+        if bytes.is_empty() {
+            return self.deliver(Vec::new(), false, cancellation);
+        }
         #[cfg(unix)]
-        return self.deliver_with(cancellation, |receipt| self.enqueue_input(bytes, receipt));
-        #[cfg(windows)]
-        self.deliver(Self::input_packet(bytes)?, false, cancellation)
+        let tag = *self.generation.lock().unwrap();
+        let mut confirmed = 0;
+        for segment in bytes.chunks(SEGMENT) {
+            #[cfg(unix)]
+            let result = self.deliver_with(cancellation, |receipt| {
+                self.enqueue_input(segment, Some(tag), receipt)
+            });
+            #[cfg(windows)]
+            let result = self.deliver(Self::input_packet(segment), false, cancellation);
+            if let Err(error) = result {
+                return Err(if confirmed == 0 {
+                    error
+                } else {
+                    format!(
+                        "{error} The first {confirmed} of {} bytes were delivered before it; later bytes were not sent.",
+                        bytes.len()
+                    )
+                });
+            }
+            confirmed += segment.len();
+        }
+        Ok(())
     }
 
     /// Local user input is not a tool call or a conversation message. Each key is
-    /// one message, so a burst can outrun the writer for a moment: only a program
-    /// that stopped reading turns a full queue into a failure.
+    /// one message, so a burst can outrun the writer for a moment. A direct
+    /// write waits only briefly for a tool write or a full queue.
     pub fn write_direct(&self, bytes: &[u8]) -> Result<(), String> {
         let deadline = Instant::now() + DIRECT_WAIT;
+        let _writing = loop {
+            match self.writing.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(TryLockError::WouldBlock) => {
+                    return Err("Terminal input is busy; poll before sending more".into());
+                }
+                Err(TryLockError::Poisoned(error)) => panic!("{error}"),
+            }
+        };
         loop {
             #[cfg(unix)]
-            let result = self.enqueue_input(bytes, None);
+            let result = self.enqueue_input(bytes, None, None);
             #[cfg(windows)]
-            let result = self.enqueue(Self::input_packet(bytes)?, false, None);
+            let result = self.enqueue(Self::input_packet(bytes), false, None);
             match result {
                 Err(error) if error == QUEUE_FULL && Instant::now() < deadline => {
                     thread::sleep(Duration::from_millis(1));

@@ -52,8 +52,9 @@ fn look(phase: Phase) -> Look {
     }
 }
 
-/// One strip cell per task that still counts, then `N of M done`.
-fn aside(plan: &Plan, records: &[Value]) -> Line {
+/// One strip cell per task that still counts, then `N of M done`. A strip
+/// wider than half the rule leaves only the count.
+fn aside(plan: &Plan, records: &[Value], columns: usize) -> Line {
     let mut strip = Line::default();
     let (mut done, mut counted) = (0, 0);
     for task in &plan.tasks {
@@ -64,9 +65,14 @@ fn aside(plan: &Plan, records: &[Value]) -> Line {
             done += usize::from(phase == Phase::Done);
         }
     }
-    if counted > 0 {
-        strip.push(&format!(" {done} of {counted} done"), MUTED);
+    if counted == 0 {
+        return strip;
     }
+    let count = format!("{done} of {counted} done");
+    if counted + 1 + text::cells(&count) > columns / 2 {
+        return Line::new(&count, MUTED);
+    }
+    strip.push(&format!(" {count}"), MUTED);
     strip
 }
 
@@ -101,6 +107,8 @@ pub(in crate::tui) fn rows(plan: &Plan, records: &[Value], columns: usize) -> Ve
     let right = words + if owners > 0 { owners + 2 } else { 0 };
     let end = columns.saturating_sub(2);
     let room = end.saturating_sub(right);
+    // Numbers align right in at least two cells, wider for 100 tasks or more.
+    let digits = plan.tasks.len().to_string().len().max(2);
     let mut number = 0;
     tasks
         .into_iter()
@@ -109,10 +117,10 @@ pub(in crate::tui) fn rows(plan: &Plan, records: &[Value], columns: usize) -> Ve
             let mut left = Line::new("  ", MUTED);
             if !narrow {
                 let column = if phase == Phase::Cancelled {
-                    "    ".to_owned()
+                    " ".repeat(digits + 2)
                 } else {
                     number += 1;
-                    format!("{number:>2}  ")
+                    format!("{number:>digits$}  ")
                 };
                 left.push(&column, DIM);
             }
@@ -146,7 +154,7 @@ pub(super) fn sheet<'a>(state: &'a State, panel_state: &'a Panel, columns: usize
     let width = panel::text_width(columns);
     Sheet {
         title,
-        aside: aside(plan, records),
+        aside: aside(plan, records, columns),
         field: None,
         draft_caret: false,
         head: Vec::new(),

@@ -1,7 +1,7 @@
 //! Answers in progress, saved with the session input apart from the main
 //! draft.
 
-use super::{MAX_OPTIONS, MAX_QUESTIONS, TEXT_LIMIT};
+use super::TEXT_LIMIT;
 use crate::{json::Value, redact::Redactor};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -47,7 +47,6 @@ impl Draft {
             .get("answers")
             .ok_or("Invalid question draft answers")?
             .as_array()
-            .filter(|answers| answers.len() <= MAX_QUESTIONS)
             .ok_or("Invalid question draft answers")?
             .iter()
             .map(AnswerDraft::parse)
@@ -113,7 +112,6 @@ impl AnswerDraft {
         let choices = value
             .get("choices")
             .and_then(Value::as_array)
-            .filter(|choices| choices.len() <= MAX_OPTIONS)
             .and_then(|choices| {
                 choices
                     .iter()
@@ -128,7 +126,6 @@ impl AnswerDraft {
         let row = value
             .get("row")
             .and_then(Value::as_usize)
-            .filter(|row| *row <= MAX_OPTIONS)
             .ok_or("Invalid question draft row")?;
         let (text, caret) = text(value)?;
         Ok(Self {

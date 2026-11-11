@@ -146,13 +146,15 @@ fn local_document_failures_keep_the_server_and_success_clears_failures() {
     assert_eq!(observed(&entry), ("ready".into(), pid));
     fs::write(fixture.sample(), "pub fn sample() {}\n").unwrap();
 
+    // A document past the former 8 MiB limit synchronizes like any other.
     let large = fixture.workspace().join("large.rs");
-    fs::write(&large, "a".repeat(8 * 1024 * 1024 - 64)).unwrap();
-    for _ in 0..3 {
-        let outcome = run(&runtime, &fixture, large.clone());
-        assert_eq!(outcome.status, "unavailable", "{}", outcome.detail);
-        assert!(outcome.detail.contains("too large"), "{}", outcome.detail);
-    }
+    fs::write(&large, "a".repeat(9 * 1024 * 1024)).unwrap();
+    let outcome = run(&runtime, &fixture, large.clone());
+    assert_eq!(outcome.status, "ready", "{}", outcome.detail);
+    assert_eq!(observed(&entry), ("ready".into(), pid));
+    // A path that is not a file stays a local failure.
+    let outcome = run(&runtime, &fixture, fixture.workspace().to_path_buf());
+    assert_eq!(outcome.status, "unavailable", "{}", outcome.detail);
     assert_eq!(observed(&entry), ("ready".into(), pid));
     assert_eq!(run(&runtime, &fixture, fixture.sample()).status, "ready");
     assert_eq!(observed(&entry), ("ready".into(), pid));

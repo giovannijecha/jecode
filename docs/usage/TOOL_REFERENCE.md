@@ -77,7 +77,7 @@ are marked `not executed`. Nothing is replayed.
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `offset` | 1 | First line, 1-based. |
-| `limit` | 200 | Lines per page, at most 2,000. |
+| `limit` | 200 | Lines per page; a larger value returns 2,000. |
 | `byte_offset` | — | Zero-based byte position; overrides `offset` and returns unnumbered text with a byte range. |
 
 Each page is also capped at 64 KiB. Continue with `next_offset`; for a line
@@ -85,14 +85,18 @@ split by the byte cap, pass `next_byte_offset` as `byte_offset`. `total_lines`
 appears at the end of the file. These are page limits, not a file-size limit,
 and paging does not apply to images or PDFs.
 
-Instead of `path`, `paths` reads up to 12 files in one call (not both). Each
-file uses the default window and the results come back in order, each with its
-own result or error, so one missing file does not stop the others. Paths
+Instead of `path`, `paths` reads any number of files in one call (not both).
+Each file uses the default window and the results come back in order, each with
+its own result or error, so one missing file does not stop the others. Paths
 outside the working folder fail and images or PDFs are not shown: read them
-alone with `path`, which also asks for access when needed. Jecode starts no new
-read once the combined result reaches 96 KiB, and later paths report that they
-were not read. The read that crosses that size is kept, so the result can exceed
-96 KiB.
+alone with `path`, which also asks for access when needed. Every path has a result or error.
+Results up to 96 KiB come back inline in `files`; the rest, in call order, are
+saved to `result_file` as one JSON object per path, and `saved_files` and
+`notice` say how many and from which path on. Read `result_file` with `offset`
+and `limit` like saved command output. `files_read`, `files_not_read` and
+`lines_read` count the entire batch when results are saved, including failures
+in the result file. Successful skill references remain available to the
+conversation's instruction checkpoints after compaction or resume.
 
 Images and PDFs are recognized from their contents. The result returns an
 `attachment:ID` reference to a stored copy, which stays readable after the
@@ -124,8 +128,8 @@ excluded. Only `tmp:relative/path` can be written; the others are read-only.
 them in order and installs the result once.
 
 To change several files in one call, send `files: [{"path": "...", "edits":
-[...]}, ...]` instead of `path` (up to 12 entries, each file once, not combined
-with top-level `edits`; a top-level `path` beside `files`
+[...]}, ...]` instead of `path` (any number of entries, each file once, not
+combined with top-level `edits`; a top-level `path` beside `files`
 is ignored). Each file is applied all or nothing like a single
 `edit`; a failed file does not stop the others, and the result lists each file
 in order with its own outcome or error. The call needs one permission decision.
@@ -160,7 +164,7 @@ Absolute paths inside the project are accepted.
 | | `list` | `search` |
 | --- | --- | --- |
 | Default page size | 200 entries | 100 matching lines |
-| Maximum `limit` | 2,000 | 1,000 |
+| Maximum returned per page | 2,000 | 1,000 |
 | Other defaults | `recursive: false` | `case_sensitive: true`, `context: 2` (0–10) |
 
 - `pattern` is a path glob with `*`, `?`, `**` and bracket classes. Without `/`
@@ -173,7 +177,11 @@ Absolute paths inside the project are accepted.
 - An explicitly selected path bypasses its own hidden or ignored status; its
   contents are still filtered.
 - Results are capped at 64 KiB per page. Continue with `next_offset` and the
-  same arguments until it is `null`; restart after the workspace changes.
+  same arguments until it is `null`; restart after the workspace changes. A
+  `limit` above the page maximum returns a full page. A single result too large
+  for a page comes back with long text shortened and `clipped: true`. Shortened
+  match and context lines set `text_truncated: true`; use `read` with its path
+  and `byte_offset` for the full match, or its path and line for context.
 - Each match has `line`, `text`, `byte_offset` and `before`/`after` context. Long
   lines are searched in chunks and previewed around the match, with
   `text_truncated`; use `read` with the `byte_offset` to see the full text.
@@ -231,7 +239,7 @@ quoting or expansion. Details:
 | `list` | IDs, commands up to 200 characters, statuses, elapsed seconds and output references for this conversation's running and recent processes. The oldest finished ones leave the list once the model has seen them; 32 are kept. |
 | `poll` | New output and status for `process_id`. Optional `wait_ms`, default 0. |
 | `stop` | Stop the process and its descendants, waiting up to 10 seconds. If the status is `stopping`, poll again. |
-| `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. At most 64 KiB per call. |
+| `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. Text of any length is delivered in order, 64 KiB at a time, each part confirmed before the next; if a part is not confirmed, the error says how many bytes arrived first, that part may still arrive, and nothing after it is sent. |
 | `resize` | Resize an interactive process to `cols` by `rows` (1–1000). |
 | `interrupt` | Send the terminal interrupt, as Ctrl+C would. |
 
@@ -302,13 +310,16 @@ Actions: `open`, `tabs`, `navigate`, `snapshot`, `click`, `fill`, `press`, `type
   `browser_id` and `tab_id`. `profile` selects a named persistent profile.
   Without `browser_id`, the newest browser is used; without `tab_id`, an
   available page tab.
-- `width` and `height` (both or neither, 1–10,000 CSS pixels) set the page
+- `width` and `height` (both or neither, 1–10,000,000 CSS pixels, the DevTools
+  range) set the page
   viewport on `open` or before a `screenshot`, and stay with the tab.
 - `snapshot` returns page text (up to 12,000 characters) and up to 100
   interactive elements, each with a reference such as `@1`, its role,
   accessible name, type, current value (never for passwords) and state. The full
-  snapshot is saved to `snapshot_path`. `selector` accepts a reference or a CSS
-  selector.
+  snapshot is saved to `snapshot_path`. Chromium's computed role, name and state
+  are added for the first 500 elements, one DevTools call each; on larger pages
+  `accessibility_details` says so and later elements keep their DOM fields.
+  `selector` accepts a reference or a CSS selector.
 - `press` sends key-down and key-up events for a character, a named key such as
   `Enter` or `ArrowLeft`, or a chord such as `Ctrl+z`, `Meta+z` or `Shift+Tab`.
   `modifiers` is an optional CDP bitmask: Alt = 1, Ctrl = 2, Meta/Command = 4,

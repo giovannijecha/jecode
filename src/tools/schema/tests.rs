@@ -7,6 +7,27 @@ fn tool_catalog_and_encoded_size_are_reused() {
 }
 
 #[test]
+fn paging_inputs_have_no_schema_maximum() {
+    for name in ["read", "list", "search", "browser", "mcp"] {
+        let tool = definitions()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+            .unwrap();
+        let limit = tool
+            .get("parameters")
+            .unwrap()
+            .get("properties")
+            .unwrap()
+            .get("limit")
+            .unwrap();
+        assert_eq!(limit.get("minimum"), Some(&Value::number(1)), "{name}");
+        assert!(limit.get("maximum").is_none(), "{name}");
+    }
+}
+
+#[test]
 fn every_tool_advertises_optional_parallel_boolean() {
     let tools = definitions().as_array().unwrap();
     assert_eq!(tools.len(), 16);
@@ -141,7 +162,7 @@ fn command_and_process_budgets_advertise_the_same_bounded_preview_contract() {
             .get("output_limit_bytes")
             .unwrap();
         assert_eq!(budget.get("minimum"), Some(&Value::number(1)));
-        assert_eq!(budget.get("maximum"), Some(&Value::number(256 * 1024)));
+        assert!(budget.get("maximum").is_none());
         if tool.get("name").and_then(Value::as_str) == Some("process") {
             let mode = tool
                 .get("parameters")
@@ -187,7 +208,7 @@ fn edit_schema_advertises_ordered_replacements_for_one_file_or_several() {
     replacements(properties.get("edits").unwrap());
     let files = properties.get("files").unwrap();
     assert_eq!(files.get("minItems"), Some(&Value::number(1)));
-    assert_eq!(files.get("maxItems"), Some(&Value::number(12)));
+    assert!(files.get("maxItems").is_none());
     let file = files.get("items").unwrap();
     assert_eq!(
         file.get("required"),
@@ -215,10 +236,7 @@ fn provider_regression_unbounded_offsets_have_no_platform_sized_schema_maximum()
             Some("integer")
         );
     }
-    assert_eq!(
-        properties.get("limit").unwrap().get("maximum"),
-        Some(&Value::number(2000))
-    );
+    assert!(properties.get("limit").unwrap().get("maximum").is_none());
 }
 
 #[test]
@@ -361,9 +379,9 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             "ask_user",
         ]
     );
-    for (name, required, limit_max, context_max) in [
-        ("list", Vec::new(), 2_000, None),
-        ("search", vec![Value::string("query")], 1_000, Some(10)),
+    for (name, required, context_max) in [
+        ("list", Vec::new(), None),
+        ("search", vec![Value::string("query")], Some(10)),
     ] {
         let tool = tools
             .iter()
@@ -394,11 +412,7 @@ fn discovery_tools_append_to_the_existing_catalog_with_bounded_arguments() {
             let value = fields.get(field).unwrap();
             assert_eq!(value.get("type"), Some(&Value::string("integer")));
             assert_eq!(value.get("minimum"), Some(&Value::number(1)));
-            if field == "limit" {
-                assert_eq!(value.get("maximum"), Some(&Value::number(limit_max)));
-            } else {
-                assert!(value.get("maximum").is_none());
-            }
+            assert!(value.get("maximum").is_none());
         }
         if let Some(context_max) = context_max {
             assert!(fields.get("recursive").is_none());

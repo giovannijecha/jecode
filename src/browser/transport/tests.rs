@@ -94,3 +94,30 @@ fn incomplete_handshake_expires_despite_fragment_progress() {
         "handshake expired after {elapsed:?}"
     );
 }
+
+#[test]
+fn a_message_past_the_former_16_mb_arrives_whole() {
+    // A full-page screenshot can exceed the former 16 MB frame and message caps.
+    let data = "A".repeat(20 * 1024 * 1024);
+    let reply = crate::json::Value::object([("data", crate::json::Value::string(&data))]);
+    let (url, server) = super::super::tests::fake_page(move |_, _| (vec![], Some(reply.clone())));
+    let mut connection = Cdp::connect(&url).unwrap();
+    let result = connection
+        .call(
+            "Page.captureScreenshot",
+            crate::json::Value::object([]),
+            &crate::cancel::Cancellation::default(),
+            Duration::from_secs(30),
+        )
+        .unwrap();
+    assert_eq!(
+        result
+            .get("data")
+            .and_then(crate::json::Value::as_str)
+            .map(str::len),
+        Some(data.len())
+    );
+    assert!(connection.usable());
+    drop(connection);
+    server.join().unwrap();
+}

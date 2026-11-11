@@ -143,30 +143,7 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
             }
             Ok((code, Vec::new(), Vec::new()))
         }
-        "seq" => {
-            let (first, last) = match &args[1..] {
-                [last] => (1, last.parse::<i64>().map_err(|_| "seq: invalid number")?),
-                [first, last] => (
-                    first.parse::<i64>().map_err(|_| "seq: invalid number")?,
-                    last.parse::<i64>().map_err(|_| "seq: invalid number")?,
-                ),
-                _ => return Err("seq: expected LAST or FIRST LAST".into()),
-            };
-            if (last as i128 - first as i128).abs() > 1_000_000 {
-                return Err("seq: range exceeds one million lines".into());
-            }
-            let mut output = Vec::new();
-            if first <= last {
-                for value in first..=last {
-                    output.extend_from_slice(format!("{value}\n").as_bytes());
-                }
-            } else {
-                for value in (last..=first).rev() {
-                    output.extend_from_slice(format!("{value}\n").as_bytes());
-                }
-            }
-            ok(output)
-        }
+        "seq" => seq(shell, args, io),
         "mktemp" => mktemp(shell, args),
         "tr" => tr(shell, args, io),
         "head" | "tail" => head_tail(shell, args, io),
@@ -334,6 +311,36 @@ fn cat(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
         return Err(format!("cat: {error}"));
     }
     ok(Vec::new())
+}
+
+/// Streams each number as it is formatted, so any range runs in constant
+/// memory; a closed reader ends it as it ends `cat`.
+fn seq(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
+    let number = |text: &String| text.parse::<i64>().map_err(|_| "seq: invalid number");
+    let (first, last) = match &args[1..] {
+        [last] => (1, number(last)?),
+        [first, last] => (number(first)?, number(last)?),
+        _ => return Err("seq: expected LAST or FIRST LAST".into()),
+    };
+    let mut stdout = io::BufWriter::new(&io.stdout);
+    let values: Box<dyn Iterator<Item = i64>> = if first <= last {
+        Box::new(first..=last)
+    } else {
+        Box::new((last..=first).rev())
+    };
+    let written = values
+        .map(|value| writeln!(stdout, "{value}"))
+        .find(Result::is_err)
+        .unwrap_or(Ok(()))
+        .and_then(|()| stdout.flush());
+    match written {
+        Ok(()) => ok(Vec::new()),
+        Err(error) if closed(&error) => {
+            shell.broken_output = true;
+            Ok((1, Vec::new(), Vec::new()))
+        }
+        Err(error) => Err(format!("seq: {error}")),
+    }
 }
 
 /// Runs a script file in a fresh shell with its own positional arguments;

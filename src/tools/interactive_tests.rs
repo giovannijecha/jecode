@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 const WAIT: Duration = Duration::from_secs(10);
 
+#[path = "interactive_tests/large_input.rs"]
+mod large_input;
+
 #[path = "interactive_tests/validation.rs"]
 mod validation;
 
@@ -51,6 +54,25 @@ fn main() {
         io::stdout().flush().unwrap();
         let mut line = String::new();
         io::stdin().lock().read_line(&mut line).unwrap();
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("count") {
+        println!("COUNTING");
+        io::stdout().flush().unwrap();
+        let (mut lines, mut bytes, mut hash) = (0u64, 0u64, 0xcbf29ce484222325u64);
+        for line in io::stdin().lock().lines() {
+            let line = line.unwrap();
+            let line = line.trim_end_matches('\r');
+            if line == "END" {
+                break;
+            }
+            lines += 1;
+            for byte in line.bytes().chain([b'\n']) {
+                bytes += 1;
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        println!("COUNT:{lines}:{bytes}:{hash}");
         return;
     }
     println!("TTY:{}:{}:{}", io::stdin().is_terminal(),

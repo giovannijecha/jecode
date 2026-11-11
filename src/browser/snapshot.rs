@@ -33,8 +33,20 @@ pub(super) fn capture(
         if outcome.as_ref().is_err_and(|e| e == "Operation cancelled") {
             return outcome.map(|_| Value::Null);
         }
+        let total = elements.len();
         if let (Err(error), Value::Object(map)) = (outcome, &mut value) {
             map.insert("accessibility_error".into(), Value::string(error));
+        }
+        // Each detail costs one DevTools round trip; say where they stop.
+        if total > ACCESSIBLE_ELEMENTS
+            && let Value::Object(map) = &mut value
+        {
+            map.insert(
+                "accessibility_details".into(),
+                Value::string(format!(
+                    "Chromium accessibility details cover the first {ACCESSIBLE_ELEMENTS} of {total} elements; later elements keep their DOM fields"
+                )),
+            );
         }
     }
     let (path, relative) = output_path(area, "json")?;

@@ -19,7 +19,7 @@ below the title:
 | Call | Result |
 | --- | --- |
 | Read | Lines shown and where, such as `9 lines · from line 33 of 212`. A skill read shows `Loaded skill`. |
-| Read (several paths) | `3 files · 120 lines`, adding `N not read` when a path failed, then each file under its path. |
+| Read (several paths) | `3 files · 120 lines`, adding `N not read` when a path failed and `N more saved` when results went to a result file, then each file under its path and a last row naming the result file. |
 | Read (image or PDF) | `Opened image · 800×600 · 12 KiB`, or `Opened PDF · 4 pages · 1.2 MiB`. |
 | List, Search | Entry or match counts, files searched, errors, and `more from N` when there is another page. |
 | Update | `+N −M lines`, followed by the diff. Used for `edit` and for a `write` that replaced an existing file. |
