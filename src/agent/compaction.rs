@@ -326,7 +326,7 @@ impl Agent {
         let mut measured = 0usize;
         let mut media = 0usize;
         let origin = self.identity();
-        let active_start = crate::attachments::active_view_start(messages);
+        let active_start = crate::attachments::view_start(messages, self.client.inputs());
         for index in (self.context.from..messages.len()).rev() {
             if self.context.returned.contains(&index) {
                 continue;
@@ -391,6 +391,8 @@ mod live_tests;
 mod summary_budget_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod thinking_tests;
 
 #[cfg(test)]
 mod continuity_tests;

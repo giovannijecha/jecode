@@ -7,14 +7,8 @@ use crate::{
 
 /// A continuation sends no new user message, but providers treat a request
 /// that ends with an assistant answer as a prefix to extend, or reject it.
-/// This request-only note ends the request with a user turn instead; the
-/// transcript never stores it.
-pub(super) fn end_with_user_turn(messages: &mut Vec<Value>) {
-    if let Some(note) = note_after(messages.last()) {
-        messages.push(note);
-    }
-}
-
+/// This note ends the request with runtime context instead. Once accepted,
+/// it stays anchored outside the source transcript like other request state.
 pub(super) fn note_after(last: Option<&Value>) -> Option<Value> {
     let open = match last
         .and_then(|message| message.get("role"))
@@ -27,15 +21,7 @@ pub(super) fn note_after(last: Option<&Value>) -> Option<Value> {
             .is_none_or(|calls| calls.is_empty()),
         _ => false,
     };
-    open.then(|| {
-        Value::object([
-            ("role", Value::string("user")),
-            (
-                "content",
-                Value::string("No new user message. Continue from the current session state."),
-            ),
-        ])
-    })
+    open.then(|| crate::context::state_message(crate::context::CONTINUATION))
 }
 
 impl Agent {
@@ -155,7 +141,9 @@ mod tests {
             (message("tool", None), false),
         ] {
             let mut messages = vec![message("system", None), last];
-            end_with_user_turn(&mut messages);
+            if let Some(note) = note_after(messages.last()) {
+                messages.push(note);
+            }
             assert_eq!(messages.len(), if added { 3 } else { 2 });
             assert_eq!(
                 messages

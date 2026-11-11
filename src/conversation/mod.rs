@@ -98,6 +98,47 @@ pub(crate) fn record_output_tokens(message: &mut Value, tokens: Option<usize>) {
     }
 }
 
+/// Records the context window start a response was generated after: native
+/// reasoning is signed over that window's prefix.
+pub(crate) fn record_context_from(message: &mut Value, from: usize) {
+    if let Value::Object(fields) = message
+        && let Some(Value::Object(origin)) = fields.get_mut(ENVELOPE)
+    {
+        origin.insert("context_from".into(), Value::number(from));
+    }
+}
+
+/// Drops native reasoning signed over a different context window. A
+/// compaction boundary replaces the prefix those blocks were bound to, while
+/// the retained text and tool calls still read correctly after the summary.
+/// The archived transcript keeps every block.
+pub(crate) fn without_stale_reasoning(message: &Value, from: usize) -> Value {
+    let mut message = message.clone();
+    // Unmarked reasoning is retained only in the original window (start 1).
+    let generated = message.get(ENVELOPE).map(|origin| {
+        origin
+            .get("context_from")
+            .and_then(Value::as_usize)
+            .unwrap_or(1)
+    });
+    if generated.is_none_or(|generated| generated == from) {
+        return message;
+    }
+    if let Value::Object(fields) = &mut message
+        && let Some(Value::Object(origin)) = fields.get_mut(ENVELOPE)
+        && let Some(Value::Object(extras)) = origin.get_mut("extras")
+        && let Some(Value::Array(blocks)) = extras.get_mut("anthropic_blocks")
+    {
+        blocks.retain(|block| {
+            !matches!(
+                block.get("type").and_then(Value::as_str),
+                Some("thinking" | "redacted_thinking")
+            )
+        });
+    }
+    message
+}
+
 pub(crate) fn output_tokens(message: &Value) -> Option<usize> {
     message.get(ENVELOPE)?.get("output_tokens")?.as_usize()
 }

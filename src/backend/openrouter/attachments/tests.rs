@@ -31,6 +31,7 @@ fn known(image: bool, file: bool) -> Inputs {
     Inputs {
         image: Some(image),
         file: Some(file),
+        retained_views: false,
     }
 }
 

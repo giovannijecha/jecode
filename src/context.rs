@@ -9,6 +9,7 @@ pub(crate) mod source;
 mod state;
 mod view;
 
+pub(crate) use state::CONTINUATION;
 pub use state::{RequestState, SNAPSHOT_HEADER, state_message};
 pub(crate) use view::preview;
 
@@ -331,7 +332,7 @@ impl Context {
         {
             portable(message)
         } else {
-            message.clone()
+            crate::conversation::without_stale_reasoning(message, self.from)
         }
     }
 
@@ -380,7 +381,7 @@ pub fn bytes(messages: &[Value]) -> usize {
 }
 
 pub fn bytes_for(messages: &[Value], inputs: Inputs) -> usize {
-    let active_start = crate::attachments::active_view_start(messages);
+    let active_start = crate::attachments::view_start(messages, inputs);
     messages
         .iter()
         .enumerate()
@@ -389,7 +390,8 @@ pub fn bytes_for(messages: &[Value], inputs: Inputs) -> usize {
 }
 
 pub(crate) fn bytes_for_message(message: &Value, active_view: bool, inputs: Inputs) -> usize {
-    // User attachments persist; tool views expire after the next assistant reply.
+    // User attachments persist; tool views expire after the next assistant
+    // reply unless the backend retains them.
     let media = if active_view || message.get("role").and_then(Value::as_str) != Some("tool") {
         crate::attachments::weight_for(message, inputs)
     } else {

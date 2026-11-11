@@ -275,6 +275,7 @@ impl Agent {
                     .as_ref()
                     .and_then(|usage| usage.output_tokens),
             );
+            crate::conversation::record_context_from(&mut message, self.context.from);
             {
                 let mut messages = self.messages.lock().unwrap();
                 if completion
@@ -501,3 +502,5 @@ mod skills_tests;
 mod summary_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod thinking_prefix_tests;

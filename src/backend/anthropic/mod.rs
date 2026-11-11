@@ -295,6 +295,8 @@ impl Backend for Anthropic {
         Inputs {
             image: Some(true),
             file: Some(true),
+            // Signed thinking binds earlier views; see `wire::build_request`.
+            retained_views: true,
         }
     }
     fn limits(&mut self) -> Result<Option<backend::Limits>, backend::Failure> {

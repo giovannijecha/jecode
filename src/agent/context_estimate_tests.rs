@@ -168,6 +168,79 @@ fn measured_growth_charges_only_active_tool_views_and_keeps_user_media() {
 }
 
 #[test]
+fn retained_tool_views_stay_in_the_context_budget() {
+    let image = image();
+    let messages = [
+        image_receipt(&image),
+        message("assistant", "Viewed"),
+        image_receipt(&image),
+    ];
+    let text_bytes = messages
+        .iter()
+        .map(|item| portable(item).encode().len())
+        .sum::<usize>();
+    let expiring = crate::attachments::Inputs {
+        image: Some(true),
+        file: Some(true),
+        retained_views: false,
+    };
+    let retained = crate::attachments::Inputs {
+        retained_views: true,
+        ..expiring
+    };
+    assert_eq!(context::bytes_for(&messages, expiring), text_bytes + 85);
+    assert_eq!(context::bytes_for(&messages, retained), text_bytes + 85 * 2);
+}
+
+#[test]
+fn measured_growth_retains_old_tool_view_and_charges_new_view_once() {
+    let image = image();
+    let first_view = image_receipt(&image);
+    let mut messages = vec![
+        message("system", "Agent"),
+        message("user", "Inspect"),
+        first_view.clone(),
+    ];
+    let mut measured = context::Context::default();
+    measured.observe(
+        Some(&Usage {
+            input_tokens: Some(500),
+            ..Usage::default()
+        }),
+        messages.len(),
+    );
+    measured.calibrate(1000);
+    let expiring = crate::attachments::Inputs {
+        image: Some(true),
+        file: Some(true),
+        retained_views: false,
+    };
+    let retained = crate::attachments::Inputs {
+        retained_views: true,
+        ..expiring
+    };
+
+    messages.push(message("assistant", "Viewed"));
+    assert_eq!(measured.measured_input(&messages, expiring), Some(500 - 85));
+    assert_eq!(measured.measured_input(&messages, retained), Some(500));
+    let before = measured.estimate_growth(&messages, 500, retained);
+    let assistant_bytes = portable(messages.last().unwrap()).encode().len();
+
+    messages.push(first_view.clone());
+    let after = measured.estimate_growth(&messages, 500, retained);
+    assert_eq!(
+        after - before,
+        measured.estimate_bytes(assistant_bytes + portable(&first_view).encode().len())
+            - measured.estimate_bytes(assistant_bytes)
+            + 85
+    );
+    assert_eq!(
+        after,
+        measured.estimate_growth(&messages, 500 - 85, expiring) + 85
+    );
+}
+
+#[test]
 fn returned_messages_do_not_enter_the_unmeasured_agent_estimate() {
     let directory = Directory::new();
     let mut agent = agent(&directory);

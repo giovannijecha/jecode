@@ -90,7 +90,9 @@ counted; access errors and a corrupt selected account remain explicit errors.
 - **Tools.** Local tools become `input_schema` definitions, calls become
   `tool_use` blocks and adjacent results become `tool_result` blocks. Signed
   thinking and ordered content blocks are replayed only to the same backend,
-  account and model.
+  account and model, exactly as received: tool input normalized for execution
+  stays in the canonical call. Signed thinking binds everything sent before
+  it, so image and PDF views from tools stay in every later request.
 - **Completion.** Fragmented tool JSON is reassembled, and calls are returned
   only after `message_stop`. Truncated streams, output limits, context limits,
   cancellation and provider errors keep distinct recovery paths.

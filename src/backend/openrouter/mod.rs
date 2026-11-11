@@ -154,6 +154,7 @@ impl OpenRouter {
         crate::attachments::Inputs {
             image: self.accepts("image"),
             file: self.accepts("file"),
+            retained_views: false,
         }
     }
 

@@ -28,9 +28,9 @@ pub(super) struct Request {
     pub messages: Vec<Value>,
     pub measurement: crate::context::measurement::RequestMeasurement,
     pub estimated_tokens: usize,
-    /// An instruction snapshot and runtime state sent at the end of this
-    /// request, with their source position. Once the provider accepts the
-    /// request, they stay at that position.
+    /// Instructions, runtime state and continuations sent at the end of this
+    /// request, with their source position. Once the provider accepts them,
+    /// they stay at that position.
     pub states: Vec<(usize, String)>,
     /// Finished processes that state carries; delivered once it is accepted.
     pub completions: Vec<crate::tools::processes::Completion>,
@@ -82,38 +82,47 @@ impl Agent {
             .chain(pending.iter().map(String::as_str))
             .map(|text| state_message(text).encode().len())
             .fold(0usize, usize::saturating_add);
-        let last = messages
-            .iter()
-            .enumerate()
-            .skip(context.from)
-            .filter(|(index, _)| !context.returned.contains(index))
-            .map(|(_, message)| message)
-            .next_back();
-        let note = if pending.is_empty() && (context.summary.is_empty() || last.is_some()) {
-            super::continuation::note_after(last.or(Some(system)))
-        } else {
-            None
-        };
         system
             .encode()
             .len()
             .saturating_add(crate::tools::encoded_size_for(!self.child))
             .saturating_add(states)
-            .saturating_add(note.map_or(0, |note| note.encode().len()))
     }
 
-    /// The instruction snapshot, then runtime state, that this request must
-    /// add after the window; each only when it differs from its own kind.
+    /// New instructions and runtime state, or a continuation when neither
+    /// changed and the request otherwise ends with a finished assistant turn.
     fn pending_states(
         &self,
         context: &crate::context::Context,
         environment: &environment::Environment,
         messages: &[Value],
     ) -> Vec<String> {
-        self.pending_snapshot(context)
+        let mut states: Vec<_> = self
+            .pending_snapshot(context)
             .into_iter()
             .chain(self.pending_state(context, environment, messages))
-            .collect()
+            .collect();
+        if states.is_empty() {
+            let last = messages
+                .iter()
+                .enumerate()
+                .skip(context.from)
+                .rfind(|(index, _)| !context.returned.contains(index));
+            let ends_with_state = context
+                .visible_states()
+                .last()
+                .is_some_and(|state| last.is_none_or(|(index, _)| state.before > index));
+            let needs_turn = !ends_with_state && (last.is_some() || context.summary.is_empty());
+            if needs_turn
+                && super::continuation::note_after(
+                    last.map(|(_, message)| message).or(messages.first()),
+                )
+                .is_some()
+            {
+                states.push(crate::context::CONTINUATION.into());
+            }
+        }
+        states
     }
 
     /// Current instructions when they differ from the latest snapshot in the
@@ -246,8 +255,7 @@ impl Agent {
     }
 }
 
-/// Ends a request with newly sent state, then the user turn it may need.
+/// Ends a request with newly sent state, including any anchored continuation.
 fn append_states(projected: &mut Vec<Value>, states: &[String]) {
     projected.extend(states.iter().map(|state| state_message(state)));
-    super::continuation::end_with_user_turn(projected);
 }
