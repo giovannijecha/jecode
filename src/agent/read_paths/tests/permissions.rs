@@ -47,7 +47,7 @@ fn answer_once(agent: &Agent, decision: Decision) -> thread::JoinHandle<bool> {
 }
 
 #[test]
-fn conflicting_read_arguments_report_their_error_without_requesting_access() {
+fn invalid_batch_arguments_report_their_error_without_requesting_access() {
     let project = Directory::new();
     let outside = Directory::new();
     let file = outside.path().join("outside.txt");
@@ -57,17 +57,30 @@ fn conflicting_read_arguments_report_their_error_without_requesting_access() {
             200,
             completion(
                 "",
-                vec![tool_call(
-                    "invalid",
-                    "read",
-                    Value::object([
-                        ("path", Value::string("inside.txt")),
-                        (
-                            "paths",
-                            Value::Array(vec![Value::string(file.to_string_lossy())]),
-                        ),
-                    ]),
-                )],
+                vec![
+                    tool_call(
+                        "invalid",
+                        "read",
+                        Value::object([
+                            ("path", Value::string("inside.txt")),
+                            (
+                                "paths",
+                                Value::Array(vec![Value::string(file.to_string_lossy())]),
+                            ),
+                        ]),
+                    ),
+                    tool_call(
+                        "invalid-parallel",
+                        "read",
+                        Value::object([
+                            (
+                                "paths",
+                                Value::Array(vec![Value::string(file.to_string_lossy())]),
+                            ),
+                            ("parallel", Value::string("true")),
+                        ]),
+                    ),
+                ],
             ),
         ),
         (200, completion("Understood", vec![])),
@@ -86,6 +99,14 @@ fn conflicting_read_arguments_report_their_error_without_requesting_access() {
     );
     assert!(invalid.get("outcome").is_none());
     assert!(!invalid.encode().contains("outside marker"));
+    let invalid_parallel = result(&agent, "invalid-parallel");
+    assert_eq!(
+        invalid_parallel.get("error").and_then(Value::as_str),
+        Some("parallel must be a boolean")
+    );
+    assert!(invalid_parallel.get("outcome").is_none());
+    assert!(!invalid_parallel.encode().contains("outside marker"));
+    assert!(agent.permissions().grants().is_empty());
     assert_eq!(fixture.finish().len(), 2);
 }
 

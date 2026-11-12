@@ -130,7 +130,7 @@ impl Tools {
     /// for execution and its own grant if it resolves outside the workspace.
     /// Invalid slots stay aligned with the batch's per-file errors.
     fn reads_access(&self, arguments: &Value) -> Access {
-        if arguments.get("path").is_some() {
+        if arguments.get("path").is_some() || super::parallel(arguments).is_err() {
             return self.inside(Kind::Reads, "several files".into());
         }
         let Some(paths) = arguments.get("paths").and_then(Value::as_array) else {
