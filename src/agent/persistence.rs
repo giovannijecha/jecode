@@ -53,7 +53,6 @@ impl Agent {
                 .bind(self.archive(), self.persistence.clone());
             self.bind_permissions();
             self.checkpoint(Stage::Preserve)?;
-            self.record_runtime_activation()?;
         }
         Ok(())
     }
@@ -94,13 +93,6 @@ impl Agent {
     pub fn save_session(&self) -> Result<(), String> {
         self.save_known_completions();
         self.checkpoint(Stage::Preserve)
-    }
-
-    pub(super) fn record_runtime_activation(&self) -> Result<(), String> {
-        if let Some(handle) = &self.persistence {
-            handle.append_event(&self.archive(), crate::sessions::provenance::activation())?;
-        }
-        Ok(())
     }
 
     pub fn prepare_turn(

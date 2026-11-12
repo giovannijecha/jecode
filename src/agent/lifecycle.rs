@@ -106,20 +106,10 @@ impl Agent {
         if let Some(temporary) = temporary {
             self.tools.configure_temporary(temporary);
         }
-        self.checkpoint(crate::sessions::Stage::Preserve)?;
-        self.record_runtime_activation()?;
         Ok(())
     }
 
     pub fn resume(&mut self, id: &str) -> Result<String, String> {
-        self.resume_with_before_activation(id, || {})
-    }
-
-    pub(super) fn resume_with_before_activation(
-        &mut self,
-        id: &str,
-        before_activation: impl FnOnce(),
-    ) -> Result<String, String> {
         let current = self
             .persistence
             .as_ref()
@@ -161,18 +151,6 @@ impl Agent {
             .transpose()?;
         let document = handle.snapshot();
         let temporary = handle.store().temporary_area(&document.id)?;
-        let outputs = handle
-            .store()
-            .outputs(&document.id, self.redactor.clone())?;
-        // The target has passed load and connection preflight. Persist its
-        // activation before changing the current conversation's live state.
-        before_activation();
-        let mut target_archive = self.archive();
-        target_archive.messages =
-            std::sync::Arc::new(std::sync::Mutex::new(document.messages.clone()));
-        target_archive.events = std::sync::Arc::new(std::sync::Mutex::new(document.events.clone()));
-        handle.append_event(&target_archive, crate::sessions::provenance::activation())?;
-        let document = handle.snapshot();
         self.collaboration.stop_all();
         self.questions.bind(self.archive(), None);
         if let Some(client) = client {
@@ -206,7 +184,12 @@ impl Agent {
         } else {
             self.collaboration.latest_return_sequence()
         };
-        self.tools.configure_output_store(outputs);
+        let handle = self.persistence.as_ref().unwrap();
+        self.tools.configure_output_store(
+            handle
+                .store()
+                .outputs(&handle.id(), self.redactor.clone())?,
+        );
         self.tools.configure_temporary(temporary);
         Ok(match reclaimed {
             Some(note) => format!("{status} {note}"),
@@ -273,8 +256,6 @@ impl Agent {
             .bind(self.archive(), self.persistence.clone());
         self.bind_permissions();
         self.tools.configure_temporary(temporary);
-        self.checkpoint(crate::sessions::Stage::Preserve)?;
-        self.record_runtime_activation()?;
         Ok((report, true))
     }
 }

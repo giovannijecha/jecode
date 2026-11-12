@@ -13,9 +13,6 @@ fn agent(home: &Directory, directory: &Directory, endpoint: &str) -> Agent {
     agent
 }
 
-#[path = "persistence_tests/provenance.rs"]
-mod provenance;
-
 #[test]
 fn resuming_retains_model_boundaries_raw_evidence_and_never_reexecutes_saved_tools() {
     let home = Directory::new();

@@ -78,13 +78,10 @@ improvement.
 1. Record the source baseline, task-owned paths, initial dirty state, exact user
    request, loaded instruction/skill revisions, model, effort, provider route
    and permission level. Start in the intended worktree when that is the task's
-   working folder. Record `git rev-parse HEAD` and `jecode --version`; the latter
-   identifies the command launched now, which can differ from a session that
-   was already running. Prefer the journal's `runtime_identity` activation
-   events for the build that actually ran: `at_unix_ms`, `jecode_version` and
-   the nested `build` identity, including its fingerprint algorithm and value.
-   Preserve missing identities as unknown rather than inferring an old build
-   from today's installed executable.
+   working folder. Record `git rev-parse HEAD` and `jecode --version` when the
+   task starts; the latter identifies the command launched then. If the session
+   was already running, keep its build as unknown rather than inferring it from
+   today's installed executable.
 2. After the task settles, copy its session-owned journal, summary, outputs and
    any temporary or collaborator files needed to interpret the work into an
    ignored `.tmp/studies/TASK/` directory. Record the UTC cutoff and hashes of

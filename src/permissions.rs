@@ -119,8 +119,8 @@ impl Access {
         }
     }
 
-    /// What this access needs remembered: itself, or a multi-file edit's
-    /// outside files, so each stays covered and revocable on its own.
+    /// What this access needs remembered: itself, or a multi-file read's or
+    /// edit's outside files, so each stays covered and revocable on its own.
     pub fn grants(&self) -> Vec<Grant> {
         if self.members.is_empty() {
             return vec![self.grant()];
@@ -363,7 +363,7 @@ impl Permissions {
         let request = state.queue[index].clone();
         // Child call IDs may equal main call IDs. Its own session records the
         // answer; the parent records only a grant when one is remembered.
-        // A multi-file edit's decision carries no grant, so it saves one per
+        // A multi-file read's or edit's decision carries no grant, so it saves one per
         // file. A failed append leaves the queue and grant state unchanged.
         if request.agent.is_none() {
             state.journal(journal::decision(&request, decision))?;

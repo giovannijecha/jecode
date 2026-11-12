@@ -4,7 +4,6 @@ mod document;
 mod handle;
 mod journal;
 pub(crate) mod layout;
-pub(crate) mod provenance;
 mod records;
 mod storage;
 mod summary;
