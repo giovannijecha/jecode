@@ -264,7 +264,9 @@ impl App {
                 let up = key.code == 38;
                 let moved = if question.options.is_empty() {
                     let columns = window.map_or(1, |window| window.text);
-                    panel.entries[panel.step].editor.vertical(up, columns)
+                    panel.entries[panel.step]
+                        .editor
+                        .vertical(up, columns, false)
                 } else {
                     panel.move_row(question, up)
                 };

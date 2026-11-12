@@ -64,7 +64,7 @@ pub(super) fn input_editor(
             position: String::new(),
         };
     }
-    let layout = editor.layout(columns.saturating_sub(3));
+    let layout = editor.layout(columns.saturating_sub(3), true);
     let total = layout.rows.len();
     let limit = limit.max(1);
     let start = layout

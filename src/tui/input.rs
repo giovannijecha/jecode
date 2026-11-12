@@ -300,9 +300,11 @@ impl App {
                 self.take_draft();
             }
             38 | 40 if !key.ctrl() => {
-                self.state
-                    .editor
-                    .vertical(key.code == 38, super::view::input_width(self.state.width));
+                self.state.editor.vertical(
+                    key.code == 38,
+                    super::view::input_width(self.state.width),
+                    true,
+                );
                 self.edited();
             }
             _ => self.edit_draft(key),

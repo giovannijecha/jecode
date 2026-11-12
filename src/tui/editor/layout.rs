@@ -40,27 +40,41 @@ pub struct Layout {
 
 impl Layout {
     /// `labels` replace the attachment markers of `source`, in order. A label
-    /// is one unit: the cursor and wrapping never split it.
-    pub fn new(source: &str, cursor: usize, columns: usize, labels: &[String]) -> Self {
+    /// is one unit: the cursor and wrapping never split it. With `references`,
+    /// `$skill` and `@path` references are drawn as chips too.
+    pub fn new(
+        source: &str,
+        cursor: usize,
+        columns: usize,
+        labels: &[String],
+        references: bool,
+    ) -> Self {
         let mut layout = Self::default();
-        layout.reflow(source, 0, columns, labels);
+        layout.reflow(source, 0, columns, labels, references);
         layout.move_cursor(cursor);
         layout
     }
 
-    pub(super) fn reflow(&mut self, source: &str, row: usize, columns: usize, labels: &[String]) {
+    pub(super) fn reflow(
+        &mut self,
+        source: &str,
+        row: usize,
+        columns: usize,
+        labels: &[String],
+        references: bool,
+    ) {
         let columns = columns.max(4);
         let mut byte = self.rows.get(row).map_or(0, |row| row.positions[0].0);
         self.rows.truncate(row);
         self.rows.push(Row::new(byte));
         let mut cells = 0;
-        let references = if source.starts_with('/') {
-            Vec::new()
-        } else {
+        let tokens = if references && !source.starts_with('/') {
             syntax::tokens(source)
+        } else {
+            Vec::new()
         };
         let from = byte;
-        let mut references = references
+        let mut references = tokens
             .iter()
             .filter(|token| !token.value.is_empty() && token.end > from)
             .peekable();
@@ -121,11 +135,13 @@ impl Layout {
             }
             row.push(&display, marker || reference.is_some(), reference.is_some());
             cells += size;
+            byte += glyph.text.len();
             if trailing {
+                // The padding cell also maps to the reference's end.
+                row.positions.push((byte, cells));
                 row.push(" ", true, true);
                 cells += 1;
             }
-            byte += glyph.text.len();
             row.positions.push((byte, cells));
         }
         if cells >= columns {
