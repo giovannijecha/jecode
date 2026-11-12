@@ -157,20 +157,9 @@ fn cached_layout_matches_a_fresh_one_while_typing_and_deleting_references() {
     let source = "See @\"docs/my long file.md\" now\nand $skill-name, @src/tui/editor/layout.rs!";
     for width in [12, 20] {
         let mut editor = Editor::default();
-        let check = |editor: &Editor| {
-            let actual = editor.layout(width, true);
-            let expected = Layout::new(&editor.text, editor.cursor, width, &[], true);
-            assert_eq!(actual.cursor, expected.cursor, "{:?}", editor.text);
-            assert_eq!(actual.rows.len(), expected.rows.len(), "{:?}", editor.text);
-            for (actual, expected) in actual.rows.iter().zip(&expected.rows) {
-                assert_eq!(actual.text, expected.text, "{:?}", editor.text);
-                assert_eq!(actual.labels, expected.labels, "{:?}", editor.text);
-                assert_eq!(actual.positions, expected.positions, "{:?}", editor.text);
-            }
-        };
         for character in source.chars() {
             editor.insert(&character.to_string());
-            check(&editor);
+            assert_cached_layout(&editor, width);
         }
         while !editor.text.is_empty() {
             editor.key(Key {
@@ -178,7 +167,61 @@ fn cached_layout_matches_a_fresh_one_while_typing_and_deleting_references() {
                 modifiers: 0,
                 character: 0,
             });
-            check(&editor);
+            assert_cached_layout(&editor, width);
         }
+    }
+}
+
+#[test]
+fn cached_layout_preserves_edits_inside_and_after_quoted_references() {
+    for source in [
+        r#"See @"docs/my file.md" then more words"#,
+        r#"See @"docs/a\"b.md" and @"docs/second file.md" end"#,
+        "See @\"docs/日本 file.md\"\nthen $review, @src/main.rs!",
+        r#"See @"first.md" then @"an unfinished path"#,
+    ] {
+        for width in [4, 12, 20] {
+            for cursor in source
+                .char_indices()
+                .map(|(byte, _)| byte)
+                .chain([source.len()])
+            {
+                for fragment in [
+                    Some("x"),
+                    Some(" "),
+                    Some("\""),
+                    Some("\\"),
+                    Some("\n"),
+                    None,
+                ] {
+                    let mut editor = Editor::default();
+                    editor.insert(source);
+                    drop(editor.layout(width, true));
+                    editor.cursor = cursor;
+                    if let Some(fragment) = fragment {
+                        editor.insert(fragment);
+                    } else {
+                        editor.key(Key {
+                            code: 8,
+                            modifiers: 0,
+                            character: 0,
+                        });
+                    }
+                    assert_cached_layout(&editor, width);
+                }
+            }
+        }
+    }
+}
+
+fn assert_cached_layout(editor: &Editor, width: usize) {
+    let actual = editor.layout(width, true);
+    let expected = Layout::new(&editor.text, editor.cursor, width, &[], true);
+    assert_eq!(actual.cursor, expected.cursor, "{:?}", editor.text);
+    assert_eq!(actual.rows.len(), expected.rows.len(), "{:?}", editor.text);
+    for (actual, expected) in actual.rows.iter().zip(&expected.rows) {
+        assert_eq!(actual.text, expected.text, "{:?}", editor.text);
+        assert_eq!(actual.labels, expected.labels, "{:?}", editor.text);
+        assert_eq!(actual.positions, expected.positions, "{:?}", editor.text);
     }
 }

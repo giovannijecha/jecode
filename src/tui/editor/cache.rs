@@ -72,13 +72,68 @@ fn reference_start(prefix: &[u8]) -> Option<usize> {
         .iter()
         .rposition(u8::is_ascii_whitespace)
         .map_or(line, |index| line + index + 1);
-    let quoted = prefix[line..]
-        .windows(2)
-        .position(|pair| pair == b"@\"")
-        .map(|index| line + index);
+    let mut quoted = None;
+    let mut search = line;
+    while let Some(index) = prefix[search..].windows(2).position(|pair| pair == b"@\"") {
+        let start = search + index;
+        let mut escaped = false;
+        let end = prefix[start + 2..].iter().position(|byte| match byte {
+            _ if escaped => {
+                escaped = false;
+                false
+            }
+            b'\\' => {
+                escaped = true;
+                false
+            }
+            b'"' => true,
+            _ => false,
+        });
+        if let Some(end) = end {
+            // A completed quoted path cannot change when editing a later word.
+            search = start + 3 + end;
+        } else {
+            quoted = Some(start);
+            break;
+        }
+    }
     let sigil = prefix[word..]
         .iter()
         .position(|byte| matches!(byte, b'$' | b'@'))
         .map(|index| word + index);
     quoted.into_iter().chain(sigil).min()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reference_start;
+
+    #[test]
+    fn closed_quoted_paths_do_not_reflow_unrelated_words_after_them() {
+        for prefix in [
+            r#"See @"docs/my file.md" then "#,
+            r#"See @"docs/a\"b.md" then "#,
+            r#"See @"docs/a\\" then "#,
+            r#"See @"one.md" and @"two.md" then "#,
+        ] {
+            assert_eq!(reference_start(prefix.as_bytes()), None, "{prefix}");
+        }
+    }
+
+    #[test]
+    fn unfinished_quotes_and_the_edited_word_still_reflow_from_their_sigil() {
+        for prefix in [
+            r#"See @"docs/my file"#,
+            r#"See @"docs/a\"b"#,
+            "See $review,",
+            "See @src/file.rs",
+        ] {
+            assert_eq!(reference_start(prefix.as_bytes()), Some(4), "{prefix}");
+        }
+        let prefix = r#"See @"one.md" then @"docs/my file"#;
+        assert_eq!(
+            reference_start(prefix.as_bytes()),
+            Some(r#"See @"one.md" then "#.len())
+        );
+    }
 }
