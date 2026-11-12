@@ -239,10 +239,15 @@ impl Browser {
         };
         let source = self.root.join(&relative);
         let parent = source.parent()?;
-        // An exact path must not provide a way to browse through a linked folder.
+        // An exact path must not provide a way to browse through a linked folder. Only
+        // folders below the workspace count: an absolute path may reach the workspace
+        // itself through a linked prefix, such as `/tmp` for `/private/tmp` on macOS.
+        let root = self.root.as_path();
         if parent
             .ancestors()
-            .take_while(|path| *path != self.root.as_path())
+            .take_while(|path| {
+                *path != root && std::fs::canonicalize(path).ok().as_deref() != Some(root)
+            })
             .any(|path| {
                 std::fs::symlink_metadata(path)
                     .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -256,17 +261,21 @@ impl Browser {
         if walk.scope == "." {
             return None;
         }
-        // Walk validates the resolved target and workspace boundary. Use the
-        // original final name so a link keeps its own reference and kind.
+        // Walk validates the resolved target and workspace boundary. Its scope holds
+        // the stored names, which a case-insensitive file system may spell unlike the
+        // typed path; a link keeps its original final name, its own reference and kind.
         let parent = std::fs::canonicalize(parent).ok()?;
         let source = parent.join(source.file_name()?);
-        let path = source.strip_prefix(&self.root).ok()?.to_str()?.to_owned();
-        #[cfg(windows)]
-        let path = path.replace('\\', "/");
-        Some(Entry {
-            kind: kind(&source),
-            path,
-        })
+        let kind = kind(&source);
+        let path = if kind == Kind::Link {
+            let path = source.strip_prefix(&self.root).ok()?.to_str()?.to_owned();
+            #[cfg(windows)]
+            let path = path.replace('\\', "/");
+            path
+        } else {
+            walk.scope
+        };
+        Some(Entry { kind, path })
     }
 
     /// Whether `path` still exists, without following a final link.

@@ -421,3 +421,39 @@ fn a_newer_folder_or_another_conversation_discards_earlier_results() {
     assert!(app.state.selector.is_none());
     assert_eq!(app.state.editor.text, "x @");
 }
+
+#[test]
+fn absolute_paths_reach_the_workspace_directly_or_through_an_alias() {
+    // macOS reaches temporary folders through `/tmp`: a linked prefix of the
+    // workspace lies outside it and browses through no linked folder inside it.
+    let (home, project) = (Directory::new(), workspace());
+    let aliases = Directory::new();
+    let alias = aliases.path().join("workspace");
+    link_directory(project.path(), &alias);
+    let mut app = app(&home, &project);
+    for root in [project.path(), alias.as_path()] {
+        app.state.editor.take();
+        open(&mut app);
+        typed(
+            &mut app,
+            &root.join("src").join("main.rs").to_string_lossy(),
+        );
+        assert_eq!(listed(&app), ["src/main.rs"], "through {root:?}");
+        key(&mut app, ENTER);
+        assert_eq!(app.state.editor.text, "@src/main.rs ");
+    }
+}
+
+/// A case-insensitive file system accepts a typed path in any case; the reference
+/// keeps the stored names, so it matches the listing and reads on every system.
+#[cfg(windows)]
+#[test]
+fn explicit_paths_take_the_stored_case_of_their_names() {
+    let (home, project) = (Directory::new(), workspace());
+    let mut app = app(&home, &project);
+    open(&mut app);
+    typed(&mut app, "SRC/MAIN.RS");
+    assert_eq!(listed(&app), ["src/main.rs"]);
+    key(&mut app, ENTER);
+    assert_eq!(app.state.editor.text, "@src/main.rs ");
+}
