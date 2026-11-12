@@ -94,7 +94,10 @@ starts setup first.
 ## Plain chat
 
 `jecode --plain` reads one message per line and prints answers as plain text.
-Enter on an empty line sends only staged attachments. It supports these
+Enter on an empty line sends only staged attachments. Messages, here and in a
+single prompt, can name a skill as `$name` or a project file as `@path`, written
+as the TUI's selectors write them; see
+[Reference skills and files](INTERFACE.md#what-a-reference-means). It supports these
 commands:
 
 | Command | Purpose |

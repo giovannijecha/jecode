@@ -79,6 +79,9 @@ a real one.
 | Ctrl+P, Ctrl+N | Browse your last 50 sent messages; Esc returns to the draft. |
 | Alt+V, or Ctrl+V on Linux and macOS | Attach an image from the clipboard. On Windows, Ctrl+V stays your terminal's text paste. |
 | `/` | Open the command list; Up/Down select, Tab completes, Enter accepts the selected full command and runs or queues it. Use it to type arguments; commands with arguments keep their typed text. |
+| `$` | Typed as a word of its own, open the **Skills** sheet; Enter or Tab writes `$name` into the draft. See [Reference skills and files](../usage/INTERFACE.md#reference-skills-and-files). |
+| `@` | Typed as a word of its own, open the **Files** sheet at the working directory; Enter or Tab opens a folder or writes `@path` for a file. |
+| Tab | With the caret on a `$` or `@` reference, reopen its sheet to replace it. |
 | Ctrl+G | Open the **Commands** sheet whenever the composer holds the keys, also during a turn, but not over a question or a permission request. A **Filter** field narrows the list; Enter runs the selected command. Your draft is untouched and waits above the sheet as `draft kept`. A command that opens a menu shows it over the draft, Esc goes back one level, and a choice returns to the composer. `/new` and `/resume` carry the draft into the conversation they open; a resumed conversation's own saved draft joins below it. |
 
 ### Conversation and work
@@ -103,11 +106,12 @@ end with the wheel or sending a message also returns to the latest output.
 
 | Key | Action |
 | --- | --- |
-| Up, Down, Enter | Move and choose. |
+| Up, Down, Enter | Move and choose. In **Skills** and **Files**, Tab chooses too. |
 | `1`–`9` | Choose directly in menus with up to nine options. |
-| Typing | Filter longer lists. |
+| Typing | Filter longer lists. **Commands**, **Skills** and **Files** always filter. |
+| Backspace | In **Files**, with an empty filter, go to the parent folder. |
 | Left, Right | Switch tabs, such as **Commands** and **Keys** in `/help`. |
-| Esc | Go back or close; first cancels a pending deletion mark. |
+| Esc | Go back or close; first cancels a pending deletion mark. **Skills** and **Files** return the draft as it was when they opened. |
 | Ctrl+D | In `/resume`, mark the selected conversation for deletion; in `/process`, ask to stop the selected process. Enter confirms both. In `/permissions` → **Remembered**, revoke the selected approval at once, with no confirmation. |
 | `b` | In `/process`, when a call is waiting for the selected process, move it to the background: the call returns and the command keeps running. |
 

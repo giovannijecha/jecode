@@ -122,6 +122,59 @@ fn messages_sent_while_a_response_streams_join_the_next_request_once_in_order() 
 }
 
 #[test]
+fn skill_added_during_a_turn_joins_the_accepted_prompts_instruction_snapshot() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    let (release, gate) = mpsc::channel();
+    let fixture = HttpFixture::streaming(vec![
+        Response::GatedStream {
+            head: content("First."),
+            tail: STOP.into(),
+            release: gate,
+        },
+        Response::Json(200, completion("Second.", vec![])),
+    ]);
+    let mut agent = agent(&directory, &fixture);
+    agent.enable_sessions(home.path()).unwrap();
+    let inbox = agent.inbox();
+    let mut queued = false;
+    agent
+        .run_turn("start", &mut |event| {
+            if matches!(event, Event::Streaming { .. }) && !queued {
+                queued = true;
+                let package = home.path().join("skills/audit");
+                std::fs::create_dir_all(&package).unwrap();
+                std::fs::write(
+                    package.join("SKILL.md"),
+                    "---\nname: audit\ndescription: Audit a change.\n---\n\n# Audit\n",
+                )
+                .unwrap();
+                send(&inbox, &["Use $audit now"]);
+                release.send(()).unwrap();
+            }
+            Ok(())
+        })
+        .unwrap();
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        users(&requests[1]).last().map(String::as_str),
+        Some("Use $audit now")
+    );
+    assert!(
+        crate::test_support::latest_snapshot(&requests[1].body)
+            .unwrap()
+            .contains("- audit: Audit a change. (skill:audit)")
+    );
+    let read = agent.execute_tool(&crate::backend::ToolCall {
+        id: "read-new-skill".into(),
+        name: "read".into(),
+        arguments: Value::object([("path", Value::string("skill:audit"))]).encode(),
+    });
+    assert!(read.get("error").is_none(), "{}", read.encode());
+}
+
+#[test]
 fn input_during_a_tool_batch_waits_for_every_result_and_later_responses_continue() {
     let directory = Directory::new();
     let write = |id: &str| {

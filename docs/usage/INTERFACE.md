@@ -56,6 +56,91 @@ draft untouched: it waits above the sheet as `draft kept`. Use `/` when the
 command takes arguments. `/help` (or F1) lists commands and common shortcuts;
 [Commands and keys](../reference/COMMANDS.md) has the full reference.
 
+## Reference skills and files
+
+Type `$` to choose one of your [personal skills](SKILLS.md), or `@` to choose a
+file in the working directory. A sigil opens its selector only when you type it
+as a word of its own: at the start of the draft or after a space or line break,
+with nothing directly after it. Anywhere else, and in anything you paste, `$`
+and `@` stay ordinary characters, so `a@b.com`, `US$5`, `\$HOME` and pasted
+code are never touched, and a slash command's arguments never open a selector.
+
+Each selector is a sheet like the **Commands** sheet: a title with a count, a
+**Filter** field that holds the caret, and the rows with their matches
+highlighted. Your draft, the typed sigil included, waits above it as
+`draft kept`. The filter takes every key you type, digits included, however
+short the list.
+
+| Key | Skills | Files |
+| --- | --- | --- |
+| Typing | Filter by name and description | Filter by name and path below the folder shown |
+| Up, Down | Move | Move |
+| Enter or Tab | Insert `$name` | Open a folder, or insert `@path` for a file |
+| Backspace with an empty filter | Nothing | Go to the parent folder, stopping at the working directory |
+| Esc | Cancel | Cancel |
+
+Choosing writes the reference where the sigil stood and returns to the draft.
+A trailing space is added when needed; replacing a reference preserves following
+punctuation and line breaks. The text around it and any
+attachments stay where they were, and nothing is sent. With no matching row,
+Enter and Tab do nothing. Esc returns the draft exactly as it was when the
+selector opened, sigil included; that is also how to type a literal `$` or `@`
+at the start of a word, as in `$HOME`: press Esc and keep typing. Text entered in
+the Filter field is discarded when you cancel.
+
+To change a reference, put the caret on it and press Tab. Its selector opens
+with the reference as the filter, and your choice replaces it. Tab on a lone `$`
+or `@` reopens its selector. Elsewhere in a draft, Tab does nothing.
+
+### Browse files
+
+The file selector starts at the working directory and lists the folder's
+entries, folders first, each group by name. The title shows where you are, such
+as `Files · jecode/src/tui`. Listings follow the agent's `list` tool: hidden
+entries, Git-ignored entries and `.git` are left out, and links are listed, marked
+`link`, but never opened or searched. Returning to a folder you came from
+restores its filter and selection; otherwise the folder you left stays selected.
+
+A filter matches file and folder names, then paths, anywhere below the folder
+shown; it does not search file contents. Rows show the path from that folder, so
+files with the same name are told apart. The search runs in the background, so
+the selector stays responsive in large repositories: the count reads
+`searching` until it finishes, and one search covers at most 20,000 entries.
+Open a folder to narrow a larger tree. Changing folders, or the conversation,
+discards results that were still arriving; changing the filter only ranks what
+was found.
+
+You can type or paste a path with `/` or `\` separators, with or without quotes
+or a leading `./`. A path to an existing file or folder inside the working
+directory leads the list even when listings hide it, as an explicit path does for
+the file tools; nothing outside the working directory is offered. Absolute paths
+can reach the working directory through an external alias of its root. Linked
+folders inside it are never traversed. References use the stored spelling of each
+name, including a link's own alias. A file removed
+while you browse is reported and dropped from the list, a folder that cannot be
+read says so, and Backspace returns to its parent. Your draft is never affected.
+
+### What a reference means
+
+A reference is text in your message. Choosing one attaches, copies and reads
+nothing.
+
+- `$name` asks for that skill explicitly. The model reads it as `skill:name` and
+  applies it to your request; see [Personal skills](SKILLS.md#ask-for-a-skill).
+- `@path` names a file by its path from the working directory, with `/`
+  separators. A path with a space, a quote, a bracket or another character that
+  would end or blur the word, or one ending in `.`, is written in quotes:
+  `@"docs/my notes.md"`, with `\"` and `\\` escaped inside. The model reads the
+  file with its file tools when your request needs it, page by page and under
+  your [permission level](PERMISSIONS.md).
+
+Unlike an [attachment](ATTACHMENTS.md), a reference takes no snapshot: the model
+sees the file as it is when it reads it. References stay as you wrote them in
+prompt history, queued and paused messages, saved drafts and resumed
+conversations. You can also type them by hand, in the TUI, plain chat or a
+single prompt; a `$` or `@` word that names no skill or file reads as ordinary
+text.
+
 ## While the agent works
 
 The status row shows a blinking `>_`, the current activity (the running tool's
@@ -139,7 +224,8 @@ above the sheet as `draft kept`, next to a queued message if there is one. Only
 `/` completion keeps the composer.
 
 Up/Down and Enter choose; menus with up to nine options also accept the number
-keys `1`–`9`, and longer ones filter as you type. The current value is marked
+keys `1`–`9`, and longer ones filter as you type. The **Commands**, **Skills**
+and **Files** sheets always filter. The current value is marked
 with the word `current`, separately from the highlighted row. Esc goes back one
 level and closes the menu; when you have marked something for deletion, Esc
 first cancels the mark. A text field, such as an API key, sits on its own row

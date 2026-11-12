@@ -10,6 +10,7 @@ mod lsp;
 mod mcp;
 mod permissions;
 mod providers;
+mod references;
 mod settings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +59,8 @@ pub enum Choice {
     Grant(usize),
     Mcp(usize, Option<super::mcp::Health>),
     Lsp(usize),
+    /// A skill or file row by its place in the selector's rows.
+    Reference(usize),
 }
 /// The right-aligned status of an option.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,6 +148,13 @@ pub enum Purpose {
     Commands {
         later: Vec<bool>,
     },
+    /// `$`: personal skills, written as `$name` at `origin`; `notes` explain skipped ones.
+    Skills {
+        origin: super::references::Origin,
+        notes: Vec<String>,
+    },
+    /// `@`: workspace files, written as `@path` at the browser's origin.
+    Files(Box<super::references::Browser>),
 }
 
 pub struct Selector {
@@ -391,6 +401,10 @@ impl Selector {
     }
     pub fn refresh(&mut self) {
         self.cancel_delete();
+        if matches!(self.purpose, Purpose::Files(_)) {
+            self.refresh_files(false);
+            return;
+        }
         let mut filtered: Vec<_> = self
             .options
             .iter()

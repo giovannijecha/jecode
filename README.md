@@ -61,6 +61,9 @@ then works through the task in the same window:
   the project directory;
 - `/` lists commands as you type, and Ctrl+G opens them without touching your
   draft;
+- `$` picks one of your personal skills and `@` a project file, written into the
+  message as references the agent reads when it needs them; see
+  [Reference skills and files](docs/usage/INTERFACE.md#reference-skills-and-files);
 - Auto, Dark and Light themes keep your terminal's own background;
 - long conversations keep their original history available after compaction;
   see [Long-running work](docs/usage/LONG_WORK.md);

@@ -295,6 +295,7 @@ mod multi_edit;
 mod notices;
 mod panels;
 mod permissions;
+mod references;
 mod rhythm;
 mod sheet;
 mod tinted;

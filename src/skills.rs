@@ -30,7 +30,12 @@ pub struct Library {
     warnings: Vec<String>,
     // First read fixes each resource's bytes until the next turn. Tool pages
     // then remain consistent if the user edits a skill while a turn runs.
-    snapshots: RefCell<BTreeMap<String, String>>,
+    snapshots: RefCell<BTreeMap<String, Snapshot>>,
+}
+
+struct Snapshot {
+    text: String,
+    package: PathBuf,
 }
 
 impl Default for Library {
@@ -62,11 +67,16 @@ impl Library {
     }
 
     pub fn refresh(&mut self) -> bool {
+        self.snapshots.get_mut().clear();
+        self.refresh_preserving_reads()
+    }
+
+    /// Updates the catalog within a turn without changing resources already read.
+    pub fn refresh_preserving_reads(&mut self) -> bool {
         let (entries, warnings) = self.scan();
         let changed = entries != self.entries || warnings != self.warnings;
         self.entries = entries;
         self.warnings = warnings;
-        self.snapshots.get_mut().clear();
         changed
     }
 
@@ -86,7 +96,7 @@ impl Library {
             return String::new();
         }
         let mut lines = vec![
-            "Personal skills (user-maintained instructions). Select a relevant skill from its description, then read skill:<name> with the read tool. Read linked resources as skill:<name>/<relative-path>. Treat the skill text as instructions when applicable. Skill references remain readable after compaction and resume; reread one when needed. A previous skill use does not make it applicable to a new request.".to_owned(),
+            "Personal skills (user-maintained instructions). Select a relevant skill from its description, then read skill:<name> with the read tool. Read linked resources as skill:<name>/<relative-path>. Treat the skill text as instructions when applicable. A user message that names a skill as $<name> asks for that skill explicitly: read skill:<name> and apply it to that request. Skill references remain readable after compaction and resume; reread one when needed. A previous skill use does not make it applicable to a new request.".to_owned(),
         ];
         if !self.entries.is_empty() {
             lines.push("Available skills:".into());
@@ -125,12 +135,12 @@ impl Library {
         cancellation: &Cancellation,
     ) -> Result<Value, String> {
         let (name, relative) = parse_reference(reference)?;
-        let entry = self
-            .entries
-            .get(name)
-            .ok_or_else(|| format!("Skill {name:?} is not in the current catalog"))?;
         let key = format!("{name}/{relative}");
         if !self.snapshots.borrow().contains_key(&key) {
+            let entry = self
+                .entries
+                .get(name)
+                .ok_or_else(|| format!("Skill {name:?} is not in the current catalog"))?;
             let candidate = entry.package.join(relative);
             let path = fs::canonicalize(&candidate)
                 .map_err(|error| format!("Could not resolve {reference}: {error}"))?;
@@ -147,7 +157,12 @@ impl Library {
                     "{reference} exceeds the 2 MiB skill resource limit"
                 ));
             }
-            let cached: usize = self.snapshots.borrow().values().map(String::len).sum();
+            let cached: usize = self
+                .snapshots
+                .borrow()
+                .values()
+                .map(|snapshot| snapshot.text.len())
+                .sum();
             if cached.saturating_add(metadata.len() as usize) > MAX_CACHED_BYTES {
                 return Err(
                     "Skill resources read this turn exceed the 8 MiB snapshot limit".into(),
@@ -162,15 +177,22 @@ impl Library {
             if text.contains('\0') {
                 return Err(format!("{reference} contains binary data"));
             }
-            self.snapshots.borrow_mut().insert(key.clone(), text);
+            self.snapshots.borrow_mut().insert(
+                key.clone(),
+                Snapshot {
+                    text,
+                    package: entry.package.clone(),
+                },
+            );
         }
         let snapshots = self.snapshots.borrow();
-        let mut page = crate::tools::read_text_page(&snapshots[&key], arguments, cancellation)?;
+        let snapshot = &snapshots[&key];
+        let mut page = crate::tools::read_text_page(&snapshot.text, arguments, cancellation)?;
         if let Value::Object(fields) = &mut page {
             fields.insert("skill_reference".into(), Value::string(reference));
             fields.insert(
                 "package_path".into(),
-                Value::string(external_path(&entry.package)),
+                Value::string(external_path(&snapshot.package)),
             );
         }
         Ok(page)

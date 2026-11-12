@@ -7,13 +7,16 @@ use crate::{
 
 impl Agent {
     /// Adds submitted messages and reports whether the request context changed.
-    pub(super) fn accept_input(&self, events: &mut impl EventSink) -> Result<bool, String> {
+    pub(super) fn accept_input(&mut self, events: &mut impl EventSink) -> Result<bool, String> {
         let prompts = self
             .inbox
             .accept(|prompts, queued| self.append_input(prompts, queued))?;
         if prompts.is_empty() {
             return Ok(false);
         }
+        // A selected skill may have been added while the current response ran.
+        // Keep earlier skill reads stable, but send current metadata with this input.
+        self.refresh_skills_during_turn();
         events.emit(Event::Accepted { prompts })?;
         self.emit_context(events)?;
         Ok(true)
