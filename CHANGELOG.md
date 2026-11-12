@@ -1,5 +1,26 @@
 # Release notes
 
+## 0.7.5
+
+Changes since 0.6.5.
+
+- **Skill and file references.** Type `$` or `@` in the composer to choose a
+  personal skill or browse project files. References appear as editable cards
+  alongside attachments; Tab reopens a reference's selector. The model reads
+  the referenced skill or file when needed, under the existing permission
+  rules. See [Reference skills and files](docs/usage/INTERFACE.md#reference-skills-and-files).
+- **Batch read approvals.** Reading several files outside the workspace asks
+  for approval once for the batch, naming every target. Denying it reads none
+  of the files; remembering approval covers each outside file separately. See
+  [Permissions](docs/usage/PERMISSIONS.md#approval-requests).
+- **Tool cards and questions.** Tool badges share an eight-cell width across
+  states and themes. Ask choices use the same empty and selected marks at every
+  terminal width. See [Tool activity](docs/usage/TOOL_ACTIVITY.md) and
+  [Questions and plans](docs/usage/QUESTIONS_AND_PLANS.md).
+- **Long commands.** The model receives clearer guidance on choosing a wait
+  duration and retrieving complete command output. See
+  [Command line](docs/usage/CLI.md).
+
 ## 0.6.5
 
 Changes since 0.5.5.

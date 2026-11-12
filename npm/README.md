@@ -4,9 +4,9 @@ Jecode is a coding agent for your terminal. Choose a model, describe a task,
 and let it read your project, edit files, run commands and check
 the result. Tool cards and diffs show the work as it happens.
 
-![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/37a695e4ce9e846e035e430bca8f9114360bcad5/docs/images/jecode-startup.png)
+![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/9e39e37abbeeb325f3815e4f1fa1e512dc7f9f4d/docs/images/jecode-startup.png)
 
-*Jecode 0.6.5 in Windows Terminal, with GPT-6.1 Sol selected.*
+*Jecode 0.7.5 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Install
 
@@ -33,6 +33,10 @@ API keys use API billing separately from subscription plans.
 Type a task and press Enter. Esc stops a turn, Ctrl+Q quits, and `jecode resume`
 continues saved work. `/help` or F1 lists commands and shortcuts. See the
 [terminal guide](https://github.com/giovannijecha/jecode/blob/main/docs/usage/INTERFACE.md).
+
+Type `$` to choose a personal skill or `@` to browse project files. References
+appear as editable cards in the composer; Tab on a reference reopens its
+selector. See [Reference skills and files](https://github.com/giovannijecha/jecode/blob/main/docs/usage/INTERFACE.md#reference-skills-and-files).
 
 The default permission level is Workspace; see [Permissions](https://github.com/giovannijecha/jecode/blob/main/docs/usage/PERMISSIONS.md)
 for command confinement, approvals and platform limits. Read
