@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_support::Directory;
+use crate::test_support::link_directory;
 use crate::tools::Begun;
 
 fn arguments(fields: &[(&str, &str)]) -> String {
@@ -58,6 +59,55 @@ fn file_tools_are_inside_unless_the_resolved_path_leaves_the_folder() {
         .unwrap();
     assert_eq!(listed.base.as_deref(), Some(canonical.as_path()));
     assert!(!tools.access("list", "{}").unwrap().outside);
+}
+
+#[test]
+fn read_batch_access_keeps_slot_order_and_detects_linked_outside_paths() {
+    let project = Directory::new();
+    let other = Directory::new();
+    fs::write(project.path().join("a.rs"), "inside").unwrap();
+    fs::write(other.path().join("b.rs"), "outside").unwrap();
+    link_directory(other.path(), &project.path().join("alias"));
+    let tools = Tools::new(project.path()).unwrap();
+    let arguments = Value::object([(
+        "paths",
+        Value::Array(vec![
+            Value::string("a.rs"),
+            Value::string("history:requests"),
+            Value::number(7),
+            Value::string(other.path().join("b.rs").to_string_lossy()),
+            Value::string("alias/b.rs"),
+        ]),
+    )]);
+    let access = tools.access("read", &arguments.encode()).unwrap();
+    assert_eq!(access.kind, Kind::Reads);
+    assert!(access.outside);
+    assert_eq!(access.members.len(), 5);
+    assert!(!access.members[0].outside);
+    assert!(!access.members[1].outside);
+    assert!(!access.members[2].outside);
+    assert!(access.members[3].outside && access.members[4].outside);
+    assert_eq!(access.grants().len(), 2);
+
+    let permissions = crate::permissions::Permissions::default();
+    assert!(matches!(
+        permissions.check(&access),
+        crate::permissions::Verdict::Ask
+    ));
+    permissions
+        .set_level(crate::permissions::Level::Read)
+        .unwrap();
+    assert!(matches!(
+        permissions.check(&access),
+        crate::permissions::Verdict::Unavailable(_)
+    ));
+    permissions
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
+    assert!(matches!(
+        permissions.check(&access),
+        crate::permissions::Verdict::Allow
+    ));
 }
 
 #[test]

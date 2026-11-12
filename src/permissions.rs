@@ -104,7 +104,7 @@ pub struct Access {
     pub base: Option<PathBuf>,
     /// Exact, private invocation identity for a remembered command grant.
     pub identity: Option<String>,
-    /// Each file of a multi-file edit, whose `target` names them all. One
+    /// Each file of a multi-file read or edit; `target` names them all. One
     /// request covers the call; grants remember the outside files one by one.
     pub members: Vec<Access>,
 }
@@ -119,8 +119,8 @@ impl Access {
         }
     }
 
-    /// What this access needs remembered: itself, or a multi-file edit's
-    /// outside files, so each stays covered and revocable on its own.
+    /// What this access needs remembered: itself, or a multi-file read's or
+    /// edit's outside files, so each stays covered and revocable on its own.
     pub fn grants(&self) -> Vec<Grant> {
         if self.members.is_empty() {
             return vec![self.grant()];
@@ -363,7 +363,7 @@ impl Permissions {
         let request = state.queue[index].clone();
         // Child call IDs may equal main call IDs. Its own session records the
         // answer; the parent records only a grant when one is remembered.
-        // A multi-file edit's decision carries no grant, so it saves one per
+        // A multi-file read's or edit's decision carries no grant, so it saves one per
         // file. A failed append leaves the queue and grant state unchanged.
         if request.agent.is_none() {
             state.journal(journal::decision(&request, decision))?;

@@ -16,11 +16,7 @@ impl Tools {
         let arguments = json::parse(arguments).ok()?;
         let text = |key| arguments.get(key).and_then(Value::as_str);
         match name {
-            // Each entry of a multi-path read is checked again when it runs;
-            // outside paths are refused there and need a single read.
-            "read" if arguments.get("paths").is_some() => {
-                Some(self.inside(Kind::Reads, "several files".into()))
-            }
+            "read" if arguments.get("paths").is_some() => Some(self.reads_access(&arguments)),
             "read" => self.file_access(Kind::Reads, text("path")?, false),
             "list" | "search" => self.file_access(Kind::Reads, text("path").unwrap_or("."), true),
             "edit" if edit::several(&arguments) => self.edits_access(&arguments),
@@ -127,6 +123,46 @@ impl Tools {
             base: None,
             identity: None,
             members: Vec::new(),
+        }
+    }
+
+    /// One permission decision covers a batch; each slot keeps its own base
+    /// for execution and its own grant if it resolves outside the workspace.
+    /// Invalid slots stay aligned with the batch's per-file errors.
+    fn reads_access(&self, arguments: &Value) -> Access {
+        if arguments.get("path").is_some() || super::parallel(arguments).is_err() {
+            return self.inside(Kind::Reads, "several files".into());
+        }
+        let Some(paths) = arguments.get("paths").and_then(Value::as_array) else {
+            return self.inside(Kind::Reads, "several files".into());
+        };
+        let members: Vec<_> = paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
+                path.as_str()
+                    .and_then(|path| self.file_access(Kind::Reads, path, false))
+                    .unwrap_or_else(|| {
+                        self.inside(Kind::Reads, format!("invalid path at index {index}"))
+                    })
+            })
+            .collect();
+        Access {
+            kind: Kind::Reads,
+            target: if members.is_empty() {
+                "several files".into()
+            } else {
+                members
+                    .iter()
+                    .map(|access| access.target.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+            place: None,
+            outside: members.iter().any(|access| access.outside),
+            base: None,
+            identity: None,
+            members,
         }
     }
 

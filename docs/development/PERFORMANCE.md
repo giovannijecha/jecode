@@ -65,3 +65,70 @@ Journals are at `sessions/<project>/<session>/session.jsonl` in the Jecode
 home (see [Files Jecode keeps](../reference/FILES.md)); the session folder's
 name identifies the conversation, and
 `JECODE_MEASURE_DIRECTORY` is the folder where it was started.
+
+## Real-task evidence
+
+A saved task can explain one observed workflow. Capture its original delivery
+before review changes it, and keep repair work as a separate phase. A selected
+case alone does not establish a comparison with another harness or a measured
+improvement.
+
+### Freeze the inputs and delivery
+
+1. Record the source baseline, task-owned paths, initial dirty state, exact user
+   request, loaded instruction/skill revisions, model, effort, provider route
+   and permission level. Start in the intended worktree when that is the task's
+   working folder. Record `git rev-parse HEAD` and `jecode --version` when the
+   task starts; the latter identifies the command launched then. If the session
+   was already running, keep its build as unknown rather than inferring it from
+   today's installed executable.
+2. After the task settles, copy its session-owned journal, summary, outputs and
+   any temporary or collaborator files needed to interpret the work into an
+   ignored `.tmp/studies/TASK/` directory. Record the UTC cutoff and hashes of
+   the copied files. Exclude live lock files and leave the source unchanged.
+   Copy only this session's evidence, keeping account stores, configuration
+   credentials and unrelated sessions outside the capture.
+3. Save the task's delivered tracked diff and its new files before repairs.
+   With `TASK`, `BASE`, `PATH_1` and `PATH_2` replaced by the capture name,
+   recorded baseline and explicit task-owned paths, Git can write the binary
+   patch without shell text re-encoding:
+
+   ```text
+   git diff --binary --output=.tmp/studies/TASK/DELIVERED.patch BASE -- PATH_1 PATH_2
+   git ls-files --others --exclude-standard -- PATH_1 PATH_2
+   ```
+
+   Create the capture directory first. Copy the listed new files under a
+   separate delivered-files directory, preserving their relative paths and
+   hashes: an ordinary diff does not include untracked files. Preserve the
+   initial dirty-state record so pre-existing changes are not attributed to
+   the task. Record the final verification receipts and answer at this cutoff.
+4. Keep raw captures private and local. Published findings follow the
+   [report rules](../reports/README.md) and omit credentials, personal
+   instructions, source content and command output that are not meant to be
+   shared.
+
+### Reconcile before interpreting
+
+Reconstruct the append journal in sequence, checking message and event offsets.
+Separate ordinary completions, title requests, compaction and descendants, and
+retain missing usage as missing. Keep cache reads, cache creation and uncached
+input distinct; reasoning tokens, when reported, are part of output. Do not
+sum repeated streaming usage snapshots as separate requests.
+
+Use explicit grains for tool calls, nested `steps` executions and per-file
+results. Inspect each file's error in a multi-file result. A nonzero command
+exit needs its command's meaning and recovery before it can be classified;
+compile/test feedback and no-match searches are not interchangeable with a
+provider failure.
+
+Distinguish response-level batching from concurrent execution. Union timing
+intervals before calculating elapsed shares; request preparation, first update
+and response intervals are not independent sums. A first update can be hidden
+reasoning or working activity rather than visible text. A yielded command can
+keep running after its tool invocation ends, so use its process outcome too.
+
+Review the original delivery against the requested behavior, then record
+repairs separately. For efficiency comparisons, hold quality criteria and
+loaded inputs steady across matched runs and keep raw totals. Proposals from
+one trace remain hypotheses until a comparable run supports them.

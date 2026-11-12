@@ -64,6 +64,12 @@ asking, the target and the kind of access:
    environment, input and terminal settings; no command prefix is approved.
 3. **Deny** runs nothing and tells the agent.
 
+A multi-file read or edit is one request naming every target. Denying it runs
+none of the call. Remembering it covers each approved outside file separately;
+adding a different file to a later batch still requires its own approval.
+Read refuses a batch that includes an outside target, while Full uses your
+normal user permissions for every target.
+
 In the TUI, type `1`, `2` or `3`, or move with the arrow keys and press Enter.
 Nothing is selected when the request appears, so a stray Enter does nothing, and
 pasted text never answers it. If the request arrives while you are typing, your

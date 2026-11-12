@@ -41,6 +41,16 @@ Rust fixtures, synthetic credentials, isolated directories under `target` and
 loopback HTTP. It exercises the native HTTP adapter and process boundaries
 without contacting a provider or reading your configuration.
 
+After a cohesive group of Rust edits, run `cargo fmt --all` before the final
+format check. Keep `--check` in verification so later unformatted edits still
+fail visibly.
+
+Choose focused checks from the behavior being changed. Trace inputs through
+their consumers, including saved state and tool access where relevant, and
+exercise the changed transition or failure case. A passing existing suite does
+not establish behavior that no check exercises. Keep the implemented outcome,
+executed checks and remaining limits distinct in the delivery report.
+
 Ignored tests run only when named explicitly; a normal run says nothing about
 them. They are the native terminal fixtures, live-provider checks, manual smoke
 tests and measurements described below.
@@ -76,6 +86,9 @@ Check the reported count: a command that matched no tests verified nothing. Use
 
 Keep credentials, logs, screenshots and temporary drivers out of tracked files;
 use the ignored `.tmp/` or `target` directories.
+
+For a real-task study, capture the delivered files and journal before repairs;
+see [Real-task evidence](PERFORMANCE.md#real-task-evidence).
 
 ## Documentation checks
 

@@ -140,7 +140,7 @@ fn title(pending: &Pending) -> Vec<Line> {
     vec![counted, head]
 }
 
-/// The target, or every file of a multi-file edit, wrapping under itself.
+/// The target, or every file of a multi-file read or edit, wrapping under itself.
 fn call(pending: &Pending, width: usize) -> Vec<Line> {
     let access = &pending.request.access;
     let call = if access.members.is_empty() {

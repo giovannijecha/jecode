@@ -87,9 +87,13 @@ and paging does not apply to images or PDFs.
 
 Instead of `path`, `paths` reads any number of files in one call (not both).
 Each file uses the default window and the results come back in order, each with
-its own result or error, so one missing file does not stop the others. Paths
-outside the working folder fail and images or PDFs are not shown: read them
-alone with `path`, which also asks for access when needed. Every path has a result or error.
+its own result or error, so one missing file does not stop the others after
+authorization. Outside paths, including sibling worktree files, follow the same
+permission policy as a single read: Read refuses an outside batch, Workspace
+asks once for the named files before reading anything, and Full allows it with
+your normal user permissions. A remembered approval covers the individual
+outside targets, not other files in those folders. Images and PDFs still need
+their own `path` call to be shown. Every attempted path has a result or error.
 Results up to 96 KiB come back inline in `files`; the rest, in call order, are
 saved to `result_file` as one JSON object per path, and `saved_files` and
 `notice` say how many and from which path on. Read `result_file` with `offset`

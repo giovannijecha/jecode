@@ -5,6 +5,7 @@ use crate::tools::Tools;
 use std::fs;
 
 mod failure;
+mod permissions;
 
 fn read(agent: &Agent, arguments: Value) -> Value {
     agent.execute_tool(&ToolCall {
@@ -50,8 +51,9 @@ fn several_files_are_read_in_order_and_each_reports_its_own_outcome() {
     assert!(field(0, "content").contains("alpha"));
     assert!(!field(1, "error").is_empty());
     assert!(field(2, "content").contains("beta"));
-    // Outside paths keep their single-read approval flow.
-    assert!(field(3, "error").contains("read it alone with path"));
+    // The direct test helper has no permission grant, so its default base
+    // cannot authorize an outside path.
+    assert!(field(3, "error").contains("restricted to the working directory"));
     assert!(!result.encode().contains("hidden"));
 }
 

@@ -3,7 +3,7 @@
 //! files a step needs together saves those round trips.
 
 use super::Agent;
-use crate::{backend::ToolCall, json::Value, output};
+use crate::{backend::ToolCall, json::Value, output, tools::Begun};
 
 /// Inline size of one call's results. Every path is still read: entries past
 /// this budget are saved in call order to a result file the model pages with
@@ -14,8 +14,8 @@ impl Agent {
     /// Reads each path with its default window, in order, through the same
     /// route as a single read. Every entry reports its own result or error,
     /// so one missing file needs no retry of the others.
-    pub(super) fn read_paths(&self, call: &ToolCall, arguments: &Value) -> Value {
-        self.read_paths_with(call, arguments, |first| {
+    pub(super) fn read_paths(&self, call: &ToolCall, arguments: &Value, begun: &Begun) -> Value {
+        self.read_paths_with(call, arguments, begun, |first| {
             Overflow::start(self.tools.outputs(), first)
         })
     }
@@ -24,6 +24,7 @@ impl Agent {
         &self,
         call: &ToolCall,
         arguments: &Value,
+        begun: &Begun,
         mut save: impl FnMut(usize) -> Result<Overflow, String>,
     ) -> Value {
         let Some(paths) = arguments.get("paths").and_then(Value::as_array) else {
@@ -42,7 +43,7 @@ impl Agent {
         let mut skills = std::collections::BTreeSet::new();
         for (index, path) in paths.iter().enumerate() {
             let result = match path.as_str() {
-                Some(path) => entry(path, self.read_one(call, path)),
+                Some(path) => entry(path, self.read_one(call, path, begun.read_member(index))),
                 None => failure("paths must contain strings"),
             };
             if result.get("error").is_some() {
@@ -113,26 +114,14 @@ impl Agent {
         )
     }
 
-    fn read_one(&self, call: &ToolCall, path: &str) -> Value {
+    fn read_one(&self, call: &ToolCall, path: &str, begun: Begun) -> Value {
         let single = Value::object([("path", Value::string(path))]);
-        if self
-            .tools
-            .access("read", &single.encode())
-            .is_some_and(|access| access.outside)
-        {
-            return failure(
-                "Outside the working folder; read it alone with path to request access",
-            );
-        }
         let read = ToolCall {
             id: call.id.clone(),
             name: "read".into(),
             arguments: single.encode(),
         };
-        shown_alone(
-            self.execute_tool_with_change(&read, crate::tools::Begun::default())
-                .result,
-        )
+        shown_alone(self.execute_tool_with_change(&read, begun).result)
     }
 }
 

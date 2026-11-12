@@ -65,6 +65,11 @@ refused in Read and need approval in Workspace. `write` creates a new file's
 missing parent directories. Writes and edits replace the file through a temporary
 copy, so a failed edit leaves the original intact. Text is UTF-8.
 
+One `read` call can name several files, including files in a sibling worktree.
+The call follows the same permission level as single reads. If Workspace needs
+approval, one request names all targets and no file is read before approval;
+afterward, each file keeps its own result or error.
+
 `edit` applies its replacements in order to the result of the previous ones.
 Each one must match exactly once, including whitespace and line endings; a
 missing or ambiguous match leaves that file unchanged, and in a multi-file call the

@@ -59,6 +59,20 @@ impl Begun {
         self.permission = Some((level, access));
         self
     }
+
+    /// The approved access for one `read paths[]` slot. Without the batch's
+    /// permission state, the slot keeps the ordinary workspace boundary.
+    pub fn read_member(&self, index: usize) -> Self {
+        let Some((level, Some(access))) = &self.permission else {
+            return Self::default();
+        };
+        let Some(member) = access.members.get(index) else {
+            return Self::default();
+        };
+        Self::default()
+            .with_base(member.base.clone())
+            .with_permission(*level, Some(member.clone()))
+    }
 }
 
 pub struct Tools {
