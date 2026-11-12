@@ -141,12 +141,7 @@ fn options(question: &Question, entry: &Entry, columns: usize) -> Answers {
         } else {
             entry.picked.contains(&index)
         };
-        let mark = match (question.is_multiple(), picked) {
-            (true, true) => "☑ ",
-            (true, false) => "☐ ",
-            (false, true) => "◉ ",
-            (false, false) => "○ ",
-        };
+        let mark = if picked { "◉ " } else { "○ " };
         let mut head = Line::new(if cursor { "› " } else { "  " }, ACCENT.bold());
         head.push(mark, if picked { ACCENT.bold() } else { MUTED });
         head.push(label, STRONG);

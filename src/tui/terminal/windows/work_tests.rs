@@ -8,13 +8,13 @@ use crate::{
         line::Line,
         render::Renderer,
         state::State,
-        text,
+        text, theme,
         view::{self, Frame},
     },
 };
 use std::io::{self, Write};
 
-fn paint(rows: Vec<Line>, width: usize, height: usize) {
+fn paint(renderer: &mut Renderer, rows: Vec<Line>, width: usize, height: usize) {
     assert!(rows.len() <= height);
     let expected: String = (0..height)
         .map(|index| {
@@ -32,15 +32,110 @@ fn paint(rows: Vec<Line>, width: usize, height: usize) {
         cursor: None,
         composer: height - 1,
     };
-    let output = Renderer::new().paint(&frame, width, height);
+    let output = renderer.paint(&frame, width, height);
     write!(io::stdout(), "{output}").unwrap();
     io::stdout().flush().unwrap();
     assert_eq!(probe().lines().nth(1).unwrap(), expected);
 }
 
+fn ask_frame(
+    state: &State,
+    renderer: &mut Renderer,
+    width: usize,
+    height: usize,
+    expected: [&str; 3],
+) {
+    let frame = view::frame(state, "fixture/model", "fixture");
+    let toggling = !expected[2].starts_with('›');
+    for prefix in expected {
+        assert!(
+            frame.live.iter().any(|row| row.plain().starts_with(prefix)),
+            "Missing {prefix}: {:?}",
+            frame.live.iter().map(Line::plain).collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(
+        frame
+            .live
+            .iter()
+            .any(|row| row.plain().contains("Space toggle")),
+        toggling,
+        "Space types words when the cursor is on Other"
+    );
+    paint(renderer, frame.live, width, height);
+}
+
+fn multiple_answers(state: &mut State, renderer: &mut Renderer, width: usize, height: usize) {
+    let request = state.question.clone().unwrap();
+    let question = &request.questions[1];
+    for columns in [40, 80] {
+        for light in [false, true] {
+            theme::set_light(light);
+            renderer.repaint();
+            state.width = columns;
+            let mut panel = crate::tui::ask::Panel::new(&request, None);
+            panel.switch(&request, true);
+            state.ask_panel = Some(panel);
+            ask_frame(
+                state,
+                renderer,
+                width,
+                height,
+                ["› ○ CSV ", "  ○ XLSX ", "  ○ Other "],
+            );
+
+            state.ask_panel.as_mut().unwrap().select(question);
+            ask_frame(
+                state,
+                renderer,
+                width,
+                height,
+                ["› ◉ CSV ", "  ○ XLSX ", "  ○ Other "],
+            );
+
+            let panel = state.ask_panel.as_mut().unwrap();
+            panel.move_row(question, false);
+            panel.select(question);
+            ask_frame(
+                state,
+                renderer,
+                width,
+                height,
+                ["  ◉ CSV ", "› ◉ XLSX ", "  ○ Other "],
+            );
+
+            state.ask_panel.as_mut().unwrap().select(question);
+            ask_frame(
+                state,
+                renderer,
+                width,
+                height,
+                ["  ◉ CSV ", "› ○ XLSX ", "  ○ Other "],
+            );
+
+            state
+                .ask_panel
+                .as_mut()
+                .unwrap()
+                .type_text(question, "Also JSON");
+            ask_frame(
+                state,
+                renderer,
+                width,
+                height,
+                ["  ◉ CSV ", "  ○ XLSX ", "› ◉ Other  Also JSON"],
+            );
+        }
+    }
+    theme::set_light(false);
+    renderer.repaint();
+    state.width = width;
+}
+
 pub(super) fn console() {
     let terminal = Terminal::open().unwrap();
     let (width, height) = terminal.size;
+    let mut renderer = Renderer::new();
     let mut state = State {
         width,
         height,
@@ -89,7 +184,8 @@ pub(super) fn console() {
     );
     assert!(!shown.iter().any(|row| row.contains("ASK USER")));
     assert_eq!(state.editor, draft);
-    paint(ask.live, width, height);
+    paint(&mut renderer, ask.live, width, height);
+    multiple_answers(&mut state, &mut renderer, width, height);
 
     state.ask_panel = None;
     // Only the call creating the plan has a row; the next set has none.
@@ -129,7 +225,7 @@ pub(super) fn console() {
         .collect();
     assert_eq!(created.len(), 1);
     assert!(created[0].plain().contains("CSV export  1 task"));
-    paint(created, width, height);
+    paint(&mut renderer, created, width, height);
 
     state.collaboration = vec![crate::json::Value::object([
         ("id", crate::json::Value::string("a1")),
@@ -169,6 +265,6 @@ pub(super) fn console() {
         row.contains("Check CSV encoding") && row.contains("AGENTS  #1") && row.contains("review")
     }));
     assert_eq!(state.editor, draft);
-    paint(todo.live, width, height);
+    paint(&mut renderer, todo.live, width, height);
     drop(terminal);
 }
