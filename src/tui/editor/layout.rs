@@ -1,12 +1,12 @@
 use crate::attachments::MARKER;
-use crate::tui::text;
+use crate::tui::{references::syntax, text};
 use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
 pub struct Row {
     pub text: String,
     pub positions: Vec<(usize, usize)>,
-    /// Byte ranges of `text` that show attachment labels.
+    /// Byte ranges of `text` that show attachment or reference chips.
     pub labels: Vec<std::ops::Range<usize>>,
 }
 
@@ -16,6 +16,18 @@ impl Row {
             text: String::new(),
             positions: vec![(byte, 0)],
             labels: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, value: &str, chip: bool, join: bool) {
+        let start = self.text.len();
+        self.text.push_str(value);
+        if chip {
+            if join && let Some(last) = self.labels.last_mut().filter(|last| last.end == start) {
+                last.end = self.text.len();
+            } else {
+                self.labels.push(start..self.text.len());
+            }
         }
     }
 }
@@ -28,20 +40,44 @@ pub struct Layout {
 
 impl Layout {
     /// `labels` replace the attachment markers of `source`, in order. A label
-    /// is one unit: the cursor and wrapping never split it.
-    pub fn new(source: &str, cursor: usize, columns: usize, labels: &[String]) -> Self {
+    /// is one unit: the cursor and wrapping never split it. With `references`,
+    /// `$skill` and `@path` references are drawn as chips too.
+    pub fn new(
+        source: &str,
+        cursor: usize,
+        columns: usize,
+        labels: &[String],
+        references: bool,
+    ) -> Self {
         let mut layout = Self::default();
-        layout.reflow(source, 0, columns, labels);
+        layout.reflow(source, 0, columns, labels, references);
         layout.move_cursor(cursor);
         layout
     }
 
-    pub(super) fn reflow(&mut self, source: &str, row: usize, columns: usize, labels: &[String]) {
+    pub(super) fn reflow(
+        &mut self,
+        source: &str,
+        row: usize,
+        columns: usize,
+        labels: &[String],
+        references: bool,
+    ) {
         let columns = columns.max(4);
         let mut byte = self.rows.get(row).map_or(0, |row| row.positions[0].0);
         self.rows.truncate(row);
         self.rows.push(Row::new(byte));
         let mut cells = 0;
+        let tokens = if references && !source.starts_with('/') {
+            syntax::tokens(source)
+        } else {
+            Vec::new()
+        };
+        let from = byte;
+        let mut references = tokens
+            .iter()
+            .filter(|token| !token.value.is_empty() && token.end > from)
+            .peekable();
         let mut label = if labels.is_empty() {
             0
         } else {
@@ -53,6 +89,22 @@ impl Layout {
                 cells = 0;
                 byte += 1;
                 continue;
+            }
+            while references.peek().is_some_and(|token| token.end <= byte) {
+                references.next();
+            }
+            let reference = references.peek().filter(|token| token.start <= byte);
+            let leading = reference.is_some_and(|token| token.start == byte);
+            let trailing = reference.is_some_and(|token| token.end == byte + glyph.text.len());
+            // Move a reference that fits onto the next row as one card. Longer
+            // references keep all their text and their surface across rows.
+            if leading {
+                let token = reference.unwrap();
+                let size = text::cells(&text::clean(&source[token.start..token.end])) + 2;
+                if size <= columns && cells + size > columns {
+                    self.rows.push(Row::new(byte));
+                    cells = 0;
+                }
             }
             let marker = glyph.text.starts_with(MARKER);
             let display = if marker {
@@ -71,18 +123,25 @@ impl Layout {
                 Cow::Borrowed(_) => glyph.cells,
                 Cow::Owned(value) => text::cells(value),
             };
-            if cells + size > columns {
+            if cells + size + usize::from(leading) + usize::from(trailing) > columns {
                 self.rows.push(Row::new(byte));
                 cells = 0;
             }
             let row = self.rows.last_mut().unwrap();
-            if marker {
-                row.labels
-                    .push(row.text.len()..row.text.len() + display.len());
+            if leading {
+                row.push(" ", true, false);
+                cells += 1;
+                row.positions.push((byte, cells));
             }
-            row.text.push_str(&display);
+            row.push(&display, marker || reference.is_some(), reference.is_some());
             cells += size;
             byte += glyph.text.len();
+            if trailing {
+                // The padding cell also maps to the reference's end.
+                row.positions.push((byte, cells));
+                row.push(" ", true, true);
+                cells += 1;
+            }
             row.positions.push((byte, cells));
         }
         if cells >= columns {

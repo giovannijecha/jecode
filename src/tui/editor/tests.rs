@@ -29,13 +29,13 @@ fn unicode_edits_and_word_controls_preserve_character_boundaries() {
 fn visual_movement_uses_cells_and_remembers_the_column_on_short_lines() {
     let mut editor = Editor::default();
     editor.insert("abcdef\n界x\nabcdef");
-    assert!(editor.vertical(true, 8));
-    assert!(editor.vertical(true, 8));
+    assert!(editor.vertical(true, 8, false));
+    assert!(editor.vertical(true, 8, false));
     assert_eq!(&editor.text[editor.cursor..], "\n界x\nabcdef");
-    assert!(editor.vertical(false, 8));
-    assert!(editor.vertical(false, 8));
+    assert!(editor.vertical(false, 8, false));
+    assert!(editor.vertical(false, 8, false));
     assert_eq!(editor.cursor, editor.text.len());
-    let layout = Layout::new("abcd界z", 4, 4, &[]);
+    let layout = Layout::new("abcd界z", 4, 4, &[], false);
     assert_eq!(layout.cursor, (1, 0));
     assert_eq!(layout.rows[1].text, "界z");
 }
@@ -76,7 +76,7 @@ fn joined_emoji_uses_one_layout_position_and_edits_as_a_whole_glyph() {
     let source = format!("A{joined}B");
     let mut editor = Editor::default();
     editor.insert(&source);
-    let layout = editor.layout(4);
+    let layout = editor.layout(4, false);
     assert_eq!(layout.rows[0].text, source);
     assert_eq!(layout.rows[0].positions.len(), 4);
     assert_eq!(layout.byte_at(0, 2), 1);
@@ -132,8 +132,8 @@ fn assert_fresh_layout(editor: &Editor, width: usize) {
         .enumerate()
         .map(|(index, attachment)| attachment.chip(index + 1))
         .collect::<Vec<_>>();
-    let expected = Layout::new(&editor.text, editor.cursor, width, &labels);
-    let actual = editor.layout(width);
+    let expected = Layout::new(&editor.text, editor.cursor, width, &labels, true);
+    let actual = editor.layout(width, true);
     assert_eq!(actual.cursor, expected.cursor);
     assert_eq!(actual.rows.len(), expected.rows.len());
     for (actual, expected) in actual.rows.iter().zip(&expected.rows) {

@@ -82,7 +82,7 @@ fn words(entry: &Entry, columns: usize) -> Answers {
             text: width,
         };
     }
-    let layout = entry.editor.layout(width);
+    let layout = entry.editor.layout(width, false);
     let (row, column) = layout.cursor;
     let rows = layout
         .rows
@@ -152,7 +152,7 @@ fn options(question: &Question, entry: &Entry, columns: usize) -> Answers {
         if own && !entry.editor.text.is_empty() {
             let width = end.saturating_sub(indent).max(1);
             answers.text = width;
-            let layout = entry.editor.layout(width);
+            let layout = entry.editor.layout(width, false);
             for (number, words) in layout.rows.iter().enumerate() {
                 let mut line = if number == 0 {
                     head.clone()

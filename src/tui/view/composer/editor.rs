@@ -1,4 +1,4 @@
-//! Rendering for the chat and question editors.
+//! Rendering for the chat composer.
 
 use super::{panel, window};
 use crate::tui::{
@@ -15,7 +15,7 @@ pub(super) struct Input {
     pub position: String,
 }
 
-/// The draft's visible window and caret, shared by chat and Ask user.
+/// The draft's visible window and caret.
 pub(super) fn input(
     state: &State,
     columns: usize,
@@ -64,7 +64,7 @@ pub(super) fn input_editor(
             position: String::new(),
         };
     }
-    let layout = editor.layout(columns.saturating_sub(3));
+    let layout = editor.layout(columns.saturating_sub(3), true);
     let total = layout.rows.len();
     let limit = limit.max(1);
     let start = layout

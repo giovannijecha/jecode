@@ -1,5 +1,7 @@
 mod cache;
 mod layout;
+#[cfg(test)]
+mod reference_tests;
 use super::terminal::Key;
 use super::text;
 use crate::attachments::{self, Attachment, MARKER, Prompt};
@@ -122,7 +124,9 @@ impl Editor {
         self.text.drain(start..end);
     }
 
-    pub fn layout(&self, columns: usize) -> Rc<Layout> {
+    /// Rows for `columns` cells. The composer passes `references` to draw `$skill`
+    /// and `@path` as chips; other editors keep them as plain text.
+    pub fn layout(&self, columns: usize, references: bool) -> Rc<Layout> {
         let labels = self
             .attachments
             .iter()
@@ -131,7 +135,7 @@ impl Editor {
             .collect::<Vec<_>>();
         self.layout
             .borrow_mut()
-            .get(&self.text, self.cursor, columns, labels)
+            .get(&self.text, self.cursor, columns, labels, references)
     }
 
     pub fn viewport(&self, columns: usize, secret: bool) -> (String, usize) {
@@ -166,8 +170,8 @@ impl Editor {
         )
     }
 
-    pub fn vertical(&mut self, up: bool, columns: usize) -> bool {
-        let layout = self.layout(columns);
+    pub fn vertical(&mut self, up: bool, columns: usize, references: bool) -> bool {
+        let layout = self.layout(columns, references);
         let (row, column) = layout.cursor;
         let target = if up {
             row.checked_sub(1)
