@@ -16,9 +16,7 @@ options takes typed text only. Nothing is preselected; an option marked as
 recommended is only a suggestion.
 
 Both single and multiple choice show `○` for an unselected option and `◉` for
-a selected one. The `›` marker and highlighted row show the cursor only; moving
-between options does not select them. For multiple choice, Space toggles each
-option and Enter sends the selected set or moves to the next question.
+a selected one. The `›` marker and highlighted row show only the cursor.
 
 | Key | Action |
 | --- | --- |
@@ -26,7 +24,7 @@ option and Enter sends the selected set or moves to the next question.
 | `1`–`N` | Choose an option directly when nothing is focused; the last number focuses **Other**. Digits reach the first nine rows; Up/Down reach the rest. |
 | Space | Select the highlighted option; for multiple choice, toggle it. |
 | Typing | Fill **Other**; Ctrl+J adds a line. |
-| Enter | For single choice, choose the highlighted option; move on, or send all answers on the last question. Multiple choice keeps its toggled selections. |
+| Enter | Choose the highlighted option for single choice, or keep the toggled set for multiple choice; then move on, or send all answers on the last question. |
 | Tab, Shift+Tab, Left/Right | Switch questions (Left/Right only outside typed text). |
 | Esc | Return to the main conversation, leaving the questions pending. `/ask` reopens them. |
 | Ctrl+D | Dismiss the questions; the agent learns that you gave no answer. |

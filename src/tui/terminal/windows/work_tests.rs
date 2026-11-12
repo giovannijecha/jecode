@@ -68,7 +68,7 @@ fn ask_frame(
 fn multiple_answers(state: &mut State, renderer: &mut Renderer, width: usize, height: usize) {
     let request = state.question.clone().unwrap();
     let question = &request.questions[1];
-    for columns in [40, width] {
+    for columns in [40, 80] {
         for light in [false, true] {
             theme::set_light(light);
             renderer.repaint();

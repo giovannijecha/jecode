@@ -104,11 +104,11 @@ fn multiple_choices_share_single_choice_marks_without_selecting_the_cursor() {
         assert!(rows.iter().any(|row| row.starts_with("  ◉ CSV")));
         assert!(rows.iter().any(|row| row.starts_with("› ◉ XLSX")));
         assert!(rows.iter().any(|row| row.starts_with("  ○ Other")));
-        assert_eq!(
-            panel.entry().answer(question).unwrap().choices,
-            ["csv", "xlsx"]
-        );
     }
+    assert_eq!(
+        panel.entry().answer(question).unwrap().choices,
+        ["csv", "xlsx"]
+    );
     panel.select(question);
     let rows = plain(&dock(&request, &panel, 80, 30));
     assert!(rows.iter().any(|row| row.starts_with("  ◉ CSV")));
