@@ -116,7 +116,10 @@ fn multiple_choices_share_single_choice_marks_without_selecting_the_cursor() {
     assert_eq!(panel.entry().answer(question).unwrap().choices, ["csv"]);
     panel.type_text(question, "Also JSON");
     let rows = plain(&dock(&request, &panel, 80, 30));
-    assert!(rows.iter().any(|row| row.starts_with("› ◉ Other")));
+    assert!(
+        rows.iter()
+            .any(|row| row.starts_with("› ◉ Other  Also JSON"))
+    );
     assert_eq!(panel.entry().answer(question).unwrap().choices, ["csv"]);
     assert_eq!(panel.entry().answer(question).unwrap().text, "Also JSON");
 }

@@ -123,7 +123,7 @@ fn multiple_answers(state: &mut State, renderer: &mut Renderer, width: usize, he
                 renderer,
                 width,
                 height,
-                ["  ◉ CSV ", "  ○ XLSX ", "› ◉ Other "],
+                ["  ◉ CSV ", "  ○ XLSX ", "› ◉ Other  Also JSON"],
             );
         }
     }
