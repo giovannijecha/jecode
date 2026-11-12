@@ -113,7 +113,10 @@ was found.
 You can type or paste a path with `/` or `\` separators, with or without quotes
 or a leading `./`. A path to an existing file or folder inside the working
 directory leads the list even when listings hide it, as an explicit path does for
-the file tools; nothing outside the working directory is offered. A file removed
+the file tools; nothing outside the working directory is offered. Absolute paths
+can reach the working directory through an external alias of its root. Linked
+folders inside it are never traversed. References use the stored spelling of each
+name, including a link's own alias. A file removed
 while you browse is reported and dropped from the list, a folder that cannot be
 read says so, and Backspace returns to its parent. Your draft is never affected.
 

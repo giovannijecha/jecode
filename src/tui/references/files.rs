@@ -9,6 +9,7 @@
 use super::Origin;
 use crate::{cancel::Cancellation, json::Value, tools::discovery::walk::Walk, tui::editor::Editor};
 use std::{
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, TryRecvError},
     thread,
@@ -239,15 +240,17 @@ impl Browser {
         };
         let source = self.root.join(&relative);
         let parent = source.parent()?;
-        // An exact path must not provide a way to browse through a linked folder. Only
-        // folders below the workspace count: an absolute path may reach the workspace
-        // itself through a linked prefix, such as `/tmp` for `/private/tmp` on macOS.
+        // The outermost ancestor resolving to the workspace is the boundary.
+        // An external alias may name that boundary; an alias inside it may not
+        // be traversed, even if it also resolves to the workspace root.
         let root = self.root.as_path();
+        let boundary = parent
+            .ancestors()
+            .filter(|path| std::fs::canonicalize(path).ok().as_deref() == Some(root))
+            .last();
         if parent
             .ancestors()
-            .take_while(|path| {
-                *path != root && std::fs::canonicalize(path).ok().as_deref() != Some(root)
-            })
+            .take_while(|path| Some(*path) != boundary)
             .any(|path| {
                 std::fs::symlink_metadata(path)
                     .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -268,6 +271,8 @@ impl Browser {
         let source = parent.join(source.file_name()?);
         let kind = kind(&source);
         let path = if kind == Kind::Link {
+            let name = stored_name(&parent, source.file_name()?)?;
+            let source = parent.join(name);
             let path = source.strip_prefix(&self.root).ok()?.to_str()?.to_owned();
             #[cfg(windows)]
             let path = path.replace('\\', "/");
@@ -282,6 +287,32 @@ impl Browser {
     pub fn exists(&self, path: &str) -> bool {
         std::fs::symlink_metadata(self.root.join(path)).is_ok()
     }
+}
+
+/// Resolve only the link's last name through its own directory. A canonical path
+/// would replace that name with the target's. An exact spelling wins; a folded
+/// spelling is usable only when it identifies one directory entry.
+fn stored_name(parent: &Path, typed: &OsStr) -> Option<OsString> {
+    let folded = typed.to_str()?.to_lowercase();
+    let mut candidate = None;
+    let mut ambiguous = false;
+    for entry in std::fs::read_dir(parent).ok()? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let name = entry.file_name();
+        if name.as_os_str() == typed {
+            return Some(name);
+        }
+        if name
+            .to_str()
+            .is_some_and(|name| name.to_lowercase() == folded)
+        {
+            ambiguous |= candidate.is_some();
+            candidate = Some(name);
+        }
+    }
+    (!ambiguous).then_some(candidate).flatten()
 }
 
 fn kind(path: &Path) -> Kind {
