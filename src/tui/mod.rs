@@ -35,6 +35,7 @@ mod prose;
 mod providers;
 mod quit;
 mod recovery;
+mod references;
 mod render;
 mod resize;
 mod routing;
@@ -403,7 +404,7 @@ pub(crate) fn launch(
             };
             let delay = delay.min(background.wait().unwrap_or(Duration::MAX));
             let delay = delay.min(decoder.wait().unwrap_or(Duration::MAX));
-            if app.copy_job.is_some() || !app.imports.is_empty() {
+            if app.copy_job.is_some() || !app.imports.is_empty() || app.references_pending() {
                 delay.min(Duration::from_millis(20))
             } else if motion::loading(&app.state) || view::opening::animated(&app.state) {
                 delay.min(motion::FRAME)

@@ -10,6 +10,7 @@ mod panel;
 mod permission;
 pub(super) mod processes;
 mod quit;
+mod references;
 mod routing;
 mod status;
 pub(in crate::tui) mod todo;

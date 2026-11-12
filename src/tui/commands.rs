@@ -129,17 +129,7 @@ impl App {
         }
         if name == "/skills" && arguments.is_empty() {
             self.local_start("/skills");
-            let listing = if let Some(agent) = &mut self.agent {
-                agent
-                    .skills()
-                    .map(|skills| (skills, agent.skill_warnings().to_vec()))
-            } else {
-                // A turn holds the agent; read the same library directly.
-                let mut library = crate::skills::Library::at(self.facts().skills.clone());
-                library.refresh();
-                Ok((library.list(), library.warnings().to_vec()))
-            };
-            match listing {
+            match self.skill_catalog() {
                 Ok((skills, warnings)) => {
                     let (result, details) = commands::skills_catalog(
                         skills

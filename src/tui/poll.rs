@@ -70,6 +70,7 @@ impl App {
         dirty |= self.poll_lsp();
         dirty |= self.poll_job()?;
         dirty |= self.poll_imports();
+        dirty |= self.poll_references();
         dirty |= self.finish_delete(false)?;
         dirty |= self.sync_commands();
         for _ in 0..32 {

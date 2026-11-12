@@ -23,6 +23,12 @@ impl Agent {
         }
     }
 
+    pub(super) fn refresh_skills_during_turn(&mut self) {
+        if self.skills.refresh_preserving_reads() {
+            self.context.clear_measurement();
+        }
+    }
+
     pub(super) fn skill_instructions(&self) -> String {
         self.skills.instructions()
     }

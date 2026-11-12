@@ -59,6 +59,9 @@ mod native_lsp;
 #[path = "native_processes.rs"]
 mod native_processes;
 
+#[path = "native_references.rs"]
+mod native_references;
+
 #[path = "native_script.rs"]
 mod native_script;
 
@@ -316,6 +319,12 @@ fn native_console_fixture() {
         native_lsp::console();
         restored(&path);
         println!("NATIVE_LSP_RESTORED");
+        return;
+    }
+    if scenario == "reference-sheets" {
+        native_references::console();
+        restored(&path);
+        println!("NATIVE_REFERENCES_RESTORED");
         return;
     }
     if matches!(scenario.as_str(), "background-light" | "background-native") {

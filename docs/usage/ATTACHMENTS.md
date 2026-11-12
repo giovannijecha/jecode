@@ -4,6 +4,12 @@ You can attach files and clipboard images to a message. Jecode copies each one
 into its own storage, so later changes to the original do not affect the
 conversation.
 
+To point the agent at a file in the working directory without copying it, type
+`@` in the TUI, or write `@path` yourself. A
+[file reference](INTERFACE.md#reference-skills-and-files) is text in the message:
+it adds nothing to attachment storage, and the model reads the file's current
+content through its file tools when it needs it.
+
 ## Attach files
 
 | Where | How |

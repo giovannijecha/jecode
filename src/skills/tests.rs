@@ -87,6 +87,47 @@ fn reads_are_paged_and_stable_until_refresh() {
 }
 
 #[test]
+fn midturn_catalog_refresh_keeps_read_resources_until_next_turn() {
+    let home = Directory::new();
+    let old = install(home.path(), "old", "Old skill", "first body");
+    let mut library = Library::default();
+    library.configure(home.path());
+    library.refresh();
+    let args = Value::object([]);
+    let read = |library: &Library, name: &str| {
+        library
+            .read(name, &args, &Cancellation::default())
+            .unwrap()
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    assert!(read(&library, "skill:old").contains("first body"));
+    fs::write(
+        old.join("SKILL.md"),
+        "---\nname: old\ndescription: Changed skill\n---\n\nsecond body",
+    )
+    .unwrap();
+    install(home.path(), "new", "New skill", "new body");
+    assert!(library.refresh_preserving_reads());
+    assert!(library.instructions().contains("skill:new"));
+    assert!(read(&library, "skill:new").contains("new body"));
+    assert!(read(&library, "skill:old").contains("first body"));
+
+    fs::remove_dir_all(old).unwrap();
+    assert!(library.refresh_preserving_reads());
+    assert!(!library.instructions().contains("skill:old"));
+    assert!(read(&library, "skill:old").contains("first body"));
+    library.refresh();
+    assert!(
+        library
+            .read("skill:old", &args, &Cancellation::default())
+            .is_err()
+    );
+}
+
+#[test]
 fn invalid_resource_paths_cannot_escape_or_open_config() {
     let home = Directory::new();
     let package = install(home.path(), "safe", "Safe skill", "# Safe");

@@ -55,10 +55,28 @@ shared with [project instructions](PROJECT_INSTRUCTIONS.md#when-changes-take-eff
 a changed list is sent once, when it changes. When one fits, the model
 reads it, and any supporting files it needs, with references such as
 `skill:debugging` or `skill:debugging/references/DETAILS.md`. Skill bodies are
-never sent on every request. You can also ask for a skill by name in your
-message; there is no per-skill slash command.
+never sent on every request. There is no per-skill slash command.
 
-The list is refreshed at the start of each turn and whenever `/skills` runs.
+## Ask for a skill
+
+To ask for a skill yourself, name it in your message as `$name`, such as
+`$debugging the login test fails`. In the TUI, type `$` at the start of a word to
+choose from a **Skills** sheet that lists each skill with its description and
+filters as you type; Enter or Tab writes `$name` into your draft without sending
+it, and Esc keeps a literal `$`. See
+[Terminal interface](INTERFACE.md#reference-skills-and-files). In plain chat or a
+single prompt, type `$name` directly.
+
+The skill catalog the model receives says that `$name` is an explicit request
+for that skill. The model then reads `skill:name` and applies it to the
+request; Jecode does not load the body in advance or check that it was used.
+The selector reads the catalog from `~/.jecode/skills/` each time it opens,
+locally and without calling the model: an empty catalog, or one whose skills
+were all skipped, says so, and `/skills` explains skipped entries. A `$` word
+that names no skill in the catalog is ordinary text.
+
+The list is refreshed at the start of each turn, whenever `/skills` or the skill
+selector opens, and when a new message joins a running turn.
 Within a turn, the first read of each file stays fixed; the next turn reads the
 files from disk again. Skills support your current request; they do not override
 your instructions or grant permission for extra work. After compaction, the

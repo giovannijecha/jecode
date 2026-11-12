@@ -63,6 +63,20 @@ impl Editor {
         self.goal = None;
     }
 
+    /// Replaces the byte range `start..end` with `text`, together with any attachments
+    /// inside the range, leaving the caret after the new text.
+    pub fn splice(&mut self, start: usize, end: usize, text: &str) -> bool {
+        let text = attachments::strip(text);
+        if text.len() > LIMIT.saturating_sub(self.text.len() - (end - start)) {
+            return false;
+        }
+        self.remove(start, end);
+        self.text.insert_str(start, &text);
+        self.cursor = start + text.len();
+        self.goal = None;
+        true
+    }
+
     pub fn replace(&mut self, text: String) {
         self.set(Prompt::plain(text));
     }

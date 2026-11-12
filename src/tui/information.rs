@@ -32,6 +32,9 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
                 "Ctrl+G",
                 "Commands · run one and keep writing, the draft stays as it is",
             ),
+            ("$", "Skills · choose a personal skill and insert $name"),
+            ("@", "Files · choose a workspace file and insert @path"),
+            ("Tab", "Replace the $ or @ reference at the caret"),
             ("Ctrl+P/N", "Sent prompt history · commands are excluded"),
             ("↑", "Edit the pending draft from an empty composer"),
         ],
@@ -150,5 +153,27 @@ impl Information {
 
     pub fn current(&self) -> &Section {
         &self.sections[self.section.min(self.sections.len() - 1)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Information;
+
+    #[test]
+    fn help_keys_explain_composer_references() {
+        let help = Information::help();
+        let keys = &help.sections[1].details;
+        for (key, detail) in [
+            ("$", "personal skill"),
+            ("@", "workspace file"),
+            ("Tab", "reference at the caret"),
+        ] {
+            assert!(
+                keys.iter()
+                    .any(|(shown, explanation)| shown == key && explanation.contains(detail)),
+                "missing {key} reference help"
+            );
+        }
     }
 }

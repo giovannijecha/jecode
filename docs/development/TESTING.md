@@ -67,7 +67,7 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | LSP | `lsp::` uses an original child-process server for framing, synchronization, capabilities and lifecycle. `agent::lsp_tests` covers model dispatch at all local permission levels; `process::duplex` covers persistent I/O and descendant cleanup. `tui::lsp` and card tests cover the LSP panels and cards. |
 | Routing | `agent::routing_tests`, `backend::openrouter`. |
 | Tool scheduling | `agent::execution::scheduling`, `agent::execution::declared`, `sessions::tool_batch_tests`. |
-| Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`. |
+| Files and discovery | `tools::discovery`, `path_filter`, `agent::discovery_tests`; `tui::references` covers the `$` and `@` sheets, the file browser and reference text. |
 | Processes and terminals | `tools::processes` (lifecycle, yielding, completions), `agent::process_delivery_tests` (delivery and idle continuation), `session::processes`, `tui::processes`, `tools::exec`, `tools::interactive`, `process`. |
 | Collaboration | `agent::collaboration`, `collaboration::workspace`, `session::agents`, `tui::agents`. |
 | Sessions and attachments | `sessions`, `attachments`. |
@@ -126,6 +126,7 @@ cargo test --locked --offline tui::terminal::windows::native_tests::native_windo
 cargo test --locked --offline tui::terminal::windows::native_tests::native_direct_input::native_windows_direct_input -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_lsp::native_windows_lsp_panels -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_processes::native_windows_process_panels -- --exact --ignored --nocapture --test-threads=1
+cargo test --locked --offline tui::terminal::windows::native_tests::native_references::native_windows_reference_sheets -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::windows::native_tests::native_active_history::native_windows_escape_during_active_long_history -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_linux_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
 cargo test --locked --offline tui::terminal::unix::native_tests::native_macos_tui_controls_and_terminal_lifetime -- --exact --ignored --nocapture --test-threads=1
@@ -160,6 +161,12 @@ The active-history fixture resumes synthetic history, executes a local read and
 holds a loopback model stream open. It exercises typing, resizing and Esc through
 ConPTY, then verifies that the draft survives and the terminal is restored. It
 uses isolated configuration and no provider account or external model request.
+
+The reference-sheets fixture types `$` and `@` into a draft with an attachment,
+filters, opens a folder and inserts both references, then cancels an empty result.
+It paints each step with the real renderer at 44, 80 and 100 columns in both
+palettes and reads the console cells back, using an isolated skill library and
+workspace.
 
 The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
 the list, add, form and Advanced panels (including unchecked and signed-out

@@ -1,11 +1,13 @@
+mod field;
+
 use super::{
     commands,
-    panel::{self, Field, Key, Part, Sheet, key},
-    routing,
+    panel::{self, Key, Part, Sheet, key},
+    references, routing,
 };
 use crate::tui::{
     line::Line,
-    lsp::{Field as LspField, Panel as LspPanel},
+    lsp::Panel as LspPanel,
     mcp::{Field as McpField, Panel as McpPanel},
     motion,
     selector::{Badge, Choice, Hit, Purpose, Selector},
@@ -107,9 +109,12 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
         _ => Box::new(move |room| list(menu, columns, room)),
     };
     Sheet {
-        title: panel::title(menu.parent, title, &menu.context),
+        title: match &menu.purpose {
+            Purpose::Files(browser) => references::title(browser, columns),
+            _ => panel::title(menu.parent, title, &menu.context),
+        },
         aside: aside(menu),
-        field: field(menu),
+        field: field::render(menu),
         draft_caret: false,
         head,
         body,
@@ -123,70 +128,6 @@ pub(super) fn sheet(menu: &Selector, columns: usize) -> Sheet<'_> {
                 }
             ),
     }
-}
-
-/// The value typed for this menu. The label names the field and the title the panel, so
-/// a placeholder only adds what neither says.
-fn field(menu: &Selector) -> Option<Field> {
-    let (label, placeholder, suffix) = match &menu.purpose {
-        Purpose::Key(_) => ("Paste your key".to_string(), "", ""),
-        Purpose::AutoCompact => ("Threshold".into(), "1–99", "% of the context window"),
-        Purpose::Mcp(McpPanel::Field(field)) => match field {
-            McpField::Name => ("Shown in /mcp and tool cards".into(), "", ""),
-            McpField::Endpoint => ("Server address".into(), "https://…", ""),
-            McpField::Token => ("Paste your token".into(), "", ""),
-            McpField::Timeout => ("Per call".into(), "1–600", " seconds"),
-            McpField::Header => ("Name: value · Name: removes".into(), "Name: value", ""),
-            McpField::ClientId => ("Public OAuth client ID".into(), "", ""),
-        },
-        Purpose::Lsp(LspPanel::Field(field)) => match field {
-            LspField::Name => ("Shown in /lsp and tool cards".into(), "", ""),
-            LspField::Executable => ("User-selected executable or absolute path".into(), "", ""),
-            LspField::Languages => (
-                "Language ID and file extensions".into(),
-                "rust: .rs; cpp: .cc .cpp",
-                "",
-            ),
-            LspField::Arguments => (
-                "Quoted arguments keep spaces".into(),
-                "--flag \"two words\"",
-                "",
-            ),
-            LspField::Environment => (
-                "NAME=value · NAME= removes · values hidden".into(),
-                "NAME=value",
-                "",
-            ),
-            LspField::RootMarkers => (
-                "Comma-separated files inside the workspace".into(),
-                "Cargo.toml",
-                "",
-            ),
-            LspField::RootOverride => ("Explicit analysis root".into(), "Automatic", ""),
-            LspField::Initialization | LspField::Settings => ("JSON value".into(), "{}", ""),
-            LspField::Timeout => ("Per request".into(), "100–120000", " ms"),
-        },
-        Purpose::Commands { .. } => ("Filter".into(), "", ""),
-        _ if menu.searchable => (format!("Filter {}", noun(menu)), "", ""),
-        _ => return None,
-    };
-    // The whole value: the sheet wraps it and keeps the caret in view.
-    let (value, caret) = menu.editor.viewport(
-        usize::MAX,
-        matches!(
-            menu.purpose,
-            Purpose::Key(_)
-                | Purpose::Mcp(McpPanel::Field(McpField::Token | McpField::Header))
-                | Purpose::Lsp(LspPanel::Field(LspField::Environment))
-        ),
-    );
-    Some(Field {
-        label,
-        value,
-        caret,
-        placeholder,
-        suffix,
-    })
 }
 
 fn noun(menu: &Selector) -> String {
@@ -211,6 +152,8 @@ fn aside(menu: &Selector) -> Line {
     };
     let text = match &menu.purpose {
         Purpose::Commands { .. } => count("command"),
+        Purpose::Skills { .. } => count("skill"),
+        Purpose::Files(_) => references::aside(menu),
         Purpose::Models { .. } => count("model"),
         Purpose::Providers { .. } => count("provider"),
         Purpose::ProviderGroups { .. } => count("group"),
@@ -255,6 +198,7 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
     let close = [key("Esc", back)];
     let deleting = menu.delete_target().is_some();
     let keys: Vec<Key> = match &menu.purpose {
+        Purpose::Skills { .. } | Purpose::Files(_) => return references::keys(menu, width),
         Purpose::Sessions { working: true, .. } => vec![key("Ctrl+Q", "quit after cleanup")],
         Purpose::Sessions { .. } if deleting => {
             return panel::confirm(
@@ -345,28 +289,41 @@ fn table_width(menu: &Selector, columns: usize) -> usize {
 }
 
 fn list(menu: &Selector, columns: usize, room: usize) -> Vec<(Line, Part)> {
-    let empty = if menu.options.is_empty() && matches!(menu.purpose, Purpose::Sessions { .. }) {
-        Some("No saved conversations")
+    let empty = if let Some(empty) = references::empty(menu) {
+        Some(empty)
+    } else if menu.options.is_empty() && matches!(menu.purpose, Purpose::Sessions { .. }) {
+        Some(("No saved conversations".into(), MUTED))
     } else if menu.options.is_empty() && matches!(menu.purpose, Purpose::Remembered { .. }) {
-        Some("Nothing remembered")
+        Some(("Nothing remembered".into(), MUTED))
     } else if menu.filtered.is_empty() {
-        Some("No matching option")
+        Some(("No matching option".into(), MUTED))
     } else {
         None
     };
     let notes = match &menu.purpose {
-        Purpose::Routing { notes, .. } => notes.as_slice(),
-        _ => &[],
+        Purpose::Routing { notes, .. } => notes.clone(),
+        Purpose::Skills { .. } | Purpose::Files(_) => references::notes(menu),
+        _ => Vec::new(),
     };
-    if let Some(empty) = empty {
-        let mut rows = vec![(panel::indent(Line::new(empty, MUTED), columns), Part::Keep)];
+    let notes = notes.as_slice();
+    if let Some((empty, style)) = empty {
+        // A long reason, such as an unreadable folder's, wraps rather than losing its cause.
+        let mut rows: Vec<(Line, Part)> = Line::new(&empty, style)
+            .wrap(panel::text_width(columns), true)
+            .into_iter()
+            .map(|row| (panel::indent(row, columns), Part::Keep))
+            .collect();
         rows.extend(notes.iter().map(|note| note_row(note, columns)));
         return rows;
     }
-    // Panel-wide notes follow the list within the same room.
-    let notes = if room > notes.len() + 1 { notes } else { &[] };
-    let limit = room - notes.len();
+    // Panel-wide notes follow the list within the same room; a short list keeps them.
     let total = menu.filtered.len();
+    let notes = if room > notes.len() + 1 || total + notes.len() <= room {
+        notes
+    } else {
+        &[]
+    };
+    let limit = room - notes.len();
     let start = panel::start(menu.selected, total, limit);
     let table = match &menu.purpose {
         Purpose::Routing { entries, .. } => Some((
@@ -396,6 +353,9 @@ fn list(menu: &Selector, columns: usize, room: usize) -> Vec<(Line, Part)> {
                         false,
                         columns.saturating_sub(2),
                     )
+                }
+                None if matches!(menu.purpose, Purpose::Files(_)) => {
+                    references::file_row(menu, hit, on, columns)
                 }
                 None => option(menu, hit, on, names, columns),
             };

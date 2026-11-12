@@ -22,6 +22,8 @@ impl App {
                 _ => return Ok(false),
             }
         }
+        // Only typed sigils open a selector; pasted `$` and `@` stay text.
+        let pasted = matches!(decoded, Decoded::Paste(_));
         let decoded = match decoded {
             // Only an explicitly typed shortcut can decide a request.
             Decoded::Text(text) if self.state.permission.is_some() => {
@@ -130,7 +132,7 @@ impl App {
                             self.choose(choice)?;
                         }
                     }
-                } else {
+                } else if pasted || !self.type_reference(&text) {
                     self.continue_draft(&text);
                 }
                 return Ok(false);
@@ -273,6 +275,10 @@ impl App {
                 _ => {}
             }
         }
+        let plain = !key.ctrl() && !key.alt() && !key.shift();
+        if key.code == 9 && plain && self.retarget_reference() {
+            return Ok(false);
+        }
         match key.code {
             13 if !key.shift() && !key.alt() && !key.ctrl() => {
                 self.typed = None;
@@ -360,6 +366,9 @@ impl App {
         if self.deletion_job.is_some() {
             return Ok(false);
         }
+        if self.reference_key(key) {
+            return Ok(false);
+        }
         if key.code == 68 && key.ctrl() && !key.alt() && !key.shift() {
             if !self.revoke_grant() {
                 self.state.selector.as_mut().unwrap().toggle_delete();
@@ -435,12 +444,13 @@ impl App {
         }
     }
     pub(super) fn close_selector(&mut self) {
-        if self
-            .state
-            .selector
-            .as_ref()
-            .is_some_and(|menu| matches!(menu.purpose, Purpose::Commands { .. }))
-        {
+        // These sheets never touched the draft, which returns as it stood.
+        if self.state.selector.as_ref().is_some_and(|menu| {
+            matches!(
+                menu.purpose,
+                Purpose::Commands { .. } | Purpose::Skills { .. } | Purpose::Files(_)
+            )
+        }) {
             self.state.selector = None;
             return;
         }
