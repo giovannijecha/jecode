@@ -85,6 +85,43 @@ fn the_cursor_moves_freely_and_only_space_enter_or_typing_select() {
 }
 
 #[test]
+fn multiple_choices_share_single_choice_marks_without_selecting_the_cursor() {
+    let request = request(SEVERAL);
+    let question = &request.questions[0];
+    let mut panel = Panel::new(&request, None);
+    for width in [40, 80] {
+        let rows = plain(&dock(&request, &panel, width, 30));
+        assert!(rows.iter().any(|row| row.starts_with("› ○ CSV")));
+        assert!(rows.iter().any(|row| row.starts_with("  ○ XLSX")));
+        assert!(rows.iter().any(|row| row.starts_with("  ○ Other")));
+        assert!(rows.iter().any(|row| row.contains("Space toggle")));
+    }
+    panel.select(question);
+    panel.move_row(question, false);
+    panel.select(question);
+    for width in [40, 80] {
+        let rows = plain(&dock(&request, &panel, width, 30));
+        assert!(rows.iter().any(|row| row.starts_with("  ◉ CSV")));
+        assert!(rows.iter().any(|row| row.starts_with("› ◉ XLSX")));
+        assert!(rows.iter().any(|row| row.starts_with("  ○ Other")));
+        assert_eq!(
+            panel.entry().answer(question).unwrap().choices,
+            ["csv", "xlsx"]
+        );
+    }
+    panel.select(question);
+    let rows = plain(&dock(&request, &panel, 80, 30));
+    assert!(rows.iter().any(|row| row.starts_with("  ◉ CSV")));
+    assert!(rows.iter().any(|row| row.starts_with("› ○ XLSX")));
+    assert_eq!(panel.entry().answer(question).unwrap().choices, ["csv"]);
+    panel.type_text(question, "Also JSON");
+    let rows = plain(&dock(&request, &panel, 80, 30));
+    assert!(rows.iter().any(|row| row.starts_with("› ◉ Other")));
+    assert_eq!(panel.entry().answer(question).unwrap().choices, ["csv"]);
+    assert_eq!(panel.entry().answer(question).unwrap().text, "Also JSON");
+}
+
+#[test]
 fn an_earlier_draft_restores_its_choice_and_words() {
     let request = request(SINGLE);
     let draft = Draft {

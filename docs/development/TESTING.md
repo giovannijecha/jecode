@@ -112,6 +112,11 @@ the executable directly. Repeated snapshots keep the same native cell and mode
 assertions without repeatedly starting PowerShell and its compiler. Timeout
 diagnostics retain the end of the terminal output so child failures stay visible.
 
+The Windows fullscreen fixture also reads Ask answer rows back from the native
+console at 40- and 80-column layouts in both palettes. It checks the shared
+`○`/`◉` marks, cursor and label spacing across multiple selections, deselection
+and typed Other answers, reusing the renderer between frames to catch stale cells.
+
 The Windows active-history Esc fixture resumes 300 turns with compact saved tool
 outputs, keeping the request below the loopback server's 8 MiB body limit. It
 checks transcript rebuilding and cancellation; compaction uses separate fixtures.

@@ -403,6 +403,12 @@ headings are `DIM`. A `┃` thumb in `MUTED` on a `│` track in `FAINT` takes t
 last column when the list overflows. Digits `1`–`9` choose among up to nine
 options; ten or more are filtered by typing.
 
+Ask answer options use `○` when unselected and `◉` in bold `ACCENT` when
+selected, for both single and multiple choice. Each mark takes one cell and
+one following space before the label. The `›` marker and `SELECTED_SURFACE`
+show cursor focus independently of the selected answers; nothing is preselected.
+Multiple choice keeps its Space toggle and Enter send/next keys.
+
 Tabs show names in `MUTED`, the active one bold `STRONG` over an `ACCENT` `━`
 on a `HAIRLINE` divider, with an optional mode word on the right. Process output
 sits on `CODE_SURFACE` from column 2 to the edge.
