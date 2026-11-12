@@ -63,6 +63,17 @@ your unsent draft, the pending message and your prompt history. On resume, a
 queued message becomes a paused draft: press Up in an empty composer to take it
 back, then Enter to send it. Nothing pending is sent automatically.
 
+The journal also keeps a `runtime_identity` event each time a conversation is
+activated by a running Jecode process. It records the activation time, Jecode
+version, OS, architecture, build profile and executable fingerprint. A resume
+appends the current identity and preserves earlier ones, so the same version
+number can be distinguished across local builds. The fingerprint is diagnostic
+identity, not an authenticity check; it is null when unavailable. These events
+are journal metadata and do not enter the model's conversation or context.
+Older current-format histories may lack earlier runtime identities; resume
+does not invent them. See [Real-task evidence](../development/PERFORMANCE.md#real-task-evidence)
+for capturing a study before review changes its delivered files.
+
 If you send a task before any provider is configured, it returns to the
 composer. A draft with attachments can still be saved; it appears as **Not
 selected** in the picker and uses whichever model is configured when resumed.

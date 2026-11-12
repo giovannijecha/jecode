@@ -104,7 +104,7 @@ pub struct Access {
     pub base: Option<PathBuf>,
     /// Exact, private invocation identity for a remembered command grant.
     pub identity: Option<String>,
-    /// Each file of a multi-file edit, whose `target` names them all. One
+    /// Each file of a multi-file read or edit; `target` names them all. One
     /// request covers the call; grants remember the outside files one by one.
     pub members: Vec<Access>,
 }

@@ -27,6 +27,13 @@ pub fn once(access: &Access) -> &'static str {
 pub fn covers(access: &Access, tool: &str) -> &'static str {
     match (access.kind, tool) {
         (Kind::Reads, "list" | "search") => "Reads of this folder",
+        (Kind::Reads, "read") if access.members.len() > 1 => {
+            match access.members.iter().filter(|file| file.outside).count() {
+                count if count == access.members.len() => "Reads of these files",
+                1 => "Reads of the outside file above",
+                _ => "Reads of the outside files above",
+            }
+        }
         (Kind::Reads, _) => "Reads of this file",
         // One request names every file of a multi-file edit; only the outside
         // ones need remembering.

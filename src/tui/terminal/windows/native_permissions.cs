@@ -58,6 +58,8 @@ public sealed partial class JecodeTestPty {
         int request = Mark();
         Command("read outside again");
         Wait("Waiting for permission", request);
+        Wait("Reads of the outside files above", request);
+        Wait("outside-other.txt", request);
         Send("3");
         Wait("Native second read complete.");
 

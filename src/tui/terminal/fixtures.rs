@@ -35,6 +35,9 @@ pub(super) fn permissions(path: &Path) {
     let outside = Directory::new();
     let file = outside.path().join("outside-note.txt");
     std::fs::write(&file, "native outside fixture\n").unwrap();
+    let second = outside.path().join("outside-other.txt");
+    std::fs::write(&second, "native second outside fixture\n").unwrap();
+    std::fs::write(path.join("inside-note.txt"), "native inside fixture\n").unwrap();
     let read = |id| {
         tool_call(
             id,
@@ -63,7 +66,24 @@ pub(super) fn permissions(path: &Path) {
     let fixture = HttpFixture::new(vec![
         (200, completion("", vec![read("native-read-1")])),
         (200, completion("Native first read complete.", vec![])),
-        (200, completion("", vec![read("native-read-2")])),
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "native-read-2",
+                    "read",
+                    Value::object([(
+                        "paths",
+                        Value::Array(vec![
+                            Value::string("inside-note.txt"),
+                            Value::string(file.to_string_lossy()),
+                            Value::string(second.to_string_lossy()),
+                        ]),
+                    )]),
+                )],
+            ),
+        ),
         (200, completion("Native second read complete.", vec![])),
         (200, completion("", vec![long])),
         (200, completion("Native long command denied.", vec![])),

@@ -21,12 +21,17 @@ fn a_failed_result_write_preserves_read_results_and_the_resume_index() {
         name: "read".into(),
         arguments: arguments.encode(),
     };
-    let result = agent.read_paths_with(&call, &arguments, |first| {
-        let mut file = Overflow::start(agent.tools.outputs(), first)?;
-        let path = agent.tools.outputs().resolve(&file.logs.stdout_ref)?;
-        file.logs.stdout = output::Spool::read_only_fixture(&path);
-        Ok(file)
-    });
+    let result = agent.read_paths_with(
+        &call,
+        &arguments,
+        &crate::tools::Begun::default(),
+        |first| {
+            let mut file = Overflow::start(agent.tools.outputs(), first)?;
+            let path = agent.tools.outputs().resolve(&file.logs.stdout_ref)?;
+            file.logs.stdout = output::Spool::read_only_fixture(&path);
+            Ok(file)
+        },
+    );
     assert!(
         result
             .get("error")

@@ -48,7 +48,7 @@ impl Agent {
             && arguments.get("paths").is_some()
         {
             return crate::tools::Execution {
-                result: self.read_paths(call, &arguments),
+                result: self.read_paths(call, &arguments, &begun),
                 change: None,
             };
         }

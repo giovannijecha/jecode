@@ -144,64 +144,76 @@ fn a_call_that_fits_leaves_page_keys_to_the_conversation() {
 
 #[test]
 fn a_multi_file_request_keeps_its_choices_and_pages_through_every_file() {
-    let directory = Directory::new();
-    let fixture = HttpFixture::new(vec![]);
-    let mut app = app(&directory, &fixture);
-    app.permission_observer
-        .set_surface(crate::permissions::Surface::Panel);
-    let request = |count: usize| {
-        let members: Vec<Access> = (0..count)
-            .map(|index| {
-                outside(
-                    Kind::Edits,
-                    &format!(r"D:\work\a-long-folder-name\another-long-folder\file-{index:02}.rs"),
-                )
-            })
-            .collect();
-        Access {
-            target: members
-                .iter()
-                .map(|member| member.target.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            members,
-            ..outside(Kind::Edits, "")
+    for (kind, tool, grant) in [
+        (
+            Kind::Reads,
+            "read",
+            "Reads of these files, this conversation",
+        ),
+        (
+            Kind::Edits,
+            "edit",
+            "Edits to these files, this conversation",
+        ),
+    ] {
+        let directory = Directory::new();
+        let fixture = HttpFixture::new(vec![]);
+        let mut app = app(&directory, &fixture);
+        app.permission_observer
+            .set_surface(crate::permissions::Surface::Panel);
+        let request = |count: usize| {
+            let members: Vec<Access> = (0..count)
+                .map(|index| {
+                    outside(
+                        kind,
+                        &format!(
+                            r"D:\work\a-long-folder-name\another-long-folder\file-{index:02}.rs"
+                        ),
+                    )
+                })
+                .collect();
+            Access {
+                target: members
+                    .iter()
+                    .map(|member| member.target.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                members,
+                ..outside(kind, "")
+            }
+        };
+        let names: Vec<String> = (0..12).map(|index| format!("file-{index:02}.rs")).collect();
+        let asked = app
+            .permission_observer
+            .begin("call", tool, &request(12))
+            .unwrap();
+        app.refresh_permission();
+        for (width, height) in [(80, 24), (44, 24), (80, 12)] {
+            assert_eq!(
+                page_through(&mut app, width, height, &names),
+                names,
+                "{width}x{height}"
+            );
         }
-    };
-    let names: Vec<String> = (0..12).map(|index| format!("file-{index:02}.rs")).collect();
-    let asked = app
-        .permission_observer
-        .begin("call", "edit", &request(12))
-        .unwrap();
-    app.refresh_permission();
-    for (width, height) in [(80, 24), (44, 24), (80, 12)] {
-        assert_eq!(
-            page_through(&mut app, width, height, &names),
-            names,
-            "{width}x{height}"
+        app.permission_observer
+            .decide(asked.id, crate::permissions::Decision::Deny)
+            .unwrap();
+        app.refresh_permission();
+        // With room, every file is named and nothing pages.
+        app.permission_observer
+            .begin("call", tool, &request(2))
+            .unwrap();
+        app.refresh_permission();
+        app.state.width = 100;
+        app.state.height = 40;
+        let shown = screen(&app);
+        assert!(
+            shown.contains("file-00.rs") && shown.contains("file-01.rs"),
+            "{shown}"
         );
+        assert!(!shown.contains("PgUp/PgDn"), "{shown}");
+        assert!(shown.contains(grant), "{shown}");
     }
-    app.permission_observer
-        .decide(asked.id, crate::permissions::Decision::Deny)
-        .unwrap();
-    app.refresh_permission();
-    // With room, every file is named and nothing pages.
-    app.permission_observer
-        .begin("call", "edit", &request(2))
-        .unwrap();
-    app.refresh_permission();
-    app.state.width = 100;
-    app.state.height = 40;
-    let shown = screen(&app);
-    assert!(
-        shown.contains("file-00.rs") && shown.contains("file-01.rs"),
-        "{shown}"
-    );
-    assert!(!shown.contains("PgUp/PgDn"), "{shown}");
-    assert!(
-        shown.contains("Edits to these files, this conversation"),
-        "{shown}"
-    );
 }
 
 #[test]

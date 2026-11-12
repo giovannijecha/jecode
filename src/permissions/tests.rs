@@ -32,6 +32,27 @@ fn a_grant_states_which_files_of_a_multi_file_edit_it_covers() {
     assert_eq!(covers(&[true]), "Edits to this file");
 }
 
+#[test]
+fn a_read_batch_grant_names_only_the_outside_files_it_covers() {
+    let covers = |outside: &[bool]| {
+        let batch = Access {
+            members: outside
+                .iter()
+                .map(|outside| access(Kind::Reads, *outside))
+                .collect(),
+            ..access(Kind::Reads, true)
+        };
+        wording::covers(&batch, "read")
+    };
+    assert_eq!(covers(&[true, true]), "Reads of these files");
+    assert_eq!(covers(&[false, true]), "Reads of the outside file above");
+    assert_eq!(
+        covers(&[false, true, true]),
+        "Reads of the outside files above"
+    );
+    assert_eq!(covers(&[true]), "Reads of this file");
+}
+
 fn allowed(permissions: &Permissions, access: &Access) -> &'static str {
     match permissions.check(access) {
         Verdict::Allow => "allow",

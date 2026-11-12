@@ -105,6 +105,12 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         members,
         ..access(Kind::Edits, "", None)
     };
+    let mut several_reads = several.clone();
+    several_reads.kind = Kind::Reads;
+    for member in &mut several_reads.members {
+        member.kind = Kind::Reads;
+    }
+    several_reads.members[0].outside = false;
     let mut focused = asking(columns, "edit", edit, "MAIN AGENT", 1);
     focused.permission.as_mut().unwrap().focus = Some(1);
     let long = (1..=40)
@@ -133,6 +139,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
             asking(columns, "read", read, "MAIN AGENT", 1),
         ),
         ("Request · edit, focus on remember", focused),
+        (
+            "Request · multi-file read, mixed targets",
+            asking(columns, "read", several_reads, "MAIN AGENT", 1),
+        ),
         (
             "Request · multi-file edit, paged",
             asking(columns, "edit", several, "MAIN AGENT", 1),
