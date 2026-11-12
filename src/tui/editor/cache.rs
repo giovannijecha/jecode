@@ -25,12 +25,24 @@ impl Cache {
             self.source.clear();
             self.source.push_str(source);
         } else if self.source != source {
-            let common = self
+            let mut common = self
                 .source
                 .bytes()
                 .zip(source.bytes())
                 .take_while(|(before, after)| before == after)
                 .count();
+            // Closing a quoted reference or editing its end can change chips
+            // on earlier wrapped rows of the same logical line.
+            let line = source.as_bytes()[..common]
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(0, |index| index + 1);
+            if source.as_bytes()[line..common]
+                .iter()
+                .any(|byte| matches!(byte, b'$' | b'@'))
+            {
+                common = line;
+            }
             // Start before the edit boundary so combining marks and joins can
             // extend the preceding glyph, including at a wrapped row boundary.
             let row = self

@@ -92,6 +92,12 @@ To change a reference, put the caret on it and press Tab. Its selector opens
 with the reference as the filter, and your choice replaces it. Tab on a lone `$`
 or `@` reopens its selector. Elsewhere in a draft, Tab does nothing.
 
+References appear in the composer as colored cards on the same surface as image
+and file attachments, with their `$` or `@` prefix and no attachment number.
+They remain editable text: Backspace removes one character, and the message keeps
+the exact reference without the card's visual padding. Long references wrap in
+full. A lone `$` or `@` stays plain until it has a name or path.
+
 ### Browse files
 
 The file selector starts at the working directory and lists the folder's

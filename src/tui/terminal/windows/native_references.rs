@@ -115,6 +115,7 @@ fn flow(home: &Directory, project: &Directory, columns: usize) {
     press(&mut app, 13);
     assert!(app.state.selector.is_none());
     paint(&app, "$review");
+    chip(&app, " $review ");
 
     text(&mut app, "@");
     settle(&mut app);
@@ -138,7 +139,16 @@ fn flow(home: &Directory, project: &Directory, columns: usize) {
             .ends_with("$review @src/tui/input.rs ")
     );
     // The composer wraps the path at 44 columns; its text is checked above.
-    paint(&app, "with $review");
+    paint(&app, "with  $review");
+    chip(&app, " @src/tui/input.rs ");
+
+    text(&mut app, "@");
+    settle(&mut app);
+    text(&mut app, "my file");
+    paint(&app, "my file.md");
+    press(&mut app, 13);
+    assert!(app.state.selector.is_none());
+    chip(&app, " @\"docs/my file.md\" ");
 
     text(&mut app, "$");
     text(&mut app, "zzz");
@@ -225,4 +235,18 @@ fn paint(app: &App, expected: &str) {
     .unwrap();
     io::stdout().flush().unwrap();
     assert!(probe().contains(expected), "ConPTY lacked {expected}");
+}
+
+/// Check the same filled surface as attachments before reading the native cells.
+fn chip(app: &App, expected: &str) {
+    let frame = view::frame(&app.state, "fixture/model", "project");
+    assert!(
+        frame.live.iter().flat_map(|line| &line.spans).any(|span| {
+            span.text == expected
+                && span.style == theme::LIT
+                && span.background == Some(theme::BADGE_IDLE)
+        }),
+        "reference lacked its attachment surface: {expected}"
+    );
+    paint(app, expected);
 }

@@ -1,5 +1,7 @@
 mod cache;
 mod layout;
+#[cfg(test)]
+mod reference_tests;
 use super::terminal::Key;
 use super::text;
 use crate::attachments::{self, Attachment, MARKER, Prompt};
