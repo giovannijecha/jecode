@@ -294,14 +294,19 @@ public sealed partial class JecodeTestPty : IDisposable {
                     int cleared = pty.Mark(); pty.Send("\x15");
                     pty.Wait("Ask anything", cleared);
                 }
-                int next = pty.Mark(); pty.Send("/new");
-                pty.Wait("Commands", next); pty.Send("\r");
+                // A menu can repaint after only the first fragment. End flushes
+                // buffered console text before Enter without changing the draft.
+                int next = pty.Mark(); pty.Send("/");
+                pty.Wait("Commands", next); pty.Send("new\x1b[F");
+                pty.Wait("Start a new conversation", next);
+                next = pty.Mark(); pty.Send("\r");
                 string result = scenario == "startup-fallback-new" ? "current model kept"
                     : scenario == "startup-fallback" ? "Choose a model" : "No configured provider";
                 pty.Wait(result, next);
                 pty.EnsureNoText("has no configured account", next);
-                int settings = pty.Mark(); pty.Send("/settings");
-                pty.Wait("Commands", settings); pty.Send("\r");
+                int settings = pty.Mark(); pty.Send("/settings\x1b[F");
+                pty.Wait("Change saved defaults", settings);
+                settings = pty.Mark(); pty.Send("\r");
                 pty.Wait("Providers", settings);
                 pty.Send("\x1b"); Thread.Sleep(150); pty.Send("\x11");
                 pty.Wait("NATIVE_STARTUP_RESTORED");
