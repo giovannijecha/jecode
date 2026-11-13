@@ -19,8 +19,10 @@ use crate::{
 const NARROW: usize = 64;
 pub(in crate::tui) const NO_PLAN: &str = "No plan yet. The model writes one for multi-step work.";
 
-/// A state's B3 mark, title and word styles, and its cell on the rule's
-/// strip; cancelled tasks have none.
+/// A state's mark, title and word styles, and its cell on the rule's strip;
+/// cancelled tasks have none. The mark is `◉` only once the main agent marks
+/// the task done and `○` otherwise, the circles Ask answers use; its colour
+/// carries the state.
 struct Look {
     mark: (&'static str, Style),
     title: Style,
@@ -29,23 +31,17 @@ struct Look {
 }
 
 fn look(phase: Phase) -> Look {
-    let (mark, title, word, strip) = match phase {
-        Phase::Done => (("☑ ", GOOD), MUTED, GOOD, Some(("▰", GOOD))),
-        Phase::InProgress => (
-            ("☐ ", ACCENT.bold()),
-            STRONG.bold(),
-            ACCENT,
-            Some(("▰", ACCENT)),
-        ),
-        Phase::Waiting | Phase::AwaitingReview => {
-            (("☐ ", MUTED), STRONG, MUTED, Some(("▰", MUTED)))
-        }
-        Phase::Failed => (("☐ ", BAD.bold()), STRONG, BAD, Some(("▰", BAD))),
-        Phase::NotStarted => (("☐ ", MUTED), BODY, MUTED, Some(("▱", FAINT))),
-        Phase::Cancelled => (("☐ ", FAINT), DIM.strike(), DIM, None),
+    let (ink, title, word, strip) = match phase {
+        Phase::Done => (GOOD, MUTED, GOOD, Some(("▰", GOOD))),
+        Phase::InProgress => (ACCENT.bold(), STRONG.bold(), ACCENT, Some(("▰", ACCENT))),
+        Phase::Waiting | Phase::AwaitingReview => (MUTED, STRONG, MUTED, Some(("▰", MUTED))),
+        Phase::Failed => (BAD.bold(), STRONG, BAD, Some(("▰", BAD))),
+        Phase::NotStarted => (MUTED, BODY, MUTED, Some(("▱", FAINT))),
+        Phase::Cancelled => (FAINT, DIM.strike(), DIM, None),
     };
+    let glyph = if phase == Phase::Done { "◉ " } else { "○ " };
     Look {
-        mark,
+        mark: (glyph, ink),
         title,
         word,
         strip,

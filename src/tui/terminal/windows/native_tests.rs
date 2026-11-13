@@ -13,6 +13,8 @@ use crate::{
 mod activity_tests;
 #[path = "agents_tests.rs"]
 mod agents_tests;
+#[path = "mark_tests.rs"]
+mod mark_tests;
 #[path = "work_tests.rs"]
 mod work_tests;
 

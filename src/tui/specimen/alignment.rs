@@ -38,7 +38,9 @@ fn ask(width: usize) -> State {
             "question":"Which rows should the CSV include?",
             "context":"The reports screen has active filters.","options":[
             {"id":"visible","label":"Visible rows","description":"Follow the active filters","recommended":true},
-            {"id":"all","label":"All report rows","description":"Ignore filters and export everything"}]}]}"#,
+            {"id":"all","label":"All report rows","description":"Ignore filters and export everything"}]},
+            {"id":"formats","title":"Formats","question":"Which formats should the export offer?",
+            "multiple":true,"options":[{"id":"csv","label":"CSV"},{"id":"xlsx","label":"XLSX"}]}]}"#,
         )
         .unwrap(),
     )
@@ -47,6 +49,16 @@ fn ask(width: usize) -> State {
     panel.protect_arrival(&request);
     state.question = Some(request);
     state.ask_panel = Some(panel);
+    state
+}
+
+fn answered_questions(width: usize) -> State {
+    let mut state = ask(width);
+    let panel = state.ask_panel.as_mut().unwrap();
+    panel.entries[0].picked = vec![0];
+    panel.step = 1;
+    panel.entries[1].picked = vec![0];
+    panel.entries[1].row = 1;
     state
 }
 
@@ -131,6 +143,17 @@ fn alignment() {
     let scenes = [
         ("Ask over a draft", ask(80), false),
         ("Ask over a draft, narrow", ask(40), false),
+        (
+            "Ask, answered step and multiple choice",
+            answered_questions(80),
+            false,
+        ),
+        ("Ask, answered step, narrow", answered_questions(40), false),
+        (
+            "Ask, answered step, light inks",
+            answered_questions(80),
+            true,
+        ),
         (
             "Ask, twelve questions of twenty options",
             many_questions(80),

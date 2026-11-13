@@ -234,13 +234,14 @@ fn headings_tasks_and_inline_formatting_keep_their_visible_text() {
             "",
             "Subtitle",
             "",
-            "☐ pending",
-            "☑ done",
+            "○ pending",
+            "◉ done",
             "│ old and docs (example.test)"
         ]
     );
-    // Levels: H1 accent, H2 strong, H3 and below body, all bold; a done task
-    // is good.
+    // Levels: H1 accent, H2 strong, H3 and below body, all bold; an open task
+    // is muted and a done task good.
+    assert_eq!(rows[4].spans[0].style, MUTED);
     assert_eq!(rows[5].spans[0].style, crate::tui::theme::GOOD);
     assert_eq!(rows[0].spans[0].style, STRONG.bold());
     assert_eq!(rows[2].spans[0].style, ACCENT.bold());

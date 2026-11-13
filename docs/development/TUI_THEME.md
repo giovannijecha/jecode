@@ -51,7 +51,7 @@ Text roles, with the ink for each kind of terminal:
 | `LIT` | `#DACEFF` | `#48198A` | The caret's blinking `_`, background badge names, command names in Work chapters, `new output`, attachment chips. |
 | `BODY` | `#D1D2D6` | `#2C2E31` | Assistant prose, tool targets, diagnostics. |
 | `CODE_TEXT` | `#D1D2D6` | `#2C2E31` | Default code, inline code, command output, diff context. |
-| `GOOD` | `#7CD992` | `#066F32` | The `Done` and `✓` marks, added lines, `☑`. |
+| `GOOD` | `#7CD992` | `#066F32` | The `Done` and `✓` marks, the done Todo and Markdown task `◉`, added lines. |
 | `ACCENT` | `#C7AFFF` | `#552B9A` | The `>_` mark, `›` and `●` markers, matches, level 1 headings, links, the words `current` and `recommended`, the active tab mark, the gauge fill. |
 | `KEYWORD` | `#C8B7FF` | `#553494` | Code keywords. |
 | `CODE_STRING` | `#99D3DA` | `#016770` | Code strings. |
@@ -408,6 +408,23 @@ selected, for both single and multiple choice. Each mark takes one cell and
 one following space before the label. The `›` marker and `SELECTED_SURFACE`
 show cursor focus independently of the selected answers; nothing is preselected.
 Multiple choice keeps its Space toggle and Enter send/next keys.
+
+`/todo` task rows use the same circles and have no cursor: `◉` once the main
+agent marks a task done, `○` in every other state, each one cell and one
+following space before the title. The mark takes the state colour: `GOOD` done,
+bold `ACCENT` in progress, bold `BAD` failed, `MUTED` waiting, awaiting review
+and not started, `FAINT` cancelled, whose title is struck in `DIM`. A
+collaborator's return shows `awaiting review` with an open circle. The rule's
+`▰`/`▱` strip is separate.
+
+With several questions, the step row puts `◉` and one space in `ACCENT` before
+each answered title other than the current one; the current title is bold
+`ACCENT` without a mark and unanswered titles are `MUTED`. Earlier titles and
+their ellipsis give way before the current title is clipped. When titles are
+cut, a mark never stays without its title. Markdown task lists render `[ ]` as `○`
+in `MUTED` and `[x]` as `◉` in `GOOD`, with hanging wraps; the message text keeps
+its brackets. No TUI indicator uses the `☐`/`☑` checkboxes, which some
+terminal fonts draw wider than one cell.
 
 Tabs show names in `MUTED`, the active one bold `STRONG` over an `ACCENT` `━`
 on a `HAIRLINE` divider, with an optional mode word on the right. Process output

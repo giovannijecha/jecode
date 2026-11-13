@@ -179,6 +179,16 @@ The Windows fullscreen fixture also reads Ask answer rows back from the native
 console at 40- and 80-column layouts in both palettes. It checks the shared
 `○`/`◉` marks, cursor and label spacing across multiple selections, deselection
 and typed Other answers, reusing the renderer between frames to catch stale cells.
+It reads `/todo` back the same way: `◉` only for done tasks and `○` for every
+other state, one space before aligned titles and aligned state words, through
+successive state changes, retitled and removed tasks, and the empty states.
+The same renderer then paints the Ask step row through answering, moving back,
+clearing an answer and reopening, checking that `◉` marks only answered titles
+other than the current one, followed by one space and never cut from its title,
+and Markdown task lists whose `○`/`◉` items change state and shrink. The emitted
+VT also checks the step mark's `ACCENT` and the task marks' `GOOD`/`MUTED` inks
+in both palettes. These are fixed 40- and 80-column layouts in an 80-column
+native console, not a 40-column console resize or a font rasterization check.
 
 The Windows active-history Esc fixture resumes 300 turns with compact saved tool
 outputs, keeping the request below the loopback server's 8 MiB body limit. It

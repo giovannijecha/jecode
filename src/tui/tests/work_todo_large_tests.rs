@@ -34,8 +34,8 @@ fn a_plan_of_many_long_tasks_keeps_numbers_aligned_and_scrolls_to_the_end() {
     let rows = view::todo::rows(app.state.todo_plan.as_ref().unwrap(), &[], 80);
     assert_eq!(rows.len(), 120);
     let row = |index: usize| rows[index].plain();
-    assert!(row(0).starts_with("    1  ☑ Task 0"), "{}", row(0));
-    assert!(row(119).starts_with("  120  ☐ Task 119"), "{}", row(119));
+    assert!(row(0).starts_with("    1  ◉ Task 0"), "{}", row(0));
+    assert!(row(119).starts_with("  120  ○ Task 119"), "{}", row(119));
     assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 80));
 
     let frame = view::composer_frame(&app.state, "fixture", "folder");
@@ -62,7 +62,7 @@ fn a_plan_of_many_long_tasks_keeps_numbers_aligned_and_scrolls_to_the_end() {
         frame
             .live
             .iter()
-            .any(|row| row.plain().contains("120  ☐ Task 119")),
+            .any(|row| row.plain().contains("120  ○ Task 119")),
         "End shows the last task"
     );
     assert!(fixture.finish().is_empty());

@@ -160,7 +160,7 @@ impl Iterator for Rows {
                 &body,
                 (
                     &format!("{indentation}{marker}"),
-                    if marker == "☑ " { GOOD } else { MUTED },
+                    if marker == CHECKED { GOOD } else { MUTED },
                 ),
                 columns,
                 false,
@@ -345,14 +345,19 @@ fn setext(value: &str) -> bool {
         && (value.bytes().all(|byte| byte == b'=') || value.bytes().all(|byte| byte == b'-'))
 }
 
+/// Task list items show Ask's circles, never the source's brackets or
+/// emoji-prone checkbox glyphs; the source keeps `[ ]` and `[x]`.
+const UNCHECKED: &str = "○ ";
+const CHECKED: &str = "◉ ";
+
 fn task_item<'a>(marker: &'a str, body: &'a str) -> (&'a str, &'a str) {
     if let Some(tail) = body.strip_prefix("[ ] ") {
-        ("☐ ", tail)
+        (UNCHECKED, tail)
     } else if let Some(tail) = body
         .strip_prefix("[x] ")
         .or_else(|| body.strip_prefix("[X] "))
     {
-        ("☑ ", tail)
+        (CHECKED, tail)
     } else {
         (marker, body)
     }
@@ -438,5 +443,7 @@ fn prefixed(
 
 #[cfg(test)]
 mod code_tests;
+#[cfg(test)]
+mod task_tests;
 #[cfg(test)]
 mod tests;
