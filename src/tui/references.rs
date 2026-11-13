@@ -37,7 +37,7 @@ impl App {
         if editor.text.starts_with('/') || !syntax::opens(&editor.text, editor.cursor) {
             return false;
         }
-        self.continue_draft(text);
+        self.continue_draft(text, true);
         let end = self.state.editor.cursor;
         if self.state.editor.text[..end].ends_with(sigil.character()) {
             self.open_reference(sigil, end - 1, end, "");

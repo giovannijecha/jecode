@@ -68,12 +68,12 @@ a real one.
 | --- | --- |
 | Enter | Send the draft, or queue it while the agent works. |
 | Ctrl+J | Insert a newline. Shift+Enter and Alt+Enter also work when the terminal reports them; on Linux and macOS, Jecode asks for that through the keyboard protocol terminals such as kitty, Ghostty, WezTerm and iTerm2 support. |
-| Left, Right | Move by character. |
+| Left, Right | Move by character, crossing attachment and reference cards whole. |
 | Ctrl+Left, Ctrl+Right | Move by word. |
 | Up, Down | Move between rows of the draft. In an empty composer, Up takes back the pending message. |
 | Home, End, or Ctrl+A, Ctrl+E | Go to the start or end of the line. |
 | Ctrl+Home, Ctrl+End | Go to the start or end of the draft. |
-| Backspace, Delete | Delete a character, or a whole attachment. |
+| Backspace, Delete | Delete a character, or a whole attachment or completed reference card. |
 | Ctrl+Backspace, Ctrl+Delete, Ctrl+W | Delete a word, when the terminal reports the shortcut. |
 | Ctrl+U | Delete to the start of the line. |
 | Ctrl+P, Ctrl+N | Browse your last 50 sent messages; Esc returns to the draft. |
@@ -81,7 +81,7 @@ a real one.
 | `/` | Open the command list; Up/Down select, Tab completes, Enter accepts the selected full command and runs or queues it. Use it to type arguments; commands with arguments keep their typed text. |
 | `$` | Typed as a word of its own, open the **Skills** sheet; Enter or Tab writes `$name` into the draft. See [Reference skills and files](../usage/INTERFACE.md#reference-skills-and-files). |
 | `@` | Typed as a word of its own, open the **Files** sheet at the working directory; Enter or Tab opens a folder or writes `@path` for a file. |
-| Tab | With the caret on a `$` or `@` reference, reopen its sheet to replace it. |
+| Tab | With the caret at either end of a `$` or `@` reference, reopen its sheet to replace it. |
 | Ctrl+G | Open the **Commands** sheet whenever the composer holds the keys, also during a turn, but not over a question or a permission request. A **Filter** field narrows the list; Enter runs the selected command. Your draft is untouched and waits above the sheet as `draft kept`. A command that opens a menu shows it over the draft, Esc goes back one level, and a choice returns to the composer. `/new` and `/resume` carry the draft into the conversation they open; a resumed conversation's own saved draft joins below it. |
 
 ### Conversation and work

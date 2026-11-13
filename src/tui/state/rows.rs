@@ -1,11 +1,16 @@
 #[cfg(test)]
 use super::State;
 use super::{Item, Kind};
-use crate::tui::{
-    cards,
-    line::Line,
-    prose, text,
-    theme::{ACCENT, BAD, BADGE_IDLE, BODY, LIT, STRONG, USER_SURFACE},
+use crate::{
+    attachments::MARKER,
+    tui::{
+        cards,
+        line::Line,
+        prose,
+        references::syntax,
+        text,
+        theme::{ACCENT, BAD, BADGE_IDLE, BODY, LIT, STRONG, USER_SURFACE},
+    },
 };
 
 #[cfg(test)]
@@ -175,21 +180,39 @@ pub(in crate::tui) fn tool_card(
 }
 
 /// The sent request: `› ` on one band of the full-row user surface, the text hanging
-/// at column 2 and attachment labels drawn as chips.
+/// at column 2 and attachment labels and references drawn as chips.
 fn request(value: &str, columns: usize) -> Vec<Line> {
-    let mut line = chips(&text::clean(value)).at_source(0);
+    let width = columns.saturating_sub(4);
+    let Chips {
+        line,
+        positions,
+        source,
+        ..
+    } = chips(&text::clean(value), width);
+    let mut line = line.at_source(0);
     line.background = Some(USER_SURFACE);
-    line.wrap(columns.saturating_sub(4), true)
+    line.wrap(width, true)
         .into_iter()
         .enumerate()
-        .map(|(index, line)| line.indent(if index == 0 { "› " } else { "  " }, ACCENT.bold()))
+        .map(|(index, mut line)| {
+            if let Some(origin) = &mut line.origin {
+                origin.character = source.original(positions.original(origin.character));
+            }
+            line.indent(if index == 0 { "› " } else { "  " }, ACCENT.bold())
+        })
         .collect()
 }
 
-/// `[1# Image]` and `[2# File: wake.log]` become ` 1 Image ` and ` 2 wake.log `
-/// in LIT on the quiet badge surface; inner spaces never break.
-fn chips(value: &str) -> Line {
-    let mut line = Line::default();
+/// `[1# Image]` and `[2# File: wake.log]` become ` 1 Image ` and ` 2 wake.log `, and
+/// the references the composer draws become ` $review ` and ` @AGENTS.md `, in LIT
+/// on the quiet badge surface. Inner spaces never break; a reference wider than
+/// `columns` is shortened on screen only, and chips that touch keep one plain cell
+/// between them so wrapping can separate them.
+fn chips(value: &str, columns: usize) -> Chips {
+    // Each label stands for its attachment marker, a reference boundary as in the composer.
+    let mut source = String::with_capacity(value.len());
+    let mut positions = Positions::default();
+    let mut labels = Vec::new();
     let mut rest = value;
     while let Some(start) = rest.find('[') {
         let tail = &rest[start + 1..];
@@ -199,18 +222,107 @@ fn chips(value: &str) -> Line {
             .and_then(|label| label.find(']').map(|end| &label[..end]))
             .filter(|label| digits > 0 && !label.is_empty());
         let Some(label) = label else {
-            line.push(&rest[..start + 1], STRONG);
+            source.push_str(&rest[..start + 1]);
+            let length = rest[..start + 1].chars().count();
+            positions.advance(length, length);
             rest = tail;
             continue;
         };
-        line.push(&rest[..start], STRONG);
+        source.push_str(&rest[..start]);
+        let length = rest[..start].chars().count();
+        positions.advance(length, length);
+        source.push(MARKER);
         let name = label.strip_prefix("File: ").unwrap_or(label);
-        let chip = format!(" {} {name} ", &tail[..digits]).replace(' ', "\u{a0}");
-        line.push_on(&chip, LIT, BADGE_IDLE);
-        rest = &tail[digits + 2 + label.len() + 1..];
+        labels.push(format!(" {} {name} ", &tail[..digits]));
+        let end = digits + 2 + label.len() + 1;
+        positions.advance(1, rest[start..start + 1 + end].chars().count());
+        rest = &tail[end..];
     }
-    line.push(rest, STRONG);
-    line
+    source.push_str(rest);
+    let length = rest.chars().count();
+    positions.advance(length, length);
+    let mut chips = Chips {
+        source: positions,
+        ..Chips::default()
+    };
+    let mut labels = labels.into_iter();
+    let mut text = |chips: &mut Chips, value: &str| {
+        for (index, part) in value.split(MARKER).enumerate() {
+            if index > 0 {
+                chips.chip(&labels.next().unwrap_or_default(), 1);
+            }
+            chips.text(part);
+        }
+    };
+    let mut at = 0;
+    for reference in syntax::chips(&source) {
+        text(&mut chips, &source[at..reference.start]);
+        let name = text::ellipsize(&source[reference.clone()], columns.saturating_sub(2).max(1));
+        chips.chip(
+            &format!(" {name} "),
+            source[reference.clone()].chars().count(),
+        );
+        at = reference.end;
+    }
+    text(&mut chips, &source[at..]);
+    chips
+}
+
+#[derive(Default)]
+struct Chips {
+    line: Line,
+    touching: bool,
+    positions: Positions,
+    source: Positions,
+}
+
+impl Chips {
+    fn text(&mut self, value: &str) {
+        self.line.push(value, STRONG);
+        let length = value.chars().count();
+        self.positions.advance(length, length);
+        self.touching &= value.is_empty();
+    }
+
+    fn chip(&mut self, value: &str, source_length: usize) {
+        if self.touching {
+            self.line.push(" ", STRONG);
+            self.positions.advance(1, 0);
+        }
+        self.line
+            .push_on(&value.replace(' ', "\u{a0}"), LIT, BADGE_IDLE);
+        self.positions.advance(value.chars().count(), source_length);
+        self.touching = true;
+    }
+}
+
+/// Source character positions after display-only insertions and replacements.
+/// Only changes in length need an entry; ordinary prose keeps a linear mapping.
+#[derive(Default)]
+struct Positions {
+    display: usize,
+    source: usize,
+    changes: Vec<(usize, usize)>,
+}
+
+impl Positions {
+    fn advance(&mut self, display: usize, source: usize) {
+        self.display += display;
+        self.source += source;
+        if display != source {
+            self.changes.push((self.display, self.source));
+        }
+    }
+
+    fn original(&self, character: usize) -> usize {
+        let index = self
+            .changes
+            .partition_point(|(display, _)| *display <= character);
+        let (display, source) = index
+            .checked_sub(1)
+            .map_or((0, 0), |index| self.changes[index]);
+        source + character - display
+    }
 }
 
 impl Rows {

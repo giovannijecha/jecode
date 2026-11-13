@@ -125,7 +125,7 @@ impl App {
     /// draft's.
     pub(super) fn ask_text(&mut self, text: &str, pasted: bool) {
         if self.ask_guarded() {
-            self.continue_draft(text);
+            self.continue_draft(text, !pasted);
             return;
         }
         let (Some(panel), Some(request)) = (&mut self.state.ask_panel, &self.state.question) else {

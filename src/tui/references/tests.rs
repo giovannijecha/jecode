@@ -55,6 +55,9 @@ fn quoted_files_unescape_and_unclosed_quotes_are_text() {
     assert_eq!(values, ["docs/my file.md", r#"a"b\c"#]);
     assert!(tokens(r#"@"docs/my file"#).is_empty());
     assert!(tokens("@\"a\nb\"").is_empty());
+    for marker in [MARKER.to_string(), format!("\\{MARKER}")] {
+        assert!(tokens(&format!("@\"a{marker}b\"")).is_empty());
+    }
 }
 
 #[test]

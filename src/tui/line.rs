@@ -1,6 +1,6 @@
 use super::{
     text,
-    theme::{BASE, BODY, INLINE_CODE, INLINE_CODE_SURFACE, Style, Surface},
+    theme::{BADGE_IDLE, BASE, BODY, INLINE_CODE, INLINE_CODE_SURFACE, LIT, Style, Surface},
 };
 
 mod code;
@@ -156,8 +156,11 @@ impl Line {
                     newline: glyph.text == "\n",
                     whitespace: glyph.text.chars().next().is_some_and(spacing),
                     breakable: glyph.text.chars().next().is_some_and(spacing)
-                        && (characters[start].1, characters[start].2)
-                            != (INLINE_CODE, Some(INLINE_CODE_SURFACE)),
+                        && ![
+                            (INLINE_CODE, Some(INLINE_CODE_SURFACE)),
+                            (LIT, Some(BADGE_IDLE)),
+                        ]
+                        .contains(&(characters[start].1, characters[start].2)),
                 };
                 start = end;
                 part

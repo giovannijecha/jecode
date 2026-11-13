@@ -31,7 +31,7 @@ impl App {
                 return Ok(false);
             }
             Decoded::Paste(text) if self.permission_guarded() => {
-                self.continue_draft(&text);
+                self.continue_draft(&text, false);
                 return Ok(false);
             }
             Decoded::Paste(_) | Decoded::Error if self.state.permission.is_some() => {
@@ -133,7 +133,7 @@ impl App {
                         }
                     }
                 } else if pasted || !self.type_reference(&text) {
-                    self.continue_draft(&text);
+                    self.continue_draft(&text, !pasted);
                 }
                 return Ok(false);
             }
@@ -312,10 +312,10 @@ impl App {
         Ok(false)
     }
 
-    /// Text typed into the chat draft, also while a request that arrived
-    /// during the typing guards its answer.
-    pub(super) fn continue_draft(&mut self, text: &str) {
-        if !self.state.editor.insert(text) {
+    /// Text typed (`typed`) or pasted into the chat draft, also while a request that
+    /// arrived during the typing guards its answer.
+    pub(super) fn continue_draft(&mut self, text: &str, typed: bool) {
+        if !self.state.editor.compose(text, typed) {
             self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
         } else {
             self.typed = Some(std::time::Instant::now());
@@ -327,7 +327,7 @@ impl App {
     /// An editing key on the chat draft.
     pub(super) fn edit_draft(&mut self, key: Key) {
         let before = self.state.editor.text.clone();
-        if !self.state.editor.key(key) {
+        if !self.state.editor.compose_key(key) {
             self.warn("Input exceeds 1 MiB · insertion rejected, your draft was kept");
         }
         if self.state.editor.text != before {

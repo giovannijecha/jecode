@@ -35,7 +35,7 @@ fn visual_movement_uses_cells_and_remembers_the_column_on_short_lines() {
     assert!(editor.vertical(false, 8, false));
     assert!(editor.vertical(false, 8, false));
     assert_eq!(editor.cursor, editor.text.len());
-    let layout = Layout::new("abcd界z", 4, 4, &[], false);
+    let layout = Layout::new("abcd界z", 4, 4, &[], &[]);
     assert_eq!(layout.cursor, (1, 0));
     assert_eq!(layout.rows[1].text, "界z");
 }
@@ -132,7 +132,7 @@ fn assert_fresh_layout(editor: &Editor, width: usize) {
         .enumerate()
         .map(|(index, attachment)| attachment.chip(index + 1))
         .collect::<Vec<_>>();
-    let expected = Layout::new(&editor.text, editor.cursor, width, &labels, true);
+    let expected = Layout::new(&editor.text, editor.cursor, width, &labels, &editor.chips());
     let actual = editor.layout(width, true);
     assert_eq!(actual.cursor, expected.cursor);
     assert_eq!(actual.rows.len(), expected.rows.len());
