@@ -92,7 +92,15 @@ pub(super) fn permissions(path: &Path) {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(path).unwrap(),
     );
-    crate::tui::launch(agent, isolated_config(path), None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent,
+        isolated_config(path),
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(
         Store::new(path.join("home"))
             .load()
@@ -187,7 +195,15 @@ pub(super) fn direct_input(path: &Path) {
     agent
         .permissions()
         .set_default(config.settings.default_permissions);
-    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent,
+        config,
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     let store = crate::sessions::Store::new(path.join("home"), path).unwrap();
     let sessions = store.list().unwrap().sessions;
     assert_eq!(sessions.len(), 1);
@@ -230,7 +246,15 @@ pub(super) fn background(path: &Path, scenario: &str) {
             OpenRouter::fixture(fixture.endpoint.clone()),
             Tools::new(path).unwrap(),
         );
-        crate::tui::launch(agent, isolated_config(path), None, Default::default(), None).unwrap();
+        crate::tui::launch(
+            agent,
+            isolated_config(path),
+            None,
+            Default::default(),
+            None,
+            Default::default(),
+        )
+        .unwrap();
         write!(io::stdout(), "\x1b[0m").unwrap();
         io::stdout().flush().unwrap();
         assert!(fixture.finish().is_empty());
@@ -277,6 +301,7 @@ fn startup_splash(store: Store) {
         None,
         Default::default(),
         None,
+        Default::default(),
     )
     .unwrap();
     assert_eq!(fixture.finish().len(), 1);
@@ -312,7 +337,15 @@ pub(super) fn startup(path: &Path, scenario: &str) {
     if scenario == "startup-setup-empty" {
         crate::bootstrap::configure().unwrap();
     } else {
-        crate::bootstrap::run(None, None, vec![], scenario == "startup-plain").unwrap();
+        crate::bootstrap::run(crate::cli::Run {
+            start: crate::cli::Start::New,
+            prompt: None,
+            attachments: vec![],
+            plain: scenario == "startup-plain",
+            json: false,
+            selection: Default::default(),
+        })
+        .unwrap();
     }
     if matches!(scenario, "startup-fresh" | "startup-unconfigured-prompt") {
         assert!(!store.path().exists());

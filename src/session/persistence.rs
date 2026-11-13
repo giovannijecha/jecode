@@ -55,6 +55,18 @@ pub(super) fn resume(
     output: &mut impl Write,
     status: &mut impl Write,
 ) -> Result<(), String> {
+    resume_with_selection(agent, config, id, None, input, output, status)
+}
+
+pub(super) fn resume_with_selection(
+    agent: &mut Agent,
+    config: &SessionConfig,
+    id: Option<&str>,
+    selection: Option<&crate::cli::Selection>,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+    status: &mut impl Write,
+) -> Result<(), String> {
     let id = if let Some(id) = id {
         id.to_string()
     } else {
@@ -129,7 +141,12 @@ pub(super) fn resume(
             }
         }
     };
-    let result = agent.resume(&id)?;
+    let result = match selection {
+        Some(selection) => {
+            crate::selection::resume(agent, &id, selection, &config.settings, &config.store)?
+        }
+        None => agent.resume(&id)?,
+    };
     agent.record_local(&format!("/resume {id}"), &result);
     agent.save_session()?;
     let document = agent.sessions().unwrap().snapshot();

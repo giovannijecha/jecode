@@ -14,7 +14,10 @@ Paths are relative to `src/`.
 
 | Area | Modules |
 | --- | --- |
-| Entry and setup | `main.rs`, `cli.rs`, `bootstrap.rs`, `bootstrap/`, `setup/` |
+| Entry and setup | `main.rs`, `cli/` (grammar, parser, help, completions), `bootstrap.rs`, `bootstrap/` (startup, piped input, JSON Lines), `setup/` |
+| Run selection | `selection.rs`: provider, model, effort and permission choices shared by single runs, resume, plain chat and the TUI launch |
+| Management commands | `manage/`: `settings`, `providers`, `models`, `sessions`, `skills`, `mcp`, `lsp` and `doctor`, over the same stores as the interfaces |
+| Installation lifecycle | `install/`: provenance, registry metadata, gzip and tar reading, SHA-512, standalone and package-manager update and removal |
 | Settings, credentials and effort | `config/`, `auth/accounts.rs`, `auth/openai/`, `auth/anthropic/`, `auth/landing.rs`, `effort.rs`, `identity.rs` |
 | Agent loop, conversation and context | `agent.rs`, `agent/`, `conversation/`, `context.rs`, `context/`, `events.rs`, `events/` |
 | Input during a turn | `inbox.rs`, `inbox/`, `input.rs`, `agent/input.rs` |

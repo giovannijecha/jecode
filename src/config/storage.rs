@@ -202,6 +202,39 @@ impl Store {
             .map_err(|error| format!("Could not save {}: {error}", self.path.display()))
     }
 
+    /// Removes one provider's saved API key; everything else is kept as written.
+    /// Returns whether a key was saved.
+    pub fn remove_credential(&self, backend: &str) -> Result<bool, String> {
+        super::validate_backend_id(backend)?;
+        let Some(mut document) = self.document()? else {
+            return Ok(false);
+        };
+        Settings::parse(&document).map_err(|error| self.invalid(&error))?;
+        let removed = match &mut document {
+            Value::Object(root) => match root.get_mut("backends") {
+                Some(Value::Object(backends)) => match backends.get_mut(backend) {
+                    Some(Value::Object(provider)) => provider.remove("api_key").is_some(),
+                    _ => false,
+                },
+                _ => false,
+            },
+            _ => false,
+        };
+        if !removed {
+            return Ok(false);
+        }
+        let mut encoded = format!("{}\n", document.pretty());
+        if encoded.len() > CONFIG_LIMIT {
+            encoded = format!("{}\n", document.encode());
+        }
+        if encoded.len() > CONFIG_LIMIT {
+            return Err(self.invalid("Configuration exceeds 64 KiB"));
+        }
+        self.atomic_save(encoded.as_bytes())
+            .map_err(|error| format!("Could not save {}: {error}", self.path.display()))?;
+        Ok(true)
+    }
+
     fn invalid(&self, error: &str) -> String {
         format!(
             "{}: {error}. The file was left unchanged; correct it before running jecode setup.",

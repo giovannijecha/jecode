@@ -60,7 +60,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             (
                 "Ctrl+D",
-                "/resume: mark deletion · /process: mark a process to stop · Enter confirms, Esc cancels",
+                "/resume: mark deletion · /process: mark a process to stop · API keys: mark removal · Enter confirms, Esc cancels",
             ),
             (
                 "b",
@@ -119,6 +119,9 @@ impl Information {
             );
         }
         let count = keys.iter().filter(|(_, text)| !text.is_empty()).count();
+        // Shell commands manage what lives outside a conversation, such as
+        // updates and saved conversations; they run in another terminal.
+        let shell = crate::cli::help::command_summaries();
         Self {
             title: "Help".into(),
             context: String::new(),
@@ -134,6 +137,12 @@ impl Information {
                     aside: format!("{count} keys"),
                     details: keys,
                     keys: true,
+                },
+                Section {
+                    name: "Shell".into(),
+                    aside: "run in a terminal · jecode --help".into(),
+                    details: shell,
+                    keys: false,
                 },
             ],
             section: 0,
@@ -159,6 +168,25 @@ impl Information {
 #[cfg(test)]
 mod tests {
     use super::Information;
+
+    #[test]
+    fn help_lists_shell_commands_from_the_command_line_table() {
+        let help = Information::help();
+        let shell = &help.sections[2];
+        assert_eq!(shell.name, "Shell");
+        for command in [
+            "jecode update",
+            "jecode doctor",
+            "jecode sessions",
+            "jecode mcp",
+        ] {
+            assert!(
+                shell.details.iter().any(|(name, _)| name == command),
+                "missing {command}"
+            );
+        }
+        assert!(!shell.details.iter().any(|(name, _)| name == "jecode help"));
+    }
 
     #[test]
     fn help_keys_explain_composer_references() {

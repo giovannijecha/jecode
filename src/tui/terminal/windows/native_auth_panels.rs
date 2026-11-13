@@ -121,6 +121,31 @@ pub(super) fn console() {
             ..State::default()
         };
         paint(&state, "Claude login unapproved", columns, height);
+        // A saved key marked for removal asks before anything changes.
+        let mut keys = Selector::api_keys(&[
+            ("openrouter", true),
+            ("openai-api", false),
+            ("anthropic-api", true),
+        ]);
+        keys.toggle_delete();
+        assert_eq!(keys.delete_target(), Some(0));
+        let state = State {
+            width: columns,
+            height,
+            selector: Some(keys),
+            ..State::default()
+        };
+        paint(&state, "Remove this saved key?", columns, height);
+        // /help lists the shell commands in its third section.
+        let mut help = crate::tui::information::Information::help();
+        help.section = 2;
+        let state = State {
+            width: columns,
+            height,
+            information: Some(help),
+            ..State::default()
+        };
+        paint(&state, "jecode resume", columns, height);
     }
     drop(terminal);
 }

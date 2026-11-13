@@ -14,23 +14,44 @@ pub(super) fn needs_setup(store: &Store, settings: &Settings) -> bool {
             .is_err()
 }
 
+/// `lenient` is true for the TUI, which reports an unavailable default
+/// provider in a notice, and for a resume, whose conversation brings its own.
 pub(super) fn client(
     store: &Store,
     settings: &Settings,
-    model_override: Option<String>,
-    tui: bool,
+    selection: &Selection,
+    lenient: bool,
 ) -> Result<(Box<dyn Backend>, Option<StartupNotice>), String> {
     let home = store.path().parent().expect("configuration directory");
-    if !tui && needs_setup(store, settings) {
+    // An explicit provider is used as chosen or the run stops: its billing
+    // or account route is never swapped for another configured provider.
+    if selection.provider.is_some() || selection.routing.is_some() {
+        return Ok((
+            crate::selection::explicit_backend(settings, store, selection)?,
+            None,
+        ));
+    }
+    if !lenient && needs_setup(store, settings) {
         return Err("Jecode needs provider credentials and a default model. Run jecode setup in a terminal, then retry your task.".into());
     }
+    let model_override = selection.model.clone();
     let model = model_override
         .clone()
         .or_else(|| settings.has_model().then(|| settings.model.clone()));
     let unavailable = match settings.service_status(home, &settings.backend_id) {
         Ok(services) => {
             if let Some(model) = model {
-                return services.create(model).map(|client| (client, None));
+                let effort = selection.effort.unwrap_or(if model == settings.model {
+                    settings.effort
+                } else {
+                    crate::effort::Effort::Default
+                });
+                if selection.effort.is_some() {
+                    crate::selection::check_effort(&services, &model, effort)?;
+                }
+                let mut client = services.create(model)?;
+                client.set_effort(effort);
+                return Ok((client, None));
             }
             let text = "No model · Choose a model to finish configuration".to_string();
             return Ok((
@@ -52,8 +73,8 @@ pub(super) fn client(
             .map_or(id, |info| info.name);
         let mut text =
             format!("Default provider unavailable · {cause} · Using {name} for this conversation");
-        if model_override.is_some() {
-            text.push_str(" · --model override skipped for the fallback provider");
+        if model_override.is_some() || selection.effort.is_some() {
+            text.push_str(" · run options skipped for the fallback provider");
         }
         if let Some(model) = store.previous_model(id)? {
             let mut client = services.create(model)?;

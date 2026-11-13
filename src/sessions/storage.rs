@@ -174,6 +174,15 @@ impl Store {
     /// files, is not a conversation. Sessions of the earlier flat layout are
     /// reported and left unchanged.
     pub fn list(&self) -> Result<Listing, String> {
+        self.list_inner(true)
+    }
+
+    /// Reads saved conversations without creating or repairing summary caches.
+    pub fn list_read_only(&self) -> Result<Listing, String> {
+        self.list_inner(false)
+    }
+
+    fn list_inner(&self, cache: bool) -> Result<Listing, String> {
         let entries = match fs::read_dir(&self.bucket) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -229,7 +238,7 @@ impl Store {
             }
             match self.load(&id) {
                 Ok((document, _)) => {
-                    if let Some(stamp) = &stamp {
+                    if cache && let Some(stamp) = &stamp {
                         // The cache is optional; opening still validates the journal itself.
                         let _ = super::summary::save(self, &document, &document.title(), stamp);
                     }

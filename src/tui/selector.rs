@@ -94,7 +94,10 @@ pub enum Purpose {
     },
     ProviderSettings,
     Credentials,
-    ApiKeys,
+    /// `delete` marks a saved key for removal until Enter confirms it.
+    ApiKeys {
+        delete: Option<usize>,
+    },
     Accounts,
     Account {
         confirm_sign_out: bool,
@@ -126,6 +129,7 @@ pub enum Purpose {
     Theme,
     Loading,
     Sessions {
+        launch: Option<crate::cli::Selection>,
         current: Option<usize>,
         delete: Option<usize>,
         working: bool,
@@ -265,6 +269,7 @@ impl Selector {
         let mut menu = Self::new(
             "Resume",
             Purpose::Sessions {
+                launch: None,
                 current: sessions.iter().position(|session| session.id == current),
                 delete: None,
                 working: false,
@@ -471,20 +476,30 @@ impl Selector {
     }
     pub fn delete_target(&self) -> Option<usize> {
         match &self.purpose {
-            Purpose::Sessions { delete, .. } => *delete,
+            Purpose::Sessions { delete, .. } | Purpose::ApiKeys { delete } => *delete,
             _ => None,
         }
     }
     pub fn cancel_delete(&mut self) -> bool {
         match &mut self.purpose {
-            Purpose::Sessions { delete, .. } => delete.take().is_some(),
+            Purpose::Sessions { delete, .. } | Purpose::ApiKeys { delete } => {
+                delete.take().is_some()
+            }
             _ => false,
         }
     }
     pub fn toggle_delete(&mut self) {
         let index = self.filtered.get(self.selected).map(|hit| hit.index);
-        if let Purpose::Sessions { delete, .. } = &mut self.purpose {
-            *delete = if *delete == index { None } else { index };
+        match &mut self.purpose {
+            Purpose::Sessions { delete, .. } => {
+                *delete = if *delete == index { None } else { index };
+            }
+            // Only a saved key, which its row's badge shows, can be removed.
+            Purpose::ApiKeys { delete } => {
+                let saved = index.filter(|index| self.options[*index].badge.is_some());
+                *delete = if *delete == saved { None } else { saved };
+            }
+            _ => {}
         }
     }
 }

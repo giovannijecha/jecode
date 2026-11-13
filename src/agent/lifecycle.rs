@@ -110,6 +110,16 @@ impl Agent {
     }
 
     pub fn resume(&mut self, id: &str) -> Result<String, String> {
+        self.resume_with_backend(id, None)
+    }
+
+    /// Restore a conversation with a prepared replacement only when its saved
+    /// provider is no longer configured. Ordinary resumes keep their route.
+    pub fn resume_with_backend(
+        &mut self,
+        id: &str,
+        mut replacement: Option<Box<dyn Backend>>,
+    ) -> Result<String, String> {
         let current = self
             .persistence
             .as_ref()
@@ -137,6 +147,10 @@ impl Agent {
                 crate::sessions::Stage::Selection,
             )?;
         }
+        let unavailable = !self.has_backend(&document.backend);
+        let mut used_replacement = false;
+        let saved_backend = document.backend.clone();
+        let saved_model = document.model.clone();
         let client = document
             .model
             .as_ref()
@@ -147,6 +161,18 @@ impl Agent {
                     document.effort,
                     document.routing.clone(),
                 )
+                .or_else(|error| {
+                    if unavailable {
+                        let mut selected = replacement.take().ok_or(error)?;
+                        // Bound to this agent as `connection` binds its clients.
+                        selected.set_cancellation(self.cancellation.clone());
+                        selected.set_delegation(!self.child);
+                        used_replacement = true;
+                        Ok(selected)
+                    } else {
+                        Err(error)
+                    }
+                })
             })
             .transpose()?;
         let document = handle.snapshot();
@@ -165,6 +191,25 @@ impl Agent {
         *self.events.lock().unwrap() = document.events;
         self.compatible_from = document.compatible_from;
         self.context = document.context;
+        if used_replacement {
+            self.compatible_from = self.messages.lock().unwrap().len();
+            self.context.reset_usage();
+            self.context.summary_output_tokens = 0;
+            self.events
+                .lock()
+                .unwrap()
+                .push(crate::json::Value::object([
+                    ("type", crate::json::Value::string("backend_changed")),
+                    ("from_backend", crate::json::Value::string(saved_backend)),
+                    ("from_model", crate::json::Value::optional(saved_model)),
+                    ("backend", crate::json::Value::string(self.backend_id())),
+                    ("model", crate::json::Value::string(self.model())),
+                    (
+                        "after_message",
+                        crate::json::Value::number(self.compatible_from),
+                    ),
+                ]));
+        }
         let calibration = self.context.calibration;
         self.context.reset_projection();
         self.context.calibration = calibration;
@@ -179,6 +224,10 @@ impl Agent {
         self.questions
             .bind(self.archive(), self.persistence.clone());
         self.bind_permissions();
+        if used_replacement {
+            self.register_backend(self.client.services());
+            self.checkpoint(crate::sessions::Stage::Selection)?;
+        }
         self.collaboration_seen = if self.has_open_collaboration_report() {
             0
         } else {

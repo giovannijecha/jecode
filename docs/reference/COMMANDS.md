@@ -1,9 +1,9 @@
 # Commands and keys
 
-The complete list of slash commands and keyboard controls in the TUI. `/help`
-(or F1) shows the command list and common shortcuts inside Jecode. Plain-chat
-commands are listed in
-[Command line](../usage/CLI.md#plain-chat).
+The complete list of slash commands and keyboard controls in the TUI, and of
+the `jecode` shell commands. `/help` (or F1) shows the slash commands, common
+shortcuts and the shell commands inside Jecode. Plain-chat commands are listed
+in [Command line](../usage/CLI.md#plain-chat).
 
 ## Slash commands
 
@@ -55,7 +55,7 @@ and does not run. The Ctrl+G sheet never queues: commands that wait stay listed 
 | `/settings` | Change saved defaults and connect providers. Alias: `/setup`. See [Configuration](CONFIGURATION.md). | Opens |
 | `/mcp` | Inspect globally configured MCP connections and their tools. Configure them in Settings → MCP. | Now |
 | `/lsp` | Inspect configured language servers and this conversation's observed instances without starting one. Configure in Settings → LSP. | Now |
-| `/help` | Show commands and keys, including Ctrl+G. | Opens |
+| `/help` | Show commands, keys and the shell commands, including Ctrl+G. | Opens |
 
 An unknown command reports an error, with a suggestion when the name is close to
 a real one.
@@ -110,9 +110,9 @@ end with the wheel or sending a message also returns to the latest output.
 | `1`–`9` | Choose directly in menus with up to nine options. |
 | Typing | Filter longer lists. **Commands**, **Skills** and **Files** always filter. |
 | Backspace | In **Files**, with an empty filter, go to the parent folder. |
-| Left, Right | Switch tabs, such as **Commands** and **Keys** in `/help`. |
+| Left, Right | Switch tabs, such as **Commands**, **Keys** and **Shell** in `/help`. |
 | Esc | Go back or close; first cancels a pending deletion mark. **Skills** and **Files** return the draft as it was when they opened. |
-| Ctrl+D | In `/resume`, mark the selected conversation for deletion; in `/process`, ask to stop the selected process. Enter confirms both. In `/permissions` → **Remembered**, revoke the selected approval at once, with no confirmation. |
+| Ctrl+D | In `/resume`, mark the selected conversation for deletion; in `/process`, ask to stop the selected process; in Settings → Providers → **API keys**, mark a saved key for removal. Enter confirms all three. In `/permissions` → **Remembered**, revoke the selected approval at once, with no confirmation. |
 | `b` | In `/process`, when a call is waiting for the selected process, move it to the background: the call returns and the command keeps running. |
 
 ### Background process output
@@ -126,3 +126,75 @@ end with the wheel or sending a message also returns to the latest output.
 
 Questions from the agent have their own keys; see
 [Questions and plans](../usage/QUESTIONS_AND_PLANS.md#answer-questions).
+
+## Command line
+
+Run these in a terminal, outside a conversation. Every command accepts `-C DIR`
+and `-h`/`--help`; `--json` prints one JSON document. See
+[Command line](../usage/CLI.md) for the grammar, run options and exit codes.
+
+| Command | Options | Effect |
+| --- | --- | --- |
+| `jecode [PROMPT]` | run options | Open the TUI or plain chat, or run one task. |
+| `jecode resume [--last \| SESSION_ID] [PROMPT]` | run options | Continue a saved conversation; with a prompt or piped stdin, send one message and exit. |
+| `jecode init` | `--provider`, `--model`, `--effort`, `--routing`, `--permissions`, `--json` | Run the `/init` task once. |
+| `jecode setup` | | Guided provider, account and model configuration. |
+| `jecode settings [show]` | `--json` | Show every saved default and where it is saved. |
+| `jecode settings get KEY` | `--json` | Print one saved default. |
+| `jecode settings set KEY VALUE` | `--provider ID` (for `model`) | Change one saved default. |
+| `jecode settings path` | `--json` | Print the configuration file and the Jecode home. |
+| `jecode providers [list]` | `--json` | Each provider's route, billing and readiness, from saved files only. |
+| `jecode providers accounts PROVIDER` | `--json` | List saved account IDs, labels and the active choice without contacting the provider. |
+| `jecode providers use PROVIDER ACCOUNT_ID` | | Activate a saved account; default provider and model are unchanged. |
+| `jecode providers login PROVIDER` | | Save an API key (hidden prompt or piped stdin, checked with the provider), or sign in to a ChatGPT or Claude account. |
+| `jecode providers logout PROVIDER` | `--account ACCOUNT_ID`, `--yes` | Remove a saved API key, or sign out of the selected account (the active one by default). |
+| `jecode models endpoints MODEL` | `--provider ID`, `--json` | List OpenRouter endpoint IDs and their tool/reasoning compatibility, as `/routing` does. |
+| `jecode models [list]` | `--provider ID`, `--json` | The provider's tool-capable models, with efforts and list prices. |
+| `jecode models show ID` | `--provider ID`, `--json` | One model's efforts and prices. |
+| `jecode sessions [list]` | `--json` | This folder's saved conversations and any left unchanged. |
+| `jecode sessions show SESSION_ID` | `--json` | Details and messages, read without opening it. |
+| `jecode sessions export SESSION_ID` | `--output PATH` (`-` for stdout) | Save the `/export` JSON document; an existing file is never replaced. |
+| `jecode sessions delete SESSION_ID` | `--yes` | Delete as `/resume` does; an open conversation is refused. |
+| `jecode skills [list]`, `jecode skills show NAME` | `--json` | Personal skills, or one skill's `SKILL.md`. |
+| `jecode mcp [list]`, `jecode mcp show CONNECTION` | `--json` | Configured connections, without contacting them. |
+| `jecode mcp tools CONNECTION` | `--json` | Connect and list the server's tools. |
+| `jecode mcp add NAME URL` | `--auth none\|token\|oauth` | Check and save a connection, as Settings → MCP → Add does. |
+| `jecode mcp login CONNECTION` | | Sign in again, or replace a token. |
+| `jecode mcp enable\|disable CONNECTION` | | Allow or suspend a connection. |
+| `jecode mcp remove CONNECTION` | `--yes` | Remove a connection and its credentials. |
+| `jecode lsp [list]`, `jecode lsp show SERVER` | `--json` | Configured language servers; nothing starts. |
+| `jecode lsp add rust-analyzer\|clangd` | `--executable PATH` | Add a guided entry, turned on. Custom servers use Settings → LSP or `lsp.json`. |
+| `jecode lsp check SERVER` | `--json` | Start a temporary instance, read its capabilities and stop it. |
+| `jecode lsp enable\|disable SERVER` | | Turn a server on or off. |
+| `jecode lsp remove SERVER` | `--yes` | Remove an entry. |
+| `jecode doctor` | `--json` | Read-only diagnostics; exit 1 when a check fails. |
+| `jecode completions SHELL` | | A completion script for `bash`, `zsh`, `fish` or `powershell`. |
+| `jecode update` | `--check`, `--json` | Update this installation, or only report whether one is published. See [Installation](../usage/INSTALLATION.md#update-jecode). |
+| `jecode uninstall` | `--yes`, `--json` | Remove this installation; the Jecode home is kept. |
+
+Run options are `--plain`, `--provider`, `--model`, `--effort`, `--routing`, `--permissions`,
+`--attach` (repeatable) and `--json`. Setting keys are `model`, `effort`,
+`routing`, `permissions`, `auto-compact`, `prompt-cache` and `theme`; see
+[Configuration](CONFIGURATION.md#change-settings).
+
+### The same capability in each interface
+
+| Capability | TUI | Plain chat | Command line |
+| --- | --- | --- | --- |
+| Model, effort, permissions for a conversation | `/model`, `/effort`, `/permissions` | the same | `--provider`, `--model`, `--effort`, `--permissions` |
+| Endpoint routing for a conversation | `/routing` | `/routing` | `--routing` (saved default: `settings set routing`) |
+| Saved defaults | `/settings` | `/settings` (guided) | `jecode settings`, `jecode setup` |
+| API keys and accounts | Settings → Providers | `/settings` (guided) | `jecode providers` |
+| Models | `/model` | `/model` | `jecode models` |
+| Resume, delete | `/resume` | `/resume` | `jecode resume`, `jecode sessions` |
+| Export | `/export` | `/export` | `jecode sessions export` |
+| Skills | `/skills` | `/skills` | `jecode skills` |
+| MCP | `/mcp`, Settings → MCP | `/mcp` | `jecode mcp` |
+| LSP | `/lsp`, Settings → LSP | `/lsp` | `jecode lsp` |
+| Project instructions | `/init` | `/init` | `jecode init` |
+| Diagnostics, update, removal | `/help` → **Shell** lists them | — | `jecode doctor`, `update`, `uninstall` |
+
+Live conversation controls stay inside the conversation: answering a question
+(`/ask`), processes (`/process`), collaborators (`/agents`), the plan (`/todo`),
+temporary files (`/tmp`) and `/copy` need the running conversation, so the
+command line does not repeat them.

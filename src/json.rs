@@ -25,6 +25,20 @@ impl Value {
         Self::String(value.into())
     }
 
+    /// An object from a runtime list of fields.
+    pub fn entries<K: Into<String>>(entries: impl IntoIterator<Item = (K, Value)>) -> Self {
+        Self::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.into(), value))
+                .collect(),
+        )
+    }
+
+    pub fn optional(value: Option<impl Into<String>>) -> Self {
+        value.map_or(Self::Null, |value| Self::String(value.into()))
+    }
+
     pub fn number(value: impl ToString) -> Self {
         Self::Number(value.to_string())
     }

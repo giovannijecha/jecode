@@ -18,10 +18,17 @@ folder with a saved history is a conversation you can resume.
 ```text
 jecode resume
 jecode resume SESSION_ID
+jecode resume --last
 jecode --plain resume SESSION_ID
+jecode resume --last "Continue with the tests"
 ```
 
-`jecode resume` opens a picker of this directory's conversations. In the TUI,
+`jecode resume` opens a picker of this directory's conversations, and
+`jecode resume --last` opens the most recent one. With a prompt or piped stdin,
+the message is sent and Jecode exits; see
+[Command line](CLI.md#continue-a-conversation). `jecode sessions list` lists
+the IDs without opening anything, and `jecode sessions show SESSION_ID` prints
+one conversation's details and messages. In the TUI,
 `/resume` opens the same picker and `/resume ID` opens one directly. The newest
 conversations come first, each with its title and age (`just now`, `5m`, `2h`,
 `3d`); type to filter by title, provider, model or ID. When you quit the TUI, it
@@ -39,6 +46,11 @@ interrupted requests and tool calls are not replayed, and background processes
 from the earlier run are gone (their saved output stays readable). A
 conversation open in another Jecode process cannot be resumed or deleted until
 that process exits.
+
+Explicit CLI options replace the corresponding saved choices. If the old
+provider is no longer configured, an explicit `--provider` and a usable model
+can restore the portable history through the selected provider; defaults are
+unchanged and provider-specific history retains its compatibility boundary.
 
 `/new` starts a separate conversation with your saved defaults and keeps any
 unsent text in the composer. `/model` switches the model inside the same
@@ -103,7 +115,8 @@ refer to them.
 In the TUI's `/resume` picker, select a conversation and press Ctrl+D to mark it,
 then Enter to confirm; Esc or Ctrl+C cancels. The picker stays open. In
 `--plain`, type `d NUMBER` or `d ID` in `/resume`, then type `delete` to
-confirm.
+confirm. From a terminal, `jecode sessions delete SESSION_ID` asks for the same
+confirmation; add `--yes` when there is no terminal.
 
 Deleting removes the conversation's saved history, recovery copies, complete
 command output and [temporary files](TEMPORARY.md). Attachments are removed when

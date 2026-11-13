@@ -16,12 +16,14 @@ format, so one file can serve all of them.
 
 ## Create one with /init
 
-In the TUI or `--plain`, run `/init`. The current model inspects the project and
+In the TUI or `--plain`, run `/init`; from a terminal, run `jecode init`. The
+current model inspects the project and
 creates or updates the `AGENTS.md` in the launch directory, keeping useful
 existing content and adding only conventions and commands it can verify. It is a
 normal agent turn, so it uses your model and permission level as usual. If a
 turn is running, `/init` waits until it ends. The new instructions apply from
-the next turn.
+the next turn. `jecode init` runs the same task once and exits; like any single
+run, it refuses permission requests because nobody is there to answer them.
 
 ## Which files apply
 

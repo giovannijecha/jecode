@@ -18,7 +18,7 @@ User guides in `usage/`:
 | [Platform support](usage/PLATFORMS.md) | System requirements, verification status and platform limitations. |
 | [Providers](usage/PROVIDERS.md) | API keys, ChatGPT sign-in and the Claude account compatibility route. |
 | [Terminal interface](usage/INTERFACE.md) | Sending, queueing, stopping, reading and quitting. |
-| [Command line](usage/CLI.md) | Single prompts, pipes, plain chat, options and exit codes. |
+| [Command line](usage/CLI.md) | Single prompts, pipes, run options, management commands, JSON output and exit codes. |
 
 ## Work with Jecode
 
@@ -49,7 +49,7 @@ Lookup pages in `reference/`:
 | --- | --- |
 | [Configuration](reference/CONFIGURATION.md) | Settings, `config.json`, routing, environment variables and proxies. |
 | [Files Jecode keeps](reference/FILES.md) | The Jecode home, `JECODE_HOME`, local directories and locks. |
-| [Commands and keys](reference/COMMANDS.md) | Slash commands and keyboard controls in the TUI. |
+| [Commands and keys](reference/COMMANDS.md) | Slash commands, keyboard controls and `jecode` shell commands. |
 | [Tool reference](reference/TOOL_REFERENCE.md) | Exact tool arguments, defaults and limits. |
 | [Command language](reference/SHELL.md) | Syntax and built-ins of the `bash` tool. |
 | [Markdown display](reference/MARKDOWN.md) | How answers are formatted in the terminal. |

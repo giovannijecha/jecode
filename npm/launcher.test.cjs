@@ -17,6 +17,8 @@ function runtimeFor(platform = process.platform, arch = process.arch) {
   runtime.arch = arch;
   runtime.report = { getReport: () => ({ header: { glibcVersionRuntime: '2.28' } }) };
   runtime.argv = ['node', 'jecode.cjs', '--plain', 'two words'];
+  runtime.env = { JECODE_LAUNCHER_TEST: 'inherited' };
+  runtime.execPath = path.join(os.tmpdir(), 'fixture-node');
   runtime.stderr = { write: (message) => errors.push(message) };
   runtime.exitCode = undefined;
   return { runtime, errors };
@@ -139,7 +141,9 @@ test('launcher passes executable, arguments and inherited terminal contract', ()
   assert.deepEqual(spawned, [
     path.join(packageRoot, 'native', 'linux-x64', 'jecode'),
     ['--plain', 'two words'],
-    { stdio: 'inherit', shell: false },
+    { stdio: 'inherit', shell: false, env: {
+      JECODE_LAUNCHER_TEST: 'inherited', JECODE_LAUNCHER_NODE: path.join(os.tmpdir(), 'fixture-node'),
+    } },
   ]);
   child.emit('close', 27, null);
   assert.equal(runtime.exitCode, 27);
@@ -190,6 +194,7 @@ test('a real child inherits cwd and environment and returns its exit code', asyn
   });
 
   const { runtime } = runtimeFor('linux', 'x64');
+  runtime.env = process.env;
   const child = launch({
     runtime,
     binaryExists: () => true,

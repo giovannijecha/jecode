@@ -15,13 +15,22 @@ impl App {
         let menu = self.state.selector.take().unwrap();
         match (choice, &menu.purpose) {
             (Choice::Copy(index), Purpose::Copy) => self.choose_copy(index),
-            (Choice::Session(index), Purpose::Sessions { current, .. }) => {
+            (
+                Choice::Session(index),
+                Purpose::Sessions {
+                    current, launch, ..
+                },
+            ) => {
                 let id = self.saved_sessions[index].id.clone();
                 if menu.delete_target() == Some(index) {
                     self.state.selector = Some(menu);
                     self.start_delete(&id)?;
                 } else if Some(index) != *current {
-                    self.resume_session(&id);
+                    if let Some(selection) = launch {
+                        self.resume_with_selection(&id, selection)?;
+                    } else {
+                        self.resume_session(&id);
+                    }
                 }
             }
             (Choice::Model(index), Purpose::Models { defaults }) => {
@@ -75,7 +84,21 @@ impl App {
             (Choice::Provider(provider @ ("openai" | "anthropic")), Purpose::Credentials) => {
                 self.open_accounts_for(provider)
             }
-            (Choice::ApiKey(id), Purpose::ApiKeys) => self.state.selector = Some(Selector::key(id)),
+            (
+                Choice::ApiKey(id),
+                Purpose::ApiKeys {
+                    delete: Some(marked),
+                },
+            ) if matches!(
+                menu.options.get(*marked).map(|option| option.choice),
+                Some(Choice::ApiKey(saved)) if saved == id
+            ) =>
+            {
+                self.remove_key(id)
+            }
+            (Choice::ApiKey(id), Purpose::ApiKeys { .. }) => {
+                self.state.selector = Some(Selector::key(id))
+            }
             (Choice::Account(index), Purpose::Accounts) => self.open_account(index),
             (Choice::Account(_), Purpose::Account { .. }) => self.activate_account(),
             (Choice::AddAccount, Purpose::Accounts) => self.start_sign_in(None),

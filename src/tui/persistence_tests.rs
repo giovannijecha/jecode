@@ -9,6 +9,7 @@ use crate::{
 use std::{thread, time::Instant};
 
 mod command_tests;
+mod selection_tests;
 
 // Persistence scenarios include multiple requests and durable tool/session
 // checkpoints. Their deadline bounds a stall, not interactive latency.

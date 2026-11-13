@@ -41,6 +41,7 @@ mod resize;
 mod routing;
 mod selector;
 mod settings;
+mod startup;
 mod state;
 mod suggestions;
 mod syntax;
@@ -289,12 +290,15 @@ impl App {
 }
 
 /// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
+/// Run options apply to a conversation resumed at launch; a new conversation
+/// already starts with them.
 pub(crate) fn launch(
     mut agent: Agent,
     config: SessionConfig,
     resume: Option<Option<String>>,
     draft: crate::attachments::Prompt,
     notice: Option<StartupNotice>,
+    selection: crate::cli::Selection,
 ) -> Result<(), String> {
     agent.enable_sessions(
         config
@@ -310,11 +314,7 @@ pub(crate) fn launch(
     if !draft.is_empty() {
         app.state.editor.set(draft);
     }
-    match resume {
-        Some(Some(id)) => app.resume_session(&id),
-        Some(None) => app.open_sessions(),
-        None => {}
-    }
+    app.prepare_resume(resume, &selection)?;
     app.restore_staged();
     if let Some(notice) = notice {
         let mut feedback = Feedback::result(Kind::Warning, app.archive.redactor.text(&notice.text));

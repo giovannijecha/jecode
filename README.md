@@ -29,7 +29,7 @@ jecode --version
 The npm command launches a bundled native executable. It needs Node.js to
 start; the standalone executable does not. To build and install from source,
 see [Installation](docs/usage/INSTALLATION.md). That guide also
-covers npm updates, removal, and existing standalone installations.
+covers `jecode update`, `jecode uninstall`, and existing standalone installations.
 
 ## First task
 
@@ -77,11 +77,15 @@ When you quit, Jecode prints a summary and the command to continue later:
    jecode resume 1793721600123-4812-0
 ```
 
-You can also run one task without the fullscreen interface, or pipe one in; see
-[Command line](docs/usage/CLI.md):
+You can also run one task without the fullscreen interface, pipe data into it,
+or manage Jecode from your shell; see [Command line](docs/usage/CLI.md):
 
 ```sh
 jecode "Explain the structure of this project"
+git diff | jecode "Review this diff"
+jecode resume --last "Now add the missing test"
+jecode doctor
+jecode update
 ```
 
 ## Learn more

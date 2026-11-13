@@ -86,6 +86,8 @@ fn partial_plain_answers_resume_at_the_unanswered_question() {
         &mut output,
         &mut Vec::new(),
         Some(id),
+        Vec::new(),
+        &Default::default(),
     )
     .unwrap();
     let output = String::from_utf8(output).unwrap();
@@ -359,6 +361,8 @@ fn a_failed_continuation_after_resuming_a_question_keeps_the_chat_open() {
         &mut output,
         &mut status,
         Some(id),
+        Vec::new(),
+        &Default::default(),
     )
     .unwrap();
     assert!(String::from_utf8(status).unwrap().contains("401"));

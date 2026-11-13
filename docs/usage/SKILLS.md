@@ -24,7 +24,8 @@ compare it with the expected behavior, fix the cause and run relevant checks.
 Report any verification that could not be run.
 ```
 
-Then run `/skills` in the TUI or plain chat. It lists the skills Jecode found,
+Then run `/skills` in the TUI or plain chat, or `jecode skills` in a terminal
+(`jecode skills show NAME` prints one skill). It lists the skills Jecode found,
 with warnings for invalid ones, without calling the model.
 
 The frontmatter needs two fields:

@@ -21,6 +21,29 @@ fn fixture() -> (Directory, Directory, Store, Document) {
 }
 
 #[test]
+fn read_only_listing_keeps_missing_and_invalid_caches_unchanged() {
+    let (_home, _directory, store, document) = fixture();
+    let lease = store.create(&document.id).unwrap();
+    lease.save(&document).unwrap();
+    let cache = path(&store, &document.id);
+    fs::remove_file(&cache).unwrap();
+
+    let listing = store.list_read_only().unwrap();
+    assert!(listing.warnings.is_empty());
+    assert_eq!(listing.sessions[0].title, document.title());
+    assert!(!cache.exists());
+
+    fs::write(&cache, b"invalid cache").unwrap();
+    let listing = store.list_read_only().unwrap();
+    assert!(listing.warnings.is_empty());
+    assert_eq!(listing.sessions[0].id, document.id);
+    assert_eq!(fs::read(&cache).unwrap(), b"invalid cache");
+
+    store.list().unwrap();
+    assert!(load(&store, &document.id, &stamp(&store, &document.id).unwrap()).is_some());
+}
+
+#[test]
 fn an_unselected_draft_is_listed_without_inventing_a_model_identifier() {
     let (_home, _directory, store, mut document) = fixture();
     document.model = None;

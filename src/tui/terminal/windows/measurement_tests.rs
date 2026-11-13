@@ -21,7 +21,15 @@ pub(super) fn fixture(path: &Path) {
         OpenRouter::fixture(provider.endpoint.clone()),
         Tools::new(path).unwrap(),
     );
-    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent,
+        config,
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert!(
         provider.finish().is_empty(),
         "latency fixture unexpectedly called a provider"
@@ -55,7 +63,15 @@ pub(super) fn scroll_fixture(path: &Path) {
     saved.save_session().unwrap();
     let id = saved.sessions().unwrap().snapshot().id.clone();
     drop(saved);
-    crate::tui::launch(agent(), config, Some(Some(id)), Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent(),
+        config,
+        Some(Some(id)),
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert!(
         provider.finish().is_empty(),
         "scroll fixture unexpectedly called a provider"

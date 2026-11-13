@@ -46,27 +46,6 @@ On Windows, if PowerShell reports that running scripts is disabled, use `npm.cmd
 Next, connect a provider and start working: see
 [First task](../../README.md#first-task).
 
-### Update or remove the npm installation
-
-To update:
-
-```sh
-npm update -g @giovannijecha/jecode
-jecode --version
-```
-
-To remove:
-
-```sh
-npm uninstall -g @giovannijecha/jecode
-```
-
-npm removes its own package and command. Your settings, accounts and conversations
-in `~/.jecode/` (or the directory selected by `JECODE_HOME`)
-remain in place. An npm uninstall does not remove a separate source-built
-installation. On Windows, close any running Jecode process before updating or
-uninstalling if npm reports that the executable is in use.
-
 ### Existing standalone installations
 
 An earlier source-built `jecode` may be found before npm's command on `PATH`.
@@ -87,8 +66,8 @@ command -v jecode
 If that resolves to the standalone install directory instead of npm's command,
 remove only that directory's `bin` entry from your `PATH`, or use the npm
 command by its resolved path. npm does not delete the older installation or
-change your shell configuration. See [Remove a standalone installation](#remove-a-standalone-installation)
-if you no longer need it.
+change your shell configuration. Run `jecode uninstall` with the standalone
+executable to remove it; see [Remove Jecode](#remove-jecode).
 
 ## Build and install from source
 
@@ -216,26 +195,82 @@ sh target/package/jecode-linux-x86_64/INSTALL.sh "$HOME/.local/opt/jecode"
 #### Run without installing
 
 A package directory works on its own: run `jecode` (or `jecode.exe`) from it
-directly, or run `target/release/jecode` after building.
+directly, or run `target/release/jecode` after building. `jecode update` and
+`jecode uninstall` do not manage such a copy.
 
-### Update a standalone installation
+## Update Jecode
 
-Pull the newer source, then repeat the package and install steps. The installer
-replaces the executable it installed earlier. Your configuration, accounts and
-conversations in `~/.jecode/` are not touched.
+```sh
+jecode update --check    # report the installed and latest versions
+jecode update            # install the latest release
+jecode --version
+```
 
-### Remove a standalone installation
+`jecode update` works on the installation that is running, identified by where
+its executable lives rather than by `PATH` order, so several installations can
+coexist:
 
-1. Identify the root you used for the standalone installer (by default,
-   `%LOCALAPPDATA%\Jecode` on Windows or
-   `${XDG_DATA_HOME:-$HOME/.local/share}/jecode` on Linux and macOS). Check
-   its `.jecode-install` marker and remove its `bin/jecode` executable
-   (`bin\jecode.exe` on Windows) and marker. Remove empty directories afterward;
-   keep any unrelated files in a custom install root.
-2. Remove only this standalone `bin` directory from your `PATH` or shell
-   profile. On Windows, edit the user `Path` in **Settings → System → About →
-   Advanced system settings → Environment Variables**.
+| Installation | How it is recognized | What `jecode update` does |
+| --- | --- | --- |
+| npm global | The executable is inside the `@giovannijecha/jecode` package of an npm prefix | Runs `npm install --global --prefix PREFIX @giovannijecha/jecode@VERSION` with the npm of the Node.js that started Jecode, else the first npm on `PATH` that is not Volta's shim, so npm keeps owning the package. |
+| Volta | The package is in Volta's image directory | Runs `volta install @giovannijecha/jecode@VERSION`. |
+| Standalone | `INSTALL.ps1` or `INSTALL.sh` wrote the `.jecode-install` marker beside its `bin` folder | Downloads the published release itself; needs no Node.js, npm, Rust, Git or shell. |
+| Project dependency, source build, copied file | None of the above | Reports the location and changes nothing. Update it the way you installed it. |
 
-This does not remove `~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows), which
-holds your configuration, credentials and saved conversations;
-see [Files Jecode keeps](../reference/FILES.md).
+The latest version is the `latest` tag of the npm package `@giovannijecha/jecode`,
+the one published release. A standalone update downloads that release's
+tarball and installs it only when the tarball matches the registry's
+`sha512` integrity and the executable inside matches the SHA-256 in the
+release's own manifest. The new executable is written beside the old one, must
+report the expected version with `--version`, and only then takes its place.
+Any failure before that point leaves the installed executable as it was.
+
+On Windows a running program cannot be overwritten, but it can be renamed:
+Jecode renames itself out of the way, puts the new executable in place, and a
+hidden Windows PowerShell removes the old file after Jecode exits. An npm or
+Volta update moves the running executable out of the package first, so the
+package manager can replace the folder; if the package manager fails, the
+executable is moved back. Other Jecode processes started from the same file
+keep running until they exit; a later update removes what they leave.
+
+Read the [release notes](../../CHANGELOG.md) before updating: a new build
+resumes only conversations in its current format and leaves unsupported files
+unchanged. Set `JECODE_UPDATE_REGISTRY` to an npm registry mirror's URL to
+check and download from it instead of `https://registry.npmjs.org`. Use an
+`https://` mirror: the `sha512` check compares the tarball with the mirror's own
+metadata, so it cannot protect a plain `http://` connection. Releases include
+executables for Windows x64, macOS and Linux x64; a standalone installation on
+another platform reports that before downloading anything.
+
+## Remove Jecode
+
+```sh
+jecode uninstall
+```
+
+It asks you to type `uninstall` to confirm; add `--yes` to run it without a
+terminal. It removes only the running installation:
+
+- **npm and Volta:** runs `npm uninstall --global --prefix PREFIX` or
+  `volta uninstall`, which remove the package and its command.
+- **Standalone:** removes `bin/jecode` (`bin\jecode.exe`), leftovers of earlier
+  updates and the `.jecode-install` marker, then the `bin` folder and the root
+  if they are empty. Other files in the root stay, and the command lists them.
+  On Windows it also removes that `bin` folder from your user `PATH`, keeping
+  every other entry and the value's type; open a new terminal afterwards. A
+  `bin` folder that still holds other files stays on `PATH`. On
+  Linux and macOS the installer never changed `PATH`, so remove any line you
+  added to your shell profile yourself.
+
+An installation Jecode does not manage is reported and left alone.
+Uninstalling never removes another installation or the Jecode home,
+`~/.jecode/` (`%USERPROFILE%\.jecode\` on Windows, or `JECODE_HOME`), which
+holds your configuration, credentials and saved conversations. Delete that
+folder yourself if you want them gone; see [Files Jecode keeps](../reference/FILES.md).
+
+The package managers' own commands still work: `npm update -g
+@giovannijecha/jecode` and `npm uninstall -g @giovannijecha/jecode`. On Windows,
+close running Jecode processes first if npm reports that the executable is in
+use. To update a standalone installation from source instead, repeat the
+package and install steps above; the installer replaces the executable it
+installed earlier.

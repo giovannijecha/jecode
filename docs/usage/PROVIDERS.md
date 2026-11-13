@@ -55,6 +55,32 @@ ID, such as `=provider/model-id`, to enter an exact model ID.
 start setup when the saved provider has no credentials. Piped tasks never
 prompt; they fail with an instruction to run `jecode setup`.
 
+`jecode providers` manages connections one at a time without changing the
+default provider or model:
+
+```text
+jecode providers                       # each provider's route and readiness
+jecode providers login openrouter      # save a key: hidden prompt or piped stdin
+jecode providers login openai          # sign in to a ChatGPT account
+jecode providers accounts openai       # list saved account IDs and active choice
+jecode providers use openai ACCOUNT_ID # activate an existing account
+jecode providers logout anthropic-api  # remove a saved key
+jecode providers logout openai --account ACCOUNT_ID  # sign out of this account
+```
+
+`login` checks a key with the provider before saving it, as setup does, and
+needs an existing configuration; run `jecode setup` first. For an account it
+opens the same browser sign-in and makes the new account active. `logout`
+removes a saved key, or signs out of the active account as **Sign out** does.
+`--account ACCOUNT_ID` selects a saved account explicitly, including an inactive
+one. Account listing and selection need no default configuration and make no
+provider request. Selection changes the provider's active account; open Jecode
+processes keep their current connections.
+API-key providers bill the provider's API account; `openai` and `anthropic`
+use your ChatGPT or Claude plan. A key is never accepted as an argument or
+printed. To use a provider for one conversation only, pass `--provider ID`; see
+[Command line](CLI.md#provider-model-effort-and-permissions).
+
 ## OpenRouter API key
 
 Create a key at <https://openrouter.ai/settings/keys>. In the TUI, choose
@@ -161,8 +187,12 @@ signed in in your browser.
 
 - **Sign out** deletes that account's local tokens. For ChatGPT, Jecode also
   asks OpenAI to revoke them; for Claude, the remote authorization is not
-  revoked.
+  revoked. `jecode providers logout openai` does the same for the active
+  account; add `--account ACCOUNT_ID` to sign out of a different saved account.
 - Tokens refresh automatically.
+
+In **API keys**, Ctrl+D on a saved key marks it for removal and Enter removes
+it from `config.json`; the running conversation keeps its connection.
 
 For token storage and access permissions, see
 [Credentials](../../SECURITY.md#credentials); for masking, see

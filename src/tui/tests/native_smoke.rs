@@ -107,7 +107,15 @@ fn interactive_windows_smoke() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(directory.path()).unwrap(),
     );
-    launch(agent, config(&directory), None, Default::default(), None).unwrap();
+    launch(
+        agent,
+        config(&directory),
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(fixture.finish().len(), 7);
     let exports: Vec<_> = fs::read_dir(directory.path())
         .unwrap()
@@ -193,6 +201,14 @@ fn work_tools_windows_smoke() {
     );
     // Send a prompt, leave Ask with Esc, inspect /todo, reopen with /ask,
     // then choose or type an answer and submit explicitly with Enter.
-    launch(agent, config(&directory), None, Default::default(), None).unwrap();
+    launch(
+        agent,
+        config(&directory),
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(fixture.finish().len(), 3);
 }

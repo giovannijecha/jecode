@@ -18,8 +18,10 @@ mod writes;
 
 pub(crate) use files::read_text_page;
 #[cfg(test)]
+pub use schema::definitions;
+#[cfg(test)]
 pub use schema::encoded_size;
-pub use schema::{definitions, definitions_for, encoded_size_for};
+pub use schema::{definitions_for, encoded_size_for};
 
 use crate::cancel::Cancellation;
 use crate::json::{self, Value};

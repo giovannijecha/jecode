@@ -164,6 +164,11 @@ impl App {
         }
         let current = self.persistence.as_ref().unwrap().id();
         let mut menu = Selector::sessions(&self.saved_sessions, &current);
+        if let Purpose::Sessions { launch, .. } = &previous.purpose
+            && let Purpose::Sessions { launch: next, .. } = &mut menu.purpose
+        {
+            *next = launch.clone();
+        }
         menu.searchable |= previous.searchable;
         menu.editor = previous.editor;
         menu.refresh();
