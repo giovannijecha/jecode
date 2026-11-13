@@ -61,6 +61,8 @@ function packageBytes(binary, receiptVersion = future) {
 function compileFixture(scratch, reportedVersion) {
   const output = path.join(scratch, `fixture-${reportedVersion}${process.platform === 'win32' ? '.exe' : ''}`);
   const flags = process.platform === 'win32' ? ['-Ctarget-feature=+crt-static'] : [];
+  const linker = process.env.CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER;
+  if (process.platform === 'win32' && linker) flags.push(`-Clinker=${linker}`);
   const result = spawnSync('rustc', ['--edition=2024', ...flags, source, '-o', output], {
     cwd: root,
     env: {...process.env, JECODE_NATIVE_FIXTURE_VERSION: reportedVersion},
