@@ -492,6 +492,10 @@ node --test npm/launcher.test.cjs
 node --test tools/npm/release.test.mjs
 ```
 
+Run the release tests after changing Windows adapters too: they compare every
+runtime P/Invoke with `tools/npm/windows-abi.mjs`. Review each new API's documented
+minimum Windows version before updating that inventory.
+
 The [release runbook](../maintainers/RELEASING.md) describes staging and packing the platform
 binaries. After preparing a tarball, replace the path below with the actual
 tarball path and `<version>` with the package version from `Cargo.toml`. Run the
