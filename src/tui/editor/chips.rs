@@ -59,18 +59,22 @@ impl Editor {
                     let added = format!("{before}{text}{after}");
                     let mut trial = self.text.clone();
                     trial.insert_str(at, &added);
-                    let shift = |chip: &Range<usize>| {
-                        let shift = if chip.start >= at { added.len() } else { 0 };
-                        chip.start + shift..chip.end + shift
-                    };
-                    survive(&trial, chips.iter().map(shift))
+                    survive(
+                        &trial,
+                        chips.iter().map(|chip| moved(chip, at, added.len())),
+                    )
                 }
             })
             .unwrap_or_default();
         if !self.put(&format!("{before}{text}{after}")) {
             return false;
         }
+        let added = self.cursor - at;
         self.cursor -= after.len();
+        let chips = chips
+            .iter()
+            .map(|chip| moved(chip, at, added))
+            .collect::<Vec<_>>();
         self.typing = self.typed(&chips, typed);
         true
     }
@@ -135,6 +139,12 @@ impl Editor {
         let open = self.cursor < token.end || typed && !word.chars().any(|ch| boundary(Some(ch)));
         (open && !chips.iter().any(|chip| chip.start == token.start)).then_some(token.start)
     }
+}
+
+/// `chip` after `added` bytes were inserted at `at`.
+fn moved(chip: &Range<usize>, at: usize, added: usize) -> Range<usize> {
+    let shift = if chip.start >= at { added } else { 0 };
+    chip.start + shift..chip.end + shift
 }
 
 /// Whether `text` still holds every `expected` chip. A draft that became a slash

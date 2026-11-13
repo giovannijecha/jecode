@@ -297,6 +297,14 @@ fn a_reference_typed_by_hand_stays_editable_until_its_word_ends() {
     assert_eq!(editor.cursor, "@foo".len());
     assert_eq!(shown(&editor, 80), [" @foo "]);
 
+    // A reference typed before a chip is compared with the chips' moved positions.
+    let mut editor = draft("$abc");
+    editor.cursor = 0;
+    assert!(editor.compose("$re", true));
+    assert_eq!(shown(&editor, 80), [" $abc "]);
+    typed(&mut editor, "v");
+    assert_eq!(editor.text, "$rev $abc");
+
     // Pasted text is complete: its reference is a chip at once.
     let mut editor = Editor::default();
     assert!(editor.compose("see @README.md", false));
