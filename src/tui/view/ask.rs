@@ -162,10 +162,14 @@ fn max_key_rows(request: &Request, panel: &Panel, columns: usize) -> usize {
         .unwrap_or(0)
 }
 
-/// `☑` before each answered title, the current one in bold `accent`, and
+/// The mark before an answered title other than the current one: Ask's
+/// selected circle, one cell and a space.
+const ANSWERED: &str = "◉ ";
+
+/// `◉` before each answered title, the current one in bold `accent`, and
 /// `N of M` in `dim` ending two cells from the edge.
 /// When the titles do not fit, earlier ones leave behind `…` so the current
-/// title stays in view.
+/// title stays in view; a cut never leaves a mark without its title.
 fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
     let count = format!("{} of {}", panel.step + 1, request.questions.len());
     let count_cells = text::cells(&count);
@@ -182,7 +186,7 @@ fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
         let (title, answered) = &titles[index];
         text::cells(title)
             + if *answered && index != panel.step {
-                2
+                text::cells(ANSWERED)
             } else {
                 0
             }
@@ -198,24 +202,35 @@ fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
         span -= cells(first) + 3;
         first += 1;
     }
+    // Context gives way before the current title: omit the leading ellipsis
+    // and its gap when they would force an otherwise fitting title to clip.
+    let leading = first > 0 && span + 4 <= room;
     let mut row = Line::new("  ", MUTED);
-    if first > 0 {
+    if leading {
         row.push("…", MUTED);
     }
     for (index, (title, answered)) in titles.iter().enumerate().skip(first) {
-        if index > 0 {
+        if index > first || leading {
             row.push("   ", MUTED);
         }
         if index == panel.step {
             row.push(title, ACCENT.bold());
         } else if *answered {
-            row.push("☑ ", ACCENT);
+            row.push(ANSWERED, ACCENT);
             row.push(title, MUTED);
         } else {
             row.push(title, MUTED);
         }
     }
-    let mut row = row.shortened(columns.saturating_sub(count_cells + 4));
+    let limit = columns.saturating_sub(count_cells + 4);
+    // Only a real cut can strand a mark; a fitting title keeps its own text.
+    let fits = panel::cells(&row) <= limit;
+    let mut row = match row.shortened(limit) {
+        cut if fits => cut,
+        cut if cut.plain().ends_with("◉…") => row.shortened(limit.saturating_sub(1)),
+        cut if cut.plain().ends_with("◉ …") => row.shortened(limit.saturating_sub(2)),
+        cut => cut,
+    };
     let used = panel::cells(&row);
     row.push(
         &" ".repeat(columns.saturating_sub(count_cells + 2 + used)),

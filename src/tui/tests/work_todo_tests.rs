@@ -312,13 +312,13 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
     assert_eq!(
         rows(80),
         [
-            "   1  ☑ Inspect the report                                     done",
-            "   2  ☐ Write the exporter                                     in progress",
-            "   3  ☐ Cover edge cases                           AGENTS  #1  awaiting review",
-            "   4  ☐ Benchmark large files                      AGENTS  #2  failed",
-            "   5  ☐ Ask about encoding                                     waiting",
-            "      ☐ Support XML                                            cancelled",
-            "   6  ☐ Update the docs",
+            "   1  ◉ Inspect the report                                     done",
+            "   2  ○ Write the exporter                                     in progress",
+            "   3  ○ Cover edge cases                           AGENTS  #1  awaiting review",
+            "   4  ○ Benchmark large files                      AGENTS  #2  failed",
+            "   5  ○ Ask about encoding                                     waiting",
+            "      ○ Support XML                                            cancelled",
+            "   6  ○ Update the docs",
         ]
         .map(pad)
     );
@@ -326,13 +326,13 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
     assert_eq!(
         rows(48),
         [
-            "  ☑ Inspect the rep…               done",
-            "  ☐ Write the expor…               in progress",
-            "  ☐ Cover edge cases   AGENTS  #1  review",
-            "  ☐ Benchmark large…   AGENTS  #2  failed",
-            "  ☐ Ask about encod…               waiting",
-            "  ☐ Support XML                    cancelled",
-            "  ☐ Update the docs",
+            "  ◉ Inspect the rep…               done",
+            "  ○ Write the expor…               in progress",
+            "  ○ Cover edge cases   AGENTS  #1  review",
+            "  ○ Benchmark large…   AGENTS  #2  failed",
+            "  ○ Ask about encod…               waiting",
+            "  ○ Support XML                    cancelled",
+            "  ○ Update the docs",
         ]
         .map(pad)
     );
@@ -347,17 +347,21 @@ fn menu_rows_align_owner_and_state_columns_and_narrow_drops_numbers() {
             .unwrap()
             .style
     };
-    use crate::tui::theme::{ACCENT, BAD, DIM, GOOD, MUTED, STRONG};
-    assert_eq!(style(0, "☑"), GOOD);
+    use crate::tui::theme::{ACCENT, BAD, DIM, FAINT, GOOD, MUTED, STRONG};
+    assert_eq!(style(0, "◉"), GOOD);
     assert_eq!(style(0, "Inspect"), MUTED);
-    assert_eq!(style(1, "☐"), ACCENT.bold());
+    assert_eq!(style(1, "○"), ACCENT.bold());
     assert_eq!(style(1, "Write"), STRONG.bold());
+    // A returned collaborator's task awaits review: open, not completed.
+    assert_eq!(style(2, "○"), MUTED);
     assert_eq!(style(2, "awaiting review"), MUTED);
-    assert_eq!(style(3, "☐"), BAD.bold());
+    assert_eq!(style(3, "○"), BAD.bold());
     assert_eq!(style(3, "failed"), BAD);
+    assert_eq!(style(4, "○"), MUTED);
+    assert_eq!(style(5, "○"), FAINT);
     assert_eq!(style(5, "Support"), DIM.strike());
     assert_eq!(style(5, "cancelled"), DIM);
-    assert_eq!(style(6, "☐"), MUTED);
+    assert_eq!(style(6, "○"), MUTED);
 }
 
 #[test]

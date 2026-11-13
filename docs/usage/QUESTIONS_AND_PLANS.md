@@ -9,7 +9,8 @@ conversation that you can check at any time.
 When the agent asks, the questions replace the composer under a
 `Waiting for you` marker, and an open menu or panel closes so they show at once.
 One request holds one or more questions, answered one at a time and sent
-together; when their titles do not fit the step row, earlier ones give way to
+together; answered titles other than the current one show `◉`, and when their
+titles do not fit the step row, earlier ones give way to
 `…` so the current one stays in view. A question can offer any number of
 options, single or multiple choice, and then ends with **Other**, where you type your own answer; a question without
 options takes typed text only. Nothing is preselected; an option marked as
@@ -88,7 +89,8 @@ task count. Later updates add no rows.
 `/todo` opens the current plan in place of the composer and updates live: the title,
 a progress bar, `N of M done`, and each task with its number, owner and state
 (`done`, `in progress`, `waiting`, `awaiting review`, `failed` or `cancelled`; a
-task not started shows no state). Arrow keys scroll; Esc closes. It makes no
+task not started shows no state). A task shows `◉` once done and `○`
+otherwise, colored by its state. Arrow keys scroll; Esc closes. It makes no
 model request. In `--plain`, `/todo` prints the same information.
 
 A task can name the collaborator working on it, shown as an `AGENTS` badge

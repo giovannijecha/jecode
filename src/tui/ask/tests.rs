@@ -240,7 +240,7 @@ fn several_questions_show_a_step_row_and_free_text_input() {
     let rows = plain(&dock(&request, &panel, 60, 30));
     assert_eq!(
         rows[2],
-        format!("  ☑ Formats   Delivery{}2 of 2", " ".repeat(30))
+        format!("  ◉ Formats   Delivery{}2 of 2", " ".repeat(30))
     );
     assert_eq!(rows[5], "› Type your answer");
     assert_eq!(

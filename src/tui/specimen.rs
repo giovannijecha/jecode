@@ -133,9 +133,9 @@ const GLYPHS: &[(&str, &[(&str, &str)])] = &[
             ("⏎", "enter alternative"),
             ("⇥", "tab"),
             ("…", "ellipsis"),
-            ("☐", "open task"),
-            ("☑", "done task"),
-            ("☒", "alternate done task"),
+            ("☐", "emoji-prone open checkbox"),
+            ("☑", "emoji-prone checked box"),
+            ("☒", "emoji-prone crossed box"),
         ],
     ),
 ];

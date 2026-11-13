@@ -12,7 +12,7 @@ display only: the original text is what Jecode saves, exports and copies with
 | `**bold**`, `__bold__`, `*italic*`, `_italic_`, `~~struck~~` | Bold, italic and dimmed struck text; styles can combine. |
 | `` `code` `` | Inline code on a code background. |
 | `[label](https://example.com/page)` | The underlined label followed by the host in parentheses, `(example.com)`. Relative links stay whole. Links are not clickable. |
-| `-`, `*`, `+` and numbered lists | Bullets or numbers with hanging indents. `[ ]` and `[x]` show as `☐` and `☑`. |
+| `-`, `*`, `+` and numbered lists | Bullets or numbers with hanging indents. `[ ]` and `[x]` show as `○` and `◉`; the message keeps its brackets. |
 | `>` quotes | Muted text behind a `│` guide. |
 | Fenced code blocks (three or more backticks or tildes) | A code card with the language name and syntax highlighting. |
 | `---`, `***`, `___` | A horizontal rule. |
