@@ -10,6 +10,9 @@ use crate::effort::Effort;
 use crate::json::Value;
 use crate::permissions::Level;
 
+#[cfg(test)]
+mod tests;
+
 pub const KEYS: &[&str] = &[
     "model",
     "effort",
@@ -242,17 +245,8 @@ fn set(
             let routing = if value == "auto" {
                 Routing::Auto
             } else {
-                // The same check as /settings and --routing: the endpoint
-                // must exist and serve this model's tools and effort.
-                let routing = Routing::Endpoint(value.to_owned());
                 let services = services(&settings, &settings.backend_id)?;
-                crate::selection::check_routing(
-                    &services,
-                    &settings.model,
-                    settings.effort,
-                    &routing,
-                )?;
-                routing
+                endpoint_routing(&services, &settings.model, settings.effort, value)?
             };
             settings.routing.insert(settings.model.clone(), routing);
         }
@@ -302,4 +296,18 @@ fn set(
         ]),
         text,
     ))
+}
+
+/// The same endpoint check as /settings and --routing: tools and the saved
+/// reasoning effort must both be served by the selected route.
+fn endpoint_routing(
+    services: &crate::backend::Services,
+    model: &str,
+    effort: Effort,
+    tag: &str,
+) -> Result<Routing, Failure> {
+    let routing = Routing::Endpoint(tag.to_owned());
+    crate::selection::check_routing(services, model, effort, &routing)
+        .map_err(|error| services.redact(&error))?;
+    Ok(routing)
 }

@@ -252,7 +252,8 @@ fn delete(context: &Context, store: &Store, id: &str, yes: bool) -> Result<Repor
     // Reading first rejects missing, unsupported and foreign sessions unchanged.
     let document = store.read(id)?;
     // As in `show`: a key saved after the title was written is masked too.
-    let title = context.redactor()?.text(&document.title());
+    let redactor = context.redactor()?;
+    let title = redactor.text(&document.title());
     if !confirm(
         yes,
         &format!(
@@ -282,5 +283,6 @@ fn delete(context: &Context, store: &Store, id: &str, yes: bool) -> Result<Repor
             ),
         ]),
         text,
-    ))
+    )
+    .redact(&redactor))
 }

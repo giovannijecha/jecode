@@ -196,13 +196,7 @@ fn activate(binary: &Path, staged: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 pub fn update(root: &Path, binary: &Path, release: &Release) -> Result<Outcome, String> {
-    if !provenance::published() {
-        return Err(format!(
-            "Jecode releases include no executable for {}-{}; update this installation the way you built it",
-            std::env::consts::OS,
-            std::env::consts::ARCH
-        ));
-    }
+    supported()?;
     eprintln!(
         "Downloading Jecode {} from {}…",
         release.version,
@@ -241,6 +235,17 @@ pub fn update(root: &Path, binary: &Path, release: &Release) -> Result<Outcome, 
             ),
         ]),
     })
+}
+
+pub fn supported() -> Result<(), String> {
+    if !provenance::published() {
+        return Err(format!(
+            "Jecode releases include no executable for {}-{}; update this installation the way you built it",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
+    }
+    Ok(())
 }
 
 /// Removes the executable, update leftovers, the marker and directories left

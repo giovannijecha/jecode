@@ -227,6 +227,64 @@ fn explicit_provider_restores_history_when_saved_credentials_are_missing() {
 }
 
 #[test]
+fn replacing_missing_credentials_records_the_saved_routing() {
+    let directory = Directory::new();
+    let fixture = crate::test_support::HttpFixture::new(vec![]);
+    let services = Services::from_service(crate::backend::openai::Api::fixture_api_key(
+        "isolated-fixture-key",
+        &fixture.endpoint,
+    ));
+    let mut agent = Agent::with_backend(
+        services.create("fixture/current".into()).unwrap(),
+        crate::tools::Tools::new(directory.path()).unwrap(),
+    );
+    let home = directory.path().join(".jecode");
+    agent.enable_sessions(&home).unwrap();
+    let mut document = crate::sessions::Document::new(
+        directory.path().to_path_buf(),
+        "fixture/old".into(),
+        Effort::Low,
+    )
+    .unwrap();
+    document.routing = Routing::Endpoint("fixture/old-route".into());
+    document.messages = agent.sessions().unwrap().snapshot().messages;
+    document.messages.push(crate::json::Value::object([
+        ("role", crate::json::Value::string("user")),
+        ("content", crate::json::Value::string("Keep this history")),
+    ]));
+    let id = document.id.clone();
+    let handle = crate::sessions::Handle::new(
+        agent.sessions().unwrap().store(),
+        document,
+        agent.redactor(),
+    );
+    handle.flush().unwrap();
+    drop(handle);
+    let store = Store::new(home);
+    let settings = Settings::new("isolated-fixture-key".into(), "fixture/new".into()).unwrap();
+    store.save(&settings).unwrap();
+    let status = resume(
+        &mut agent,
+        &id,
+        &Selection {
+            provider: Some("openrouter".into()),
+            model: Some("fixture/new".into()),
+            routing: Some(Routing::Auto),
+            ..Selection::default()
+        },
+        &settings,
+        &store,
+    )
+    .unwrap();
+    assert!(
+        status.contains("was Endpoint fixture/old-route"),
+        "{status}"
+    );
+    assert_eq!(agent.routing(), Routing::Auto);
+    assert_eq!(fixture.finish().len(), 0);
+}
+
+#[test]
 fn the_most_recent_session_is_found_without_opening_it() {
     let directory = Directory::new();
     let project = directory.path().join("project");

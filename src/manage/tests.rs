@@ -310,8 +310,15 @@ fn sessions_list_show_export_and_delete_without_opening_a_conversation() {
             .unwrap()
             .contains("jecode.conversation")
     );
+    let store =
+        crate::sessions::Store::new(directory.path().to_path_buf(), project.path()).unwrap();
+    let kept = store.session_directory(&id).join(KEY);
+    fs::write(&kept, "unowned fixture").unwrap();
     let (deleted, _) = run(command("sessions", "delete", &[&id]));
-    assert!(deleted.unwrap().text.contains("Deleted"));
+    let deleted = printed(&deleted.unwrap());
+    assert!(deleted.contains("Deleted"));
+    assert!(!deleted.contains(KEY), "{deleted}");
+    assert!(kept.exists());
     let (listed, _) = run(command("sessions", "list", &[]));
     assert!(!listed.unwrap().text.contains(&id));
     let (missing, _) = run(command("sessions", "show", &[&id]));

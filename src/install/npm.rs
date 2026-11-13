@@ -34,27 +34,47 @@ fn npm() -> Result<Command, String> {
         }
     }
     let name = if cfg!(windows) { "npm.cmd" } else { "npm" };
-    let found = std::env::var_os("PATH")
+    let candidates = std::env::var_os("PATH")
         .into_iter()
         .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .map(|directory| directory.join(name))
-        .find(|candidate| candidate.is_file())
-        .ok_or(
-            "npm was not found; run jecode update from the npm installation's own jecode command",
-        )?;
+        .map(|directory| directory.join(name));
     // Volta's home is `Volta` on Windows and `.volta` on Unix, or VOLTA_HOME.
     let volta_home = std::env::var_os("VOLTA_HOME")
         .filter(|home| !home.is_empty())
         .map(PathBuf::from);
-    if volta_home.is_some_and(|home| found.starts_with(home))
-        || found.components().any(|part| {
-            let part = part.as_os_str();
-            part.eq_ignore_ascii_case("volta") || part.eq_ignore_ascii_case(".volta")
-        })
+    Ok(Command::new(fallback_npm(
+        candidates,
+        volta_home.as_deref(),
+    )?))
+}
+
+fn fallback_npm(
+    candidates: impl IntoIterator<Item = PathBuf>,
+    volta_home: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let mut found_volta = false;
+    for found in candidates
+        .into_iter()
+        .filter(|candidate| candidate.is_file())
     {
-        return Err("Only Volta's npm shim was found, which would install into Volta instead of this npm prefix; run jecode update through this installation's jecode command".into());
+        let is_volta = volta_home.is_some_and(|home| found.starts_with(home))
+            || found.components().any(|part| {
+                let part = part.as_os_str();
+                part.eq_ignore_ascii_case("volta") || part.eq_ignore_ascii_case(".volta")
+            });
+        if !is_volta {
+            return Ok(found);
+        }
+        found_volta = true;
     }
-    Ok(Command::new(found))
+    if found_volta {
+        Err("Only Volta's npm shim was found, which would install into Volta instead of this npm prefix; run jecode update through this installation's jecode command".into())
+    } else {
+        Err(
+            "npm was not found; run jecode update from the npm installation's own jecode command"
+                .into(),
+        )
+    }
 }
 
 fn volta(home: &Path) -> Result<Command, String> {
@@ -226,6 +246,29 @@ pub fn uninstall(owner: &Owner) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fallback_skips_volta_shim_when_another_npm_is_available() {
+        let directory = crate::test_support::Directory::new();
+        let volta_home = directory.path().join("custom-volta-home");
+        let ordinary = directory.path().join("node");
+        std::fs::create_dir_all(&volta_home).unwrap();
+        std::fs::create_dir_all(&ordinary).unwrap();
+        let name = if cfg!(windows) { "npm.cmd" } else { "npm" };
+        let shim = volta_home.join(name);
+        let npm = ordinary.join(name);
+        std::fs::write(&shim, b"shim").unwrap();
+        std::fs::write(&npm, b"npm").unwrap();
+        assert_eq!(
+            fallback_npm(vec![shim, npm.clone()], Some(&volta_home)).unwrap(),
+            npm
+        );
+        assert!(
+            fallback_npm(vec![volta_home.join(name)], Some(&volta_home))
+                .unwrap_err()
+                .contains("Volta's npm shim")
+        );
+    }
 
     #[test]
     fn update_commands_use_the_registry_that_supplied_the_release() {

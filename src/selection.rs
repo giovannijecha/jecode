@@ -184,7 +184,7 @@ pub fn resume(
                 };
                 client.set_routing(routing);
             }
-            Some((client, was))
+            Some((client, (was, saved.routing)))
         } else {
             None
         }
@@ -210,22 +210,24 @@ fn apply(
     selection: &Selection,
     settings: &Settings,
     store: &Store,
-    replaced: Option<String>,
+    replaced: Option<(String, Routing)>,
 ) -> Result<Option<String>, String> {
     if selection.is_empty() {
         return Ok(None);
     }
     let home = store.path().parent().expect("configuration directory");
     let prepared_replacement = replaced.is_some();
-    let previous = replaced.unwrap_or_else(|| {
-        format!(
-            "{} / {} · {}",
-            agent.backend_id(),
-            agent.model(),
-            agent.effort().name()
+    let (previous, previous_routing) = replaced.unwrap_or_else(|| {
+        (
+            format!(
+                "{} / {} · {}",
+                agent.backend_id(),
+                agent.model(),
+                agent.effort().name()
+            ),
+            agent.routing(),
         )
     });
-    let previous_routing = agent.routing();
     let mut changes = Vec::new();
     let provider = selection.provider.as_deref().unwrap_or(agent.backend_id());
     check_routing_provider(provider, selection.routing.as_ref())?;

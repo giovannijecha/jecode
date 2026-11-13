@@ -49,6 +49,9 @@ pub fn update(check: bool, json: bool) -> Result<(), Failure> {
     if !check && let Some(reason) = unmanaged(&owner) {
         return Err(Failure::Error(reason));
     }
+    if matches!(owner, Owner::Standalone { .. }) {
+        standalone::supported()?;
+    }
     let release = registry::latest()?;
     let available = registry::newer(&release.version, VERSION);
     let mut fields = vec![

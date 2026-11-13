@@ -49,9 +49,13 @@ pub fn target() -> (&'static str, &'static str) {
 /// Whether releases include an executable for this platform: `target`
 /// names the closest published one, which may not run here.
 pub fn published() -> bool {
+    published_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn published_for(os: &str, arch: &str) -> bool {
     matches!(
-        (std::env::consts::OS, std::env::consts::ARCH),
-        ("windows", _) | ("macos", "aarch64" | "x86_64") | ("linux", "x86_64")
+        (os, arch),
+        ("windows", "x86_64") | ("macos", "aarch64" | "x86_64") | ("linux", "x86_64")
     )
 }
 
@@ -208,6 +212,16 @@ mod tests {
     use super::*;
     use crate::test_support::Directory;
     use std::fs;
+
+    #[test]
+    fn published_targets_match_the_release_artifacts() {
+        assert!(published_for("windows", "x86_64"));
+        assert!(!published_for("windows", "aarch64"));
+        assert!(published_for("linux", "x86_64"));
+        assert!(!published_for("linux", "aarch64"));
+        assert!(published_for("macos", "aarch64"));
+        assert!(published_for("macos", "x86_64"));
+    }
 
     fn file(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
