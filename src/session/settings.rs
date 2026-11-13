@@ -227,9 +227,8 @@ impl SessionConfig {
         output: &mut impl Write,
     ) -> Result<(), String> {
         let requested = argument.map(Effort::parse).transpose()?;
-        let effort = if let Some(effort) = requested
-            .filter(|effort| *effort == Effort::Default || !agent.services().validates_effort())
-        {
+        let effort = if let Some(effort) = requested {
+            crate::selection::check_effort(&agent.services(), agent.model(), effort)?;
             effort
         } else {
             let catalog = agent.services().catalog()?;
@@ -237,21 +236,10 @@ impl SessionConfig {
                 .iter()
                 .find(|model| model.id == agent.model())
                 .ok_or("Current model is not available in the tool-capable catalog")?;
-            if let Some(effort) = requested {
-                if !model.efforts.contains(&effort) {
-                    return Err(format!(
-                        "{} does not support effort {}",
-                        model.id,
-                        effort.name()
-                    ));
-                }
-                effort
-            } else {
-                let Some(effort) = choose_effort(model, &mut Terminal::new(input, output))? else {
-                    return Ok(());
-                };
-                effort
-            }
+            let Some(effort) = choose_effort(model, &mut Terminal::new(input, output))? else {
+                return Ok(());
+            };
+            effort
         };
         let previous = agent.effort();
         agent.set_effort(effort);

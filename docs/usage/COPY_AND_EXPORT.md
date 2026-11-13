@@ -52,6 +52,11 @@ directory, named `JECODE-SESSION-<timestamp>-<process>-<counter>.json`. Existing
 files are never overwritten. An export is a snapshot for inspection or sharing;
 `jecode resume` cannot open it.
 
+`jecode sessions export SESSION_ID` writes the same document for a saved
+conversation without opening it: to a new file in its working directory, to
+`--output PATH` (never replacing an existing file), or to stdout with
+`--output -`.
+
 The file is JSON with `"format": "jecode.conversation"` and
 `"format_version": 2`. It contains:
 

@@ -114,6 +114,8 @@ fn staged_file_survives_exit_source_removal_and_plain_resume() {
         &mut output,
         &mut Vec::new(),
         Some(id),
+        Vec::new(),
+        &Default::default(),
     )
     .unwrap();
     assert!(

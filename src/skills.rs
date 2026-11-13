@@ -91,6 +91,16 @@ impl Library {
         &self.warnings
     }
 
+    /// A skill's package and its `SKILL.md` text, as the catalog validated it.
+    pub fn source(&self, name: &str) -> Result<(PathBuf, String), String> {
+        let entry = self
+            .entries
+            .get(name)
+            .ok_or_else(|| format!("Skill {name:?} is not in the current catalog"))?;
+        let text = read_bounded(&entry.package.join("SKILL.md"), MAX_RESOURCE_BYTES)?;
+        Ok((entry.package.clone(), text))
+    }
+
     pub fn instructions(&self) -> String {
         if self.entries.is_empty() && self.warnings.is_empty() {
             return String::new();

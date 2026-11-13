@@ -85,6 +85,35 @@ impl App {
         Ok(())
     }
 
+    /// Removes a saved key through the same store as `jecode providers
+    /// logout`. The running conversation keeps the connection it has.
+    pub(super) fn remove_key(&mut self, id: &'static str) {
+        let label = backend::info(id).map_or_else(|| id.to_owned(), |info| info.key_label());
+        let mut settings = self.config.settings.clone();
+        settings.credentials.remove(id);
+        if settings.backend_id == id {
+            settings.api_key.clear();
+        }
+        // Without a saved model the key lived only in this session.
+        let saved = if self.config.settings.has_model() {
+            self.config.store.remove_credential(id).map(|_| ())
+        } else {
+            Ok(())
+        };
+        if let Err(error) = saved {
+            self.finish_setting(Kind::Error, &error, vec![]);
+            return;
+        }
+        self.config.settings = settings;
+        self.catalog.clear();
+        self.finish_setting_change(
+            Kind::Notice,
+            &format!("{label} removed · this conversation keeps its connection"),
+            vec![],
+        );
+        self.open_api_keys();
+    }
+
     /// Reconnects the conversation's model with a validated key, or keeps the
     /// key for a later switch to its provider.
     pub(super) fn adopt_key(&mut self, services: backend::Services) -> Result<(), String> {

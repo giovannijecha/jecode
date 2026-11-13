@@ -43,7 +43,7 @@ Keep `AGENTS.md`, local configuration, credentials, and internal reports out of
 the tarball.
 
 The checked-in [CI workflow](https://github.com/giovannijecha/jecode/blob/main/.github/workflows/CI.yml) runs the Rust
-checks, launcher tests, release build, local native package, npm lifecycle
+checks, launcher tests, release build, standalone update/removal, local native package, npm lifecycle
 fixture, and a native terminal check through the npm launcher on Windows x64
 and Linux x64 using the existing local runners, and on hosted macOS ARM64 and x64.
 Its required job names are `Rust (Windows)`, `Rust (Linux)`, `Rust (macOS)`, and
@@ -80,6 +80,13 @@ The workflow does **not** publish to npm, create a Git tag or GitHub release,
 or use an npm credential or OIDC write permission. The local lifecycle fixture
 uses a private registry on loopback; it never contacts a provider. It checks
 the native binary and npm's global install, update, and uninstall behavior.
+
+The published tarball is also the standalone update source: `jecode update`
+on a standalone installation reads the registry's `latest` tag, requires the
+tarball's `sha512` integrity, and accepts `native/<target>/<binary>` only when
+`package/package.json` names the version and `native/manifest.json` lists the
+same version and SHA-256 for that target. Keep those fields when changing the
+package layout, or standalone updates will refuse the release.
 
 To check one platform from a local checkout, build its release executable with
 `cargo build --release --locked --offline` (on Linux, against the sysroot; on macOS,
@@ -136,7 +143,8 @@ The preparation workflow does none of this. For each published version:
 1. Run `npm view @giovannijecha/jecode@<version> dist.integrity` and compare it with
    `integrity` in the reviewed `manifest.json`.
 2. From the previous public version, verify `npm update -g @giovannijecha/jecode`
-   against the real registry, then run `jecode --version`. Use a disposable
+   and, when that version has it, `jecode update` against the real registry,
+   then run `jecode --version`. Use a disposable
    environment: version managers such as Volta intercept global npm commands and
    ignore `npm_config_prefix`.
 3. Create the annotated tag `v<version>` with the message `Jecode <version>` on the

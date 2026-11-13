@@ -65,9 +65,12 @@ function launch({
 
   let child;
   try {
+    // The executable's own update and uninstall run npm beside this Node.js,
+    // so a version manager's global npm cannot redirect them.
     child = spawnChild(executable, runtime.argv.slice(2), {
       stdio: 'inherit',
       shell: false,
+      env: { ...(runtime.env ?? process.env), JECODE_LAUNCHER_NODE: runtime.execPath ?? process.execPath },
     });
   } catch (error) {
     runtime.stderr.write(`jecode: could not start ${target.key}: ${error.message}\n`);

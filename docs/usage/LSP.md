@@ -118,8 +118,16 @@ remain supported, and draining notifications yields to pending control actions.
 ## Configuration file
 
 Global entries are stored in `~/.jecode/lsp.json`, with a separate lock file.
-Plain mode uses the same model tool; configure entries in the TUI or edit
-this file. `/lsp` also provides read-only inspection in plain chat.
+Plain mode uses the same model tool; configure entries in the TUI, with
+`jecode lsp`, or in this file. `/lsp` also provides read-only inspection in
+plain chat.
+
+`jecode lsp` lists entries without starting anything; `jecode lsp show SERVER`
+shows one with environment values masked. `jecode lsp add rust-analyzer` or
+`jecode lsp add clangd` saves the guided entry, turned on (`--executable PATH`
+names another executable). `jecode lsp check SERVER` is the form's **Check**,
+and `enable`, `disable` and `remove` change an entry. Custom servers use the
+TUI form or this file.
 Environment values are retained locally in plaintext and masked in the TUI.
 Credential-like values (names containing key, token, secret, password, auth,
 session or signature, or values of 20 characters or more) are redacted from

@@ -166,11 +166,28 @@ impl App {
     }
 
     pub(super) fn resume_session(&mut self, id: &str) {
+        if let Err(error) = self.resume_with_selection(id, &crate::cli::Selection::default()) {
+            self.local_start(&format!("/resume {id}"));
+            self.local_finish(Kind::Error, &error, vec![]);
+        }
+    }
+
+    pub(super) fn resume_with_selection(
+        &mut self,
+        id: &str,
+        selection: &crate::cli::Selection,
+    ) -> Result<(), String> {
         self.cancel_copy();
         // A draft still in the composer, from the commands sheet, comes along.
         let carried = self.take_composer();
         self.capture_input();
-        let result = self.agent.as_mut().unwrap().resume(id);
+        let result = crate::selection::resume(
+            self.agent.as_mut().unwrap(),
+            id,
+            selection,
+            &self.config.settings,
+            &self.config.store,
+        );
         match result {
             Ok(status) => {
                 let agent = self.agent.as_ref().unwrap();
@@ -433,13 +450,13 @@ impl App {
                     self.run_worker(worker);
                 }
                 self.state.changed();
+                Ok(())
             }
             Err(error) => {
                 super::recovery::carry_draft(&mut self.state.editor, carried);
                 self.edited();
                 self.state.selector = None;
-                self.local_start(&format!("/resume {id}"));
-                self.local_finish(Kind::Error, &error, vec![]);
+                Err(self.archive.redactor.text(&error))
             }
         }
     }

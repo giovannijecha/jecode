@@ -207,6 +207,21 @@ fn ending(menu: &Selector, width: usize) -> Vec<Line> {
                 width,
             );
         }
+        Purpose::ApiKeys { .. } if deleting => {
+            return panel::confirm(
+                "Remove this saved key?",
+                &[key("Enter", "remove"), key("Esc", "cancel")],
+                width,
+            );
+        }
+        Purpose::ApiKeys { .. } if menu.options.iter().any(|option| option.badge.is_some()) => {
+            vec![
+                key("↑↓", "move").optional(),
+                key("Enter", "choose"),
+                key("Ctrl+D", "remove"),
+                close[0],
+            ]
+        }
         Purpose::Account {
             confirm_sign_out: true,
         } => {

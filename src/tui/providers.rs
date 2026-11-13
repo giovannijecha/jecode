@@ -436,7 +436,7 @@ impl App {
             }
             Purpose::Account { .. } => self.open_accounts(),
             Purpose::Accounts => self.open_credentials(),
-            Purpose::Credentials | Purpose::ApiKeys => {
+            Purpose::Credentials | Purpose::ApiKeys { .. } => {
                 self.state.selector = Some(Selector::providers_settings())
             }
             Purpose::ProviderSettings => self.return_to_settings(),

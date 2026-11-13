@@ -140,6 +140,8 @@ fn plain_todo_reads_persisted_plan_without_a_model_request() {
         &mut output,
         &mut Vec::new(),
         Some(id),
+        Vec::new(),
+        &Default::default(),
     )
     .unwrap();
     assert_eq!(resumed.todo_plan().unwrap().revision, 1);

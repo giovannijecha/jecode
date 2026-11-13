@@ -121,6 +121,7 @@ pub(super) fn console(path: &Path) {
         Some(Some(id.clone())),
         Default::default(),
         None,
+        Default::default(),
     )
     .unwrap();
     let store = crate::sessions::Store::new(home, path).unwrap();

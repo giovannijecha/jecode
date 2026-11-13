@@ -17,6 +17,7 @@ content through its file tools when it needs it.
 | TUI | Drop files onto the terminal window, or paste their paths. Press Alt+V, or Ctrl+V on Linux and macOS, to attach an image from the clipboard. |
 | `jecode --plain` | Start with `jecode --plain --attach PATH`. Enter on an empty line sends only the staged attachments. |
 | Single prompt or pipe | `jecode --attach PATH [--attach PATH]... "prompt"` |
+| A saved conversation | `jecode resume --last --attach PATH "prompt"`; without a prompt the attachment waits in the composer. |
 
 Attachments appear in the draft as numbered elements, such as `[1# Image]` or
 `[2# File: report.pdf]`, shown as chips. Backspace or Delete removes a whole

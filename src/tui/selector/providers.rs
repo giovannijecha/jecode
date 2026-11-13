@@ -121,7 +121,7 @@ impl Selector {
     pub fn api_keys(configured: &[(&'static str, bool)]) -> Self {
         let mut menu = Self::new(
             "API keys",
-            Purpose::ApiKeys,
+            Purpose::ApiKeys { delete: None },
             configured
                 .iter()
                 .filter_map(|(id, saved)| {

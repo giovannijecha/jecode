@@ -24,7 +24,7 @@ pub struct Archive {
 }
 
 impl Archive {
-    #[cfg(test)]
+    /// The `/export` document, as `jecode sessions export` also writes it.
     pub fn document(&self) -> Value {
         self.document_at(timestamp())
     }

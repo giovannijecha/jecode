@@ -76,6 +76,7 @@ fn sessions_windows_smoke() {
         None,
         Default::default(),
         None,
+        Default::default(),
     )
     .unwrap();
     let home = directory.path().join(".jecode");
@@ -111,6 +112,7 @@ fn sessions_windows_smoke() {
         Some(None),
         Default::default(),
         None,
+        Default::default(),
     )
     .unwrap();
     assert_eq!(fixture.finish().len(), 3);

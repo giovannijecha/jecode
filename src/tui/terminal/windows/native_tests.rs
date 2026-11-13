@@ -373,7 +373,15 @@ fn native_console_fixture() {
             OpenRouter::fixture(fixture.endpoint.clone()),
             Tools::new(&path).unwrap(),
         );
-        crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+        crate::tui::launch(
+            agent,
+            config,
+            None,
+            Default::default(),
+            None,
+            Default::default(),
+        )
+        .unwrap();
         restored(&path);
         assert_eq!(fixture.finish().len(), 1);
         println!("NATIVE_DELETE_RESTORED");
@@ -455,7 +463,15 @@ fn native_console_fixture() {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(&path).unwrap(),
     );
-    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent,
+        config,
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     restored(&path);
     let sessions = crate::sessions::Store::new(path.join("home"), &path)
         .unwrap()

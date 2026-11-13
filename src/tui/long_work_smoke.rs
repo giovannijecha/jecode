@@ -65,6 +65,7 @@ fn long_work_windows_smoke() {
         None,
         Default::default(),
         None,
+        Default::default(),
     )
     .unwrap();
     let requests = fixture.finish();

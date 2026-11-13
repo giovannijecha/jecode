@@ -76,7 +76,15 @@ fn launch(path: &Path, fixture: &HttpFixture) {
         OpenRouter::fixture(fixture.endpoint.clone()),
         Tools::new(path).unwrap(),
     );
-    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent,
+        config,
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
 }
 
 fn idle_conversation(path: &Path) {
@@ -159,7 +167,15 @@ fn terminal_probe_conversation(path: &Path) {
     agent
         .permissions()
         .set_default(crate::permissions::Level::Workspace);
-    crate::tui::launch(agent, config, None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent,
+        config,
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     let requests = fixture.finish();
     assert_eq!(
         std::fs::read_to_string(project.join("tty-probe"))

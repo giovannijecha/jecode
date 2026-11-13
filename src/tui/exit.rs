@@ -79,15 +79,19 @@ mod tests {
 
     #[test]
     fn the_printed_resume_command_is_accepted_by_the_cli() {
-        let text = summary(1, 0, Duration::ZERO, Some("fixture-id"), true);
+        let text = summary(1, 0, Duration::ZERO, Some("1794555952096-15056-0"), true);
         let command = text.lines().nth(1).unwrap().trim();
         let arguments = command
             .split_whitespace()
             .skip(1)
             .map(std::ffi::OsString::from);
         assert!(matches!(
-            crate::cli::parse(arguments),
-            Ok(crate::cli::Action::Resume { id: Some(id), plain: false }) if id == "fixture-id"
+            crate::cli::parse(arguments).map(|invocation| invocation.action),
+            Ok(crate::cli::Action::Run(crate::cli::Run {
+                start: crate::cli::Start::Resume(crate::cli::Resume::Id(id)),
+                plain: false,
+                ..
+            })) if id == "1794555952096-15056-0"
         ));
     }
 

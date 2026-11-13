@@ -29,9 +29,12 @@ pub fn chat(
     status: &mut impl Write,
     staged: Vec<Attachment>,
 ) -> Result<(), String> {
-    chat_inner(agent, config, input, output, status, None, staged)
+    let none = crate::cli::Selection::default();
+    chat_inner(agent, config, input, output, status, None, staged, &none)
 }
 
+/// Plain chat that opens a saved conversation first; run options apply to it.
+#[allow(clippy::too_many_arguments)]
 pub fn chat_with_resume(
     agent: &mut Agent,
     config: &mut SessionConfig,
@@ -39,10 +42,22 @@ pub fn chat_with_resume(
     output: &mut impl Write,
     status: &mut impl Write,
     id: Option<String>,
+    staged: Vec<Attachment>,
+    selection: &crate::cli::Selection,
 ) -> Result<(), String> {
-    chat_inner(agent, config, input, output, status, Some(id), Vec::new())
+    chat_inner(
+        agent,
+        config,
+        input,
+        output,
+        status,
+        Some(id),
+        staged,
+        selection,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn chat_inner(
     agent: &mut Agent,
     config: &mut SessionConfig,
@@ -51,6 +66,7 @@ fn chat_inner(
     status: &mut impl Write,
     resume: Option<Option<String>>,
     mut staged: Vec<Attachment>,
+    selection: &crate::cli::Selection,
 ) -> Result<(), String> {
     agent.set_process_resume_on_input();
     let previous = agent.sessions();
@@ -65,7 +81,15 @@ fn chat_inner(
         .map_err(|error| error.to_string())?;
     let mut process_resume = true;
     if let Some(id) = resume {
-        persistence::resume(agent, config, id.as_deref(), input, output, status)?;
+        persistence::resume_with_selection(
+            agent,
+            config,
+            id.as_deref(),
+            Some(selection),
+            input,
+            output,
+            status,
+        )?;
         if agent.has_pending_question() {
             process_resume = resume_question(agent, input, output, status)?;
         }
@@ -341,33 +365,7 @@ fn run_plain(
 
 /// The plain `/mcp` listing: a recorded summary and the user's own view.
 fn mcp_overview(home: &std::path::Path) -> (String, String) {
-    let connections = match crate::mcp::Store::new(home.to_path_buf()).list() {
-        Ok(connections) => connections,
-        Err(error) => {
-            let error = format!("Could not read MCP connections: {error}");
-            return (error.clone(), error);
-        }
-    };
-    let mut text = connections
-        .iter()
-        .map(|connection| {
-            format!(
-                "{} · {} · {}\n",
-                connection.name,
-                crate::mcp::without_query(&connection.endpoint),
-                if connection.enabled {
-                    "enabled"
-                } else {
-                    "suspended"
-                }
-            )
-        })
-        .collect::<String>();
-    text.push_str("Manage connections in Settings > MCP in the TUI, or ~/.jecode/mcp.json.");
-    (
-        format!("{} configured connections", connections.len()),
-        text,
-    )
+    crate::manage::mcp::overview(home)
 }
 
 #[cfg(test)]

@@ -130,6 +130,8 @@ jobs:
         run: node --test tools/npm/release.test.mjs tools/package.test.mjs
       - name: Build release executable
         run: cargo +${{ matrix.toolchain }} build --release --locked --offline
+      - name: Verify standalone update and uninstall
+        run: node tools/npm/native-lifecycle.mjs "${{ runner.os == 'Windows' && 'target/release/jecode.exe' || 'target/release/jecode' }}"
       - name: Run the release executable on the glibc floor
         if: runner.os == 'Linux'
         shell: bash

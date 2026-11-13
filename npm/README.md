@@ -47,9 +47,12 @@ sent to providers and local credential storage.
 
 Read the [release notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md)
 before updating: this build resumes only conversations in its current format
-and leaves unsupported files unchanged. The
-[installation guide](https://github.com/giovannijecha/jecode/blob/main/docs/usage/INSTALLATION.md#update-or-remove-the-npm-installation)
-covers npm updates, removal and existing standalone installations.
+and leaves unsupported files unchanged. `jecode update --check` reports whether
+a newer release is published, `jecode update` installs it through npm, and
+`jecode uninstall` removes this npm installation while keeping your settings and
+conversations. The
+[installation guide](https://github.com/giovannijecha/jecode/blob/main/docs/usage/INSTALLATION.md#update-jecode)
+covers updates, removal and existing standalone installations.
 
 The [project README](https://github.com/giovannijecha/jecode#readme) and
 [documentation index](https://github.com/giovannijecha/jecode/blob/main/docs/README.md)

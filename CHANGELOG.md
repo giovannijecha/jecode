@@ -1,5 +1,32 @@
 # Release notes
 
+## Unreleased
+
+Changes since 0.7.5.
+
+- **Command line.** New `settings`, `providers`, `models`, `sessions`,
+  `skills`, `mcp`, `lsp`, `doctor`, `init` and `completions` commands manage
+  Jecode from a terminal through the same stores and checks as the TUI;
+  inspection needs no model credentials. Every command has `--help`, and
+  management commands print JSON with `--json`. See
+  [Command line](docs/usage/CLI.md).
+- **Run options.** `--provider`, `--model`, `--effort`, `--routing`, `--permissions` and
+  `-C DIR` choose a conversation's route and folder without changing saved
+  defaults. An explicit provider never falls back to another billing route.
+  `jecode resume --last` and `jecode resume ID "PROMPT"` continue a
+  conversation directly. `--json` prints a run as JSON Lines.
+- **Prompt and piped data.** `git diff | jecode "Review this diff"` now sends
+  both: the prompt, then the piped data. Oversized or non-UTF-8 input is an
+  error rather than being ignored.
+- **Update and uninstall.** `jecode update` updates npm, Volta and standalone
+  installations; standalone updates verify the published release and need no
+  Node.js. `jecode uninstall` removes only the running installation and keeps
+  your Jecode home. See [Installation](docs/usage/INSTALLATION.md#update-jecode).
+- **Interface.** `/help` gains a **Shell** tab listing these commands, and
+  Settings → Providers → API keys can remove a saved key with Ctrl+D.
+- **Parser.** `jecode --plain setup` and other inapplicable options are now
+  usage errors (exit status 2) instead of being sent as a task.
+
 ## 0.7.5
 
 Changes since 0.6.5.

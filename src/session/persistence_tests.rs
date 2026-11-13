@@ -62,6 +62,8 @@ fn plain_resume_directs_saved_attachment_drafts_to_fullscreen_composer() {
         &mut output,
         &mut status,
         Some(id),
+        Vec::new(),
+        &Default::default(),
     )
     .unwrap();
     let rendered = String::from_utf8(output).unwrap();
@@ -110,6 +112,8 @@ fn plain_resume_restores_history_and_displays_unsent_text_without_calling_the_pr
         &mut output,
         &mut status,
         Some(id.clone()),
+        Vec::new(),
+        &Default::default(),
     )
     .unwrap();
     let output = String::from_utf8(output).unwrap();

@@ -54,10 +54,28 @@ impl Agent {
         self.install_backend(next, true)
     }
 
+    /// Install a run-selected route before preparation checks a saved pin.
+    pub fn replace_backend_with_routing(
+        &mut self,
+        next: Box<dyn Backend>,
+        routing: crate::backend::Routing,
+    ) -> Result<(), String> {
+        self.install_backend_with_routing(next, true, Some(routing))
+    }
+
     pub(super) fn install_backend(
+        &mut self,
+        next: Box<dyn Backend>,
+        prepare: bool,
+    ) -> Result<(), String> {
+        self.install_backend_with_routing(next, prepare, None)
+    }
+
+    fn install_backend_with_routing(
         &mut self,
         mut next: Box<dyn Backend>,
         prepare: bool,
+        routing: Option<crate::backend::Routing>,
     ) -> Result<(), String> {
         let previous_identity = self.identity();
         let had_model = self.has_model();
@@ -70,7 +88,9 @@ impl Agent {
         self.tools.include_credentials(self.redactor.clone());
         next.set_cancellation(self.cancellation.clone());
         next.set_delegation(!self.child);
-        if previous_identity.backend == identity.backend
+        if let Some(routing) = routing {
+            next.set_routing(routing);
+        } else if previous_identity.backend == identity.backend
             && previous_identity.model == identity.model
         {
             next.clone_routing_from(self.client.as_ref());

@@ -273,7 +273,15 @@ fn native_pty_fixture() {
             .set_default(settings.default_permissions);
         agent
     };
-    crate::tui::launch(agent(), config(), None, Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent(),
+        config(),
+        None,
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert_mode_restored(&tty, &original);
     assert!(!path.join("late.txt").exists());
     let sessions = crate::sessions::Store::new(path.join("home"), &path).unwrap();
@@ -317,6 +325,7 @@ fn native_pty_fixture() {
         Some(Some(id.clone())),
         Default::default(),
         None,
+        Default::default(),
     )
     .unwrap();
     assert_mode_restored(&tty, &original);
@@ -343,7 +352,15 @@ fn native_pty_fixture() {
     other.save_session().unwrap();
     drop(other);
     eprintln!("\r\nPTY_PHASE_MANAGE");
-    crate::tui::launch(agent(), config(), Some(None), Default::default(), None).unwrap();
+    crate::tui::launch(
+        agent(),
+        config(),
+        Some(None),
+        Default::default(),
+        None,
+        Default::default(),
+    )
+    .unwrap();
     assert_mode_restored(&tty, &original);
     assert!(sessions.list().unwrap().sessions.is_empty());
     assert!(sessions.fixture_load(id).is_err());

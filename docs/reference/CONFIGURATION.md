@@ -12,10 +12,13 @@ Most settings have two scopes:
 
 - **This conversation.** `/model`, `/effort`, `/routing` and `/permissions`
   change the current conversation. The choice is saved with it and restored on
-  resume, but new conversations do not inherit it.
-- **Defaults.** `/settings` saves defaults for new conversations, launches,
-  single prompts and pipes. Saving a default does not change the current
-  conversation, except where noted below.
+  resume, but new conversations do not inherit it. The run options `--provider`,
+  `--model`, `--effort`, `--routing` and `--permissions` choose the same things when a
+  conversation starts or resumes; see
+  [Command line](../usage/CLI.md#provider-model-effort-and-permissions).
+- **Defaults.** `/settings` and `jecode settings` save defaults for new
+  conversations, launches, single prompts and pipes. Saving a default does not
+  change the current conversation, except where noted below.
 
 | `/settings` item | What it sets |
 | --- | --- |
@@ -31,6 +34,28 @@ Most settings have two scopes:
 
 In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 
+### From the command line
+
+`jecode settings` shows every saved default and `jecode settings path` the
+file and the Jecode home. `jecode settings get KEY` prints one value and
+`jecode settings set KEY VALUE` changes it through the same validation and
+save as `/settings`:
+
+| Key | Values | `/settings` item |
+| --- | --- | --- |
+| `model` | A model ID; add `--provider ID` to change provider too. The provider needs a saved key or active account. A different model resets the default effort to `default`. | **Default model** |
+| `effort` | `default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; checked against the model's catalog on OpenRouter and Anthropic. | **Default effort** |
+| `routing` | `auto`, or an OpenRouter endpoint tag the provider lists for the default model. | **Default routing** |
+| `permissions` | `read`, `workspace`, `full`. | **Default permissions** |
+| `auto-compact` | A whole percentage from 1 to 99, with or without `%`. | **Context** → **Auto-compact at** |
+| `prompt-cache` | `5m` or `1h`. | **Context** → **Prompt cache** |
+| `theme` | `auto`, `dark`, `light`. | **Theme** |
+
+`provider` is shown with the model and is read only. Changing a value needs an
+existing configuration: run `jecode setup` first. API keys and accounts are
+managed with `jecode providers`, MCP with `jecode mcp` and language servers
+with `jecode lsp`. Output never includes a credential.
+
 ## Models and effort
 
 | Action | Effect |
@@ -38,7 +63,8 @@ In `jecode --plain`, `/settings` runs the guided setup instead of a menu.
 | `/model` | Choose API keys or Credentials and a configured provider (when several are available), then a model and effort, for this conversation. |
 | `/model ID` | Switch this conversation to model `ID` on the current provider. The TUI opens the effort selector when the catalog lists `ID`. An unlisted ID, a failed catalog load or `--plain` applies it at `default` effort. |
 | `/effort` or `/effort NAME` | Change this conversation's reasoning effort. |
-| `jecode --model ID "task"` | Use model `ID` for one launch without changing defaults. A different model starts at `default` effort. |
+| `jecode --model ID "task"` | Use model `ID` for this conversation without changing defaults. A different model starts at `default` effort unless `--effort` names one. |
+| `jecode settings set model ID` | Save model `ID` as the default; see [From the command line](#from-the-command-line). |
 
 The effort selector uses the model's catalog or documented API capabilities.
 For known OpenAI API models, Jecode supplies the levels documented by OpenAI
@@ -104,6 +130,10 @@ queried.
 A model on OpenRouter is often served by several endpoints. `/routing` chooses
 how the current conversation reaches them; `/settings` → **Default routing**
 saves a choice for the default model. Other providers have no routing choice.
+
+From the shell, `jecode models endpoints MODEL --provider openrouter` lists
+endpoint IDs and compatibility. `--routing auto` or `--routing ENDPOINT` chooses
+for one conversation, including on resume; saved defaults remain unchanged.
 
 | Choice | Behavior |
 | --- | --- |
@@ -189,6 +219,7 @@ Rules for the file:
 | `JECODE_HOME` | Absolute path of the [Jecode home](FILES.md#jecode-home); relative paths are rejected. |
 | `JECODE_BROWSER` | Path to the browser executable for the `browser` tool. |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Configure a run when no `config.json` exists; see [Providers](../usage/PROVIDERS.md#environment-variables). |
+| `JECODE_UPDATE_REGISTRY` | An npm registry mirror for `jecode update`, instead of `https://registry.npmjs.org`. |
 
 ## Network proxies
 

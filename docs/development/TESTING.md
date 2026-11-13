@@ -81,6 +81,8 @@ Check the reported count: a command that matched no tests verified nothing. Use
 | Processes and terminals | `tools::processes` (lifecycle, yielding, completions), `agent::process_delivery_tests` (delivery and idle continuation), `session::processes`, `tui::processes`, `tools::exec`, `tools::interactive`, `process`. |
 | Collaboration | `agent::collaboration`, `collaboration::workspace`, `session::agents`, `tui::agents`. |
 | Sessions and attachments | `sessions`, `attachments`. |
+| Command line | `cli::` parses grammar, help, literal prompts and invalid input; `selection::` covers run-option precedence on new and resumed conversations; `bootstrap::` covers prompt-and-stdin composition and JSON Lines; `manage::` covers settings, providers, sessions, skills, MCP and LSP commands with isolated homes. `tests/cli.rs` runs the built executable for exit codes, stream separation and read-only commands. |
+| Installation lifecycle | `install::` covers provenance, registry metadata, gzip, tar, SHA-512, staged replacement, failure recovery and owned-file removal. |
 | TUI | State, layout and VT screen tests under `tui`, plus the native terminal fixture for your platform. |
 | Browser | `browser` uses loopback DevTools fixtures; installed-browser checks are below. |
 
@@ -105,6 +107,54 @@ Keep user guides in `docs/usage/`, lookup pages in `docs/reference/`, contributo
 procedures in `docs/development/`, account-dependent operations in
 `docs/maintainers/`, and dated evidence in `docs/reports/`. Update
 [the index](../README.md) and inbound links when moving a page.
+
+## Installation lifecycle checks
+
+The CI matrix runs the built release executable against a loopback registry:
+
+```text
+node tools/npm/native-lifecycle.mjs target/release/jecode
+```
+
+On Windows, use `target/release/jecode.exe`. The fixture uses isolated standalone
+roots and a small, locally compiled next-version executable. It verifies update
+checking, integrity and version failures, successful replacement, deferred
+cleanup, and removal while preserving unrelated files and the Jecode home.
+On Windows it first verifies that the disposable bin is absent from the user
+PATH, then confirms that the registry value and type remain unchanged.
+
+The normal suite covers update and removal with synthetic installations under
+`target`. Two opt-in checks reach outside it:
+
+```text
+cargo test --locked --offline install::registry::tests::live_published_release_verifies_and_extracts -- --exact --ignored --nocapture
+cargo test --locked --offline install::system::tests::registry_path_removal_keeps_the_value_kind_and_other_entries -- --exact --ignored --nocapture
+```
+
+The first downloads the published npm release, checks its `sha512` integrity,
+inflates it and matches the executable to the release manifest. It installs
+nothing. The second, Windows only, writes a disposable key under
+`HKCU\Software\JecodeTest-<pid>` to check the user `PATH` edit, then deletes it;
+it never touches the real `Environment` key.
+
+To exercise `jecode update` and `jecode uninstall` end to end, use disposable
+installations only:
+
+- **Standalone.** Install a build with `INSTALL.ps1 -InstallRoot <temp> -NoPath`
+  or `INSTALL.sh <temp>`. Serve npm-shaped release tarballs from a loopback
+  registry and set `JECODE_UPDATE_REGISTRY` to it. A release whose executable
+  prints `jecode <version> (...)` for `--version` updates; a corrupted digest or
+  a wrong version must leave the installed executable unchanged.
+- **npm.** Follow the isolation in `tools/npm/lifecycle.mjs`: a temporary
+  prefix, cache, user and global npm configuration, `HOME`, `USERPROFILE`,
+  `APPDATA`, `LOCALAPPDATA` and `JECODE_HOME`, with `npm_config_registry`
+  pointing at the loopback registry. Run npm as `node npm-cli.js` beside the
+  chosen Node.js, with any version manager's directories removed from `PATH`:
+  Volta intercepts global npm commands and ignores `npm_config_prefix`. Then run
+  the installed `jecode update` and `jecode uninstall --yes` through npm's own
+  command shim.
+
+Never run these against your own installations, `PATH` or Jecode home.
 
 ## Offline long-context checks
 

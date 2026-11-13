@@ -223,6 +223,46 @@ fn worker_completion_and_connection_events_keep_a_pending_session_error_visible(
 }
 
 #[test]
+fn api_key_removal_needs_a_mark_and_enter_and_keeps_the_rest_of_the_file() {
+    let home = Directory::new();
+    let project = Directory::new();
+    let mut app = app(&home, &project, "http://127.0.0.1:1/chat/completions");
+    app.config.store.save(&app.config.settings).unwrap();
+    app.open_api_keys();
+    // The first row is OpenRouter, whose key is saved; the next is not.
+    key(&mut app, 40, 0);
+    key(&mut app, 68, 4);
+    assert_eq!(app.state.selector.as_ref().unwrap().delete_target(), None);
+    key(&mut app, 38, 0);
+    key(&mut app, 68, 4);
+    assert_eq!(
+        app.state.selector.as_ref().unwrap().delete_target(),
+        Some(0)
+    );
+    assert!(
+        live(&app).contains("Remove this saved key?"),
+        "{}",
+        live(&app)
+    );
+    key(&mut app, 27, 0);
+    assert_eq!(app.state.selector.as_ref().unwrap().delete_target(), None);
+    assert!(app.config.settings.credential_for("openrouter").is_some());
+    key(&mut app, 68, 4);
+    key(&mut app, 13, 0);
+    assert!(app.config.settings.credential_for("openrouter").is_none());
+    let saved = std::fs::read_to_string(app.config.store.path()).unwrap();
+    assert!(!saved.contains("isolated-fixture-key") && saved.contains("fixture/model"));
+    let menu = app.state.selector.as_ref().unwrap();
+    assert!(matches!(menu.purpose, selector::Purpose::ApiKeys { .. }));
+    assert!(menu.options.iter().all(|option| option.badge.is_none()));
+    assert!(
+        live(&app).contains("OpenRouter API key removed"),
+        "{}",
+        live(&app)
+    );
+}
+
+#[test]
 fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
     let home = Directory::new();
     let project = Directory::new();
@@ -248,7 +288,7 @@ fn closing_selectors_and_settings_is_silent_and_retains_the_draft() {
     key(&mut app, 27, 0);
     assert!(matches!(
         app.state.selector.as_ref().unwrap().purpose,
-        selector::Purpose::ApiKeys
+        selector::Purpose::ApiKeys { .. }
     ));
     assert!(app.state.notice.is_none());
     key(&mut app, 27, 0);

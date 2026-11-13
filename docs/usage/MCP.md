@@ -1,9 +1,10 @@
 # MCP connections
 
-Manage global HTTP MCP connections in **Settings > MCP**. `/mcp` inspects only
-configured connections and their tools. Multiple connections to the same
-service use distinct names. They apply to every conversation and collaborator.
-Plain mode has no MCP settings; use the TUI or
+Manage global HTTP MCP connections in **Settings > MCP** or with `jecode mcp`.
+`/mcp` inspects only configured connections and their tools. Multiple
+connections to the same service use distinct names. They apply to every
+conversation and collaborator. Plain mode has no MCP settings; use
+`jecode mcp`, the TUI or
 [edit the file directly](#edit-the-file-directly).
 
 ## Connect a server
@@ -47,6 +48,24 @@ they grant it access to. A public server with no authentication reads
 The [Vercel client setup](../maintainers/VERCEL_MCP_CLIENT.md) records the
 public metadata URL and publication requirement. Vercel CLI/API tokens are not
 assumed to authorize the MCP endpoint; access follows its OAuth grants.
+
+## Manage connections from a terminal
+
+```text
+jecode mcp                              # list, without contacting servers
+jecode mcp show docs                    # one connection, credentials masked
+jecode mcp tools docs                   # connect and list its tools
+jecode mcp add Docs https://example.com/mcp --auth token
+jecode mcp login docs                   # sign in again or replace the token
+jecode mcp disable docs
+jecode mcp remove docs --yes
+```
+
+A connection is named by its ID or name. `add` uses the same check as the
+form: it signs in when asked, loads the tools, and saves only after that
+succeeds. `--auth token` reads the bearer token from a hidden prompt or piped
+stdin; `--auth oauth` opens browser sign-in, or GitHub's device code. Headers,
+timeouts and custom OAuth clients remain in Settings > MCP and `mcp.json`.
 
 ## Edit the file directly
 

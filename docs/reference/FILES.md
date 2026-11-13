@@ -39,3 +39,19 @@ lock files contain no project data and coordinate processes using different
 
 For credential storage, sensitive data and what leaves your machine, see
 [Security](../../SECURITY.md).
+
+## Installation files
+
+Installations live outside the Jecode home, and `jecode uninstall` never
+removes the home. A standalone installation from `INSTALL.ps1` or `INSTALL.sh`
+is a root folder (by default `%LOCALAPPDATA%\Jecode` on Windows or
+`${XDG_DATA_HOME:-$HOME/.local/share}/jecode` on Linux and macOS) holding:
+
+| Path | Contents |
+| --- | --- |
+| `.jecode-install` | The marker that identifies the installation as Jecode's. |
+| `bin/jecode`, `bin\jecode.exe` | The executable. |
+| `bin/.jecode-update-*`, `bin/.jecode-previous-*` | A staged update, or a previous executable still running on Windows. `jecode update` and `jecode uninstall` remove them. |
+
+npm and Volta installations are package folders their package manager owns;
+see [Installation](../usage/INSTALLATION.md#update-jecode).

@@ -27,7 +27,10 @@ pub(super) fn print(agent: &mut Agent, home: &Path, output: &mut impl Write) -> 
             }
         }
     }
-    lines.push("Manage servers in Settings > LSP in the TUI, or ~/.jecode/lsp.json.".into());
+    lines.push(
+        "Manage servers with jecode lsp, in Settings > LSP in the TUI, or in ~/.jecode/lsp.json."
+            .into(),
+    );
     agent.record_local("/lsp", &summary);
     writeln!(output, "{}", agent.redactor().text(&lines.join("\n")))
         .map_err(|error| error.to_string())
