@@ -140,25 +140,69 @@ impl Peer {
         }
     }
 
-    pub(super) fn send(&mut self, text: &str) {
+    fn frame(text: &str) -> Vec<u8> {
         let bytes = text.as_bytes();
         let mut frame = vec![0x81];
         if bytes.len() < 126 {
             frame.push(bytes.len() as u8);
-        } else {
+        } else if bytes.len() <= u16::MAX as usize {
             frame.push(126);
             frame.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
+        } else {
+            frame.push(127);
+            frame.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
         }
         frame.extend_from_slice(bytes);
-        self.writer.write_all(&frame).unwrap();
+        frame
+    }
+
+    pub(super) fn send(&mut self, text: &str) {
+        self.writer.write_all(&Self::frame(text)).unwrap();
     }
 
     pub(super) fn answer(&mut self, text: &str) {
-        for event in reply(text) {
-            self.send(&event);
-        }
-        self.send(r#"{"type":"responsesapi.websocket_timing","timing_metrics":{}}"#);
+        self.answer_after(text, |_| {});
     }
+
+    fn answer_after(&mut self, text: &str, after_write: impl FnOnce(&mut Self)) {
+        // A client may close as soon as response.completed arrives. Queue the
+        // optional timing frame with the response, before that close can race it.
+        let mut frames = Vec::new();
+        for event in reply(text) {
+            frames.extend(Self::frame(&event));
+        }
+        frames.extend(Self::frame(
+            r#"{"type":"responsesapi.websocket_timing","timing_metrics":{}}"#,
+        ));
+        self.writer.write_all(&frames).unwrap();
+        after_write(self);
+    }
+}
+
+#[test]
+fn a_client_closing_after_the_response_does_not_break_the_fixture_answer() {
+    use std::net::{Shutdown, TcpListener};
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    let mut peer = Peer::new(stream);
+    peer.reader
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    peer.answer_after("Done", |peer| {
+        client.shutdown(Shutdown::Both).unwrap();
+        drop(client);
+        let mut byte = [0];
+        let closed = peer.reader.read(&mut byte);
+        match closed {
+            Ok(0) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+            other => panic!("client did not close: {other:?}"),
+        }
+    });
 }
 
 pub(super) fn reply(text: &str) -> Vec<String> {
