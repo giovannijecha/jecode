@@ -115,7 +115,7 @@ impl App {
     /// except while the typing the request arrived into goes on.
     pub(super) fn permission_text(&mut self, text: &str) {
         if self.permission_guarded() {
-            self.continue_draft(text);
+            self.continue_draft(text, true);
             return;
         }
         let mut characters = text.chars();

@@ -42,7 +42,7 @@ pub struct Token {
 
 /// Where a reference may start or end: the edge of the text, whitespace or an
 /// attachment.
-fn boundary(character: Option<char>) -> bool {
+pub fn boundary(character: Option<char>) -> bool {
     character.is_none_or(|character| character.is_whitespace() || character == MARKER)
 }
 
@@ -89,7 +89,7 @@ fn token(text: &str, start: usize, sigil: Sigil) -> Option<Token> {
             let mut escaped = false;
             for (offset, character) in rest.char_indices().skip(1) {
                 match character {
-                    '\n' => return None,
+                    '\n' | MARKER => return None,
                     _ if escaped => {
                         value.push(character);
                         escaped = false;
@@ -147,6 +147,19 @@ pub fn tokens(text: &str) -> Vec<Token> {
         }
     }
     found
+}
+
+/// The references the chat composer draws as chips: every nonempty reference, unless
+/// the draft is a slash command, whose arguments stay plain text.
+pub fn chips(text: &str) -> Vec<std::ops::Range<usize>> {
+    if text.starts_with('/') {
+        return Vec::new();
+    }
+    tokens(text)
+        .into_iter()
+        .filter(|token| !token.value.is_empty())
+        .map(|token| token.start..token.end)
+        .collect()
 }
 
 /// The reference the caret is on, from just before its sigil to just after its end.

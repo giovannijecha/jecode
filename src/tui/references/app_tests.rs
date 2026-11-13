@@ -14,7 +14,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod atomic_tests;
 mod files_tests;
+mod sent_tests;
 mod turn_tests;
 
 const BACKSPACE: u16 = 8;

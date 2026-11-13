@@ -39,7 +39,9 @@ public static class JecodeConsoleProbe {
             int count = screen.Width * (screen.Bottom - screen.Top + 1);
             var text = new char[count];
             Check(ReadConsoleOutputCharacterW(output, text, (uint)count, new Coord(0, screen.Top), out read));
-            return inputMode + "|" + outputMode + "|" + GetConsoleOutputCP() + "\n" + new string(text, 0, (int)read);
+            // A third line, after the visible cells, holds the cursor relative to the window.
+            return inputMode + "|" + outputMode + "|" + GetConsoleOutputCP() + "\n" + new string(text, 0, (int)read)
+                + "\n" + screen.X + "," + (screen.Y - screen.Top);
         }
     }
 }

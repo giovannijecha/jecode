@@ -227,9 +227,12 @@ uses isolated configuration and no provider account or external model request.
 
 The reference-sheets fixture types `$` and `@` into a draft with an attachment,
 filters, opens a folder and inserts both references, then cancels an empty result.
-It paints each step with the real renderer at 44, 80 and 100 columns in both
-palettes and reads the console cells back, using an isolated skill library and
-workspace.
+It also moves across and deletes references, checks attachments beside incomplete
+quoted paths and sends a mixed request to a loopback endpoint. Unicode spaces stay
+inside sent cards. One renderer paints at 44, 80 and 100 columns in both palettes.
+The fixture reads console cells and cursor at card boundaries and after edits;
+surfaces and other movement frames are checked in a VT model fed the same output.
+It uses an isolated skill library, workspace and configuration.
 
 The MCP fixture uses the real Windows renderer at 44 and 100 columns, covering
 the list, add, form and Advanced panels (including unchecked and signed-out

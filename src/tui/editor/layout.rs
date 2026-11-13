@@ -1,13 +1,13 @@
 use crate::attachments::MARKER;
-use crate::tui::{references::syntax, text};
-use std::borrow::Cow;
+use crate::tui::text;
+use std::{borrow::Cow, ops::Range};
 
 #[derive(Clone, Debug)]
 pub struct Row {
     pub text: String,
     pub positions: Vec<(usize, usize)>,
     /// Byte ranges of `text` that show attachment or reference chips.
-    pub labels: Vec<std::ops::Range<usize>>,
+    pub labels: Vec<Range<usize>>,
 }
 
 impl Row {
@@ -19,15 +19,11 @@ impl Row {
         }
     }
 
-    fn push(&mut self, value: &str, chip: bool, join: bool) {
+    fn push(&mut self, value: &str, chip: bool) {
         let start = self.text.len();
         self.text.push_str(value);
         if chip {
-            if join && let Some(last) = self.labels.last_mut().filter(|last| last.end == start) {
-                last.end = self.text.len();
-            } else {
-                self.labels.push(start..self.text.len());
-            }
+            self.labels.push(start..self.text.len());
         }
     }
 }
@@ -39,18 +35,19 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// `labels` replace the attachment markers of `source`, in order. A label
-    /// is one unit: the cursor and wrapping never split it. With `references`,
-    /// `$skill` and `@path` references are drawn as chips too.
+    /// `labels` replace the attachment markers of `source`, in order, and the
+    /// `chips` byte ranges of `source` show as reference chips. Each label and chip
+    /// is one unit: the cursor and wrapping never split it, and a label too wide
+    /// for a row is shortened on screen only.
     pub fn new(
         source: &str,
         cursor: usize,
         columns: usize,
         labels: &[String],
-        references: bool,
+        chips: &[Range<usize>],
     ) -> Self {
         let mut layout = Self::default();
-        layout.reflow(source, 0, columns, labels, references);
+        layout.reflow(source, 0, columns, labels, chips);
         layout.move_cursor(cursor);
         layout
     }
@@ -61,50 +58,47 @@ impl Layout {
         row: usize,
         columns: usize,
         labels: &[String],
-        references: bool,
+        chips: &[Range<usize>],
     ) {
         let columns = columns.max(4);
         let mut byte = self.rows.get(row).map_or(0, |row| row.positions[0].0);
         self.rows.truncate(row);
         self.rows.push(Row::new(byte));
         let mut cells = 0;
-        let tokens = if references && !source.starts_with('/') {
-            syntax::tokens(source)
-        } else {
-            Vec::new()
-        };
-        let from = byte;
-        let mut references = tokens
+        let mut chips = chips[chips.partition_point(|chip| chip.end <= byte)..]
             .iter()
-            .filter(|token| !token.value.is_empty() && token.end > from)
             .peekable();
         let mut label = if labels.is_empty() {
             0
         } else {
             source[..byte].chars().filter(|&ch| ch == MARKER).count()
         };
-        for glyph in text::glyphs(&source[byte..]) {
+        let mut glyphs = text::glyphs(&source[byte..]);
+        loop {
+            if let Some(chip) = chips.next_if(|chip| chip.start <= byte) {
+                let name = text::ellipsize(&text::clean(&source[chip.clone()]), columns - 2);
+                let display = format!(" {name} ");
+                let size = text::cells(&display);
+                if cells + size > columns {
+                    self.rows.push(Row::new(byte));
+                    cells = 0;
+                }
+                let row = self.rows.last_mut().unwrap();
+                row.push(&display, true);
+                cells += size;
+                byte = chip.end;
+                row.positions.push((byte, cells));
+                glyphs = text::glyphs(&source[byte..]);
+                continue;
+            }
+            let Some(glyph) = glyphs.next() else {
+                break;
+            };
             if glyph.text == "\n" {
                 self.rows.push(Row::new(byte + 1));
                 cells = 0;
                 byte += 1;
                 continue;
-            }
-            while references.peek().is_some_and(|token| token.end <= byte) {
-                references.next();
-            }
-            let reference = references.peek().filter(|token| token.start <= byte);
-            let leading = reference.is_some_and(|token| token.start == byte);
-            let trailing = reference.is_some_and(|token| token.end == byte + glyph.text.len());
-            // Move a reference that fits onto the next row as one card. Longer
-            // references keep all their text and their surface across rows.
-            if leading {
-                let token = reference.unwrap();
-                let size = text::cells(&text::clean(&source[token.start..token.end])) + 2;
-                if size <= columns && cells + size > columns {
-                    self.rows.push(Row::new(byte));
-                    cells = 0;
-                }
             }
             let marker = glyph.text.starts_with(MARKER);
             let display = if marker {
@@ -123,25 +117,14 @@ impl Layout {
                 Cow::Borrowed(_) => glyph.cells,
                 Cow::Owned(value) => text::cells(value),
             };
-            if cells + size + usize::from(leading) + usize::from(trailing) > columns {
+            if cells + size > columns {
                 self.rows.push(Row::new(byte));
                 cells = 0;
             }
             let row = self.rows.last_mut().unwrap();
-            if leading {
-                row.push(" ", true, false);
-                cells += 1;
-                row.positions.push((byte, cells));
-            }
-            row.push(&display, marker || reference.is_some(), reference.is_some());
+            row.push(&display, marker);
             cells += size;
             byte += glyph.text.len();
-            if trailing {
-                // The padding cell also maps to the reference's end.
-                row.positions.push((byte, cells));
-                row.push(" ", true, true);
-                cells += 1;
-            }
             row.positions.push((byte, cells));
         }
         if cells >= columns {
@@ -165,14 +148,15 @@ impl Layout {
         (row, positions[position].1)
     }
 
+    /// The byte whose caret position is nearest `column` on `row`, so a chip is
+    /// entered by neither end.
     pub fn byte_at(&self, row: usize, column: usize) -> usize {
-        self.rows[row]
-            .positions
-            .iter()
-            .rev()
-            .find(|(_, cell)| *cell <= column)
-            .or_else(|| self.rows[row].positions.first())
-            .unwrap()
-            .0
+        let positions = &self.rows[row].positions;
+        let after = positions.partition_point(|(_, cell)| *cell <= column);
+        let before = positions[after.saturating_sub(1)];
+        match positions.get(after) {
+            Some(&(byte, cell)) if after > 0 && cell - column < column - before.1 => byte,
+            _ => before.0,
+        }
     }
 }

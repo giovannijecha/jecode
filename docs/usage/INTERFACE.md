@@ -88,15 +88,23 @@ selector opened, sigil included; that is also how to type a literal `$` or `@`
 at the start of a word, as in `$HOME`: press Esc and keep typing. Text entered in
 the Filter field is discarded when you cancel.
 
-To change a reference, put the caret on it and press Tab. Its selector opens
+To change a reference, put the caret at either end and press Tab. Its selector opens
 with the reference as the filter, and your choice replaces it. Tab on a lone `$`
 or `@` reopens its selector. Elsewhere in a draft, Tab does nothing.
 
-References appear in the composer as colored cards on the same surface as image
-and file attachments, with their `$` or `@` prefix and no attachment number.
-They remain editable text: Backspace removes one character, and the message keeps
-the exact reference without the card's visual padding. Long references wrap in
-full. A lone `$` or `@` stays plain until it has a name or path.
+References appear in the composer and sent messages as colored cards on the same
+surface as image and file attachments, with their `$` or `@` prefix and no number.
+Each card is one element: Left and Right cross it whole, Backspace just after it
+or Delete just before it removes the whole reference, and word and row movement
+never stop inside it. Cards stay on one row; long labels shorten with `…` only on
+screen. Saved messages and model requests keep the complete reference without
+visual padding or shortening.
+
+Typing or pasting beside a card adds a space where needed to preserve its value.
+Deleting its only separator from neighboring text moves the caret across the
+separator instead. A reference typed by hand stays plain and editable until a
+space, movement or sending ends its word. Chosen, pasted, recalled and restored
+references become cards immediately. A lone `$` or `@` stays plain.
 
 ### Browse files
 

@@ -1,12 +1,14 @@
 mod cache;
+mod chips;
 mod layout;
 #[cfg(test)]
 mod reference_tests;
 use super::terminal::Key;
 use super::text;
 use crate::attachments::{self, Attachment, MARKER, Prompt};
+use chips::outside;
 pub use layout::Layout;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, ops::Range, rc::Rc};
 
 const LIMIT: usize = 1024 * 1024;
 
@@ -17,6 +19,9 @@ pub struct Editor {
     /// One per marker in `text`, in order. Only `attach` adds markers.
     pub attachments: Vec<Attachment>,
     goal: Option<usize>,
+    /// In the chat composer, the start of the reference being typed at the caret. It
+    /// stays plain, editable text until a space or any other action ends it.
+    typing: Option<usize>,
     layout: RefCell<cache::Cache>,
 }
 
@@ -27,6 +32,7 @@ impl Clone for Editor {
             cursor: self.cursor,
             attachments: self.attachments.clone(),
             goal: self.goal,
+            typing: self.typing,
             layout: RefCell::default(),
         }
     }
@@ -38,6 +44,7 @@ impl PartialEq for Editor {
             && self.cursor == other.cursor
             && self.attachments == other.attachments
             && self.goal == other.goal
+            && self.typing == other.typing
     }
 }
 
@@ -45,12 +52,15 @@ impl Eq for Editor {}
 
 impl Editor {
     pub fn insert(&mut self, text: &str) -> bool {
-        // Typed or pasted text never carries attachment markers.
-        let text = attachments::strip(&text.replace("\r\n", "\n").replace('\r', "\n"));
+        self.typing = None;
+        self.put(&input(text))
+    }
+
+    fn put(&mut self, text: &str) -> bool {
         if text.len() > LIMIT.saturating_sub(self.text.len()) {
             return false;
         }
-        self.text.insert_str(self.cursor, &text);
+        self.text.insert_str(self.cursor, text);
         self.cursor += text.len();
         self.goal = None;
         true
@@ -58,6 +68,7 @@ impl Editor {
 
     /// Inserts an attachment element at the cursor.
     pub fn attach(&mut self, attachment: Attachment) {
+        self.typing = None;
         let index = self.markers(self.cursor);
         self.attachments.insert(index, attachment);
         self.text.insert(self.cursor, MARKER);
@@ -76,6 +87,7 @@ impl Editor {
         self.text.insert_str(start, &text);
         self.cursor = start + text.len();
         self.goal = None;
+        self.typing = None;
         true
     }
 
@@ -89,6 +101,7 @@ impl Editor {
         self.text = prompt.text;
         self.attachments = prompt.attachments;
         self.goal = None;
+        self.typing = None;
     }
 
     pub fn prompt(&self) -> Prompt {
@@ -98,6 +111,7 @@ impl Editor {
     pub fn take(&mut self) -> Prompt {
         self.cursor = 0;
         self.goal = None;
+        self.typing = None;
         Prompt::new(
             std::mem::take(&mut self.text),
             std::mem::take(&mut self.attachments),
@@ -125,7 +139,7 @@ impl Editor {
     }
 
     /// Rows for `columns` cells. The composer passes `references` to draw `$skill`
-    /// and `@path` as chips; other editors keep them as plain text.
+    /// and `@path` as chips, like attachments; other editors keep them as plain text.
     pub fn layout(&self, columns: usize, references: bool) -> Rc<Layout> {
         let labels = self
             .attachments
@@ -133,9 +147,13 @@ impl Editor {
             .enumerate()
             .map(|(index, attachment)| attachment.chip(index + 1))
             .collect::<Vec<_>>();
-        self.layout
-            .borrow_mut()
-            .get(&self.text, self.cursor, columns, labels, references)
+        self.layout.borrow_mut().get(
+            &self.text,
+            self.cursor,
+            columns,
+            labels,
+            references.then_some(self.typing),
+        )
     }
 
     pub fn viewport(&self, columns: usize, secret: bool) -> (String, usize) {
@@ -171,6 +189,11 @@ impl Editor {
     }
 
     pub fn vertical(&mut self, up: bool, columns: usize, references: bool) -> bool {
+        if references {
+            // Leaving the row ends a typed reference, which becomes a chip.
+            self.typing = None;
+            self.cursor = outside(&self.chips(), self.cursor, false);
+        }
         let layout = self.layout(columns, references);
         let (row, column) = layout.cursor;
         let target = if up {
@@ -186,33 +209,44 @@ impl Editor {
         true
     }
 
+    /// Ordinary editing, where every character is its own element.
     pub fn key(&mut self, key: Key) -> bool {
+        self.typing = None;
+        self.edit(key, &[])
+    }
+
+    /// Edits with `chips` as single elements: the caret moves across each whole and
+    /// deleting any part of one removes all of it.
+    fn edit(&mut self, key: Key, chips: &[Range<usize>]) -> bool {
         self.goal = None;
         let ctrl = key.ctrl();
         match key.code {
-            13 if key.shift() || key.alt() => return self.insert("\n"),
-            74 if ctrl => return self.insert("\n"),
+            13 if key.shift() || key.alt() => return self.put("\n"),
+            74 if ctrl => return self.put("\n"),
             8 | 87 if key.code == 8 || ctrl => {
                 let start = if ctrl {
                     self.word_left()
                 } else {
                     self.previous()
                 };
-                self.remove(start, self.cursor);
-                self.cursor = start;
+                self.erase(chips, start, self.cursor, true);
             }
             46 => {
                 let end = if ctrl { self.word_right() } else { self.next() };
-                self.remove(self.cursor, end);
+                self.erase(chips, self.cursor, end, false);
             }
             37 => {
-                self.cursor = if ctrl {
+                let target = if ctrl {
                     self.word_left()
                 } else {
                     self.previous()
-                }
+                };
+                self.cursor = outside(chips, target, false);
             }
-            39 => self.cursor = if ctrl { self.word_right() } else { self.next() },
+            39 => {
+                let target = if ctrl { self.word_right() } else { self.next() };
+                self.cursor = outside(chips, target, true);
+            }
             36 => self.cursor = if ctrl { 0 } else { self.line_start() },
             35 => {
                 self.cursor = if ctrl {
@@ -223,11 +257,7 @@ impl Editor {
             }
             65 if ctrl => self.cursor = self.line_start(),
             69 if ctrl => self.cursor = self.line_end(),
-            85 if ctrl => {
-                let start = self.line_start();
-                self.remove(start, self.cursor);
-                self.cursor = start;
-            }
+            85 if ctrl => self.erase(chips, self.line_start(), self.cursor, true),
             _ => {}
         }
         true
@@ -349,6 +379,12 @@ impl Editor {
         }
         end
     }
+}
+
+/// Typed or pasted text with line breaks normalized. It never carries attachment
+/// markers.
+fn input(text: &str) -> String {
+    attachments::strip(&text.replace("\r\n", "\n").replace('\r', "\n"))
 }
 
 fn word(ch: char) -> bool {

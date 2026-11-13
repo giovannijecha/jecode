@@ -208,5 +208,6 @@ mod feedback_tests;
 mod flow_tests;
 mod input_tests;
 mod markdown_tests;
+mod reference_tests;
 mod resize_tests;
 mod spacing_tests;

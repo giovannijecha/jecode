@@ -62,6 +62,9 @@ mod native_processes;
 #[path = "native_references.rs"]
 mod native_references;
 
+#[path = "native_reference_edits.rs"]
+mod native_reference_edits;
+
 #[path = "native_script.rs"]
 mod native_script;
 
