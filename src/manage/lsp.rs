@@ -76,14 +76,14 @@ pub fn run(context: &Context, command: &Manage) -> Result<Report, Failure> {
 }
 
 fn find<'a>(profiles: &'a [Profile], target: &str) -> Result<&'a Profile, Failure> {
-    profiles
-        .iter()
-        .find(|profile| profile.id == target || profile.name.eq_ignore_ascii_case(target))
-        .ok_or_else(|| {
-            Failure::Error(format!(
-                "No language server named {target}; list them with jecode lsp list"
-            ))
-        })
+    super::resolve(
+        profiles
+            .iter()
+            .map(|profile| (profile.id.clone(), profile.name.clone(), profile)),
+        target,
+        "language server",
+        "lsp",
+    )
 }
 
 fn check_state(profile: &Profile) -> String {

@@ -47,7 +47,7 @@ or with `TERM=dumb`, use `--plain` or a single prompt instead.
 ## Run options
 
 These apply to the TUI, plain chat, single prompts, `resume` and `init`
-(`init` takes the provider, model, effort, permission and JSON options).
+(`init` takes the provider, model, effort, routing, permission and JSON options).
 
 | Option | Effect |
 | --- | --- |
@@ -263,7 +263,7 @@ or `powershell`:
 
 ```sh
 source <(jecode completions bash)            # ~/.bashrc
-source <(jecode completions zsh)             # ~/.zshrc
+source <(jecode completions zsh)             # ~/.zshrc, after compinit
 jecode completions fish | source             # ~/.config/fish/config.fish
 ```
 

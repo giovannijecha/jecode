@@ -60,7 +60,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             (
                 "Ctrl+D",
-                "/resume: mark deletion · /process: mark a process to stop · Enter confirms, Esc cancels",
+                "/resume: mark deletion · /process: mark a process to stop · API keys: mark removal · Enter confirms, Esc cancels",
             ),
             (
                 "b",

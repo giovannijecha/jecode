@@ -147,16 +147,25 @@ pub struct Version {
     core: (u64, u64, u64),
     /// A release sorts after its prereleases.
     release: bool,
-    pre: String,
+    pre: Vec<Identifier>,
+}
+
+/// A prerelease identifier: numbers compare numerically and sort before text.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Identifier {
+    Number(u64),
+    Text(String),
 }
 
 impl Version {
     pub fn parse(text: &str) -> Option<Self> {
+        let text = text
+            .split_once('+')
+            .map_or(text, |(version, _build)| version);
         let (core, pre) = match text.split_once('-') {
             Some((core, pre)) => (core, Some(pre)),
             None => (text, None),
         };
-        let core = core.split('+').next()?;
         let mut parts = core.split('.').map(|part| part.parse::<u64>().ok());
         let version = (parts.next()??, parts.next()??, parts.next()??);
         if parts.next().is_some() {
@@ -165,7 +174,14 @@ impl Version {
         Some(Self {
             core: version,
             release: pre.is_none(),
-            pre: pre.unwrap_or_default().to_owned(),
+            pre: pre
+                .into_iter()
+                .flat_map(|pre| pre.split('.'))
+                .map(|part| {
+                    part.parse()
+                        .map_or_else(|_| Identifier::Text(part.to_owned()), Identifier::Number)
+                })
+                .collect(),
         })
     }
 }
@@ -204,6 +220,11 @@ mod tests {
         assert!(newer("0.7.6", "0.7.5"));
         assert!(newer("0.10.0", "0.9.9"));
         assert!(newer("1.0.0", "1.0.0-beta.1"));
+        assert!(newer("1.0.0-beta.10", "1.0.0-beta.9"));
+        assert!(newer("1.0.0-beta", "1.0.0-alpha.2"));
+        assert!(newer("1.0.0-alpha.1", "1.0.0-alpha"));
+        assert!(newer("1.0.0-alpha.beta", "1.0.0-alpha.1"));
+        assert!(!newer("0.7.5+build.2", "0.7.5"));
         assert!(!newer("0.7.5", "0.7.5"));
         assert!(!newer("0.7.4", "0.7.5"));
         assert!(!newer("garbage", "0.7.5"));

@@ -38,14 +38,11 @@ pub fn text(path: &[&str]) -> String {
             ));
         }
     }
+    // A family's help lists its own options and every subcommand's.
     let mut options: Vec<&Opt> = command.options.to_vec();
-    if options.is_empty() {
-        for sub in command.subcommands {
-            for option in sub.options {
-                if !options.iter().any(|known| known.long == option.long) {
-                    options.push(option);
-                }
-            }
+    for option in command.subcommands.iter().flat_map(|sub| sub.options) {
+        if !options.iter().any(|known| known.long == option.long) {
+            options.push(option);
         }
     }
     options.extend(grammar::GLOBAL.iter().copied());

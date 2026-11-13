@@ -505,3 +505,18 @@ fn skills_list_and_show_read_the_personal_library() {
     ));
     assert!(message.contains("not in the current catalog"));
 }
+
+#[test]
+fn targets_resolve_by_exact_id_then_by_a_unique_name() {
+    let entries = || {
+        [("a1", "rust"), ("b2", "Rust"), ("c3", "go")]
+            .map(|(id, name)| (id.to_owned(), name.to_owned(), id))
+    };
+    assert_eq!(resolve(entries(), "b2", "server", "lsp").unwrap(), "b2");
+    assert_eq!(resolve(entries(), "GO", "server", "lsp").unwrap(), "c3");
+    let Err(Failure::Error(several)) = resolve(entries(), "rust", "server", "lsp") else {
+        panic!("a repeated name must not pick one entry");
+    };
+    assert!(several.contains("a1, b2"), "{several}");
+    assert!(resolve(entries(), "none", "server", "lsp").is_err());
+}

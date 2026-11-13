@@ -163,7 +163,10 @@ impl Agent {
                 )
                 .or_else(|error| {
                     if unavailable {
-                        let selected = replacement.take().ok_or(error)?;
+                        let mut selected = replacement.take().ok_or(error)?;
+                        // Bound to this agent as `connection` binds its clients.
+                        selected.set_cancellation(self.cancellation.clone());
+                        selected.set_delegation(!self.child);
                         used_replacement = true;
                         Ok(selected)
                     } else {

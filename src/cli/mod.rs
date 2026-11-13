@@ -184,7 +184,10 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Invocation
             continue;
         }
         if !literal && token.starts_with('-') && token.len() > 1 {
-            if command.prompt && !positionals.is_empty() && !resume_id_only(command, &positionals) {
+            if command.prompt
+                && !positionals.is_empty()
+                && !resume_id_only(command, &positionals, &values)
+            {
                 return Err(Usage::new(
                     format!(
                         "option {token} follows the prompt. Put options first, quote the prompt, or put -- before a prompt containing '{token}'"
@@ -214,7 +217,7 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Invocation
                     let value = tokens.get(index).ok_or_else(|| {
                         Usage::new(format!("--{} requires {name}", option.long), &path)
                     })?;
-                    if value.starts_with('-') {
+                    if value.starts_with('-') && value != "-" {
                         return Err(Usage::new(
                             format!(
                                 "--{} requires {name}; write --{}=VALUE for a value starting with '-'",
@@ -276,9 +279,16 @@ pub fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Invocation
     Ok(Invocation { directory, action })
 }
 
-/// `resume ID` keeps accepting options until the prompt itself begins.
-fn resume_id_only(command: &Command, positionals: &[String]) -> bool {
-    command.name == "resume" && positionals.len() == 1
+/// `resume ID` keeps accepting options until the prompt itself begins; with
+/// `--last` the first positional already starts the prompt.
+fn resume_id_only(
+    command: &Command,
+    positionals: &[String],
+    values: &[(&'static Opt, Option<String>)],
+) -> bool {
+    command.name == "resume"
+        && positionals.len() == 1
+        && !values.iter().any(|(option, _)| option.long == "last")
 }
 
 fn lookup(token: &str, path: &[&'static str]) -> Result<(&'static Opt, Option<String>), Usage> {

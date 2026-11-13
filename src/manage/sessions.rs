@@ -36,7 +36,12 @@ pub fn run_in(
             command.value("output"),
             output,
         ),
-        "delete" => delete(&store, id(&command.operands[0])?, command.flag("yes")),
+        "delete" => delete(
+            context,
+            &store,
+            id(&command.operands[0])?,
+            command.flag("yes"),
+        ),
         action => unreachable!("sessions {action}"),
     }
 }
@@ -243,10 +248,11 @@ fn export(
     ))
 }
 
-fn delete(store: &Store, id: &str, yes: bool) -> Result<Report, Failure> {
+fn delete(context: &Context, store: &Store, id: &str, yes: bool) -> Result<Report, Failure> {
     // Reading first rejects missing, unsupported and foreign sessions unchanged.
     let document = store.read(id)?;
-    let title = document.title();
+    // As in `show`: a key saved after the title was written is masked too.
+    let title = context.redactor()?.text(&document.title());
     if !confirm(
         yes,
         &format!(

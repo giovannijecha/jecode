@@ -17,7 +17,9 @@ Changes since 0.7.5.
   conversation directly. `--json` prints a run as JSON Lines.
 - **Prompt and piped data.** `git diff | jecode "Review this diff"` now sends
   both: the prompt, then the piped data. Oversized or non-UTF-8 input is an
-  error rather than being ignored.
+  error rather than being ignored. Scripts that run Jecode with a stdin they
+  do not mean to send, such as inside a `while read` loop, should redirect it
+  from `/dev/null`.
 - **Update and uninstall.** `jecode update` updates npm, Volta and standalone
   installations; standalone updates verify the published release and need no
   Node.js. `jecode uninstall` removes only the running installation and keeps

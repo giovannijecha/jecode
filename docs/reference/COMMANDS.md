@@ -192,7 +192,7 @@ Run options are `--plain`, `--provider`, `--model`, `--effort`, `--routing`, `--
 | MCP | `/mcp`, Settings → MCP | `/mcp` | `jecode mcp` |
 | LSP | `/lsp`, Settings → LSP | `/lsp` | `jecode lsp` |
 | Project instructions | `/init` | `/init` | `jecode init` |
-| Diagnostics, update, removal | `/help` → **Shell** lists them | `/help` | `jecode doctor`, `update`, `uninstall` |
+| Diagnostics, update, removal | `/help` → **Shell** lists them | — | `jecode doctor`, `update`, `uninstall` |
 
 Live conversation controls stay inside the conversation: answering a question
 (`/ask`), processes (`/process`), collaborators (`/agents`), the plan (`/todo`),

@@ -46,6 +46,15 @@ pub fn target() -> (&'static str, &'static str) {
     }
 }
 
+/// Whether releases include an executable for this platform: `target`
+/// names the closest published one, which may not run here.
+pub fn published() -> bool {
+    matches!(
+        (std::env::consts::OS, std::env::consts::ARCH),
+        ("windows", _) | ("macos", "aarch64" | "x86_64") | ("linux", "x86_64")
+    )
+}
+
 impl Owner {
     pub fn label(&self) -> &'static str {
         match self {

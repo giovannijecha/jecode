@@ -158,6 +158,8 @@ fn resume_takes_an_id_or_last_and_an_optional_prompt() {
     assert!(error(&["resume", "1-2", "--last"]).contains("cannot combine"));
     assert!(error(&["resume", "1-2", "--last", "prompt"]).contains("cannot combine"));
     assert!(error(&["resume", "prompt", "--last"]).contains("follows the prompt"));
+    // With --last the first word already starts the prompt.
+    assert!(error(&["resume", "--last", "summarize", "--json"]).contains("follows the prompt"));
     assert!(error(&["init", "extra"]).contains("takes no prompt"));
     assert!(error(&["init", "--attach", "a"]).contains("does not apply"));
     assert_eq!(run(&["init", "--model", "m"]).start, Start::Init);
@@ -191,6 +193,8 @@ fn help_is_contextual_and_never_runs_the_command() {
         (vec!["settings"], "Keys: model, effort"),
         (vec!["providers"], "providers accounts openai|anthropic"),
         (vec!["providers", "logout"], "--account ACCOUNT_ID"),
+        (vec!["providers"], "--yes"),
+        (vec!["mcp"], "--auth"),
         (vec!["models", "endpoints"], "models endpoints MODEL"),
         (vec!["update"], "--check"),
     ] {
@@ -260,6 +264,10 @@ fn commands_reject_inapplicable_options_and_wrong_operands() {
     assert!(error(&["providers", "use", "openai"]).contains("takes 2 arguments"));
     assert!(error(&["providers", "login", "openai", "--account", "x"]).contains("does not apply"));
     assert!(error(&["providers", "logout", "openai", "--account"]).contains("requires ACCOUNT_ID"));
+    // `-` alone is a value (stdout), not an option.
+    let exported = manage(&["sessions", "export", "1-2", "--output", "-"]);
+    assert_eq!(exported.value("output"), Some("-"));
+    assert!(error(&["sessions", "export", "1-2", "--output", "-x"]).contains("--output=VALUE"));
     assert!(matches!(
         parse_args(&["update", "--check", "--json"]).unwrap().action,
         Action::Update {
@@ -303,6 +311,14 @@ fn completions_cover_every_command_and_option_in_each_shell() {
         }
     }
     assert!(completions::script("bash").contains("complete -o default -F _jecode jecode"));
+    // Free values such as paths complete as files, not command words.
+    assert!(completions::script("bash").contains("--attach|"));
+    assert!(
+        completions::script("zsh").contains("-C|")
+            && !completions::script("zsh").contains("local path")
+    );
+    assert!(completions::script("fish").contains("-s C -l cd -r -F"));
+    assert!(completions::script("powershell").contains("$jecodeFree = @('--"));
     assert!(
         grammar::command(&["providers", "logout"])
             .unwrap()

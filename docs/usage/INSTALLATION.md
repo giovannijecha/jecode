@@ -212,14 +212,14 @@ coexist:
 
 | Installation | How it is recognized | What `jecode update` does |
 | --- | --- | --- |
-| npm global | The executable is inside the `@giovannijecha/jecode` package of an npm prefix | Runs `npm install --global --prefix PREFIX @giovannijecha/jecode@VERSION` with the npm of the Node.js that started Jecode, so npm keeps owning the package. |
+| npm global | The executable is inside the `@giovannijecha/jecode` package of an npm prefix | Runs `npm install --global --prefix PREFIX @giovannijecha/jecode@VERSION` with the npm of the Node.js that started Jecode, else the first npm on `PATH` that is not Volta's shim, so npm keeps owning the package. |
 | Volta | The package is in Volta's image directory | Runs `volta install @giovannijecha/jecode@VERSION`. |
 | Standalone | `INSTALL.ps1` or `INSTALL.sh` wrote the `.jecode-install` marker beside its `bin` folder | Downloads the published release itself; needs no Node.js, npm, Rust, Git or shell. |
 | Project dependency, source build, copied file | None of the above | Reports the location and changes nothing. Update it the way you installed it. |
 
 The latest version is the `latest` tag of the npm package `@giovannijecha/jecode`,
 the one published release. A standalone update downloads that release's
-tarball over HTTPS and installs it only when the tarball matches the registry's
+tarball and installs it only when the tarball matches the registry's
 `sha512` integrity and the executable inside matches the SHA-256 in the
 release's own manifest. The new executable is written beside the old one, must
 report the expected version with `--version`, and only then takes its place.
@@ -236,7 +236,11 @@ keep running until they exit; a later update removes what they leave.
 Read the [release notes](../../CHANGELOG.md) before updating: a new build
 resumes only conversations in its current format and leaves unsupported files
 unchanged. Set `JECODE_UPDATE_REGISTRY` to an npm registry mirror's URL to
-check and download from it instead of `https://registry.npmjs.org`.
+check and download from it instead of `https://registry.npmjs.org`. Use an
+`https://` mirror: the `sha512` check compares the tarball with the mirror's own
+metadata, so it cannot protect a plain `http://` connection. Releases include
+executables for Windows x64, macOS and Linux x64; a standalone installation on
+another platform reports that before downloading anything.
 
 ## Remove Jecode
 
@@ -253,7 +257,8 @@ terminal. It removes only the running installation:
   updates and the `.jecode-install` marker, then the `bin` folder and the root
   if they are empty. Other files in the root stay, and the command lists them.
   On Windows it also removes that `bin` folder from your user `PATH`, keeping
-  every other entry and the value's type; open a new terminal afterwards. On
+  every other entry and the value's type; open a new terminal afterwards. A
+  `bin` folder that still holds other files stays on `PATH`. On
   Linux and macOS the installer never changed `PATH`, so remove any line you
   added to your shell profile yourself.
 

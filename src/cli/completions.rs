@@ -34,15 +34,37 @@ fn rows() -> Vec<(String, Vec<String>)> {
     rows
 }
 
-/// Options whose values come from a fixed list.
+/// Options whose values come from a fixed list, by long name.
 fn choices() -> Vec<(&'static str, Vec<&'static str>)> {
-    vec![
-        ("--provider", grammar::PROVIDERS.to_vec()),
-        ("--routing", vec!["auto"]),
-        ("--effort", grammar::EFFORTS.to_vec()),
-        ("--permissions", grammar::LEVELS.to_vec()),
-        ("--auth", vec!["none", "token", "oauth"]),
-    ]
+    let mut choices: Vec<_> = grammar::known()
+        .into_iter()
+        .filter(|option| !option.choices.is_empty())
+        .map(|option| (option.long, option.choices.to_vec()))
+        .collect();
+    choices.push(("routing", vec!["auto"]));
+    choices
+}
+
+/// Options taking a free value, such as a path or a model ID: shells offer
+/// files there instead of command words.
+fn free() -> Vec<&'static grammar::Opt> {
+    grammar::known()
+        .into_iter()
+        .filter(|option| {
+            option.value.is_some() && option.choices.is_empty() && option.long != "routing"
+        })
+        .collect()
+}
+
+/// `--long` and `-s` spellings of the free options.
+fn free_spellings() -> Vec<String> {
+    free()
+        .into_iter()
+        .flat_map(|option| {
+            std::iter::once(format!("--{}", option.long))
+                .chain(option.short.map(|short| format!("-{short}")))
+        })
+        .collect()
 }
 
 pub fn script(shell: &str) -> String {
@@ -65,8 +87,13 @@ fn case_rows(indent: &str) -> String {
 fn value_rows(indent: &str) -> String {
     choices()
         .iter()
-        .map(|(option, values)| format!("{indent}{option}) echo \"{}\" ;;\n", values.join(" ")))
+        .map(|(option, values)| format!("{indent}--{option}) echo \"{}\" ;;\n", values.join(" ")))
         .collect()
+}
+
+/// A `case` pattern matching every free option.
+fn free_pattern() -> String {
+    free_spellings().join("|")
 }
 
 fn bash() -> String {
@@ -74,9 +101,10 @@ fn bash() -> String {
         "# jecode completion for bash. Load with: source <(jecode completions bash)\n\
 _jecode_words() {{\n    case \"$1\" in\n{}        *) echo \"\" ;;\n    esac\n}}\n\
 _jecode_values() {{\n    case \"$1\" in\n{}        *) return 1 ;;\n    esac\n}}\n\
-_jecode() {{\n    local cur=\"${{COMP_WORDS[COMP_CWORD]}}\" prev=\"${{COMP_WORDS[COMP_CWORD-1]}}\" path=\"\" word i values\n    if values=$(_jecode_values \"$prev\"); then\n        COMPREPLY=($(compgen -W \"$values\" -- \"$cur\"))\n        return\n    fi\n    for ((i = 1; i < COMP_CWORD; i++)); do\n        word=\"${{COMP_WORDS[i]}}\"\n        case \"$word\" in\n            --) return ;;\n            -*) ;;\n            *) case \" $(_jecode_words \"$path\") \" in\n                   *\" $word \"*) path=\"${{path:+$path }}$word\" ;;\n               esac ;;\n        esac\n    done\n    COMPREPLY=($(compgen -W \"$(_jecode_words \"$path\")\" -- \"$cur\"))\n}}\ncomplete -o default -F _jecode jecode\n",
+_jecode() {{\n    local cur=\"${{COMP_WORDS[COMP_CWORD]}}\" prev=\"${{COMP_WORDS[COMP_CWORD-1]}}\" path=\"\" word i values\n    case \"$prev\" in {free}) return ;; esac\n    if values=$(_jecode_values \"$prev\"); then\n        COMPREPLY=($(compgen -W \"$values\" -- \"$cur\"))\n        return\n    fi\n    for ((i = 1; i < COMP_CWORD; i++)); do\n        word=\"${{COMP_WORDS[i]}}\"\n        case \"$word\" in\n            --) return ;;\n            -*) ;;\n            *) case \" $(_jecode_words \"$path\") \" in\n                   *\" $word \"*) path=\"${{path:+$path }}$word\" ;;\n               esac ;;\n        esac\n    done\n    COMPREPLY=($(compgen -W \"$(_jecode_words \"$path\")\" -- \"$cur\"))\n}}\ncomplete -o default -F _jecode jecode\n",
         case_rows("        "),
-        value_rows("        ")
+        value_rows("        "),
+        free = free_pattern()
     )
 }
 
@@ -85,9 +113,10 @@ fn zsh() -> String {
         "#compdef jecode\n# jecode completion for zsh. Load with: source <(jecode completions zsh)\n\
 _jecode_words() {{\n    case \"$1\" in\n{}        *) echo \"\" ;;\n    esac\n}}\n\
 _jecode_values() {{\n    case \"$1\" in\n{}        *) return 1 ;;\n    esac\n}}\n\
-_jecode() {{\n    local path=\"\" word i values\n    if values=$(_jecode_values \"${{words[CURRENT-1]}}\"); then\n        compadd -- ${{=values}}\n        return\n    fi\n    for ((i = 2; i < CURRENT; i++)); do\n        word=\"${{words[i]}}\"\n        case \"$word\" in\n            --) return ;;\n            -*) ;;\n            *) case \" $(_jecode_words \"$path\") \" in\n                   *\" $word \"*) path=\"${{path:+$path }}$word\" ;;\n               esac ;;\n        esac\n    done\n    compadd -- ${{=$(_jecode_words \"$path\")}}\n}}\nif [[ \"${{funcstack[1]}}\" == _jecode ]]; then _jecode \"$@\"; else compdef _jecode jecode; fi\n",
+_jecode() {{\n    local command_path=\"\" word i values\n    case \"${{words[CURRENT-1]}}\" in {free}) _files; return ;; esac\n    if values=$(_jecode_values \"${{words[CURRENT-1]}}\"); then\n        compadd -- ${{=values}}\n        return\n    fi\n    for ((i = 2; i < CURRENT; i++)); do\n        word=\"${{words[i]}}\"\n        case \"$word\" in\n            --) return ;;\n            -*) ;;\n            *) case \" $(_jecode_words \"$command_path\") \" in\n                   *\" $word \"*) command_path=\"${{command_path:+$command_path }}$word\" ;;\n               esac ;;\n        esac\n    done\n    compadd -- ${{=$(_jecode_words \"$command_path\")}}\n}}\nif [[ \"${{funcstack[1]}}\" == _jecode ]]; then _jecode \"$@\"; else compdef _jecode jecode; fi\n",
         case_rows("        "),
-        value_rows("        ")
+        value_rows("        "),
+        free = free_pattern()
     )
 }
 
@@ -107,9 +136,17 @@ function __jecode_words\n    switch \"$argv[1]\"\n",
     script.push_str("complete -c jecode -f -a '(__jecode_words (__jecode_path))'\n");
     for (option, values) in choices() {
         script.push_str(&format!(
-            "complete -c jecode -l {} -x -a '{}'\n",
-            option.trim_start_matches('-'),
+            "complete -c jecode -l {option} -x -a '{}'\n",
             values.join(" ")
+        ));
+    }
+    for option in free() {
+        let short = option
+            .short
+            .map_or_else(String::new, |short| format!(" -s {short}"));
+        script.push_str(&format!(
+            "complete -c jecode{short} -l {} -r -F\n",
+            option.long
         ));
     }
     script
@@ -124,13 +161,14 @@ fn powershell() -> String {
         .iter()
         .map(|(option, values)| {
             let values: Vec<String> = values.iter().map(|value| (*value).to_owned()).collect();
-            format!("    '{option}' = @({})\n", quoted(&values))
+            format!("    '--{option}' = @({})\n", quoted(&values))
         })
         .collect::<String>();
+    let free = quoted(&free_spellings());
     format!(
         "# jecode completion for PowerShell. Load with:\n# jecode completions powershell | Out-String | Invoke-Expression\n\
-$jecodeWords = @{{\n{words}}}\n$jecodeValues = @{{\n{values}}}\n\
-Register-ArgumentCompleter -Native -CommandName jecode, jecode.exe -ScriptBlock {{\n    param($wordToComplete, $commandAst, $cursorPosition)\n    $elements = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object {{ $_.ToString() }})\n    if ($wordToComplete -ne '' -and $elements.Count -gt 0) {{ $elements = @($elements | Select-Object -SkipLast 1) }}\n    $path = ''\n    foreach ($element in $elements) {{\n        if ($element -eq '--') {{ return }}\n        if ($element.StartsWith('-')) {{ continue }}\n        if ($jecodeWords[$path] -contains $element) {{ $path = ($path + ' ' + $element).Trim() }}\n    }}\n    $candidates = $jecodeWords[$path]\n    if ($elements.Count -gt 0 -and $jecodeValues.ContainsKey($elements[-1])) {{ $candidates = $jecodeValues[$elements[-1]] }}\n    $candidates | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{\n        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n    }}\n}}\n"
+$jecodeWords = @{{\n{words}}}\n$jecodeValues = @{{\n{values}}}\n$jecodeFree = @({free})\n\
+Register-ArgumentCompleter -Native -CommandName jecode, jecode.exe -ScriptBlock {{\n    param($wordToComplete, $commandAst, $cursorPosition)\n    $elements = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object {{ $_.ToString() }})\n    if ($wordToComplete -ne '' -and $elements.Count -gt 0) {{ $elements = @($elements | Select-Object -SkipLast 1) }}\n    if ($elements.Count -gt 0 -and $jecodeFree -contains $elements[-1]) {{ return }}\n    $path = ''\n    foreach ($element in $elements) {{\n        if ($element -eq '--') {{ return }}\n        if ($element.StartsWith('-')) {{ continue }}\n        if ($jecodeWords[$path] -contains $element) {{ $path = ($path + ' ' + $element).Trim() }}\n    }}\n    $candidates = $jecodeWords[$path]\n    if ($elements.Count -gt 0 -and $jecodeValues.ContainsKey($elements[-1])) {{ $candidates = $jecodeValues[$elements[-1]] }}\n    $candidates | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{\n        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n    }}\n}}\n"
     )
 }
 

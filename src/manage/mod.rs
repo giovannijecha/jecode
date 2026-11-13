@@ -117,6 +117,40 @@ impl Report {
     }
 }
 
+/// The entry whose ID is `target`, else the only one with that name. Names
+/// may repeat, so several matches fail and list their IDs instead of acting
+/// on one of them. Entries are `(id, name, item)`.
+fn resolve<T>(
+    entries: impl IntoIterator<Item = (String, String, T)>,
+    target: &str,
+    kind: &str,
+    family: &str,
+) -> Result<T, Failure> {
+    let mut named = Vec::new();
+    for (id, name, item) in entries {
+        if id == target {
+            return Ok(item);
+        }
+        if name.eq_ignore_ascii_case(target) {
+            named.push((id, item));
+        }
+    }
+    match named.len() {
+        0 => Err(Failure::Error(format!(
+            "No {kind} named {target}; list them with jecode {family} list"
+        ))),
+        1 => Ok(named.pop().unwrap().1),
+        _ => Err(Failure::Error(format!(
+            "Several {kind}s are named {target}; use one of their IDs: {}",
+            named
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
 /// Asks before a destructive change. Without a terminal it never waits:
 /// `--yes` is required instead.
 pub fn confirm(yes: bool, question: &str, word: &str) -> Result<bool, Failure> {

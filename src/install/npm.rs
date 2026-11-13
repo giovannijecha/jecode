@@ -42,9 +42,15 @@ fn npm() -> Result<Command, String> {
         .ok_or(
             "npm was not found; run jecode update from the npm installation's own jecode command",
         )?;
-    if found
-        .components()
-        .any(|part| part.as_os_str().eq_ignore_ascii_case("volta"))
+    // Volta's home is `Volta` on Windows and `.volta` on Unix, or VOLTA_HOME.
+    let volta_home = std::env::var_os("VOLTA_HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from);
+    if volta_home.is_some_and(|home| found.starts_with(home))
+        || found.components().any(|part| {
+            let part = part.as_os_str();
+            part.eq_ignore_ascii_case("volta") || part.eq_ignore_ascii_case(".volta")
+        })
     {
         return Err("Only Volta's npm shim was found, which would install into Volta instead of this npm prefix; run jecode update through this installation's jecode command".into());
     }

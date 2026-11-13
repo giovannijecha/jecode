@@ -73,16 +73,16 @@ fn text(error: mcp::Error) -> Failure {
 }
 
 fn find(store: &Store, target: &str) -> Result<Connection, Failure> {
-    store
-        .list()
-        .map_err(text)?
-        .into_iter()
-        .find(|connection| connection.id == target || connection.name.eq_ignore_ascii_case(target))
-        .ok_or_else(|| {
-            Failure::Error(format!(
-                "No MCP connection named {target}; list them with jecode mcp list"
-            ))
-        })
+    super::resolve(
+        store
+            .list()
+            .map_err(text)?
+            .into_iter()
+            .map(|connection| (connection.id.clone(), connection.name.clone(), connection)),
+        target,
+        "MCP connection",
+        "mcp",
+    )
 }
 
 fn method(connection: &Connection) -> &'static str {
@@ -326,6 +326,8 @@ fn add(store: &Store, name: &str, url: &str, auth: &str) -> Result<Report, Failu
         "token" => {
             connection.method = AuthMethod::Token;
             connection.token = secret("Bearer token (hidden): ")?;
+            // Validate the token before it reaches a request header.
+            mcp::config::validate(&connection).map_err(|error| usage(error.message))?;
         }
         "oauth" => {
             connection.method = oauth_method(&connection)?;
@@ -359,6 +361,7 @@ fn login(store: &Store, target: &str) -> Result<Report, Failure> {
         AuthMethod::Token => {
             let mut next = original.clone();
             next.token = secret("Bearer token (hidden): ")?;
+            mcp::config::validate(&next).map_err(|error| usage(error.message))?;
             (next, None)
         }
         AuthMethod::Browser | AuthMethod::GitHubDevice => {

@@ -242,17 +242,17 @@ fn set(
             let routing = if value == "auto" {
                 Routing::Auto
             } else {
+                // The same check as /settings and --routing: the endpoint
+                // must exist and serve this model's tools and effort.
+                let routing = Routing::Endpoint(value.to_owned());
                 let services = services(&settings, &settings.backend_id)?;
-                let endpoints = services
-                    .endpoints(&settings.model)?
-                    .ok_or("Endpoint routing is unavailable for this provider")?;
-                if endpoints.find(value).is_none() {
-                    return Err(Failure::Error(format!(
-                        "{} has no endpoint '{value}'; choose one in /settings > Default routing, or use auto",
-                        settings.model
-                    )));
-                }
-                Routing::Endpoint(value.to_owned())
+                crate::selection::check_routing(
+                    &services,
+                    &settings.model,
+                    settings.effort,
+                    &routing,
+                )?;
+                routing
             };
             settings.routing.insert(settings.model.clone(), routing);
         }

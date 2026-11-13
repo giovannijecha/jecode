@@ -214,7 +214,7 @@ pub fn option_short(short: char) -> Option<&'static Opt> {
         .find(|option| option.short == Some(short))
 }
 
-fn known() -> Vec<&'static Opt> {
+pub fn known() -> Vec<&'static Opt> {
     let mut all: Vec<&'static Opt> = vec![&VERSION];
     all.extend(GLOBAL.iter().copied());
     fn visit(command: &'static Command, all: &mut Vec<&'static Opt>) {

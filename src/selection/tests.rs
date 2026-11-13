@@ -287,7 +287,7 @@ fn resumed_conversations_keep_their_selection_unless_a_run_option_names_it() {
     let mut resumed = fixture_agent(&directory, &fixture.endpoint);
     resumed.resume(&id).unwrap();
     assert_eq!(
-        apply(&mut resumed, &Selection::default(), &settings, &store).unwrap(),
+        apply(&mut resumed, &Selection::default(), &settings, &store, None).unwrap(),
         None
     );
     assert_eq!(
@@ -308,7 +308,7 @@ fn resumed_conversations_keep_their_selection_unless_a_run_option_names_it() {
 
     let mut resumed = fixture_agent(&directory, &fixture.endpoint);
     resumed.resume(&id).unwrap();
-    apply(
+    let routed = apply(
         &mut resumed,
         &Selection {
             routing: Some(Routing::Auto),
@@ -316,8 +316,14 @@ fn resumed_conversations_keep_their_selection_unless_a_run_option_names_it() {
         },
         &settings,
         &store,
+        None,
     )
+    .unwrap()
     .unwrap();
+    assert!(
+        routed.starts_with("Routing set to ") && routed.contains(" · was "),
+        "{routed}"
+    );
     assert_eq!(resumed.routing(), Routing::Auto);
     assert_eq!(std::fs::read(store.path()).unwrap(), saved_config);
     drop(resumed);
@@ -334,6 +340,7 @@ fn resumed_conversations_keep_their_selection_unless_a_run_option_names_it() {
         },
         &settings,
         &store,
+        None,
     )
     .unwrap()
     .unwrap();

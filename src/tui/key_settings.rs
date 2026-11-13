@@ -95,22 +95,27 @@ impl App {
             settings.api_key.clear();
         }
         // Without a saved model the key lived only in this session.
-        let saved = if self.config.settings.has_model() {
-            self.config.store.remove_credential(id).map(|_| ())
+        let removed = if self.config.settings.has_model() {
+            self.config.store.remove_credential(id)
         } else {
-            Ok(())
+            Ok(true)
         };
-        if let Err(error) = saved {
-            self.finish_setting(Kind::Error, &error, vec![]);
-            return;
-        }
+        let removed = match removed {
+            Ok(removed) => removed,
+            Err(error) => {
+                self.finish_setting(Kind::Error, &error, vec![]);
+                return;
+            }
+        };
         self.config.settings = settings;
         self.catalog.clear();
-        self.finish_setting_change(
-            Kind::Notice,
-            &format!("{label} removed · this conversation keeps its connection"),
-            vec![],
-        );
+        let text = if removed {
+            format!("{label} removed · this conversation keeps its connection")
+        } else {
+            // Nothing on disk: the key came from the environment or another edit.
+            format!("{label} cleared for this session · config.json had no saved copy")
+        };
+        self.finish_setting_change(Kind::Notice, &text, vec![]);
         self.open_api_keys();
     }
 

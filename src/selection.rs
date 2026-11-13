@@ -166,7 +166,12 @@ pub fn resume(
     let replacement = if selection.provider.is_some() {
         let current = agent.sessions().ok_or("Session storage is unavailable")?;
         let saved = current.store().read(id)?;
-        if saved.model.is_some() && !agent.has_backend(&saved.backend) {
+        if let Some(model) = saved
+            .model
+            .as_ref()
+            .filter(|_| !agent.has_backend(&saved.backend))
+        {
+            let was = format!("{} / {model} · {}", saved.backend, saved.effort.name());
             let mut prepared = selection.clone();
             // Changing provider resets effort unless this run chooses one.
             prepared.effort.get_or_insert(Effort::Default);
@@ -179,20 +184,16 @@ pub fn resume(
                 };
                 client.set_routing(routing);
             }
-            Some(client)
+            Some((client, was))
         } else {
             None
         }
     } else {
         None
     };
-    let prepared_replacement = replacement.is_some();
+    let (replacement, replaced) = replacement.unzip();
     let status = agent.resume_with_backend(id, replacement)?;
-    let summary = if prepared_replacement {
-        apply_inner(agent, selection, settings, store, true)?
-    } else {
-        apply(agent, selection, settings, store)?
-    };
+    let summary = apply(agent, selection, settings, store, replaced)?;
     Ok(match summary {
         Some(summary) => format!("{status} {summary}"),
         None => status,
@@ -202,32 +203,28 @@ pub fn resume(
 /// Applies run options to an open conversation, typically a resumed one. Its
 /// own provider, model, routing, effort and level stay unless an option names them.
 /// Returns a description of the change for the conversation record.
-pub fn apply(
+/// `replaced` describes the saved selection that a prepared replacement
+/// backend took over; that backend was validated when it was built.
+fn apply(
     agent: &mut Agent,
     selection: &Selection,
     settings: &Settings,
     store: &Store,
-) -> Result<Option<String>, String> {
-    apply_inner(agent, selection, settings, store, false)
-}
-
-fn apply_inner(
-    agent: &mut Agent,
-    selection: &Selection,
-    settings: &Settings,
-    store: &Store,
-    prepared_replacement: bool,
+    replaced: Option<String>,
 ) -> Result<Option<String>, String> {
     if selection.is_empty() {
         return Ok(None);
     }
     let home = store.path().parent().expect("configuration directory");
-    let previous = format!(
-        "{} / {} · {}",
-        agent.backend_id(),
-        agent.model(),
-        agent.effort().name()
-    );
+    let prepared_replacement = replaced.is_some();
+    let previous = replaced.unwrap_or_else(|| {
+        format!(
+            "{} / {} · {}",
+            agent.backend_id(),
+            agent.model(),
+            agent.effort().name()
+        )
+    });
     let previous_routing = agent.routing();
     let mut changes = Vec::new();
     let provider = selection.provider.as_deref().unwrap_or(agent.backend_id());
@@ -326,7 +323,7 @@ fn apply_inner(
     if let Some(routing) = &selection.routing {
         agent.set_routing(routing.clone());
         changes.push(format!(
-            "Routing set to {} Â· was {}",
+            "Routing set to {} · was {}",
             routing.label(),
             previous_routing.label()
         ));

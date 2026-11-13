@@ -196,6 +196,13 @@ fn activate(binary: &Path, staged: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 pub fn update(root: &Path, binary: &Path, release: &Release) -> Result<Outcome, String> {
+    if !provenance::published() {
+        return Err(format!(
+            "Jecode releases include no executable for {}-{}; update this installation the way you built it",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ));
+    }
     eprintln!(
         "Downloading Jecode {} from {}…",
         release.version,
@@ -206,7 +213,6 @@ pub fn update(root: &Path, binary: &Path, release: &Release) -> Result<Outcome, 
     let previous = replace(binary, &payload, |staged| {
         validate(staged, &release.version)
     })?;
-    validate(binary, &release.version)?;
     let deferred = system::remove_later(&previous, &[]);
     let mut text = format!(
         "Updated {} to Jecode {} · sha512 and manifest verified",
@@ -255,22 +261,6 @@ pub fn uninstall(root: &Path, binary: &Path, path_key: Option<&str>) -> Result<O
     }
     files.push(moved.to.clone());
     let deferred = system::remove_later(&files, &[bin.to_path_buf(), root.to_path_buf()]);
-    #[cfg(windows)]
-    let (path_removed, path_failed) = match path_key {
-        Some(key) => match system::remove_user_path(bin, key) {
-            Ok(count) => (count, false),
-            Err(error) => {
-                notes.push(format!("Could not remove the user PATH entry: {error}"));
-                (0, true)
-            }
-        },
-        None => (0, false),
-    };
-    #[cfg(not(windows))]
-    let path_removed = {
-        let _ = path_key;
-        0
-    };
     let kept: Vec<PathBuf> = [bin, root]
         .iter()
         .filter(|directory| directory.exists())
@@ -286,8 +276,32 @@ pub fn uninstall(root: &Path, binary: &Path, path_key: Option<&str>) -> Result<O
                 .unwrap_or_default()
         })
         .collect();
+    // A bin folder that still holds other programs stays on PATH for them.
     #[cfg(windows)]
-    if !path_failed {
+    let (path_removed, path_noted) = match path_key {
+        Some(_) if kept.iter().any(|path| path.parent() == Some(bin)) => {
+            notes.push(format!(
+                "Kept {} on your user PATH because it holds other files.",
+                bin.display()
+            ));
+            (0, true)
+        }
+        Some(key) => match system::remove_user_path(bin, key) {
+            Ok(count) => (count, false),
+            Err(error) => {
+                notes.push(format!("Could not remove the user PATH entry: {error}"));
+                (0, true)
+            }
+        },
+        None => (0, false),
+    };
+    #[cfg(not(windows))]
+    let path_removed = {
+        let _ = path_key;
+        0
+    };
+    #[cfg(windows)]
+    if !path_noted {
         notes.push(if path_removed > 0 {
             format!(
                 "Removed {} from your user PATH; open a new terminal.",
