@@ -266,3 +266,23 @@ fn the_mark_keeps_its_title_where_a_cut_would_separate_them() {
         );
     }
 }
+
+#[test]
+fn a_fitting_title_that_ends_like_a_cut_mark_stays_whole() {
+    // `  Scope   Marks ◉…` is exactly the room left before `2 of 2` at 28
+    // columns: nothing is cut, so the title's own text must not be clipped.
+    for title in ["Marks ◉…", "Mark ◉ …"] {
+        let request = request(&format!(
+            r#"{{"questions":[{{"id":"a","title":"Scope","question":"Pick"}},
+            {{"id":"b","title":"{title}","question":"Pick"}}]}}"#
+        ));
+        let mut panel = Panel::new(&request, None);
+        panel.step = 1;
+        let row = dock(&request, &panel, 28)
+            .iter()
+            .map(Line::plain)
+            .find(|row| row.trim_end().ends_with("2 of 2"))
+            .unwrap();
+        assert!(row.starts_with(&format!("  Scope   {title}  ")), "{row:?}");
+    }
+}

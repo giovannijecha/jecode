@@ -223,7 +223,10 @@ fn steps(request: &Request, panel: &Panel, columns: usize) -> Line {
         }
     }
     let limit = columns.saturating_sub(count_cells + 4);
+    // Only a real cut can strand a mark; a fitting title keeps its own text.
+    let fits = panel::cells(&row) <= limit;
     let mut row = match row.shortened(limit) {
+        cut if fits => cut,
         cut if cut.plain().ends_with("◉…") => row.shortened(limit.saturating_sub(1)),
         cut if cut.plain().ends_with("◉ …") => row.shortened(limit.saturating_sub(2)),
         cut => cut,
