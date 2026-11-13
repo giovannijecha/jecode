@@ -55,6 +55,44 @@ public static class JecodeConsole {
     }
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetConsoleScreenBufferInfoEx(IntPtr handle, ref ScreenInfoEx info);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern uint GetConsoleTitleW([Out, MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.U2)] char[] title, uint size);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool SetConsoleTitleW(string title);
+    [DllImport("kernel32.dll")]
+    static extern void SetLastError(uint error);
+
+    // The fixed title while the TUI owns the console. Hosts that suppress
+    // application titles, such as Windows Terminal profiles, ignore it.
+    const string Title = "Jecode";
+    // Reserve the console's full title range. Empty is a valid saved title;
+    // GetConsoleTitleW also returns zero on failure, distinguished by last error.
+    static string ReadTitle() {
+        var buffer = new char[65536];
+        SetLastError(0);
+        uint length = GetConsoleTitleW(buffer, (uint)buffer.Length);
+        return (length == 0 && Marshal.GetLastWin32Error() != 0) || length >= buffer.Length
+            ? null : new string(buffer, 0, (int)length);
+    }
+    // UTF-16 units keep any title intact through the report and recovery pipes.
+    public static string EncodeTitle(string title) {
+        if (title == null) return "-";
+        var units = new List<string>(title.Length);
+        foreach (char unit in title) units.Add(((int)unit).ToString());
+        return string.Join(",", units);
+    }
+    public static string DecodeTitle(string encoded) {
+        if (encoded == null || encoded == "-") return null;
+        if (encoded.Length == 0) return "";
+        var title = new System.Text.StringBuilder();
+        foreach (string unit in encoded.Split(',')) title.Append((char)ushort.Parse(unit));
+        return title.ToString();
+    }
+    // Restores only Jecode's own title: a title set since then stays, and a
+    // second restoration after the first finds nothing to do.
+    public static void RestoreTitle(string saved) {
+        if (saved != null && saved != Title && ReadTitle() == Title) SetConsoleTitleW(saved);
+    }
 
     static void Check(bool success, string operation = "input") {
         if (!success) throw new IOException("Windows console " + operation + " error " + Marshal.GetLastWin32Error());
@@ -264,7 +302,8 @@ public static class JecodeConsole {
             if (!bulk) Flush(writer);
         }
     }
-    public static void Restore(uint inputMode, uint outputMode, uint codePage) {
+    public static void Restore(uint inputMode, uint outputMode, uint codePage, string title) {
+        RestoreTitle(title);
         using (var input = CreateFileW("CONIN$", 0xc0000000u, 3, IntPtr.Zero, 3, 0, IntPtr.Zero))
         using (var output = CreateFileW("CONOUT$", 0xc0000000u, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
             IntPtr outputHandle = output.DangerousGetHandle();
@@ -296,7 +335,8 @@ public static class JecodeConsole {
             Check(GetConsoleMode(input, out inputMode), "read input mode");
             Check(GetConsoleMode(output, out outputMode), "read output mode");
             uint codePage = GetConsoleOutputCP();
-            writer.WriteLine("R|" + inputMode + "|" + outputMode + "|" + codePage);
+            string title = ReadTitle();
+            writer.WriteLine("R|" + inputMode + "|" + outputMode + "|" + codePage + "|" + EncodeTitle(title));
             // The main screen's palette is a fallback when the host does not
             // answer OSC 11. COLORREF stores red in the low byte.
             var palette = new ScreenInfoEx();
@@ -315,6 +355,8 @@ public static class JecodeConsole {
                 Check(SetConsoleOutputCP(65001), "set UTF-8 output");
                 Console.Out.Write("\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1006h\x1b[?25l");
                 Console.Out.Flush();
+                // Best effort and only with a title to restore afterwards.
+                if (title != null) SetConsoleTitleW(Title);
                 // The first frame waits for this size; start the stop watcher after it.
                 string size = "";
                 ReportSize(output, writer, ref size, ref background);
@@ -346,6 +388,7 @@ public static class JecodeConsole {
                     SetConsoleMode(input, inputMode);
                     SetConsoleMode(output, outputMode);
                     SetConsoleOutputCP(codePage);
+                    RestoreTitle(title);
                 }
             }
         }

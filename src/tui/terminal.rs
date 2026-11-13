@@ -38,8 +38,10 @@ pub enum Input {
     PasteOverflow,
     #[cfg(any(windows, test))]
     Scroll(i16),
+    /// Saved input, output and code page modes, and the saved title as
+    /// comma-separated UTF-16 units (`-` when the adapter left the title alone).
     #[cfg(windows)]
-    Modes(u32, u32, u32),
+    Modes(u32, u32, u32, String),
     #[cfg(windows)]
     NativeBackground(u8, u8, u8),
     #[cfg(unix)]
@@ -66,6 +68,10 @@ impl Waker {
 
 pub(super) const LEAVE: &str =
     "\x1b[0m\x1b[?2026l\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[<u\x1b[?1049l\x1b[?25h";
+
+/// Pops the window title the Unix guardian pushed before setting `Jecode`.
+#[cfg(unix)]
+pub(super) const RESTORE_TITLE: &str = "\x1b[23;2t";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Geometry {

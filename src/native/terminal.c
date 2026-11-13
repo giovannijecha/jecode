@@ -14,6 +14,20 @@
 static volatile sig_atomic_t interrupted;
 static void stop(int signal_number) { interrupted = signal_number; }
 static const char leave[] = "\033[0m\033[?2026l\033[?1006l\033[?1000l\033[?2004l\033[<u\033[?1049l\033[?25h";
+static const char save_title[] = "\033[22;2t";
+static const char set_title[] = "\033]2;Jecode\007";
+static const char restore_title[] = "\033[23;2t";
+
+static int write_all(int fd, const char *bytes, size_t length) {
+    while (length) {
+        ssize_t written = write(fd, bytes, length);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return -1;
+        bytes += written;
+        length -= (size_t)written;
+    }
+    return 0;
+}
 
 static int install_signals(void) {
     struct sigaction action;
@@ -64,7 +78,7 @@ static void report_sizes(int tty, struct winsize size) {
     }
 }
 
-static int guard(void) {
+static int guard(int title_enabled) {
     int tty = open("/dev/tty", O_RDWR | O_CLOEXEC);
     if (tty < 0) return 2;
     struct termios saved, raw;
@@ -86,9 +100,17 @@ static int guard(void) {
     /* `>5u` asks for keys with modifiers to be reported unambiguously, with their
        base layout key so shortcuts work on non-Latin keyboards; terminals without
        the protocol ignore it. Each screen keeps its own request, so it comes after
-       switching screens and ends before switching back. */
+       switching screens and ends before switching back. The window title is saved
+       on the terminal's title stack, set to Jecode and popped on exit; terminals
+       ignore what they do not support or what their settings suppress. */
     const char enter[] = "\033[?1049h\033[?2004h\033[?1000h\033[?1006h\033[>5u\033[?25l";
-    if (write(tty, enter, sizeof(enter) - 1) != (ssize_t)sizeof(enter) - 1) result = 2;
+    /* The parent decides whether the host has the title stack. */
+    int title_saved = 0;
+    if (title_enabled) {
+        title_saved = write_all(tty, save_title, sizeof(save_title) - 1) == 0;
+        if (!title_saved || write_all(tty, set_title, sizeof(set_title) - 1) < 0) result = 2;
+    }
+    if (!result && write_all(tty, enter, sizeof(enter) - 1) < 0) result = 2;
     if (!result) {
         struct winsize size;
         measure(tty, &size);
@@ -96,10 +118,12 @@ static int guard(void) {
         fflush(stdout);
         report_sizes(tty, size);
     }
-    if (write(tty, leave, sizeof(leave) - 1) < 0) result = 2;
-    if (tcsetattr(tty, TCSANOW, &saved) < 0) result = 2;
+    if (write_all(tty, leave, sizeof(leave) - 1) < 0) result = 2;
+    /* Exit code 4 tells the parent that a pushed title still needs a pop. */
+    if (title_saved && write_all(tty, restore_title, sizeof(restore_title) - 1) < 0) result = 4;
+    if (tcsetattr(tty, TCSANOW, &saved) < 0 && result != 4) result = 2;
     close(tty);
-    return interrupted ? 128 + interrupted : result;
+    return result == 4 ? 4 : (interrupted ? 128 + interrupted : result);
 }
 
 static int mode(int argc, char **argv) {
@@ -159,7 +183,8 @@ static int mode(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    if (argc == 2 && !strcmp(argv[1], "guard")) return guard();
+    if (argc == 2 && !strcmp(argv[1], "guard")) return guard(0);
+    if (argc == 3 && !strcmp(argv[1], "guard") && !strcmp(argv[2], "title")) return guard(1);
     if (argc == 2 && !strcmp(argv[1], "secret")) return read_line(1);
     if (argc == 2 && !strcmp(argv[1], "wait-enter")) return read_line(0);
     if (argc >= 3 && !strcmp(argv[1], "mode")) return mode(argc - 2, argv + 2);

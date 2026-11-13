@@ -511,10 +511,19 @@ public sealed partial class JecodeTestPty : IDisposable {
                 pty.Start(executable, directory, "verify-owner-death");
                 pty.Wait("NATIVE_OWNER_RESTORED");
                 pty.Finish(true);
+            } else if (scenario == "title-variants") {
+                pty.Wait("NATIVE_TITLE_VARIANTS_RESTORED");
+                pty.Finish(true);
             } else {
                 pty.Wait("NATIVE_GUARDIAN_RESTORED");
                 pty.Finish(true);
             }
+            if (scenario == "startup-plain" || scenario == "startup-setup-empty" || scenario.StartsWith("setup-"))
+                pty.EnsureNoTitle(scenario);
+            else if (scenario == "title-variants")
+                pty.EnsureTitleVariants();
+            else
+                pty.EnsureTitles(scenario, scenario == "interactive" ? 2 : 1, !scenario.StartsWith("startup-"));
         }
     }
 

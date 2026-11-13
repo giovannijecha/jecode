@@ -26,6 +26,10 @@ Changes since 0.7.5.
   your Jecode home. See [Installation](docs/usage/INSTALLATION.md#update-jecode).
 - **Interface.** `/help` gains a **Shell** tab listing these commands, and
   Settings → Providers → API keys can remove a saved key with Ctrl+D.
+- **Terminal title.** The interactive TUI sets the tab or window title to
+  `Jecode` and restores the previous title on supported terminals. `--plain`,
+  JSON and piped runs leave it unchanged. Unix sessions identified as Windows
+  Terminal keep their title because that host lacks the title save/restore stack.
 - **Parser.** `jecode --plain setup` and other inapplicable options are now
   usage errors (exit status 2) instead of being sent as a task.
 

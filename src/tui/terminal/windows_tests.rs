@@ -452,7 +452,14 @@ fn decodes_native_modifiers_and_unicode_paste() {
     assert!(matches!(parse("W|-3"), Input::Scroll(-3)));
     assert!(matches!(parse("W|3"), Input::Scroll(3)));
     assert!(matches!(parse("W|invalid"), Input::Error(_)));
-    assert!(matches!(parse("R|503|7|437"), Input::Modes(503, 7, 437)));
+    assert!(
+        matches!(parse("R|503|7|437|80,111,119,101,114,83,104,101,108,108,32,946,55357,56898"), Input::Modes(503, 7, 437, title) if title == "80,111,119,101,114,83,104,101,108,108,32,946,55357,56898")
+    );
+    assert!(matches!(parse("R|503|7|437|-"), Input::Modes(503, 7, 437, title) if title == "-"));
+    assert!(matches!(parse("R|503|7|437|"), Input::Modes(503, 7, 437, title) if title.is_empty()));
+    for invalid in ["R|503|7|437", "R|503|7|437|65536", "R|503|7|437|1,,2"] {
+        assert!(matches!(parse(invalid), Input::Error(_)), "{invalid}");
+    }
     assert!(matches!(parse("K|13|2|13"), Input::Key(key) if key.shift() && !key.ctrl()));
     assert!(matches!(parse("K|67|4|3"), Input::Key(key) if key.ctrl() && !key.shift()));
     assert!(

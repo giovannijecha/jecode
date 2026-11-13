@@ -81,6 +81,7 @@ impl Pty {
         helper
             .env("SHELL", "/bin/sh")
             .env("TERM", "xterm-256color")
+            .env_remove("WT_SESSION")
             .env("BASH_ENV", startup)
             .env("ENV", directory.path().join("unused-env.sh"))
             .env("JECODE_TUI_FIXTURE", directory.path())
@@ -88,6 +89,9 @@ impl Pty {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        if case == "wt-session" {
+            helper.env("WT_SESSION", "fixture-session");
+        }
         // A result must not depend on the terminal that runs the tests. The palette
         // case declares what Terminal.app does before macOS 26.
         if case == "palette" {
@@ -420,9 +424,22 @@ impl Pty {
                 entered > 0 && entered == left,
                 "alternate screen was not restored ({entered} entries, {left} exits)"
             );
+            // Each session saves the title, sets Jecode and restores it once.
+            if marker == "PTY_STOPPED_GUARDIAN_RECOVERED" {
+                assert_eq!(title_events(&self.bytes), "PPSRR");
+            } else if marker == "PTY_WT_SESSION_TITLE_UNTOUCHED" {
+                assert_eq!(title_events(&self.bytes), "");
+            } else {
+                assert_eq!(title_events(&self.bytes), "PSR".repeat(entered));
+            }
         } else {
             assert_eq!(entered, 0, "guided setup entered the alternate screen");
             assert_eq!(left, 0, "guided setup left an unused alternate screen");
+            assert_eq!(
+                title_events(&self.bytes),
+                "",
+                "line-based output set a title"
+            );
         }
         assert!(!self.bytes.windows(4).any(|bytes| bytes == b"\x1b[3J"));
     }
@@ -447,6 +464,24 @@ impl Drop for Pty {
 
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// The guardian's title protocol in order: `P` saves the title on the
+/// terminal's stack, `S` sets Jecode and `R` restores the saved title.
+fn title_events(bytes: &[u8]) -> String {
+    let events: [(&[u8], char); 3] = [
+        (b"\x1b[22;2t", 'P'),
+        (b"\x1b]2;Jecode\x07", 'S'),
+        (b"\x1b[23;2t", 'R'),
+    ];
+    (0..bytes.len())
+        .filter_map(|index| {
+            events
+                .iter()
+                .find(|(sequence, _)| bytes[index..].starts_with(sequence))
+                .map(|(_, event)| *event)
+        })
+        .collect()
 }
 
 fn plain(bytes: &[u8]) -> Vec<u8> {

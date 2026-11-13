@@ -8,9 +8,7 @@ use std::{
 };
 
 pub(super) fn snapshot() -> String {
-    static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
-    let program = PROGRAM.get_or_init(compile);
-    let result = Command::new(program)
+    let result = Command::new(program())
         .stdin(Stdio::null())
         .output()
         .expect("Could not start console probe");
@@ -20,6 +18,21 @@ pub(super) fn snapshot() -> String {
         String::from_utf8_lossy(&result.stderr)
     );
     String::from_utf8(result.stdout).expect("Console probe did not return UTF-8")
+}
+
+/// Sets the console title through the native API, as a shell or user would.
+pub(super) fn set_title(title: &str) {
+    let status = Command::new(program())
+        .args(["title", title])
+        .stdin(Stdio::null())
+        .status()
+        .expect("Could not start console probe");
+    assert!(status.success(), "Console probe could not set the title");
+}
+
+fn program() -> &'static PathBuf {
+    static PROGRAM: OnceLock<PathBuf> = OnceLock::new();
+    PROGRAM.get_or_init(compile)
 }
 
 fn compile() -> PathBuf {

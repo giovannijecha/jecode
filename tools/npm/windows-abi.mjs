@@ -9,17 +9,19 @@ const SubsystemCeiling = '10.0';
 
 // Functions the adapters bind at run time. processmodel.dll is the one optional
 // library: it is newer than the floor and absence disables Workspace confinement.
+// GetConsoleTitleW and SetConsoleTitleW require Windows 2000; SetLastError
+// requires Windows XP, all below the Windows 10 1809 floor.
 export const reviewedPInvokes = {
   'kernel32.dll': [
     'CloseHandle', 'ClosePseudoConsole', 'CreateFileW', 'CreateIoCompletionPort',
     'CreateJobObject', 'CreatePipe', 'CreateProcessW', 'CreatePseudoConsole',
     'DeleteProcThreadAttributeList', 'DuplicateHandle', 'FreeEnvironmentStringsW', 'GetConsoleMode',
-    'GetConsoleOutputCP', 'GetConsoleScreenBufferInfo', 'GetConsoleScreenBufferInfoEx', 'GetCurrentProcess',
+    'GetConsoleOutputCP', 'GetConsoleScreenBufferInfo', 'GetConsoleScreenBufferInfoEx', 'GetConsoleTitleW', 'GetCurrentProcess',
     'GetEnvironmentStringsW', 'GetExitCodeProcess', 'GetNamedPipeServerProcessId',
     'GetNumberOfConsoleInputEvents', 'GetQueuedCompletionStatus', 'GetStdHandle',
     'InitializeProcThreadAttributeList', 'QueryInformationJobObject', 'ReadConsoleInputW',
-    'ResizePseudoConsole', 'ResumeThread', 'SetConsoleMode', 'SetConsoleOutputCP', 'SetHandleInformation',
-    'SetInformationJobObject', 'SetStdHandle', 'TerminateJobObject', 'TerminateProcess',
+    'ResizePseudoConsole', 'ResumeThread', 'SetConsoleMode', 'SetConsoleOutputCP', 'SetConsoleTitleW', 'SetHandleInformation',
+    'SetInformationJobObject', 'SetLastError', 'SetStdHandle', 'TerminateJobObject', 'TerminateProcess',
     'UpdateProcThreadAttribute', 'WaitForSingleObject', 'WriteFile',
   ],
   'winhttp.dll': [
