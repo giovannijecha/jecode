@@ -36,7 +36,8 @@ public static class JecodeTerminalEntry {
                 }
             }
             if (args.Length == 4 && args[0] == "restore") {
-                JecodeConsole.Restore(uint.Parse(args[1]), uint.Parse(args[2]), uint.Parse(args[3]));
+                JecodeConsole.Restore(uint.Parse(args[1]), uint.Parse(args[2]), uint.Parse(args[3]),
+                    JecodeConsole.DecodeTitle(Console.In.ReadLine()));
                 return 0;
             }
             if (args.Length != 1 || args[0].Length == 0) return 2;

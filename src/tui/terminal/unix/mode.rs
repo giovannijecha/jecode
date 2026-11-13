@@ -13,6 +13,9 @@ pub(super) struct Mode {
     reports: Option<JoinHandle<()>>,
     tty: File,
     saved: String,
+    /// The guardian reported READY, so it pushed and set the window title.
+    entered: bool,
+    title_enabled: bool,
 }
 
 pub(super) fn stty(tty: &File, arguments: &[&str]) -> Result<String, String> {
@@ -53,6 +56,7 @@ impl Mode {
         mut report: impl FnMut((usize, usize)) -> bool + Send + 'static,
     ) -> Result<(Self, (usize, usize)), String> {
         let saved = stty(&tty, &["-g"])?;
+        let title_enabled = std::env::var_os("WT_SESSION").is_none();
         let mut command = Command::new(crate::native::helper("terminal_unix")?);
         command
             .arg("guard")
@@ -80,17 +84,20 @@ impl Mode {
                 line.clear();
             }
         });
-        let mode = Self {
+        let mut mode = Self {
             child,
             control,
             reports: Some(reports),
             tty,
             saved,
+            entered: false,
+            title_enabled,
         };
         let line = receiver.recv_timeout(Duration::from_secs(5)).ok();
         let Some(measured) = line.as_deref().and_then(|line| line.strip_prefix("READY")) else {
             return Err("Unix terminal input did not initialize. Use jecode --plain.".into());
         };
+        mode.entered = true;
         let size =
             parse_size(measured).ok_or("Could not measure terminal size. Use jecode --plain.")?;
         Ok((mode, size))
@@ -113,6 +120,17 @@ impl Mode {
         self.child.kill().unwrap();
         let _ = self.child.wait().unwrap();
     }
+
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn stop_for_fixture(&mut self) {
+        assert!(
+            Command::new("kill")
+                .args(["-STOP", &self.child.id().to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
 }
 
 impl Drop for Mode {
@@ -125,15 +143,31 @@ impl Drop for Mode {
         {
             thread::sleep(Duration::from_millis(10));
         }
-        let failed = !matches!(self.child.try_wait(), Ok(Some(status)) if status.success());
-        if failed {
-            let _ = write!(std::io::stdout(), "{}", crate::tui::terminal::LEAVE);
-            let _ = std::io::stdout().flush();
-        }
+        // Reap a stuck guardian before writing fallback escapes. Otherwise it
+        // could resume after our pop and pop an enclosing application's title.
         if matches!(self.child.try_wait(), Ok(None)) {
             let _ = self.child.kill();
         }
-        let _ = self.child.wait();
+        let status = self.child.wait();
+        let failed = !matches!(status, Ok(status) if status.success());
+        // Exit code 4 means the guardian could not pop its saved title. A
+        // signal means it could not run cleanup; READY confirms it pushed.
+        let title = self.title_enabled
+            && (matches!(status, Ok(status) if status.code() == Some(4))
+                || self.entered && matches!(status, Ok(status) if status.code().is_none()));
+        if failed {
+            let restore = if title {
+                crate::tui::terminal::RESTORE_TITLE
+            } else {
+                ""
+            };
+            let _ = write!(
+                std::io::stdout(),
+                "{}{restore}",
+                crate::tui::terminal::LEAVE
+            );
+            let _ = std::io::stdout().flush();
+        }
         if let Some(reports) = self.reports.take() {
             let _ = reports.join();
         }

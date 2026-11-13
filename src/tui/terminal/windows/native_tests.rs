@@ -70,6 +70,9 @@ mod native_reference_edits;
 #[path = "native_script.rs"]
 mod native_script;
 
+#[path = "native_titles.rs"]
+mod native_titles;
+
 fn native_pty_source() -> String {
     use crate::tui::theme;
     // What the light palette draws, as the bytes a terminal receives.
@@ -77,10 +80,18 @@ fn native_pty_source() -> String {
     let (light_body, light_placeholder) = (format!("{}m", theme::BODY), format!("{}m", theme::DIM));
     theme::set_light(false);
     format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}",
         include_str!("native_pty.cs"),
         include_str!("native_permissions.cs"),
-        include_str!("native_splash.cs")
+        include_str!("native_splash.cs"),
+        include_str!("native_title.cs")
+    )
+    .replace(
+        "JECODE_CUSTOM_TITLE",
+        &CUSTOM_TITLE
+            .encode_utf16()
+            .map(|unit| format!("\\u{unit:04x}"))
+            .collect::<String>(),
     )
     .replace(
         "JECODE_WARNING_FOREGROUND",
@@ -138,6 +149,7 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
         "input-recovery",
         "owner-death",
         "guardian-loss",
+        "title-variants",
         "setup-cancel",
         "setup-success",
         "setup-error",
@@ -174,6 +186,13 @@ fn native_windows_fullscreen_controls_and_terminal_lifetime() {
             String::from_utf8_lossy(&result.stdout)
         );
         assert!(!result.timed_out, "native {scenario} timed out");
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        for titles in stdout
+            .lines()
+            .filter(|line| line.starts_with("NATIVE_TITLES"))
+        {
+            println!("{titles}");
+        }
     }
 }
 
@@ -219,7 +238,7 @@ fn measure(scenario: &str, source: String, entry: &str) {
     println!("{}", String::from_utf8_lossy(&result.stdout));
 }
 
-fn restored(path: &std::path::Path) {
+pub(super) fn restored(path: &std::path::Path) {
     let before = std::fs::read_to_string(path.join("modes.txt")).unwrap();
     let after = probe();
     assert_eq!(
@@ -227,6 +246,8 @@ fn restored(path: &std::path::Path) {
         before,
         "native input/output modes changed"
     );
+    let title = std::fs::read_to_string(path.join("title.txt")).unwrap();
+    assert_eq!(title_of(&after), title, "console title was not restored");
     assert!(
         after.contains("NATIVE_SHELL_SENTINEL"),
         "main screen was overwritten: {after}"
@@ -237,8 +258,22 @@ fn restored(path: &std::path::Path) {
     );
 }
 
+/// A custom title with Unicode, separators and a surrogate pair, which the
+/// adapter must restore exactly rather than assume a shell title.
+const CUSTOM_TITLE: &str = "Custom β tab | 🙂, kept";
+
+fn title_of(snapshot: &str) -> &str {
+    snapshot.lines().nth(3).unwrap_or("")
+}
+
+/// The console title, read back through the native API.
+pub(super) fn title() -> String {
+    title_of(&probe()).to_owned()
+}
+
 fn full_width_console() {
     let terminal = Terminal::open().unwrap();
+    assert_eq!(title(), "Jecode", "TUI title not set");
     let (width, height) = terminal.size;
     let rows: Vec<_> = (0..height)
         .map(|row| {
@@ -284,7 +319,17 @@ fn native_console_fixture() {
         return;
     }
     println!("NATIVE_SHELL_SENTINEL");
-    std::fs::write(path.join("modes.txt"), probe().lines().next().unwrap()).unwrap();
+    console_probe::set_title(CUSTOM_TITLE);
+    let snapshot = probe();
+    std::fs::write(path.join("modes.txt"), snapshot.lines().next().unwrap()).unwrap();
+    assert_eq!(title_of(&snapshot), CUSTOM_TITLE);
+    std::fs::write(path.join("title.txt"), CUSTOM_TITLE).unwrap();
+    if scenario == "title-variants" {
+        native_titles::console();
+        restored(&path);
+        println!("NATIVE_TITLE_VARIANTS_RESTORED");
+        return;
+    }
     if scenario == "direct-input" {
         fixtures::direct_input(&path);
         restored(&path);
@@ -357,11 +402,7 @@ fn native_console_fixture() {
         }
     }
     if scenario == "guardian-loss" {
-        let mut terminal = Terminal::open().unwrap();
-        terminal.close_for_fixture();
-        assert!(terminal.check().is_err());
-        drop(terminal);
-        restored(&path);
+        super::recovery_tests::guardian_loss(&path);
         println!("NATIVE_GUARDIAN_RESTORED");
         return;
     }

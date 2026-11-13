@@ -167,13 +167,22 @@ performance.
 ## Native terminal fixtures
 
 These drive the real renderer through a pseudo-terminal and check input,
-resize, quitting and terminal restoration after normal exit and owner loss. CI
+resize, quitting and terminal restoration after normal exit and owner loss,
+including the `Jecode` window title and the previous title afterwards on Windows,
+and balanced title save/set/restore sequences on Unix. CI
 runs the fixtures for each platform. Run them after the normal suite, one at a time;
 running them concurrently with other suites can exceed their wait limits.
 Windows screen snapshots compile the owned C# probe once per fixture, then run
 the executable directly. Repeated snapshots keep the same native cell and mode
 assertions without repeatedly starting PowerShell and its compiler. Timeout
 diagnostics retain the end of the terminal output so child failures stay visible.
+
+The title cases cover empty, long and custom Windows titles, adapter loss and a
+title changed during a session. Unix checks include a stopped guardian with an
+enclosing title stack and a `WT_SESSION` host, which must emit no title commands.
+PTY output proves the emitted protocol, not a host's support for it. Unix title
+restoration needs the host's title stack; identified Windows Terminal sessions
+leave the title unchanged because that host does not implement the stack.
 
 The Windows fullscreen fixture also reads Ask answer rows back from the native
 console at 40- and 80-column layouts in both palettes. It checks the shared

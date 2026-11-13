@@ -11,7 +11,7 @@ use crate::{
     test_support::{HttpFixture, completion, tool_call},
     tools::Tools,
 };
-use std::time::Instant;
+use std::{io::Write, time::Instant};
 
 #[cfg(target_os = "macos")]
 const PENDIN: u32 = 0x2000_0000;
@@ -77,6 +77,44 @@ fn native_linux_tui_controls_and_terminal_lifetime() {
 #[ignore = "requires the system script tool to exercise an isolated native macOS PTY"]
 fn native_macos_tui_controls_and_terminal_lifetime() {
     controls_and_terminal_lifetime();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "requires util-linux script to exercise an isolated native Linux PTY"]
+fn native_linux_stopped_guardian_restores_one_title() {
+    stopped_guardian_restores_one_title();
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+#[ignore = "requires the system script tool to exercise an isolated native macOS PTY"]
+fn native_macos_stopped_guardian_restores_one_title() {
+    stopped_guardian_restores_one_title();
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "requires util-linux script to exercise an isolated native Linux PTY"]
+fn native_linux_wt_session_leaves_title_alone() {
+    wt_session_leaves_title_alone();
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+#[ignore = "requires the system script tool to exercise an isolated native macOS PTY"]
+fn native_macos_wt_session_leaves_title_alone() {
+    wt_session_leaves_title_alone();
+}
+
+fn stopped_guardian_restores_one_title() {
+    let mut terminal = driver::Pty::new("guardian-stopped");
+    terminal.finish("PTY_STOPPED_GUARDIAN_RECOVERED");
+}
+
+fn wt_session_leaves_title_alone() {
+    let mut terminal = driver::Pty::new("wt-session");
+    terminal.finish("PTY_WT_SESSION_TITLE_UNTOUCHED");
 }
 
 fn controls_and_terminal_lifetime() {
@@ -151,6 +189,9 @@ fn controls_and_terminal_lifetime() {
     let mut terminal = driver::Pty::new("guardian-loss");
     terminal.finish("PTY_GUARDIAN_RECOVERED");
 
+    stopped_guardian_restores_one_title();
+    wt_session_leaves_title_alone();
+
     for case in ["setup-cancel", "setup-success", "setup-error"] {
         let mut terminal = driver::Pty::new(case);
         terminal.wait("SETUP_SIGN_IN_WAITING");
@@ -184,6 +225,26 @@ fn native_pty_fixture() {
     eprintln!("\nPTY_META|{}|{}", std::process::id(), tty.display());
     let tty = File::open(tty).unwrap();
     let original = mode::stty(&tty, &["-g"]).unwrap();
+    if case == "wt-session" {
+        let (mode, _) = mode::Mode::open(tty, |_| true).unwrap();
+        drop(mode);
+        assert_mode_restored(&File::open("/dev/tty").unwrap(), &original);
+        eprintln!("PTY_WT_SESSION_TITLE_UNTOUCHED");
+        return;
+    }
+    if case == "guardian-stopped" {
+        // An enclosing application has its own title on the stack. The
+        // fallback must pop Jecode's entry without consuming that one.
+        let mut output = File::options().write(true).open("/dev/tty").unwrap();
+        output.write_all(b"\x1b[22;2t\x1b]2;Outer\x07").unwrap();
+        let (mut mode, _) = mode::Mode::open(tty, |_| true).unwrap();
+        mode.stop_for_fixture();
+        drop(mode);
+        output.write_all(b"\x1b[23;2t").unwrap();
+        assert_mode_restored(&File::open("/dev/tty").unwrap(), &original);
+        eprintln!("PTY_STOPPED_GUARDIAN_RECOVERED");
+        return;
+    }
     #[cfg(target_os = "macos")]
     {
         // Independent control: clear any incoming PENDIN while entering raw
@@ -212,6 +273,28 @@ fn native_pty_fixture() {
         drop(terminal);
         assert!(at.elapsed() < Duration::from_secs(1));
         assert_mode_restored(&tty, &original);
+        // A handled startup error after the terminal opened restores it too.
+        let fixture = HttpFixture::new(vec![]);
+        let config = SessionConfig {
+            store: Store::new(path.join("home")),
+            settings: Settings::new("isolated-fixture-key".into(), "fixture/model".into()).unwrap(),
+        };
+        config.store.save(&config.settings).unwrap();
+        let agent = Agent::new(
+            OpenRouter::fixture(fixture.endpoint.clone()),
+            Tools::new(&path).unwrap(),
+        );
+        let resumed = crate::tui::launch(
+            agent,
+            config,
+            Some(Some("missing-conversation".into())),
+            Default::default(),
+            None,
+            Default::default(),
+        );
+        assert!(resumed.is_err(), "missing conversation resumed");
+        assert_mode_restored(&tty, &original);
+        assert!(fixture.finish().is_empty());
         eprintln!("PTY_GUARDIAN_RECOVERED");
         return;
     }

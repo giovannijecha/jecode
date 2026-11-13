@@ -19,7 +19,7 @@ pub struct Terminal {
     control: ChildStdin,
     child: Child,
     reader: Option<JoinHandle<()>>,
-    modes: Option<(u32, u32, u32)>,
+    modes: Option<(u32, u32, u32, String)>,
 }
 
 impl Terminal {
@@ -90,8 +90,8 @@ impl Terminal {
         };
         // The adapter enables VT output before its first size event. Do not draw sooner.
         match terminal.input.recv_timeout(Duration::from_secs(5)) {
-            Ok(Input::Modes(input, output, code_page)) => {
-                terminal.modes = Some((input, output, code_page))
+            Ok(Input::Modes(input, output, code_page, title)) => {
+                terminal.modes = Some((input, output, code_page, title))
             }
             Ok(Input::Error(error)) => return Err(format!("{error}. Use jecode --plain.")),
             _ => {
@@ -165,11 +165,17 @@ fn parse(line: &str) -> Input {
     let fields: Vec<_> = line.split('|').collect();
     match fields.as_slice() {
         ["I", "overflow"] => Input::PasteOverflow,
-        ["R", input, output, code_page] => match (input.parse(), output.parse(), code_page.parse())
-        {
-            (Ok(input), Ok(output), Ok(code_page)) => Input::Modes(input, output, code_page),
-            _ => Input::Error("Invalid console modes".into()),
-        },
+        ["R", input, output, code_page, title] => {
+            let title_units = title.is_empty()
+                || *title == "-"
+                || title.split(',').all(|unit| unit.parse::<u16>().is_ok());
+            match (input.parse(), output.parse(), code_page.parse()) {
+                (Ok(input), Ok(output), Ok(code_page)) if title_units => {
+                    Input::Modes(input, output, code_page, title.to_string())
+                }
+                _ => Input::Error("Invalid console modes".into()),
+            }
+        }
         ["B", red, green, blue] => match (red.parse(), green.parse(), blue.parse()) {
             (Ok(red), Ok(green), Ok(blue)) => Input::NativeBackground(red, green, blue),
             _ => Input::Error("Invalid console background".into()),
