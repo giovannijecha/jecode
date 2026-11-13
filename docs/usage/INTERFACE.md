@@ -335,6 +335,10 @@ conversation is never dumped into your terminal's scrollback; it stays in the
 
 - The TUI needs a VT-compatible terminal. If it cannot start, the error suggests
   `jecode --plain`.
+- The TUI sets the tab or window title to `Jecode` and restores the previous
+  title when it exits, where the terminal supports this. Unix sessions inside
+  Windows Terminal keep their title because that host lacks the title
+  save/restore stack. Plain, JSON and piped runs leave the title unchanged.
 - Colors are 24-bit, or the 256-color palette on a Linux or macOS terminal that does
   not declare 24-bit support; see [Theme](../development/TUI_THEME.md). `NO_COLOR` is ignored. Jecode never paints a
   background: it keeps your terminal's own. The `appearance.theme` setting, or

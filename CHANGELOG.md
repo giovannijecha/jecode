@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 0.10.0
 
 Changes since 0.7.5.
 
@@ -26,6 +26,10 @@ Changes since 0.7.5.
   your Jecode home. See [Installation](docs/usage/INSTALLATION.md#update-jecode).
 - **Interface.** `/help` gains a **Shell** tab listing these commands, and
   Settings → Providers → API keys can remove a saved key with Ctrl+D.
+- **References.** Skill and file cards move, wrap and delete as complete items
+  in the composer and remain recognizable in sent messages.
+- **Task and question marks.** Task lists and question choices use consistent
+  circle marks in their summaries and expanded views.
 - **Terminal title.** The interactive TUI sets the tab or window title to
   `Jecode` and restores the previous title on supported terminals. `--plain`,
   JSON and piped runs leave it unchanged. Unix sessions identified as Windows

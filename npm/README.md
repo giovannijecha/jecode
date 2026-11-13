@@ -4,9 +4,9 @@ Jecode is a coding agent for your terminal. Choose a model, describe a task,
 and let it read your project, edit files, run commands and check
 the result. Tool cards and diffs show the work as it happens.
 
-![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/9e39e37abbeeb325f3815e4f1fa1e512dc7f9f4d/docs/images/jecode-startup.png)
+![Jecode running in Windows Terminal, with its startup screen, composer and model status](https://raw.githubusercontent.com/giovannijecha/jecode/d3275083a1da2f46610ab8986c3f8cfe692c9280/docs/images/jecode-startup.png)
 
-*Jecode 0.7.5 in Windows Terminal, with GPT-6.1 Sol selected.*
+*Jecode 0.10.0 in Windows Terminal, with GPT-6.1 Sol selected.*
 
 ## Install
 
@@ -48,9 +48,9 @@ sent to providers and local credential storage.
 Read the [release notes](https://github.com/giovannijecha/jecode/blob/main/CHANGELOG.md)
 before updating: this build resumes only conversations in its current format
 and leaves unsupported files unchanged. `jecode update --check` reports whether
-a newer release is published, `jecode update` installs it through npm, and
-`jecode uninstall` removes this npm installation while keeping your settings and
-conversations. The
+a newer release is published, `jecode update` updates the running installation
+through npm or Volta, and `jecode uninstall` removes that installation while
+keeping your settings and conversations. The
 [installation guide](https://github.com/giovannijecha/jecode/blob/main/docs/usage/INSTALLATION.md#update-jecode)
 covers updates, removal and existing standalone installations.
 
