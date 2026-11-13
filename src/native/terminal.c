@@ -78,7 +78,7 @@ static void report_sizes(int tty, struct winsize size) {
     }
 }
 
-static int guard(void) {
+static int guard(int title_enabled) {
     int tty = open("/dev/tty", O_RDWR | O_CLOEXEC);
     if (tty < 0) return 2;
     struct termios saved, raw;
@@ -104,9 +104,7 @@ static int guard(void) {
        on the terminal's title stack, set to Jecode and popped on exit; terminals
        ignore what they do not support or what their settings suppress. */
     const char enter[] = "\033[?1049h\033[?2004h\033[?1000h\033[?1006h\033[>5u\033[?25l";
-    /* Windows Terminal passes WT_SESSION into WSL but supports setting a title
-       without the stack needed to restore it. */
-    int title_enabled = getenv("WT_SESSION") == NULL;
+    /* The parent decides whether the host has the title stack. */
     int title_saved = 0;
     if (title_enabled) {
         title_saved = write_all(tty, save_title, sizeof(save_title) - 1) == 0;
@@ -185,7 +183,8 @@ static int mode(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    if (argc == 2 && !strcmp(argv[1], "guard")) return guard();
+    if (argc == 2 && !strcmp(argv[1], "guard")) return guard(0);
+    if (argc == 3 && !strcmp(argv[1], "guard") && !strcmp(argv[2], "title")) return guard(1);
     if (argc == 2 && !strcmp(argv[1], "secret")) return read_line(1);
     if (argc == 2 && !strcmp(argv[1], "wait-enter")) return read_line(0);
     if (argc >= 3 && !strcmp(argv[1], "mode")) return mode(argc - 2, argv + 2);

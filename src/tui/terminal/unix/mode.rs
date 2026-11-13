@@ -56,10 +56,13 @@ impl Mode {
         mut report: impl FnMut((usize, usize)) -> bool + Send + 'static,
     ) -> Result<(Self, (usize, usize)), String> {
         let saved = stty(&tty, &["-g"])?;
+        // Windows Terminal passes WT_SESSION into WSL but supports setting a
+        // title without the stack needed to restore it.
         let title_enabled = std::env::var_os("WT_SESSION").is_none();
         let mut command = Command::new(crate::native::helper("terminal_unix")?);
         command
             .arg("guard")
+            .args(title_enabled.then_some("title"))
             .env_remove("BASH_ENV")
             .env_remove("ENV")
             .stdin(Stdio::piped())
