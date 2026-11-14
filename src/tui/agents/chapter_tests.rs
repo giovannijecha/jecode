@@ -48,7 +48,7 @@ fn agent_events_join_the_chapter_they_follow_and_stand_alone_after_prose() {
     state.collaboration_event(received);
     let chapter = all(&state);
     assert!(
-        chapter.contains("  WORK   Update agents  3 calls"),
+        chapter.contains("  WORK   Update agents") && chapter.contains("3 calls"),
         "{chapter}"
     );
     assert!(
@@ -89,7 +89,8 @@ fn ctrl_o_opens_every_agent_event_in_the_chapter_as_its_receipt() {
     ));
     state.finish_tool_turn();
     let collapsed = all(&state);
-    assert!(collapsed.contains("AGENT 1 Returned · 1 file changed  pending review"));
+    assert!(collapsed.contains("AGENT 1 Returned"), "{collapsed}");
+    assert!(!collapsed.contains("pending review"));
     assert_eq!(state.toggle_tools(), Some((true, 2)));
     let open = all(&state);
     for expected in [
@@ -136,12 +137,11 @@ fn failed_checks_are_bad_and_unknown_outcomes_are_warnings() {
     let styled = |needle: &str| {
         rows.iter()
             .flat_map(|row| &row.spans)
-            .find(|span| span.text.contains(needle))
+            .find(|span| span.text.trim() == needle)
             .map(|span| span.style)
     };
-    assert_eq!(
-        styled("check failed · history_groups_by_day failed"),
-        Some(BAD)
-    );
-    assert_eq!(styled("inspect in /agents"), Some(WARNING));
+    assert_eq!(styled("failed"), Some(BAD));
+    assert!(!all.contains("exit 1"));
+    assert_eq!(styled("outcome unknown"), Some(WARNING));
+    assert!(!all.contains("history_groups_by_day failed"));
 }

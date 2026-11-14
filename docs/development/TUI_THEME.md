@@ -299,51 +299,48 @@ the full command and exact output, numbered source for Read, all diff hunks,
 and `exit N · duration` for commands. Stdout uses `CODE_TEXT`, successful
 stderr `MUTED`, and stream labels `DIM` when both streams exist. An expanded
 image Read shows an `Opened image` fact with dimensions and bytes; Web and
-Browser keep their raw results. The last card of that turn with hidden
-content carries the key as text, `Ctrl+O` in bold `STRONG` and `expand` in
-`DIM`, ending two cells from the edge of the row reporting it, or on a row of
-its own when that row is full; expanded, the turn's first card names `collapse`
-on its title. Only the latest turn carries it. Tool cards keep the result
+Browser keep their raw results. A standalone last card with hidden content carries the key as text,
+`Ctrl+O` in bold `STRONG` and `expand` in `DIM`, ending two cells from
+the edge of the row reporting it, or on a row of its own, still ending two
+cells from the edge, when full. A finished
+WORK block uses its folded-count footer instead. Expanded, the turn's first
+card names `collapse` on its title. Only the latest turn carries it. Tool cards keep the result
 reported when the call returned; `/process` shows the live process list.
 
 ### Work chapters
 
-Two or more adjacent Read, List, Search, Bash, Exec, Process, Web, Browser, MCP and LSP
-calls, collaboration events and agent list, inspect, wait and diff calls share a
-Work chapter when their normalized `work` labels and execution turn match.
-Skill reads, assistant text and other tools break the chapter; a single call
-keeps its normal card. A missing label displays as **Activity**; the label is
-collapsed to one line and ellipsized to 60 cells for display only.
+Two or more adjacent Read, List, Search, Bash, Exec, Process, Web, Browser, MCP,
+LSP or agent calls share a Work chapter when their normalized `work` labels
+and execution turn match. Skill reads, assistant text and other tools break it;
+a single call keeps its ordinary card. A missing label displays as **Activity**.
 
-The title is a WORK badge, the label in bold `STRONG`, `N calls` in `DIM`
-and `· N failed` in `BAD`. The badge carries the chapter's state: `STRONG` on
-`BADGE_IDLE` when done, shimmering while running, red or amber on failure or
-stop. When the chapter carries the turn's `Ctrl+O` key, it sits at the
-title's right edge and the title clips before it.
+A compact WORK block takes at most eight physical rows, even at 40 columns.
+Its title has the state badge, the bold `STRONG` label and a `DIM` call count
+ending two cells from the right edge, plus `· N failed` in `BAD` when needed.
+The title has no key; below about 32 columns the count gives way before the
+badge and label. Facts use at most two tree rows ending two cells from the
+edge, breaking only between whole facts; a second row ends in ` …` when more
+facts are folded. `N running` comes last and joins a row only when it fits, so
+finishing a call never removes a fact row. Among Failed, Unknown, Stopped and
+Background calls, and Running calls older than the latest four, choose at most
+three in that priority, latest first for ties, then display those members in
+source order. A warning row counts further attention calls. The latest four
+running or completed calls in source order fill remaining room: a call that
+finishes keeps its row, so the live block never shrinks. Members use their family text ink and a middle ellipsis at 60/40 to keep
+both ends of the target, with an outcome aligned right. A failed member shows
+only `exit N` when an actual exit code exists, otherwise `failed`; the full
+diagnostic remains in its expanded card. At narrow widths a member's outcome
+gives way before its tool name. A block ends with the folded call count in
+words: `1 call folded`, `no calls folded`. Finished blocks add `Ctrl+O expand`;
+running blocks have no fold key. The status row still reports `N tools running` when appropriate.
 
-One tree runs from the title to the chapter's last row. The first row counts
-successful work: unique files read, listings, searches, other reads, web calls, screenshots,
-snapshots, browser actions, commands and process calls, plus running,
-background and stopped calls; it reads `0 completed` when it has nothing else.
-Each command keeps one row with its family-coloured name and description or
-command, with running time or a failed `exit N` inline. Other failed or
-unusual calls keep a row and bounded errors. Up to four latest completed
-ordinary Read, List, Search, Web or Browser calls stay at the foot in
-source order, with their times frozen when done. Running ordinary calls take
-these rows while active. A chapter that replaced a single card keeps at least
-that card's height. Expanded, the title's tree closes on its facts, every call
-follows as its full card, and the foot rows are dropped.
-
-While several calls run together, each running Read, List, Search, Web or
-Browser member keeps a compact target and elapsed-time row in source order.
-The chapter facts count running calls; the latest completed ordinary call
-remains last. As results arrive, the corresponding running rows become
-completed foot rows without shrinking the chapter. Earlier completed rows
-leave the four-row window as further calls start. The chapter updates in place
-even when completion order differs from source order. The status row reads
-`N tools running` while more than one call
-is active and returns to the remaining call's normal activity label when one
-is left. `Ctrl+O` still applies to the latest finished turn.
+Ctrl+O on the latest finished turn dissolves WORK: no chapter title, facts or
+footer remain. Every call opens as its ordinary full card in source order,
+with one blank row between cards. The first card carries `Ctrl+O collapse`.
+Long described Bash, Exec and Process titles wrap continuously and continue at
+column 2; complete output also wraps. Read shows complete numbered source;
+List, Search, multi-file, Ask User, Todo, agent, MCP and LSP cards retain their
+full results. Standalone cards in the same turn follow this grammar.
 
 ### Diffs
 

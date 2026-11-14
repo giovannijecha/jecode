@@ -150,3 +150,62 @@ fn search_no_matches_and_partial_errors_remain_legible() {
         );
     }
 }
+
+#[test]
+fn expanded_discovery_keeps_long_multiline_fields_and_errors() {
+    let args = Value::object([("query", Value::string("needle"))]);
+    let tail = "distinctive_tail_after_the_old_limit";
+    let long = format!("{}\n{tail}", "x".repeat(430));
+    let result = Value::object([
+        ("matches_returned", Value::number(1)),
+        ("files_searched", Value::number(1)),
+        ("complete", Value::Bool(true)),
+        (
+            "matches",
+            Value::Array(vec![Value::object([
+                ("path", Value::string(format!("src/first\n{tail}.rs"))),
+                ("line", Value::number(7)),
+                ("text", Value::string(&long)),
+                (
+                    "before",
+                    Value::Array(vec![Value::object([
+                        ("line", Value::number(6)),
+                        ("text", Value::string(&long)),
+                    ])]),
+                ),
+            ])]),
+        ),
+        (
+            "errors",
+            Value::Array(vec![Value::object([
+                ("path", Value::string("src/broken\nfile.rs")),
+                ("error", Value::string(&long)),
+            ])]),
+        ),
+    ]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let search_card = card(tool("search", &args, &result, &shown), 40, false);
+    let full = text(&search_card);
+    assert!(full.matches(tail).count() >= 4, "{full}");
+    assert!(!full.contains('↵') && !full.contains('…'), "{full}");
+    assert!(
+        search_card
+            .rows
+            .iter()
+            .all(|row| crate::tui::text::cells(&row.plain()) <= 40)
+    );
+
+    let list = Value::object([(
+        "entries",
+        Value::Array(vec![Value::object([
+            ("path", Value::string(&long)),
+            ("type", Value::string("file")),
+        ])]),
+    )]);
+    let open = card(tool("list", &args, &list, &shown), 40, false);
+    assert!(text(&open).contains(tail));
+    assert!(!text(&open).contains('↵'));
+}

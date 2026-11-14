@@ -109,8 +109,11 @@ fn a_receipt_polled_before_its_call_starts_still_joins_that_call() {
     };
     let (placed, rows) = shown(true);
     assert_eq!((placed, rows.clone()), shown(false));
-    assert!(rows.contains("  WORK   Check the docs  2 calls"), "{rows}");
-    assert!(rows.contains("  WORK   Update agents  2 calls"), "{rows}");
+    assert!(
+        rows.contains("  WORK   Check the docs") && rows.contains("2 calls"),
+        "{rows}"
+    );
+    assert!(rows.contains("  WORK   Update agents"), "{rows}");
 }
 
 #[test]
@@ -240,7 +243,7 @@ fn resumed_events_take_the_places_they_had_live() {
     assert!(lone("unknown") && lone("returned"), "{placed:?}");
     let rows = all(&resumed.state);
     assert!(
-        rows.contains("  WORK   Check the source  3 calls"),
+        rows.contains("  WORK   Check the source") && rows.contains("3 calls"),
         "{rows}"
     );
 }

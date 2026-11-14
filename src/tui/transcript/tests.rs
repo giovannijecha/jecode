@@ -275,7 +275,12 @@ fn simultaneous_read_completions_keep_the_earlier_layout_cached() {
         assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
         state.close_tools();
         let output = shown(&mut layout, &state);
-        assert!(output.contains(&format!("  WORK   Activity  {calls} calls")));
+        assert!(
+            output
+                .lines()
+                .any(|line| line.starts_with("  WORK   Activity")
+                    && line.trim_end().ends_with(&format!("{calls} calls")))
+        );
         assert!(output.contains(&format!("{calls} files read")));
         assert_eq!(output.matches("  WORK   Activity  ").count(), 1);
     }
@@ -309,7 +314,12 @@ fn missed_read_group_and_tool_toggles_redraw_from_the_earliest_change() {
     );
     assert_eq!(&layout.blocks[..prior.len()], prior.as_slice());
     let output = shown(&mut layout, &state);
-    assert!(output.contains("  WORK   Activity  3 calls"));
+    assert!(
+        output
+            .lines()
+            .any(|line| line.starts_with("  WORK   Activity")
+                && line.trim_end().ends_with("3 calls"))
+    );
     assert!(output.contains("3 files read"));
     assert_eq!(output.matches("  WORK   Activity  ").count(), 1);
 }
@@ -367,13 +377,23 @@ fn reads_join_one_card_as_they_finish_and_the_keycap_follows_the_latest_turn() {
     read(&mut state, "b", "src/b.rs");
     let text = shown(&mut layout, &state);
     // The running state lives on the WORK badge, not in the title text.
-    assert!(text.contains("  WORK   Activity  2 calls\n"), "{text}");
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("  WORK   Activity")
+                && line.trim_end().ends_with("2 calls")),
+        "{text}"
+    );
     assert!(!text.contains("calls · running"));
     assert!(text.contains("1 file read") && text.contains("READ src/b.rs"));
     assert!(!text.contains("  READ   src/a.rs"));
     finish_read(&mut state, "b");
     let text = shown(&mut layout, &state);
-    assert!(text.contains("  WORK   Activity  2 calls\n  │ 2 files read"));
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("  WORK   Activity")
+                && line.trim_end().ends_with("2 calls"))
+    );
+    assert!(text.contains("  │ 2 files read"));
     assert!(!text.contains("  READ   src/a.rs") && !text.contains("Ctrl+O"));
     state.close_tools();
     state.finish_tool_turn();

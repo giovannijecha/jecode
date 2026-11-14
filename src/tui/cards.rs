@@ -22,11 +22,9 @@ mod streams;
 mod summary;
 mod title;
 mod work;
-pub(in crate::tui) use badge::{hang, level};
+pub(in crate::tui) use badge::level;
 pub use chapter::{
-    activities as chapter_activities, exception as chapter_exception,
     groupable as chapter_groupable, header as chapter_header, label as chapter_label,
-    receipts as chapter_receipts,
 };
 pub use presentation::Presentation;
 
@@ -190,17 +188,38 @@ pub fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     } else if tool.name == "lsp" {
         lsp::card(tool, columns, keycap)
     } else if tool.name == "edit" && crate::tools::edit::several(tool.arguments) {
-        // It places its own keycaps around a title that may wrap.
-        return edits::card(tool, columns, keycap);
+        edits::card(tool, columns, keycap)
     } else if matches!(tool.name, "read" | "write" | "edit") {
         file_card(tool, columns, keycap)
     } else {
         rhythm::card(tool, columns, keycap)
     };
-    // An expanded turn names the way back on its first title row.
-    if keycap && tool.presentation.expanded && tool.name != "lsp" && !card.rows.is_empty() {
+    if keycap
+        && !tool.presentation.expanded
+        && card.hidden
+        && matches!(tool.name, "ask_user" | "todo_list")
+        && !card.rows.is_empty()
+    {
         let title = card.rows.remove(0);
-        card.rows.splice(0..0, hint(title, "collapse", columns));
+        card.rows.splice(0..0, hint(title, "expand", columns));
+    }
+    // The turn-level key belongs to its first card. Keep a wrapped title
+    // together when the first row has no room for the key.
+    if keycap && tool.presentation.expanded && !card.rows.is_empty() {
+        let titled = card
+            .rows
+            .iter()
+            .take_while(|row| row.origin.is_some_and(|origin| origin.line == 0))
+            .count()
+            .max(1);
+        let first = hint(card.rows.remove(0), "collapse", columns);
+        if first.len() == 1 || titled == 1 {
+            card.rows.splice(0..0, first);
+        } else {
+            card.rows.insert(0, first.into_iter().next().unwrap());
+            let last = hint(card.rows.remove(titled - 1), "collapse", columns);
+            card.rows.splice(titled - 1..titled - 1, last);
+        }
     }
     card
 }
@@ -279,6 +298,19 @@ fn file_card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         rows.extend(body.rows);
         rows.extend(content::notices(tool.name, result, columns, expanded));
     }
+    // A single Read deliberately hides its source without counting hidden rows.
+    // The compact fact still needs the turn-level key when source was captured.
+    if tool.name == "read"
+        && !expanded
+        && tool
+            .result
+            .is_some_and(|result| result.get("content").is_some() || result.get("files").is_some())
+    {
+        hidden = true;
+        if keycap && let Some(last) = rows.pop() {
+            rows.extend(hint(last, "expand", columns));
+        }
+    }
     // A diff runs from column 2 below its facts, outside the tree.
     let hung = if diff { facts } else { rows.len() };
     badge::hang(&mut rows[titled..hung], true);
@@ -347,10 +379,13 @@ fn hint(row: Line, label: &str, columns: usize) -> Vec<Line> {
         row.push(&" ".repeat(columns - 2 - used - room), MUTED);
         vec![row.append(cap)]
     } else {
+        // No room beside the title: the key takes its own row, still ending
+        // two cells from the edge like every other key.
         let origin = row.origin;
-        let mut cap = cap.indent("    ", MUTED);
-        cap.origin = origin;
-        vec![row, cap]
+        let mut own = Line::new(&" ".repeat(columns.saturating_sub(2 + room)), MUTED);
+        own = own.append(cap).shortened(columns);
+        own.origin = origin;
+        vec![row, own]
     }
 }
 

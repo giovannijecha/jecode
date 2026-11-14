@@ -44,7 +44,7 @@ fn earlier_chapter_and_latest_singleton_keep_compact_previews_and_original_resul
     state.begin_tool_turn();
     start(&mut state, "future");
     let running = visible(&state);
-    assert!(running.contains("  WORK   Activity  2 calls"));
+    assert!(running.contains("  WORK   Activity") && running.contains("2 calls"));
     assert!(running.contains("  BASH   fixture-command"));
     assert!(running.contains("  │ ") && running.contains("  └ "));
     assert!(!running.contains(['▰', '▱']));
@@ -230,18 +230,19 @@ fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     state.message(Kind::Assistant, "Finished.");
     let current = state.rows();
     assert_ne!(current[0], first);
-    assert!(
-        current[0][0]
-            .plain()
-            .starts_with("  WORK   Activity  3 calls")
-    );
+    assert!(current[0][0].plain().starts_with("  WORK   Activity"));
+    assert!(current[0][0].plain().contains("3 calls"));
     assert!(
         current[0]
             .iter()
             .any(|row| row.plain().contains("3 commands"))
     );
-    assert!(current[1][0].plain().contains("BASH fixture-command"));
-    assert!(current[2][0].plain().contains("BASH fixture-command"));
+    assert!(
+        current[0]
+            .iter()
+            .any(|row| row.plain().contains("BASH fixture-command"))
+    );
+    assert!(current[1..3].iter().all(Vec::is_empty));
     assert!(
         !current[1..3]
             .iter()
@@ -259,7 +260,11 @@ fn consecutive_calls_share_a_chapter_across_model_requests_and_keep_targets() {
     start(&mut state, "later");
     finish(&mut state, "later", "later result");
     state.close_tools();
-    assert_eq!(state.rows()[..4], current);
+    let later = state.rows();
+    assert!(later[0][0].plain().contains("3 calls"));
+    assert!(later[1..3].iter().all(Vec::is_empty));
+    assert_eq!(later[3], current[3]);
+    assert!(later[4].iter().any(|row| row.plain().contains("BASH")));
 }
 
 #[test]

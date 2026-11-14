@@ -45,6 +45,8 @@ pub(super) fn payload(tool: &Tool<'_>) -> String {
         format!("{} {}", field(args, "action"), field(args, "process_id"))
             .trim()
             .into()
+    } else if tool.presentation.expanded {
+        text::clean(value)
     } else {
         inline(value)
     }
@@ -116,7 +118,7 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, 
     if status == Status::Background {
         head.push(" &", LIT.bold());
     }
-    let mut rows = if tool.presentation.expanded && !command {
+    let mut rows = if tool.presentation.expanded {
         let mut wrapped = head.at_source(0).into_wrapped(columns.max(1), true);
         let mut rows: Vec<_> = wrapped.next().into_iter().collect();
         wrapped.set_columns(columns.saturating_sub(2).max(1));

@@ -86,7 +86,7 @@ impl Display {
             return;
         }
         if let Some(previous) = self.expanded_turn.take() {
-            self.viewport.remap_anchor(|block, origin| {
+            self.viewport.remap_anchor(|block, _origin| {
                 let index = block.checked_sub(1)?;
                 if !previous.contains(&index) {
                     return None;
@@ -96,8 +96,9 @@ impl Display {
                     return None;
                 }
                 let start = state::rows::chapter_start(&state.items, index);
-                (index > start || origin.is_some_and(|origin| origin.line >= 2))
-                    .then_some(start + 1)
+                // Open cards have no chapter header or shared source offsets.
+                // Any anchor inside them returns to the compact chapter block.
+                Some(start + 1)
             });
         }
         self.expanded_turn = expanded;

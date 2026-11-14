@@ -538,3 +538,26 @@ fn expanded_collapse_keycap_never_splits_a_wrapped_title() {
         }
     }
 }
+
+#[test]
+fn expanded_sections_keep_long_file_paths_after_the_compact_limit() {
+    let first = format!("src/{}/first_after_limit.rs", "nested/".repeat(24));
+    let second = "src/second.rs";
+    let files = [
+        (first.as_str(), Some(("old\n", "new\n"))),
+        (second, Some(("old\n", "new\n"))),
+    ];
+    let expanded = call(&files, false, true);
+    let rendered = card(&expanded, 40, false);
+    let rows = plain(&rendered.rows);
+    let first_section: String = rows
+        .iter()
+        .skip_while(|row| !row.starts_with("  src/nested"))
+        .take_while(|row| !row.contains("1 − old"))
+        .map(|row| row.trim_start())
+        .collect();
+    assert!(first_section.contains("first_after_limit.rs"), "{rows:?}");
+    assert!(rows.iter().any(|row| row.contains("second.rs")), "{rows:?}");
+    assert!(!rows.iter().any(|row| row.contains('…')));
+    assert!(rows.iter().all(|row| text::cells(row) <= 40));
+}

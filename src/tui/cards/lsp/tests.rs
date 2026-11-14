@@ -44,7 +44,7 @@ fn narrow_card_keeps_action_and_expanded_arguments_wrap() {
             expanded: true,
             ..Presentation::default()
         };
-        let card = card(
+        let card = super::super::card(
             Tool {
                 presentation: &expanded,
                 ..tool
@@ -52,8 +52,14 @@ fn narrow_card_keeps_action_and_expanded_arguments_wrap() {
             width,
             true,
         );
-        assert!(card.rows[0].plain().contains("references"));
-        assert!(card.rows[0].plain().contains("Ctrl+O"));
+        let full = card
+            .rows
+            .iter()
+            .map(Line::plain)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(full.contains("references"));
+        assert_eq!(full.matches("Ctrl+O collapse").count(), 1);
         assert!(
             card.rows
                 .iter()

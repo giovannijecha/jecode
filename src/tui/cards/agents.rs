@@ -1,7 +1,6 @@
-//! Collaboration events as tool rows. A lone event is one row under its
-//! AGENTS badge and a separate #N identity, a Work chapter member keeps one row,
-//! and Ctrl+O opens the full receipt: instruction, workspace, changed files
-//! and report.
+//! Collaboration events as tool rows. An AGENTS badge and separate #N identity
+//! head the compact card; Ctrl+O opens the full receipt: instruction, workspace,
+//! changed files and report.
 
 use super::{Card, Status, Tool, badge, field, hint, line_rows, rhythm};
 use crate::{
@@ -119,9 +118,8 @@ fn created(event: &Value) -> Vec<&Value> {
         .collect()
 }
 
-/// What happened, as the row's text. A member counts changed files; a lone
-/// or open receipt names the assignment instead and lists the files below.
-fn subject(event: &Value, member: bool) -> String {
+/// What happened on the card's title; details list the assignment and files.
+pub(super) fn subject(event: &Value) -> String {
     let version = number(event, "version");
     let title = inline(field(event, "title"));
     match field(event, "kind") {
@@ -143,14 +141,6 @@ fn subject(event: &Value, member: bool) -> String {
         "sent" if version == 0 => "Stop requested".into(),
         "sent" => format!("Assignment v{version} sent"),
         "received" => format!("Assignment v{version} received"),
-        "returned" if member => {
-            let count = record(event).map_or(0, |record| strings(record, "files").len());
-            if count == 0 {
-                "Returned · no files changed".into()
-            } else {
-                format!("Returned · {} changed", text::counted(count, "file"))
-            }
-        }
         "returned" => format!("Returned · {title}"),
         "reviewed" => format!("Reviewed · report v{version}"),
         "stopped" => "Stopped".into(),
@@ -160,7 +150,7 @@ fn subject(event: &Value, member: bool) -> String {
     }
 }
 
-/// The outcome fact after a member's text, or on a lone receipt's tree.
+/// The outcome fact on the compact receipt's tree.
 fn fact(event: &Value) -> Option<(String, Style)> {
     match field(event, "kind") {
         "returned" => Some(if let Some(error) = strings(event, "details").first() {
@@ -175,23 +165,6 @@ fn fact(event: &Value) -> Option<(String, Style)> {
         "unknown" => Some(("inspect in /agents".into(), WARNING)),
         _ => None,
     }
-}
-
-/// One member row inside a Work chapter: the name in its family ink, what
-/// happened and its fact.
-pub(super) fn member(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
-    let Some(event) = tool.result else {
-        return Vec::new();
-    };
-    let name = field(tool.arguments, "label");
-    let mut line = Line::new(&name.to_uppercase(), badge::ink("Agents").bold());
-    line.push(&format!(" {}", subject(event, true)), BODY);
-    if let Some((fact, style)) = fact(event) {
-        let suffix = format!("  {fact}");
-        line = line.shortened(columns.saturating_sub(4 + text::cells(&suffix)));
-        line.push(&suffix, style);
-    }
-    vec![rhythm::one(line, columns, "  ⎿ ", DIM, 2)]
 }
 
 fn file_row(path: &str, counts: Option<(usize, usize)>) -> Line {
@@ -333,29 +306,37 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
 
 /// The lone row, or the open receipt when expanded.
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
-    let Some(event) = tool.result else {
-        return Card {
-            rows: Vec::new(),
-            hidden: false,
-        };
-    };
     let name = field(tool.arguments, "label");
-    let mut title = badge::agent(name, status(event));
-    title.push(&format!(" {}", subject(event, false)), BODY);
-    let title = title.at_source(0).shortened(columns);
     let expanded = tool.presentation.expanded;
-    let more = details(event, columns);
-    let hidden = !expanded && !more.is_empty();
-    let mut rows = if keycap && hidden {
-        hint(title, "expand", columns)
+    let mut title = badge::agent(name, tool.result.map_or(Status::Running, status));
+    let subject = tool.result.map_or_else(|| "Running".into(), subject);
+    title.push(&format!(" {subject}"), BODY);
+    let title = title.at_source(0);
+    let mut rows = if expanded {
+        let mut wrapped = title.into_wrapped(columns.max(1), true);
+        let mut rows: Vec<_> = wrapped.next().into_iter().collect();
+        wrapped.set_columns(columns.saturating_sub(2).max(1));
+        rows.extend(wrapped.map(|row| row.indent("  ", BODY)));
+        rows
     } else {
-        vec![title]
+        vec![title.shortened(columns)]
     };
+    let more = tool
+        .result
+        .map_or_else(Vec::new, |event| details(event, columns));
+    let hidden = !expanded && !more.is_empty();
+    if keycap
+        && hidden
+        && let Some(first) = rows.pop()
+    {
+        rows.extend(hint(first, "expand", columns));
+    }
     let titled = rows.len();
     rows.extend(if expanded {
         more
     } else {
-        receipts(&tool, columns)
+        tool.result
+            .map_or_else(Vec::new, |_| receipts(&tool, columns))
     });
     badge::hang(&mut rows[titled..], true);
     Card { rows, hidden }

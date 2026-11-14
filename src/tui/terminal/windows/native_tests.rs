@@ -73,6 +73,9 @@ mod native_script;
 #[path = "native_titles.rs"]
 mod native_titles;
 
+#[path = "native_work_cards.rs"]
+mod native_work_cards;
+
 fn native_pty_source() -> String {
     use crate::tui::theme;
     // What the light palette draws, as the bytes a terminal receives.
@@ -328,6 +331,12 @@ fn native_console_fixture() {
         native_titles::console();
         restored(&path);
         println!("NATIVE_TITLE_VARIANTS_RESTORED");
+        return;
+    }
+    if scenario == "work-cards" {
+        native_work_cards::console();
+        restored(&path);
+        println!("NATIVE_WORK_RESTORED");
         return;
     }
     if scenario == "direct-input" {

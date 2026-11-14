@@ -36,8 +36,8 @@ fn render(
     context.render_at(&state.items, index, columns, keycap == Some(index))
 }
 
-// The card that names Ctrl+O: the last one with hidden lines in the latest
-// finished turn, while that turn is collapsed.
+// The latest WORK footer names expand; without a chapter, the last card with
+// hidden content does. The first tool card names collapse for the whole turn.
 type KeycapKey = (u64, u64, Option<(usize, usize)>, bool, bool, usize);
 
 fn keycap_key(state: &State, columns: usize) -> KeycapKey {
@@ -62,9 +62,15 @@ fn keycap(state: &State, columns: usize) -> Option<usize> {
             .tool_details
             .turn
             .clone()?
-            .find(|&index| state.items[index].tool().is_some());
+            .find(|&index| state.items[index].is_visible() && state.items[index].tool().is_some());
     }
-    state.tool_details.turn.clone()?.rev().find(|&index| {
+    let turn = state.tool_details.turn.clone()?;
+    if let Some(index) = turn.clone().rev().find(|&index| {
+        rows::in_chapter(&state.items, index) && rows::chapter_start(&state.items, index) == index
+    }) {
+        return Some(index);
+    }
+    turn.rev().find(|&index| {
         rows::tool_card(&state.items, index, columns, false).is_some_and(|card| card.hidden)
     })
 }
@@ -515,6 +521,8 @@ impl Layout {
     }
 }
 
+#[cfg(test)]
+mod expansion_tests;
 #[cfg(test)]
 mod markdown_tests;
 #[cfg(test)]

@@ -508,3 +508,34 @@ fn agent_card_keeps_reused_display_number_while_running_and_finished() {
         );
     }
 }
+
+#[test]
+fn unresolved_collaboration_is_a_card_and_can_hold_turn_collapse_hint() {
+    let arguments = Value::object([("label", Value::string("Agent 1"))]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rendered = card(
+        Tool {
+            name: "collaboration",
+            arguments: &arguments,
+            summary: "",
+            result: None,
+            change: None,
+            presentation: &shown,
+        },
+        28,
+        true,
+    );
+    let full = plain(&rendered.rows);
+    assert!(full.contains("AGENTS") && full.contains("#1"), "{full}");
+    assert!(full.contains("Running"), "{full}");
+    assert_eq!(full.matches("Ctrl+O collapse").count(), 1);
+    assert!(
+        rendered
+            .rows
+            .iter()
+            .all(|row| text::cells(&row.plain()) <= 28)
+    );
+}

@@ -102,10 +102,10 @@ pub(super) fn console() {
         rows.iter()
             .any(|row| row.plain().contains("1 + let limit = LOGIN_LIMIT;"))
     );
-    assert!(
-        rows.iter()
-            .any(|row| row.plain().contains("Activity  3 calls"))
-    );
+    assert!(rows.iter().any(|row| {
+        let value = row.plain();
+        value.starts_with("  WORK   Activity") && value.trim_end().ends_with("3 calls")
+    }));
     assert!(rows.iter().any(|row| row.plain().contains("1 screenshot")));
     state.finish_tool_turn();
     assert_eq!(state.toggle_tools(), Some((true, 4)));
@@ -266,7 +266,12 @@ fn concurrent_cards(terminal: &Terminal) {
             let rows: Vec<_> = state.rows().into_iter().flatten().collect();
             let plain: Vec<_> = rows.iter().map(crate::tui::line::Line::plain).collect();
             let all = plain.join("\n");
-            assert!(all.contains("  WORK   Inspect sources  2 calls"), "{all}");
+            assert!(
+                all.lines()
+                    .any(|line| line.starts_with("  WORK   Inspect sources")
+                        && line.trim_end().ends_with("2 calls")),
+                "{all}"
+            );
             if phase == 0 {
                 assert!(
                     all.contains("first.rs") && all.contains("second.rs"),

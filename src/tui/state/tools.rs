@@ -117,25 +117,14 @@ impl State {
             return None;
         }
         let turn = self.tool_details.turn.clone()?;
-        let first = turn.clone().find(|&index| {
-            matches!(
-                self.items[index],
-                Item::Tool {
-                    result: Some(_),
-                    ..
-                }
-            )
-        })?;
+        let first = turn
+            .clone()
+            .find(|&index| matches!(self.items[index], Item::Tool { .. }))?;
         let expanded = !self.tool_details.expanded;
         let mut count = 0;
         let end = turn.end;
         for item in &mut self.items[turn] {
-            if let Item::Tool {
-                presentation,
-                result: Some(_),
-                ..
-            } = item
-            {
+            if let Item::Tool { presentation, .. } = item {
                 presentation.expanded = expanded;
                 count += 1;
             }
@@ -179,3 +168,6 @@ impl State {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

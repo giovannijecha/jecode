@@ -226,6 +226,23 @@ labels at 40 and 80 columns in both palettes and running, finished, failed and
 stopped states. It verifies eight-cell background runs in the emitted VT and
 reads the displayed text back from the native console.
 
+The WORK matrix fixture paints complete synthetic transcripts through the same
+renderer at 40, 80 and 120 logical columns, in both palettes. It probes every
+page in a physical 120-column console and checks that cells outside owned
+surfaces keep the terminal background. Set `JECODE_WORK_INPUT` to an absolute
+JSON fixture path; `src/tui/specimen/work_catalog.rs` defines the case schema
+(`cols`, `light`, `active`, `expanded`, and message/tool `items`). The local
+design comparison prepares matching inputs and checks styled cells before
+running this fixture:
+
+```text
+node .design/CHECK_WORK.cjs --native
+cargo test --locked --offline native_windows_work_cards -- --ignored --nocapture --test-threads=1
+```
+
+The Cargo command requires the prepared `JECODE_WORK_INPUT`; it never reads
+personal provider settings or executes the captured project commands.
+
 Linux and macOS run the same conversations, from `tui::terminal::fixtures`, through
 one filter: permissions, direct terminal input, startup with and without a provider,
 the startup screen, light inks chosen through OSC 11, and a terminal that
