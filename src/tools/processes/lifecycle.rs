@@ -215,6 +215,7 @@ impl Scope {
     }
 
     /// Completions numbered after `cursor`, in the order they happened.
+    #[cfg(test)]
     pub(super) fn completions_after(
         &self,
         cursor: usize,
@@ -236,6 +237,7 @@ impl Scope {
         completions
     }
 
+    #[cfg(test)]
     pub(super) fn root_notices_after(
         &self,
         cursor: usize,
@@ -357,6 +359,7 @@ pub(super) fn bounded_command(command: &str, redactor: &Redactor) -> String {
 
 impl Registry {
     /// Root exits that no tool result or accepted model request reported.
+    #[cfg(test)]
     pub(in crate::tools) fn root_notices(&self, redactor: &Redactor) -> Vec<RootNotice> {
         self.scope()
             .root_notices_after(0, redactor, |state| !state.root_reported)
@@ -380,6 +383,7 @@ impl Registry {
     }
 
     /// Announced completions the model has not seen, in order.
+    #[cfg(test)]
     pub(in crate::tools) fn completions(&self, redactor: &Redactor) -> Vec<Completion> {
         self.scope()
             .completions_after(0, redactor, |state| !state.reported)

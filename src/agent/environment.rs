@@ -152,6 +152,14 @@ impl Agent {
         } else {
             self.collaboration.snapshot()
         };
+        let mut completions = Vec::new();
+        let mut roots = Vec::new();
+        for notice in self.tools.process_notices(&self.redactor) {
+            match notice {
+                crate::tools::processes::Notice::Root(root) => roots.push(root),
+                crate::tools::processes::Notice::Finished(done) => completions.push(done),
+            }
+        }
         Environment(
             join([
                 self.permission_instructions(),
@@ -159,8 +167,8 @@ impl Agent {
                 collaboration_instructions(&records),
             ]),
             collaboration_reports(&records),
-            self.tools.process_completions(&self.redactor),
-            self.tools.process_root_notices(&self.redactor),
+            completions,
+            roots,
         )
     }
 

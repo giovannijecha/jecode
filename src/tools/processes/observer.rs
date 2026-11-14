@@ -5,7 +5,7 @@
 //! The handle is weak: it neither extends processes nor survives the
 //! conversation that owned them.
 
-use super::{Completion, Entry, RootNotice, Scope, complete_prefix};
+use super::{Completion, Entry, Registry, RootNotice, Scope, complete_prefix};
 use crate::redact::Redactor;
 use crate::tools::OUTPUT_LIMIT;
 use std::fs::File;
@@ -31,11 +31,34 @@ pub enum Notice {
 }
 
 impl Notice {
-    fn sequence(&self) -> usize {
+    pub(crate) fn sequence(&self) -> usize {
         match self {
             Self::Root(root) => root.sequence,
             Self::Finished(done) => done.sequence,
         }
+    }
+}
+
+impl Registry {
+    /// One ordered view of news still owed to the model. Holding the list
+    /// lock keeps a newer final outcome from passing an earlier root exit.
+    pub(in crate::tools) fn pending_notices(&self, redactor: &Redactor) -> Vec<Notice> {
+        let scope = self.scope();
+        let entries = scope.entries.lock().unwrap();
+        let mut notices = Vec::new();
+        for entry in entries.iter() {
+            let state = entry.state.lock().unwrap();
+            if !state.root_reported
+                && let Some((sequence, root)) = &state.root_notice
+            {
+                notices.push(Notice::Root(entry.root_notice(*sequence, root, redactor)));
+            }
+            if !state.reported && state.sequence.is_some() {
+                notices.push(Notice::Finished(entry.completion(&state, redactor)));
+            }
+        }
+        notices.sort_by_key(Notice::sequence);
+        notices
     }
 }
 
