@@ -168,6 +168,11 @@ impl<'a> Walk<'a> {
         })
     }
 
+    /// True for one named saved stream rather than a project scope.
+    pub fn named_stream(&self) -> bool {
+        self.output
+    }
+
     pub fn selected(&self, entry: &Entry) -> Result<bool, String> {
         match &self.pattern {
             Some(pattern) => pattern.matches(&entry.relative, self.cancellation),

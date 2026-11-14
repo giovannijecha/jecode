@@ -205,7 +205,9 @@ same conversation ownership, link checks and permission (a read at every level),
 and searches the complete saved stream with the same streaming, context, case,
 paging and size rules. Matches, errors and the result `path` name the logical
 reference, never the storage location, and `byte_offset` can be passed to `read`
-on that reference. `pattern` selects project paths, so it is refused for a
+on that reference. A stream that is binary or not UTF-8 text is reported in
+`errors`, so `complete` is `false` rather than an empty result proving absence.
+`pattern` selects project paths, so it is refused for a
 reference; `include_hidden` and `include_ignored` are accepted and have no
 effect, as for any explicitly named path. `list` on a reference is an error,
 and `write` and `edit` still refuse saved output.
@@ -241,7 +243,7 @@ call returns once the rest of the tree is still running half a second later, as 
 | --- | --- |
 | `root_process` | `pid`, `status: "exited"`, `exit_code` (`null` for a Unix signal) and `exited_after_ms`. |
 | `waiting_for` | What keeps the process open: `supervised descendant processes` on Windows; on Unix, `command output held open by descendant processes`. |
-| `descendants` | Windows only: `running`, the Job Object's process count, and up to 16 `processes` with `pid` and `image`. |
+| `descendants` | Windows only: `running`, the Job Object's process count, and up to 16 `processes` with `pid` and `image`. Console hosts end with their console clients and are not counted; a job left with only console hosts reports no root exit. |
 
 Nothing about ownership changes: the descendants stay supervised, and the
 process still ends at its `timeout_seconds`, on `process stop`, on interruption

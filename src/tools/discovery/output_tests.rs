@@ -222,6 +222,40 @@ fn utf8_offsets_count_bytes_and_invalid_text_is_reported_without_losing_matches(
 }
 
 #[test]
+fn a_stream_that_is_not_text_from_its_first_byte_is_incomplete() {
+    let fixture = fixture();
+    let tools = &fixture.tools;
+    // UTF-16LE, as some Windows tools write, and an OEM code page byte.
+    let utf16: Vec<u8> = "needle\r\n"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let (wide, legacy) = saved(tools, &utf16, b"caf\x8a needle\n");
+    for (reference, reason) in [(&wide, "binary"), (&legacy, "not UTF-8")] {
+        let result = search(tools, reference, "needle", &[]);
+        assert!(matches(&result).is_empty(), "{result:?}");
+        assert_eq!(
+            result.get("complete"),
+            Some(&Value::Bool(false)),
+            "{result:?}"
+        );
+        let errors = result.get("errors").and_then(Value::as_array).unwrap();
+        assert_eq!(
+            errors[0].get("path").and_then(Value::as_str),
+            Some(reference.as_str())
+        );
+        assert!(
+            errors[0]
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap()
+                .contains(reason),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
 fn an_oversized_match_stays_within_the_output_limit() {
     let fixture = fixture();
     let tools = &fixture.tools;

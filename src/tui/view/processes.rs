@@ -411,16 +411,16 @@ fn status_style(process: &Process) -> Style {
     }
 }
 
+/// The state column's short word; the output view explains a root exit.
 fn display_status(process: &Process) -> String {
-    if process.status == "running"
-        && let Some(root) = &process.root
-    {
-        return root.exit_code.map_or_else(
+    match (process.status, &process.root) {
+        ("running", Some(root)) => root.exit_code.map_or_else(
             || "root exited".into(),
             |code| format!("root exited {code}"),
-        );
+        ),
+        ("stopping", _) => "stopping".into(),
+        _ => process.label(),
     }
-    process.label()
 }
 
 fn single_line(value: &str) -> String {

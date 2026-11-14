@@ -12,6 +12,8 @@ use std::sync::mpsc;
 const BREAKAWAY: u32 = 0x0100_0000;
 const NO_WINDOW: u32 = 0x0800_0000;
 const HANDSHAKE: Duration = Duration::from_secs(5);
+/// How long after the observation window the adapter's verdict may arrive.
+const VERDICT_GRACE: Duration = Duration::from_secs(1);
 
 enum Event {
     Refused(String),
@@ -85,13 +87,16 @@ pub(super) fn launch(
             ));
         }
     };
+    // The adapter observes the application for `observation` from its resume
+    // and then reports; its own startup does not shorten that window.
+    let resumed = Instant::now();
     let mut cancelled = false;
     let outcome = loop {
         if cancellation.requested() {
             cancelled = true;
             break None;
         }
-        let remaining = observation.saturating_sub(started.elapsed());
+        let remaining = (observation + VERDICT_GRACE).saturating_sub(resumed.elapsed());
         if remaining.is_zero() {
             break None;
         }
@@ -135,7 +140,7 @@ fn unknown(pid: u32, elapsed: Duration, error: String) -> Value {
         (
             "error",
             Value::string(format!(
-                "The application launched, but its state could not be observed: {error}"
+                "The application launched, but its state could not be observed: {error}; inspect PID {pid} before retrying"
             )),
         ),
     ])

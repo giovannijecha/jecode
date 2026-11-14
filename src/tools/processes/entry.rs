@@ -9,8 +9,9 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 /// How long a tree may keep running after its root exits before a waiting
-/// call reports that instead. Ordinary commands finish within it, including
-/// helpers such as a console host that end right after the root.
+/// call reports that instead. Ordinary commands finish within it. Windows
+/// console hosts do not count as remaining processes, so a console host that
+/// briefly outlives its command never turns that command into a root exit.
 pub(super) const ROOT_SETTLE: Duration = Duration::from_millis(500);
 
 impl Entry {
@@ -105,7 +106,11 @@ impl Entry {
         };
         let _entries = scope.entries.lock().unwrap();
         let mut state = self.state.lock().unwrap();
+        // Within the grace, the scheduled settle check owns the notice.
         if state.outcome.is_some()
+            || state
+                .root_seen
+                .is_none_or(|seen| seen.elapsed() < ROOT_SETTLE)
             || !state.returned
             || state.waiters > 0
             || state.root_reported

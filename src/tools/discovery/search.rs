@@ -113,7 +113,9 @@ fn run<'a>(
                     };
                     // A non-text file is outside the text scope. A late failure can
                     // leave valid earlier matches, so its unsearched tail needs a warning.
-                    if valid_lines > 0 || io_error {
+                    // A named saved stream is the whole scope: no match would
+                    // otherwise read as absent text.
+                    if valid_lines > 0 || io_error || walk.named_stream() {
                         walk.error(&entry.relative, message);
                     }
                     break;

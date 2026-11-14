@@ -148,10 +148,11 @@ pub(super) fn report(
             }),
         ),
         ("observed_ms", Value::number(observed.as_millis())),
-        ("ownership", Value::string(OWNERSHIP)),
     ];
-    if let Some(status) = status {
-        fields.push(("exit_code", status.map_or(Value::Null, Value::number)));
+    match status {
+        Some(status) => fields.push(("exit_code", status.map_or(Value::Null, Value::number))),
+        // Only an application still running outlives this call.
+        None => fields.push(("ownership", Value::string(OWNERSHIP))),
     }
     if cancelled {
         // Cancellation ends the observation only; the launch already happened.

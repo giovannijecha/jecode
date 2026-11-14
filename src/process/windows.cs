@@ -259,7 +259,11 @@ public static class JecodeProcess {
 
     // Process IDs and image names of the job's processes, one "id\tname\n"
     // line each. Names are best effort: a process may end while it is read.
-    static byte[] DescribeJob(IntPtr job) {
+    // Console hosts serve the job's console clients and end with them, so they
+    // are counted in `hosts` and left out of the list rather than described as
+    // descendants still running.
+    static byte[] DescribeJob(IntPtr job, out uint hosts) {
+        hosts = 0;
         int size = 8 + ListedProcesses * IntPtr.Size;
         IntPtr buffer = Marshal.AllocHGlobal(size);
         var text = new StringBuilder();
@@ -271,7 +275,12 @@ public static class JecodeProcess {
             int listed = Math.Min(Marshal.ReadInt32(buffer, 4), ListedProcesses);
             for (int i = 0; i < listed; i++) {
                 long id = Marshal.ReadIntPtr(buffer, 8 + i * IntPtr.Size).ToInt64();
-                text.Append(id).Append('\t').Append(ImageName((uint)id)).Append('\n');
+                string image = ImageName((uint)id);
+                if (string.Equals(image, "conhost.exe", StringComparison.OrdinalIgnoreCase)) {
+                    hosts++;
+                    continue;
+                }
+                text.Append(id).Append('\t').Append(image).Append('\n');
             }
         } finally { Marshal.FreeHGlobal(buffer); }
         return Encoding.UTF8.GetBytes(text.ToString());
@@ -453,10 +462,13 @@ public static class JecodeProcess {
                     throw Failure("QueryInformationJobObject");
                 if (accounting.ActiveProcesses > 0) {
                     // The root's outcome is known now; its descendants keep the job open.
-                    byte[] processes = DescribeJob(job);
-                    string current = accounting.ActiveProcesses + "|" + Convert.ToBase64String(processes);
-                    if (current != reported) {
-                        SendRootExit(completion, exitCode, accounting.ActiveProcesses, processes);
+                    // A job left with only console hosts is ending, not running on.
+                    uint hosts;
+                    byte[] processes = DescribeJob(job, out hosts);
+                    uint active = accounting.ActiveProcesses - Math.Min(hosts, accounting.ActiveProcesses);
+                    string current = active + "|" + Convert.ToBase64String(processes);
+                    if (active > 0 && current != reported) {
+                        SendRootExit(completion, exitCode, active, processes);
                         reported = current;
                     }
                     WaitForJobEvent(jobEvents);

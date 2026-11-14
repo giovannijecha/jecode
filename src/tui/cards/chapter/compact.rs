@@ -118,36 +118,36 @@ fn member(tool: &Tool<'_>, columns: usize) -> Line {
     let receipt = tool.result.and_then(|result| {
         summary::persistent(tool, result).or_else(|| super::super::root::line(tool, result))
     });
-    let detail = receipt.as_ref().map(Line::plain).unwrap_or(match status {
-        Status::Failed => tool
-            .result
-            .and_then(|result| result.get("exit_code"))
-            .filter(|value| **value != crate::json::Value::Null)
-            .map_or_else(
-                || "failed".into(),
-                |value| format!("exit {}", value.encode()),
+    // A receipt keeps its own tones, as on its full card.
+    let detail = receipt.unwrap_or_else(|| {
+        let text = match status {
+            Status::Failed => tool
+                .result
+                .and_then(|result| result.get("exit_code"))
+                .filter(|value| **value != crate::json::Value::Null)
+                .map_or_else(
+                    || "failed".into(),
+                    |value| format!("exit {}", value.encode()),
+                ),
+            Status::Unknown => "outcome unknown".into(),
+            Status::Stopped => "stopped".into(),
+            Status::Running => format!(
+                "Running · {}",
+                timer::duration(tool.presentation.duration().unwrap_or_default())
             ),
-        Status::Unknown => "outcome unknown".into(),
-        Status::Stopped => "stopped".into(),
-        Status::Running => format!(
-            "Running · {}",
-            timer::duration(tool.presentation.duration().unwrap_or_default())
-        ),
-        Status::Background => "background".into(),
-        Status::Done => tool
-            .presentation
-            .duration()
-            .map_or_else(String::new, timer::duration),
-    });
-    let tone = receipt
-        .as_ref()
-        .and_then(|line| line.spans.first().map(|span| span.style))
-        .unwrap_or(match status {
+            Status::Background => "background".into(),
+            Status::Done => tool
+                .presentation
+                .duration()
+                .map_or_else(String::new, timer::duration),
+        };
+        let tone = match status {
             Status::Failed => BAD,
             Status::Unknown | Status::Stopped => WARNING,
             _ => DIM,
-        });
-    let detail = Line::new(&detail, tone);
+        };
+        Line::new(&text, tone)
+    });
     let (name, target) = heading(tool);
     let mut left = Line::new(&name.to_uppercase(), badge::ink(name).bold());
     left.push(" ", BODY);

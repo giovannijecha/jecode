@@ -47,7 +47,7 @@ fn a_root_exit_keeps_the_running_descendants_visible() {
         elapsed: std::time::Duration::from_millis(85),
         remaining: Some(crate::process::Remaining {
             count: 2,
-            processes: vec![(41, "child.exe".into()), (42, "conhost.exe".into())],
+            processes: vec![(41, "child.exe".into()), (42, "java.exe".into())],
         }),
     });
     let mut panel = Panel::new(vec![running.clone()]);
@@ -57,7 +57,7 @@ fn a_root_exit_keeps_the_running_descendants_visible() {
         assert!(text.contains("root exited 7"), "{text}");
         assert!(text.contains("2 descendants"), "{text}");
         assert!(
-            text.contains("child.exe") && text.contains("conhost.exe"),
+            text.contains("child.exe") && text.contains("java.exe"),
             "{text}"
         );
         assert!(!text.contains("exited 0"), "{text}");
@@ -67,6 +67,27 @@ fn a_root_exit_keeps_the_running_descendants_visible() {
                 .all(|line| panel::cells(line) <= width)
         );
     }
+}
+
+#[test]
+fn a_stopping_process_after_its_root_exit_keeps_a_short_state() {
+    let mut stopping = process("stopping");
+    stopping.root = Some(crate::process::RootExit {
+        pid: 40,
+        exit_code: Some(7),
+        elapsed: std::time::Duration::from_millis(85),
+        remaining: Some(crate::process::Remaining {
+            count: 2,
+            processes: vec![(41, "child.exe".into()), (42, "java.exe".into())],
+        }),
+    });
+    let panel = Panel::new(vec![stopping]);
+    let shown = plain(&panel, 80, 24);
+    assert!(
+        shown.contains("stopping") && shown.contains("printf catalog"),
+        "{shown}"
+    );
+    assert!(!shown.contains("descendants"), "{shown}");
 }
 
 #[test]

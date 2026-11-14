@@ -280,6 +280,21 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             .get("process_id")
             .and_then(Value::as_str)
             .unwrap_or("");
+        // A tree whose root already exited says so, live and when restored.
+        let root = result
+            .get("root_process")
+            .filter(|root| root.get("status").and_then(Value::as_str) == Some("exited"))
+            .map(|root| match root.get("exit_code") {
+                Some(code) if *code != Value::Null => {
+                    format!("root exited with code {}", code.encode())
+                }
+                _ => "root exited without an exit code".into(),
+            });
+        if status == "running"
+            && let Some(root) = root
+        {
+            return format!("{root}; tree running · {id}");
+        }
         return match status {
             "running" => format!(
                 "{} · {id}",

@@ -111,7 +111,7 @@ fn root_viewing(columns: usize) -> State {
         elapsed: std::time::Duration::from_millis(85),
         remaining: Some(crate::process::Remaining {
             count: 2,
-            processes: vec![(41, "child.exe".into()), (42, "conhost.exe".into())],
+            processes: vec![(41, "child.exe".into()), (42, "java.exe".into())],
         }),
     });
     let mut panel = Panel::new(vec![root.clone()]);
