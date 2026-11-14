@@ -87,6 +87,20 @@ pub(super) fn launch(
             ));
         }
     };
+    let result = observe(pid, &receiver, observation, cancellation, started);
+    // Only the observer is ours to stop; the application is independent.
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok(result)
+}
+
+fn observe(
+    pid: u32,
+    receiver: &mpsc::Receiver<Event>,
+    observation: Duration,
+    cancellation: &Cancellation,
+    started: Instant,
+) -> Value {
     // The adapter observes the application for `observation` from its resume
     // and then reports; its own startup does not shorten that window.
     let resumed = Instant::now();
@@ -98,37 +112,30 @@ pub(super) fn launch(
         }
         let remaining = (observation + VERDICT_GRACE).saturating_sub(resumed.elapsed());
         if remaining.is_zero() {
-            break None;
+            return unknown(
+                pid,
+                started.elapsed(),
+                "The launch adapter did not report the application's state before the observation deadline"
+                    .into(),
+            );
         }
         match receiver.recv_timeout(remaining.min(Duration::from_millis(20))) {
             Ok(Event::Exited(code)) => break Some(Some(code)),
             Ok(Event::StillRunning) => break None,
             Ok(Event::ObservationError(error)) => {
-                let _ = child.wait();
-                return Ok(unknown(pid, started.elapsed(), error));
+                return unknown(pid, started.elapsed(), error);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let _ = child.wait();
-                return Ok(unknown(
+                return unknown(
                     pid,
                     started.elapsed(),
                     "The launch adapter ended before reporting the application's state".into(),
-                ));
+                );
             }
             _ => {}
         }
     };
-    if outcome.is_none() {
-        let _ = child.kill();
-    }
-    let _ = child.wait();
-    Ok(report(
-        pid,
-        outcome,
-        started.elapsed(),
-        cancelled,
-        Vec::new(),
-    ))
+    report(pid, outcome, started.elapsed(), cancelled, Vec::new())
 }
 
 fn unknown(pid: u32, elapsed: Duration, error: String) -> Value {
@@ -216,4 +223,59 @@ fn text(input: &mut impl Read) -> Result<String, String> {
         .read_exact(&mut data)
         .map_err(|error| error.to_string())?;
     String::from_utf8(data).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn observed(receiver: &mpsc::Receiver<Event>) -> Value {
+        observe(
+            42,
+            receiver,
+            Duration::ZERO,
+            &Cancellation::default(),
+            Instant::now(),
+        )
+    }
+
+    #[test]
+    fn a_missing_verdict_is_unknown_without_claiming_the_application_runs() {
+        // Keep the adapter connected after its successful launch handshake,
+        // but let it send no observation verdict before the deadline.
+        let (_adapter, receiver) = mpsc::channel();
+        let result = observed(&receiver);
+        assert_eq!(
+            result.get("application").and_then(Value::as_str),
+            Some("unknown"),
+            "{}",
+            result.encode()
+        );
+        assert!(result.get("ownership").is_none());
+        assert!(
+            result
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap()
+                .contains("inspect PID 42 before retrying")
+        );
+    }
+
+    #[test]
+    fn explicit_observation_verdicts_preserve_running_and_exit_outcomes() {
+        for (event, state, code) in [
+            (Event::StillRunning, "running", None),
+            (Event::Exited(9), "exited", Some(9)),
+        ] {
+            let (adapter, receiver) = mpsc::channel();
+            adapter.send(event).unwrap();
+            let result = observed(&receiver);
+            assert_eq!(
+                result.get("application").and_then(Value::as_str),
+                Some(state)
+            );
+            assert_eq!(result.get("exit_code"), code.map(Value::number).as_ref());
+            assert_eq!(result.get("ownership").is_some(), state == "running");
+        }
+    }
 }

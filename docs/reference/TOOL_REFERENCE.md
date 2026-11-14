@@ -295,6 +295,8 @@ Windows checks the launch adapter and the suspended application for Job Object
 membership before allowing application code to run. A lost native confirmation
 can instead leave the launch outcome unknown; inspect any reported PID before
 retrying, because the application may already have started.
+A confirmed launch without an observation verdict reports `application: "unknown"`
+with its PID instead of claiming that the application is running.
 
 ## process
 
