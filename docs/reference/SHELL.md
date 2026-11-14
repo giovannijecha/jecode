@@ -50,6 +50,21 @@ interactive terminal; see [Tools](../usage/TOOLS.md#commands).
 On Windows, variable names are case-insensitive like the environment, so `$PATH`
 reads `Path`.
 
+Quote Windows paths passed through `bash`. Outside quotes a backslash escapes
+the next character, so `C:\Users\me\run.ps1` reaches the program as
+`C:Usersmerun.ps1`. Single quotes preserve backslashes, including the leading
+pair in `'\\server\share'`. In double quotes a backslash stays literal except
+before `$`, `"` and `\`; a
+backslash-newline pair is removed. Thus `"\\server\share"` loses one leading
+backslash. For example, launch a PowerShell script in Windows Terminal with:
+
+```text
+wt.exe -w new powershell.exe -NoProfile -File 'C:\Users\me\check dir\run.ps1' -Work 'C:\Users\me\check dir\out'
+```
+
+Launchers can apply their own argument parsing. A successful `wt.exe` exit
+does not establish that the child script succeeded; check the child's result.
+
 ## Built-in commands
 
 `pwd`, `cd`, `echo`, `printf`, `cat`, `ls`, `mkdir`, `cp`, `mv`, `rm`, `touch`,
