@@ -282,22 +282,16 @@ fn group(calls: &[Call], columns: usize, keycap: bool) -> Vec<Line> {
         .zip(&summaries)
         .map(|(call, summary)| tool(call, summary))
         .collect();
-    let mut rows = cards::chapter_header(&tools, columns, keycap).rows;
     let expanded = tools.iter().any(|tool| tool.presentation.expanded);
-    if expanded {
-        cards::hang(&mut rows[1..], true);
-    }
-    for tool in &tools {
-        if tool.presentation.expanded {
-            rows.push(Line::default());
-            rows.extend(cards::card(*tool, columns, false).rows);
-        } else {
-            rows.extend(cards::chapter_exception(tool, columns));
-        }
-    }
     if !expanded {
-        rows.extend(cards::chapter_activities(&tools, columns));
-        cards::hang(&mut rows[1..], true);
+        return cards::chapter_header(&tools, columns, keycap).rows;
+    }
+    let mut rows = Vec::new();
+    for (index, tool) in tools.iter().enumerate() {
+        if index > 0 {
+            rows.push(Line::default());
+        }
+        rows.extend(cards::card(*tool, columns, keycap && index == 0).rows);
     }
     rows
 }

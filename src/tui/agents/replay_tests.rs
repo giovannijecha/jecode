@@ -169,7 +169,10 @@ fn resumed_agent_events_join_the_chapter_of_the_call_that_caused_them() {
     resumed.resume_session(&id);
     resumed.state.width = 100;
     let rows = text(&resumed.state.rows().concat());
-    assert!(rows.contains("  WORK   Split the work  2 calls"), "{rows}");
+    assert!(
+        rows.contains("  WORK   Split the work") && rows.contains("2 calls"),
+        "{rows}"
+    );
     assert!(rows.contains("1 file read · 1 agent created"), "{rows}");
     assert!(
         rows.contains("AGENTS 1 created · isolated workspace"),

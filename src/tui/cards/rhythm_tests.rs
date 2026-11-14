@@ -92,6 +92,67 @@ fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
 }
 
 #[test]
+fn expanded_described_command_wraps_full_title_as_one_line() {
+    let description =
+        "Inspect the renderer with a description that reaches its final distinctive phrase";
+    let args = object([("command", "cargo test"), ("description", description)]);
+    let result = Value::object([("exit_code", Value::number(0))]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    for name in ["bash", "exec", "process"] {
+        let card = draw(name, &args, Some(&result), &shown, 24);
+        let titles: Vec<_> = card
+            .rows
+            .iter()
+            .filter(|row| row.origin.is_some_and(|origin| origin.line == 0))
+            .map(Line::plain)
+            .collect();
+        assert!(titles.len() > 3, "{name}: {titles:?}");
+        assert!(titles.iter().skip(1).all(|row| row.starts_with("  ")));
+        assert!(!titles.iter().any(|row| row.contains('…')));
+        let joined = titles
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            joined.contains("final distinctive phrase"),
+            "{name}: {joined}"
+        );
+        assert!(card.rows.iter().all(|row| text::cells(&row.plain()) <= 24));
+    }
+}
+
+#[test]
+fn expanded_command_preserves_captured_line_breaks() {
+    let args = object([
+        ("command", "printf first\nprintf second"),
+        ("description", "Print both lines"),
+    ]);
+    let result = Value::object([("exit_code", Value::number(0))]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let card = draw("bash", &args, Some(&result), &shown, 40);
+    let rows: Vec<_> = card.rows.iter().map(Line::plain).collect();
+    assert!(
+        rows.iter().any(|row| row.contains("$ printf first")),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("printf second")),
+        "{rows:?}"
+    );
+    assert!(
+        !rows.iter().any(|row| row.contains("first printf second")),
+        "{rows:?}"
+    );
+}
+
+#[test]
 fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
     let result = Value::object([("exit_code", Value::number(0))]);
     for description in ["", "  \n "] {
@@ -139,7 +200,7 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
 }
 
 #[test]
-fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
+fn browser_decodes_cdp_exception_in_its_card() {
     let args = object([
         ("action", "evaluate"),
         ("expression", "const x = document.title; x"),
@@ -173,19 +234,6 @@ fn browser_decodes_cdp_exception_and_chapter_shows_one_exception_row() {
             .iter()
             .any(|span| span.style == MUTED && span.text.contains("at <anonymous>"))
     );
-    let rows = chapter_exception(
-        &Tool {
-            name: "browser",
-            arguments: &args,
-            result: Some(&result),
-            summary: "",
-            change: None,
-            presentation: &shown,
-        },
-        80,
-    );
-    assert_eq!(rows[0].plain(), "  ⎿ BROWSE evaluate Read title");
-    assert!(rows[1].plain().starts_with("    TypeError"));
 }
 
 #[test]

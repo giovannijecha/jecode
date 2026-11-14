@@ -156,6 +156,50 @@ fn read_expansion_preserves_numbered_source_and_syntax() {
 }
 
 #[test]
+fn compact_single_read_names_ctrl_o_even_without_counted_hidden_rows() {
+    let arguments = args("path", "src/auth.rs");
+    let result = Value::object([
+        ("content", Value::string("41: source line\n")),
+        ("offset", Value::number(41)),
+        ("lines_returned", Value::number(1)),
+    ]);
+    let shown = Presentation::default();
+    let compact = card(
+        Tool {
+            name: "read",
+            arguments: &arguments,
+            summary: "",
+            result: Some(&result),
+            change: None,
+            presentation: &shown,
+        },
+        40,
+        true,
+    );
+    assert!(compact.hidden);
+    assert!(plain(&compact.rows).contains("Ctrl+O expand"));
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let open = card(
+        Tool {
+            name: "read",
+            arguments: &arguments,
+            summary: "",
+            result: Some(&result),
+            change: None,
+            presentation: &expanded,
+        },
+        40,
+        true,
+    );
+    let full = plain(&open.rows);
+    assert!(full.contains("source line"));
+    assert_eq!(full.matches("Ctrl+O collapse").count(), 1);
+}
+
+#[test]
 fn byte_reads_do_not_invent_line_numbers() {
     let arguments = Value::object([
         ("path", Value::string("output:s1:c1:stdout")),

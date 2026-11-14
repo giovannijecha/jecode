@@ -98,13 +98,16 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
     display.scroll(Scroll::Start);
     display.scroll(Scroll::Rows(2));
     step(&mut display, &mut screen, &state, now);
-    assert!(screen.visible().starts_with("  WORK   Activity  2 calls"));
+    assert!(screen.visible().lines().next().is_some_and(
+        |line| line.starts_with("  WORK   Activity") && line.trim_end().ends_with("2 calls")
+    ));
     assert!(!screen.visible().contains("  │ one"));
     let generation = state.generation;
     state.toggle_tools();
     step(&mut display, &mut screen, &state, now);
     assert_eq!(state.generation, generation);
-    assert!(screen.visible().starts_with("  WORK   Activity  2 calls"));
+    assert!(screen.visible().starts_with("  BASH   first"));
+    assert!(!screen.visible().contains("  WORK   "));
     assert!(screen.visible().contains("  │ one"));
     assert_eq!(screen.visible().matches("  BASH   first").count(), 1);
 
@@ -115,9 +118,9 @@ fn cached_old_tool_expansion_reflows_without_losing_the_reading_anchor() {
         &state,
         now + Duration::from_millis(100),
     );
-    // At 40 columns the collapse keycap shortens the expanded title.
+    // The first standalone card carries collapse, at narrow widths too.
     let title = screen.visible().lines().next().unwrap().to_owned();
-    assert!(title.starts_with("  WORK   Activity  2 "), "{title}");
+    assert!(title.starts_with("  BASH   first"), "{title}");
     assert!(title.trim_end().ends_with("Ctrl+O collapse"), "{title}");
     assert!(screen.visible().contains("  │ one"));
     state.toggle_tools();
@@ -151,7 +154,7 @@ fn tail_rows_above_a_growing_work_chapter_never_move_down() {
             let title = if state.items.len() == 2 {
                 "  BASH   printf one"
             } else {
-                "  WORK   Inspect source"
+                "  WORK   "
             };
             let current = screen
                 .visible()

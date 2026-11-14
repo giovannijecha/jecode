@@ -24,7 +24,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
                 _ => "other",
             };
             let depth = number(entry, "depth").min(6);
-            let path = single_line(field(entry, "path"), 240);
+            let path = text::clean(field(entry, "path"));
             let size = entry
                 .get("size")
                 .and_then(Value::as_usize)
@@ -34,9 +34,9 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
         }
     } else {
         for matched in array(result, "matches") {
-            let path = single_line(field(matched, "path"), 200);
+            let path = text::clean(field(matched, "path"));
             let line = number(matched, "line");
-            let source = single_line(field(matched, "text"), 400);
+            let source = text::clean(field(matched, "text"));
             context(&mut rows, matched, "before", "  <", columns);
             let clipped = if matched.get("text_truncated") == Some(&Value::Bool(true)) {
                 " …"
@@ -83,8 +83,8 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
         );
     }
     for error in array(result, "errors") {
-        let path = single_line(field(error, "path"), 200);
-        let detail = single_line(field(error, "error"), 300);
+        let path = text::clean(field(error, "path"));
+        let detail = text::clean(field(error, "error"));
         push(&mut rows, &format!("Error {path}: {detail}"), columns, BAD);
     }
     let shown_errors = array(result, "errors").len();
@@ -116,7 +116,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
 fn context(rows: &mut Vec<Line>, matched: &Value, key: &str, prefix: &str, columns: usize) {
     for entry in array(matched, key) {
         let line = number(entry, "line");
-        let source = single_line(field(entry, "text"), 300);
+        let source = text::clean(field(entry, "text"));
         let clipped = if entry.get("text_truncated") == Some(&Value::Bool(true)) {
             " …"
         } else {
@@ -153,9 +153,4 @@ fn field<'a>(value: &'a Value, key: &str) -> &'a str {
 
 fn number(value: &Value, key: &str) -> usize {
     value.get(key).and_then(Value::as_usize).unwrap_or(0)
-}
-
-fn single_line(value: &str, max_cells: usize) -> String {
-    let clean = text::clean(value).replace('\n', "↵");
-    text::ellipsize(&clean, max_cells)
 }

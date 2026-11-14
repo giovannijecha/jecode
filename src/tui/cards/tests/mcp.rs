@@ -16,6 +16,51 @@ fn call() -> Value {
 }
 
 #[test]
+fn expanded_mcp_uses_one_turn_hint_after_a_complete_wrapped_title() {
+    let args = call();
+    let result = Value::object([
+        (
+            "connection",
+            Value::object([("name", Value::string("A long remote connection name"))]),
+        ),
+        (
+            "result",
+            Value::object([("content", Value::string("done"))]),
+        ),
+    ]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rendered = card(
+        Tool {
+            name: "mcp",
+            arguments: &args,
+            summary: "",
+            result: Some(&result),
+            change: None,
+            presentation: &shown,
+        },
+        28,
+        true,
+    );
+    let full = plain(&rendered.rows);
+    assert!(
+        full.contains("connection") && full.contains("name"),
+        "{full}"
+    );
+    assert!(full.contains("create_issue"), "{full}");
+    assert_eq!(full.matches("Ctrl+O collapse").count(), 1);
+    assert!(!full.contains('…'));
+    assert!(
+        rendered
+            .rows
+            .iter()
+            .all(|row| text::cells(&row.plain()) <= 28)
+    );
+}
+
+#[test]
 fn mcp_cards_follow_the_shared_rhythm_and_preserve_remote_uncertainty() {
     let args = call();
     let done = Value::object([(
@@ -116,9 +161,14 @@ fn mcp_cancelled_before_dispatch_uses_stopped_ink_in_cards_and_work() {
                 change: None,
                 presentation: &presentation,
             };
-            let member = chapter_exception(&tool, width);
-            assert!(plain(&member).contains("Cancelled"));
-            assert!(member.iter().all(|row| text::cells(&row.plain()) <= width));
+            let chapter = chapter_header(&[tool], width, false);
+            assert!(plain(&chapter.rows).contains("stopped"));
+            assert!(
+                chapter
+                    .rows
+                    .iter()
+                    .all(|row| text::cells(&row.plain()) <= width)
+            );
         }
     }
 }
@@ -159,7 +209,19 @@ fn work_keeps_each_mcp_connection_and_result_visible() {
     for width in [44, 100] {
         let header = chapter_header(&[tool], width, false);
         assert!(plain(&header.rows).contains("1 MCP call"));
-        let rows = chapter_exception(&tool, width);
+        let expanded = Presentation {
+            expanded: true,
+            ..Presentation::default()
+        };
+        let rows = card(
+            Tool {
+                presentation: &expanded,
+                ..tool
+            },
+            width,
+            false,
+        )
+        .rows;
         let value = plain(&rows);
         assert!(value.contains("MCP CALL GitHub"), "{value}");
         assert!(value.contains("Created #7"), "{value}");
@@ -187,17 +249,13 @@ fn mcp_remote_text_cannot_emit_terminal_control_sequences() {
         )]),
     )]);
     let presentation = Presentation::default();
-    let tool = Tool {
-        name: "mcp",
-        arguments: &args,
-        summary: "Done",
-        result: Some(&result),
-        change: None,
-        presentation: &presentation,
-    };
     for width in [44, 100] {
         let mut rows = draw("mcp", &args, Some(&result), None, width, &presentation);
-        rows.extend(chapter_exception(&tool, width));
+        let expanded = Presentation {
+            expanded: true,
+            ..Presentation::default()
+        };
+        rows.extend(draw("mcp", &args, Some(&result), None, width, &expanded));
         assert!(
             rows.iter()
                 .all(|row| !row.plain().chars().any(char::is_control))

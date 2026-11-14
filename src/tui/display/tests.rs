@@ -437,3 +437,41 @@ fn singleton_preview_anchor_stays_on_its_visible_source_when_collapsed() {
             .is_some_and(|row| row.plain().contains("singleton preview anchor"))
     );
 }
+
+#[test]
+fn closing_each_open_member_maps_its_title_and_source_back_to_the_work_preview() {
+    for width in [40, 80, 120] {
+        let mut state = State {
+            width,
+            height: 24,
+            ..State::default()
+        };
+        state.begin_tool_turn();
+        work_read(&mut state, "first", "Inspect sources", "first output\n");
+        work_read(&mut state, "second", "Inspect sources", "second output\n");
+        state.close_tools();
+        state.finish_tool_turn();
+        state.message(
+            Kind::Assistant,
+            &"Later prose remains in place.\n".repeat(80),
+        );
+        let mut display = Display::new((width, 24));
+        for target in ["first.rs", "first output", "second.rs", "second output"] {
+            state.toggle_tools().unwrap();
+            ready(&mut display, &state);
+            read_at(&mut display, target);
+            state.toggle_tools().unwrap();
+            ready(&mut display, &state);
+            assert!(!display.viewport.following());
+            assert!(!display.fresh);
+            assert!(
+                display
+                    .visible
+                    .iter()
+                    .take(3)
+                    .any(|line| line.plain().contains("Inspect sources")),
+                "{width} columns: closing {target} lost its WORK anchor"
+            );
+        }
+    }
+}

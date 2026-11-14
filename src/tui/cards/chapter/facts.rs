@@ -1,7 +1,8 @@
 //! What a Work chapter did: the outcome counts its title and badge carry, and
 //! the facts row below it.
 
-use super::{Status, Tool, field};
+use super::super::Status;
+use super::{Tool, field};
 use crate::tui::{line::Line, text, theme::DIM};
 use std::collections::BTreeSet;
 
@@ -159,9 +160,9 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
     }
     let mut line = Line::new(&parts.join(" · "), DIM);
     for (count, label, style) in [
-        (outcomes.stopped, "stopped", DIM),
         (outcomes.running, "running", DIM),
         (outcomes.background, "in background", DIM),
+        (outcomes.stopped, "stopped", DIM),
     ] {
         if count > 0 {
             if !line.spans.is_empty() {

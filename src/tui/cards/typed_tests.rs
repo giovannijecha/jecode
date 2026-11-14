@@ -400,9 +400,13 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
     let chapter = chapter_header(&tools, 80, true);
     let rows = plain(&chapter.rows);
     assert!(chapter.hidden);
-    assert!(rows[0].starts_with("  WORK   Activity  3 calls"));
+    assert!(rows[0].starts_with("  WORK   Activity"));
+    assert!(rows[0].contains("3 calls"));
     assert!(rows.join("\n").contains("│ 3 files read"));
-    assert!(rows[0].ends_with("Ctrl+O expand"));
+    assert!(
+        rows.last()
+            .is_some_and(|row| row.ends_with("Ctrl+O expand"))
+    );
     let expanded = presentation(0, true);
     let cards: Vec<_> = calls
         .iter()
@@ -445,7 +449,8 @@ fn read_chapter_counts_files_and_expands_to_individual_cards() {
     let failed = tool("read", &calls[0].0, &failed, &shown);
     assert!(chapter_groupable(&failed));
     assert!(
-        chapter_exception(&failed, 80)
+        card(failed, 80, false)
+            .rows
             .iter()
             .any(|row| row.plain().contains("denied"))
     );

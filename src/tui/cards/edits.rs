@@ -67,16 +67,10 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         }
         rows.extend(sections.rows);
     }
-    if keycap && expanded {
-        // `collapse` follows the last title row when the first is full, so
-        // a wrapped title is never split.
-        let mut first = hint(rows.remove(0), "collapse", columns);
-        let own = (first.len() > 1).then(|| first.pop()).flatten();
-        rows.splice(0..0, first);
-        if let Some(own) = own {
-            rows.insert(titled, own);
-        }
-    } else if keycap && let Some(index) = hidden {
+    if keycap
+        && !expanded
+        && let Some(index) = hidden
+    {
         let row = rows.remove(index);
         rows.splice(index..index, hint(row, "expand", columns));
     }
@@ -179,11 +173,12 @@ fn sections(
         let written = written(entry, change);
         let arguments = argument(tool.arguments, path);
         if !single {
-            rows.push(heading(
+            rows.extend(heading(
                 path,
                 tail(written, change, arguments),
                 columns,
                 origin,
+                expanded,
             ));
             origin += 1;
         }
@@ -239,7 +234,25 @@ fn sections(
 }
 
 /// A section's heading: the path clipped first so its counts stay.
-fn heading(path: &str, tail: Line, columns: usize, origin: usize) -> Line {
+fn heading(path: &str, tail: Line, columns: usize, origin: usize, expanded: bool) -> Vec<Line> {
+    if expanded {
+        let mut line = Line::new(&text::clean(path), MUTED);
+        if !tail.spans.is_empty() {
+            line.push("  ", MUTED);
+            line = line.append(tail);
+        }
+        let mut wrapped = line
+            .at_source(origin)
+            .into_wrapped(columns.saturating_sub(2).max(1), true);
+        let mut rows: Vec<_> = wrapped
+            .next()
+            .map(|row| row.gutter("  ", DIM).shortened(columns))
+            .into_iter()
+            .collect();
+        wrapped.set_columns(columns.saturating_sub(4).max(1));
+        rows.extend(wrapped.map(|row| row.gutter("    ", DIM).shortened(columns)));
+        return rows;
+    }
     let room = columns
         .saturating_sub(4 + text::cells(&tail.plain()))
         .max(1);
@@ -248,7 +261,7 @@ fn heading(path: &str, tail: Line, columns: usize, origin: usize) -> Line {
         line.push("  ", MUTED);
         line = line.append(tail);
     }
-    line.at_source(origin).gutter("  ", DIM).shortened(columns)
+    vec![line.at_source(origin).gutter("  ", DIM).shortened(columns)]
 }
 
 fn tail(written: bool, change: Option<&Change>, arguments: Option<&Value>) -> Line {

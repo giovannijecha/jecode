@@ -300,4 +300,5 @@ mod rhythm;
 mod sheet;
 mod tinted;
 mod tools;
+pub(in crate::tui) mod work_catalog;
 mod work_chapters;

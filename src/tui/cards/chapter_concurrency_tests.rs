@@ -1,68 +1,6 @@
 use super::*;
 
 #[test]
-fn running_readlike_members_keep_each_target_until_their_own_result_arrives() {
-    let shown = Presentation {
-        elapsed: Some(Duration::from_secs(2)),
-        ..Presentation::default()
-    };
-    let first = object([("path", "src/first.rs")]);
-    let second = object([("path", "src/second.rs")]);
-    let completed = Value::object([]);
-    for columns in [40, 80] {
-        let pending = [
-            tool("read", &first, None, &shown),
-            tool("read", &second, None, &shown),
-        ];
-        let rows = pending
-            .iter()
-            .flat_map(|call| chapter::exception(call, columns))
-            .map(|row| row.plain())
-            .collect::<Vec<_>>();
-        assert_eq!(rows.len(), 2);
-        assert!(
-            rows[0].contains("first.rs") && rows[1].contains("second.rs"),
-            "{rows:?}"
-        );
-        assert!(rows.iter().all(|row| text::cells(row) <= columns));
-        assert!(chapter::activity(&pending, columns).is_none());
-
-        let second_done = [pending[0], tool("read", &second, Some(&completed), &shown)];
-        assert_eq!(chapter::exception(&second_done[0], columns).len(), 1);
-        assert!(chapter::exception(&second_done[1], columns).is_empty());
-        let foot = chapter::activity(&second_done, columns).unwrap().plain();
-        assert!(
-            foot.contains("second.rs") && !foot.contains("first.rs"),
-            "{foot}"
-        );
-    }
-}
-
-#[test]
-fn completed_activity_rows_make_room_for_running_targets_without_growing_unbounded() {
-    let shown = Presentation::default();
-    let args: Vec<_> = (0..5)
-        .map(|index| object([("path", &format!("src/{index}.rs"))]))
-        .collect();
-    let completed = Value::object([]);
-    let mut calls: Vec<_> = args[..4]
-        .iter()
-        .map(|args| tool("read", args, Some(&completed), &shown))
-        .collect();
-    let before = chapter::activities(&calls, 80);
-    assert_eq!(before.len(), 4);
-    calls.push(tool("read", &args[4], None, &shown));
-    let running = chapter::activities(&calls, 80);
-    assert_eq!(running.len(), 3);
-    assert!(running.last().unwrap().plain().contains("3.rs"));
-    calls[4] = tool("read", &args[4], Some(&completed), &shown);
-    let after = chapter::activities(&calls, 80);
-    assert_eq!(after.len(), 4);
-    assert!(after.last().unwrap().plain().contains("4.rs"));
-    assert!(!after.iter().any(|row| row.plain().contains("0.rs")));
-}
-
-#[test]
 fn out_of_order_completions_update_source_order_and_keep_turn_expansion() {
     use crate::{events::Event, tui::state::State};
     for columns in [40, 80] {
@@ -139,7 +77,10 @@ fn out_of_order_completions_update_source_order_and_keep_turn_expansion() {
         }
         let mut rows = crate::tui::state::rows::Rows::default();
         let chapter = rows.render_at(&state.items, 0, columns, true);
-        assert!(chapter[0].plain().contains("Ctrl+O"));
+        assert!(
+            chapter.iter().any(|row| row.plain().contains("Ctrl+O")),
+            "{chapter:?}"
+        );
     }
 }
 

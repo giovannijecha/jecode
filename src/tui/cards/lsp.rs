@@ -13,20 +13,23 @@ use crate::{
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
     let mut title = badge::badge("LSP call", status);
-    let label = if tool.presentation.expanded {
-        "collapse"
-    } else {
-        "expand"
-    };
-    let cap = if keycap && tool.result.is_some() {
-        8 + 1 + label.len() + 2
+    let cap = if keycap && tool.result.is_some() && !tool.presentation.expanded {
+        8 + 1 + "expand".len() + 2
     } else {
         0
     };
     let target_width = columns.saturating_sub(text::cells(&title.plain()) + 1 + cap);
     title.push(&format!(" {}", target(&tool, target_width)), BODY);
-    let mut rows = if keycap && tool.result.is_some() {
-        hint(title, label, columns)
+    let mut rows = if tool.presentation.expanded {
+        super::title::rows(
+            "LSP call",
+            &target(&tool, usize::MAX),
+            status,
+            columns,
+            true,
+        )
+    } else if keycap && tool.result.is_some() {
+        hint(title, "expand", columns)
     } else {
         vec![title.shortened(columns)]
     };

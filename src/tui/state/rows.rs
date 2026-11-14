@@ -112,71 +112,18 @@ pub(in crate::tui) fn tool_card(
         return Some(cards::card(tool, columns, keycap));
     }
     let first = index == 0 || !same_chapter(&items[index - 1], &items[index]);
-    let mut chapter = if first {
-        let calls: Vec<_> = items[index..]
-            .iter()
-            .take_while(|item| same_chapter(&items[index], item))
-            .filter_map(Item::tool)
-            .collect();
-        cards::chapter_header(&calls, columns, keycap)
-    } else {
-        cards::Card {
-            rows: Vec::new(),
-            hidden: false,
-        }
-    };
-    let mut detail = if tool.presentation.expanded {
-        // Expanded, the title's tree closes on its facts; each full card
-        // below carries its own.
-        cards::hang(&mut chapter.rows, true);
-        let rows = cards::card(tool, columns, false).rows;
-        if first {
-            chapter.rows.push(Line::default());
-        }
-        rows
-    } else {
-        cards::chapter_exception(&tool, columns)
-    };
-    if first {
-        for line in &mut detail {
-            if let Some(origin) = &mut line.origin {
-                origin.line = origin.line.saturating_add(2);
-            }
-        }
+    if tool.presentation.expanded {
+        return Some(cards::card(tool, columns, keycap && first));
     }
-    chapter.rows.extend(detail);
-    let last = index + 1 == items.len() || !same_chapter(&items[index], &items[index + 1]);
-    if last {
-        let start = chapter_start(items, index);
-        let calls: Vec<_> = items[start..=index].iter().filter_map(Item::tool).collect();
-        let activities = cards::chapter_activities(&calls, columns);
-        if !calls.iter().any(|tool| tool.presentation.expanded) {
-            // Preserve the former singleton's content height with result
-            // facts. A keycap is presentation, not content, and cannot set
-            // the chapter's floor.
-            let singleton = cards::card(calls[0], columns, false).rows.len();
-            let chapter_height = cards::chapter_header(&calls, columns, false).rows.len()
-                + calls
-                    .iter()
-                    .map(|tool| cards::chapter_exception(tool, columns).len())
-                    .sum::<usize>()
-                + activities.len();
-            chapter.rows.extend(
-                cards::chapter_receipts(&calls[0], columns)
-                    .into_iter()
-                    .take(singleton.saturating_sub(chapter_height)),
-            );
-            // Expanded chapters skip it: every call shows as its full card.
-            chapter.rows.extend(activities);
-        }
+    if !first {
+        return None;
     }
-    // Collapsed, one tree runs from the WORK title through the members and
-    // closes on the chapter's last row.
-    if !tool.presentation.expanded {
-        let titled = usize::from(first).min(chapter.rows.len());
-        cards::hang(&mut chapter.rows[titled..], last);
-    }
-    (!chapter.rows.is_empty()).then_some(chapter)
+    let calls: Vec<_> = items[index..]
+        .iter()
+        .take_while(|item| same_chapter(&items[index], item))
+        .filter_map(Item::tool)
+        .collect();
+    Some(cards::chapter_header(&calls, columns, keycap))
 }
 
 /// The sent request: `› ` on one band of the full-row user surface, the text hanging

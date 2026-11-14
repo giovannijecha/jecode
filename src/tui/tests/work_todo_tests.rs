@@ -179,7 +179,8 @@ fn hidden_calls_neither_split_chapters_nor_offer_ctrl_o() {
     state.finish_tool_turn();
     assert_eq!(state.items.len(), 3);
     let chapter = state.rows()[1..].concat();
-    assert_eq!(chapter[1].plain(), "  WORK   Map the flow  2 calls");
+    assert!(chapter[1].plain().starts_with("  WORK   Map the flow"));
+    assert!(chapter[1].plain().contains("2 calls"));
 
     state.begin_tool_turn();
     call(&mut state, &mut plan, "done", set("Map", &[("t1", "done")]));

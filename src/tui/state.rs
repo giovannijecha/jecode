@@ -72,6 +72,7 @@ impl Item {
                 kind: Kind::Assistant,
                 text,
             } => !text.trim().is_empty(),
+            Self::Tool { name, result, .. } => name != "ask_user" || result.is_some(),
             Self::Local { .. }
             | Self::Text {
                 kind: Kind::Notice | Kind::Warning,

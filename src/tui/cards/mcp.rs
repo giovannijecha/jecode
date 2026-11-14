@@ -14,16 +14,10 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
     let mut title = badge::badge("MCP call", status);
     title.push(&format!(" {}", target(&tool)), BODY);
-    let mut rows = if keycap && tool.result.is_some() {
-        hint(
-            title,
-            if tool.presentation.expanded {
-                "collapse"
-            } else {
-                "expand"
-            },
-            columns,
-        )
+    let mut rows = if tool.presentation.expanded {
+        super::title::rows("MCP call", &target(&tool), status, columns, true)
+    } else if keycap && tool.result.is_some() {
+        hint(title, "expand", columns)
     } else {
         vec![title.shortened(columns)]
     };
