@@ -87,6 +87,8 @@ and anything ignored by the project's `.gitignore` files or the repository's
 `info/exclude`. Your global Git excludes file is not read. Both can be asked to
 include hidden or ignored entries. `search` matches literal text; for regular
 expressions the model can run an installed program through `bash` or `exec`.
+`search` also reads a command's complete saved output when given its `output:`
+reference, with the same access as `read`.
 
 ## Commands
 
@@ -133,6 +135,25 @@ need their outcome before dependent work or a claim of success; servers and
 watchers need a real readiness check, and a live process or empty output does not
 establish one. Processes last until they finish, are stopped, or the conversation
 is closed, switched or deleted, and are never restarted.
+
+On Windows, the supervised boundary includes the command and all its descendants
+in its Job Object. On Unix, it follows the process group and retained command output;
+a descendant that starts a separate session can escape that boundary. When the
+command's root exits while the boundary stays open, the result shows the root's exit
+code and, on Windows, which programs remain. A poll ends early after a short settling
+period. If no call reported the root exit, it is announced once after 500 ms, using
+the same idle-continuation rules as final process outcomes. `/process` shows the root
+outcome and remaining programs too. Managed programs still end with the boundary's
+timeout, stop or conversation cleanup.
+
+To open an application you want to keep, such as a desktop program, the model can
+use `exec` with `persistent: true`. That needs the Full permission level. The
+result says whether the application was still running after a short observation
+or had already exited. From then on Jecode does not own it: it keeps running when
+the conversation ends or Jecode exits, has no timeout, cannot be stopped from
+`/process`, and its output is not saved. If Windows prevents an independent launch,
+Jecode reports the error without starting the application. See
+[Persistent launches](../reference/TOOL_REFERENCE.md#persistent-launches).
 
 To see, stop or background processes yourself, use `/process`: it lists the
 conversation's running and recent processes and shows their output without adding

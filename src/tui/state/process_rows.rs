@@ -12,7 +12,7 @@ impl State {
         let start = self
             .items
             .iter()
-            .rposition(|item| !matches!(item, Item::Tool { id, .. } if id.starts_with("process:")))
+            .rposition(|item| !matches!(item, Item::Tool { id, .. } if id.starts_with("process:") || id.starts_with("process-root:")))
             .map_or(0, |last| last + 1);
         self.begin_tool_turn();
         if let Some(turn) = &mut self.tool_details.turn {
@@ -44,12 +44,17 @@ impl State {
                 .to_owned()
         };
         let id = text("process_id");
+        let prefix = if text("type") == "process_root_exited" {
+            "process-root"
+        } else {
+            "process"
+        };
         let elapsed = result
             .get("elapsed_ms")
             .and_then(Value::as_usize)
             .map(|milliseconds| Duration::from_millis(milliseconds as u64));
         let item = Item::Tool {
-            id: format!("process:{id}"),
+            id: format!("{prefix}:{id}"),
             name: "process".into(),
             arguments: Value::object([
                 ("command", Value::string(text("command"))),
@@ -73,6 +78,14 @@ impl State {
         if !inside {
             self.finish_tool_turn();
         }
+    }
+
+    /// A root exit is a separate receipt from the tree's eventual completion.
+    pub fn process_root_exit(&mut self, mut result: Value) {
+        if let Value::Object(fields) = &mut result {
+            fields.insert("type".into(), Value::string("process_root_exited"));
+        }
+        self.process_completion(result);
     }
 }
 
@@ -109,6 +122,41 @@ mod tests {
             height: 24,
             ..State::default()
         }
+    }
+
+    #[test]
+    fn a_root_notice_and_the_final_result_keep_distinct_receipts() {
+        let mut state = state();
+        let mut root = finished("process-1", 7);
+        if let Value::Object(fields) = &mut root {
+            fields.insert("status".into(), Value::string("running"));
+            fields.remove("exit_code");
+            fields.insert(
+                "root_process".into(),
+                Value::object([
+                    ("pid", Value::number(40)),
+                    ("status", Value::string("exited")),
+                    ("exit_code", Value::number(7)),
+                ]),
+            );
+            fields.insert(
+                "waiting_for".into(),
+                Value::string("supervised descendants"),
+            );
+        }
+        state.process_root_exit(root);
+        state.process_completion(finished("process-1", 7));
+        let ids: Vec<_> = state
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Tool { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, ["process-root:process-1", "process:process-1"]);
+        state.begin_process_turn();
+        assert_eq!(state.tool_details.turn.as_ref().unwrap().start, 0);
     }
 
     #[test]

@@ -31,6 +31,8 @@ pub struct Process {
     pub status: &'static str,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
+    /// The root's exit while this supervised process may still be running.
+    pub root: Option<crate::process::RootExit>,
     pub started: Instant,
     pub finished: Option<Instant>,
     /// A tool call is waiting for it, and can be released into the background.
@@ -50,6 +52,16 @@ impl Process {
 
     /// The status, with the exit code when one is known.
     pub fn label(&self) -> String {
+        if self.active()
+            && let Some(root) = &self.root
+        {
+            let code = root.exit_code.map_or_else(
+                || "root exited without code".to_string(),
+                |code| format!("root exited {code}"),
+            );
+            let remaining = root_remaining(root);
+            return format!("{} · {code} · {remaining}", self.status);
+        }
         match (self.status, self.exit_code) {
             ("exited", Some(code)) => format!("exited {code}"),
             ("timed_out", _) => "timed out".into(),
@@ -57,6 +69,13 @@ impl Process {
             (status, _) => status.into(),
         }
     }
+}
+
+fn root_remaining(root: &crate::process::RootExit) -> String {
+    root.remaining.as_ref().map_or_else(
+        || "output still open".into(),
+        |remaining| format!("{} descendants running", remaining.count),
+    )
 }
 
 /// A bounded byte range of a saved stream.
@@ -166,6 +185,16 @@ impl Observer {
         (next, completions)
     }
 
+    /// Root exits retained independently of the terminal completion cursor.
+    pub fn root_notices_since(&self, cursor: usize) -> (usize, Vec<super::RootNotice>) {
+        let Some(scope) = self.scope.upgrade() else {
+            return (cursor, Vec::new());
+        };
+        let notices = scope.root_notices_after(cursor, &self.redactor, |_| true);
+        let next = notices.last().map_or(cursor, |last| last.sequence);
+        (next, notices)
+    }
+
     /// Calls `listener` when a process of this conversation starts or ends.
     pub fn on_change(&self, listener: Arc<dyn Fn() + Send + Sync>) {
         if let Some(scope) = self.scope.upgrade() {
@@ -256,6 +285,11 @@ impl Observer {
             error: outcome
                 .and_then(|outcome| outcome.error.as_deref())
                 .map(|error| self.redactor.text(error)),
+            root: state
+                .root
+                .as_ref()
+                .or_else(|| outcome.and_then(|outcome| outcome.root.as_ref()))
+                .map(|root| super::root::redacted(root, &self.redactor)),
             started: entry.started,
             finished: state.finished,
             awaited: state.outcome.is_none() && state.waiters > 0,

@@ -1,4 +1,6 @@
-use super::{Status, Tool, content, diff, edit_fallback, field, flag, plural, skill_name, streams};
+use super::{
+    Status, Tool, content, diff, edit_fallback, field, flag, plural, root, skill_name, streams,
+};
 use crate::{
     file_change::Change,
     json::Value,
@@ -21,6 +23,12 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
     }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return Line::new(&short_error(error), BAD);
+    }
+    if let Some(launch) = persistent(tool, result) {
+        return launch;
+    }
+    if let Some(root) = root::line(tool, result) {
+        return root;
     }
     let elapsed = tool.presentation.duration();
     let output =
@@ -107,6 +115,32 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         "browser" => browser(result, tool.summary),
         _ => Line::new(tool.summary, MUTED),
     }
+}
+
+/// A persistent exec reports the launched application's observed state, not
+/// completion of a conversation-owned command.
+pub(super) fn persistent(tool: &Tool<'_>, result: &Value) -> Option<Line> {
+    if tool.name != "exec" || field(result, "launch") != "persistent" {
+        return None;
+    }
+    let pid = result.get("pid").and_then(Value::as_usize)?;
+    let application = field(result, "application");
+    let (label, style) = match application {
+        "running" => ("Launched".to_owned(), MUTED),
+        "exited" => match result.get("exit_code") {
+            Some(code) if *code != Value::Null => (
+                format!("Exited {}", code.encode()),
+                if *code == Value::number(0) {
+                    MUTED
+                } else {
+                    BAD
+                },
+            ),
+            _ => ("Exited".to_owned(), BAD),
+        },
+        _ => return None,
+    };
+    Some(Line::new(&format!("{label} · pid {pid}"), style))
 }
 
 fn running(tool: &Tool<'_>) -> Line {

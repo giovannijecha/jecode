@@ -237,6 +237,20 @@ pub(super) fn validate_from(document: &Document, validated: &mut Validation) -> 
             "temporary_cleanup" => {
                 string(event, "result")?;
             }
+            "process_root_exited" => {
+                string(event, "process_id")?;
+                string(event, "command")?;
+                let root = event
+                    .get("root_process")
+                    .ok_or("Missing process root exit")?;
+                integer(root, "pid")?;
+                integer(root, "exited_after_ms")?;
+                if string(root, "status")? != "exited"
+                    || !matches!(root.get("exit_code"), Some(Value::Number(_) | Value::Null))
+                {
+                    return Err("Invalid process root exit".into());
+                }
+            }
 
             "tool_change" => {
                 let index = integer(event, "after_message")? as usize;

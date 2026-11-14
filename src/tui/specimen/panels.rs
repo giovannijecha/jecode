@@ -44,6 +44,7 @@ fn process(id: &str, command: &str, status: &'static str, exit_code: Option<i32>
         started: std::time::Instant::now(),
         finished: None,
         awaited: false,
+        root: None,
     }
 }
 
@@ -99,6 +100,29 @@ fn output() -> String {
 fn viewing(columns: usize, logs: Logs) -> State {
     let mut panel = Panel::new(running());
     panel.logs = Some(logs);
+    listed(columns, panel)
+}
+
+fn root_viewing(columns: usize) -> State {
+    let mut root = process("p5", "build.cmd", "running", None);
+    root.root = Some(crate::process::RootExit {
+        pid: 40,
+        exit_code: Some(7),
+        elapsed: std::time::Duration::from_millis(85),
+        remaining: Some(crate::process::Remaining {
+            count: 2,
+            processes: vec![(41, "child.exe".into()), (42, "conhost.exe".into())],
+        }),
+    });
+    let mut panel = Panel::new(vec![root.clone()]);
+    panel.logs = Some(Logs {
+        id: root.id.clone(),
+        process: Some(root),
+        stream: 0,
+        views: Default::default(),
+        interactive: false,
+        input_mode: false,
+    });
     listed(columns, panel)
 }
 
@@ -189,6 +213,10 @@ fn states(columns: usize) -> Vec<(&'static str, State)> {
         ),
         ("Processes · stop", listed(columns, stop)),
         ("Output · following", viewing(columns, following)),
+        (
+            "Output · root exited with descendants",
+            root_viewing(columns),
+        ),
         ("Output · paused at the start", viewing(columns, paused)),
         ("Errors · finished process", viewing(columns, errors)),
     ]

@@ -45,6 +45,26 @@ fn local_web_and_browser_cards_show_actions_and_artifacts() {
 }
 
 #[test]
+fn persistent_launch_summaries_distinguish_running_from_exited() {
+    let running = crate::json::parse(
+        r#"{"launch":"persistent","pid":42,"application":"running","observed_ms":2000}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::tool_summary("exec", &running),
+        "launched pid 42; running, not owned by Jecode"
+    );
+    let exited = crate::json::parse(
+        r#"{"launch":"persistent","pid":42,"application":"exited","exit_code":3}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::tool_summary("exec", &exited),
+        "launched pid 42; exited with code 3"
+    );
+}
+
+#[test]
 fn several_read_paths_are_named_together() {
     let arguments = Value::object([(
         "paths",

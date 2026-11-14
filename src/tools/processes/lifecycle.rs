@@ -44,6 +44,61 @@ pub struct Completion {
     pub tty: bool,
     /// Stopped on request rather than ending by itself.
     pub stop_requested: bool,
+    /// The root's earlier exit when the timeout or a stop ended its descendants.
+    pub root: Option<crate::process::RootExit>,
+}
+
+/// The root ended while its supervised boundary remained active past the
+/// ordinary completion grace. This is one notice, not a terminal outcome.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootNotice {
+    pub sequence: usize,
+    pub id: String,
+    pub command: String,
+    pub root: crate::process::RootExit,
+    pub stdout_file: String,
+    pub stderr_file: String,
+}
+
+impl RootNotice {
+    pub fn label(&self) -> String {
+        self.root.exit_code.map_or_else(
+            || "root exited without an exit code; tree running".into(),
+            |code| format!("root exited with code {code}; tree running"),
+        )
+    }
+
+    pub fn value(&self) -> Value {
+        let mut fields = vec![
+            ("process_id".to_string(), Value::string(&self.id)),
+            ("command".to_string(), Value::string(&self.command)),
+            ("status".to_string(), Value::string("running")),
+            ("stdout_file".to_string(), Value::string(&self.stdout_file)),
+            ("stderr_file".to_string(), Value::string(&self.stderr_file)),
+        ];
+        fields.extend(super::root::fields(&self.root, true));
+        Value::entries(fields)
+    }
+
+    pub fn report(&self) -> String {
+        let waiting = self.root.remaining.as_ref().map_or_else(
+            || "command output remains open".to_string(),
+            |remaining| {
+                format!(
+                    "{} supervised descendant processes remained",
+                    remaining.count
+                )
+            },
+        );
+        format!(
+            "{}: {}; {waiting}; command: {}; stdout_file: {}; stderr_file: {}",
+            self.id,
+            self.label(),
+            self.command,
+            self.stdout_file,
+            self.stderr_file
+        )
+    }
 }
 
 impl Completion {
@@ -84,6 +139,9 @@ impl Completion {
             if self.tty {
                 fields.insert("tty".into(), Value::Bool(true));
             }
+            if let Some(root) = &self.root {
+                fields.extend(super::root::fields(root, false));
+            }
         }
         value
     }
@@ -107,6 +165,9 @@ impl Completion {
         );
         if let Some(error) = &self.error {
             text.push_str(&format!("; error: {error}"));
+        }
+        if let Some(root) = &self.root {
+            text.push_str(&format!("; {}", super::root::clause(root)));
         }
         // A terminal's raw controls are noise here; `process poll` still has them.
         let tails = if self.tty { &[][..] } else { &self.tails[..] };
@@ -174,12 +235,53 @@ impl Scope {
         completions.sort_by_key(|completion| completion.sequence);
         completions
     }
+
+    pub(super) fn root_notices_after(
+        &self,
+        cursor: usize,
+        redactor: &Redactor,
+        wanted: impl Fn(&State) -> bool,
+    ) -> Vec<RootNotice> {
+        let entries = self.entries.lock().unwrap();
+        let mut notices: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| {
+                let state = entry.state.lock().unwrap();
+                let (sequence, root) = state.root_notice.as_ref()?;
+                if *sequence <= cursor || !wanted(&state) {
+                    return None;
+                }
+                Some(entry.root_notice(*sequence, root, redactor))
+            })
+            .collect();
+        notices.sort_by_key(|notice| notice.sequence);
+        notices
+    }
 }
 
 impl Entry {
+    fn root_notice(
+        &self,
+        sequence: usize,
+        root: &crate::process::RootExit,
+        redactor: &Redactor,
+    ) -> RootNotice {
+        RootNotice {
+            sequence,
+            id: self.id.clone(),
+            command: bounded_command(&self.command, redactor),
+            root: super::root::redacted(root, redactor),
+            stdout_file: self.streams[0].reference.clone(),
+            stderr_file: self.streams[1].reference.clone(),
+        }
+    }
+
     fn forgettable(&self) -> bool {
         let state = self.state.lock().unwrap();
-        state.outcome.is_some() && state.reported && state.waiters == 0
+        state.outcome.is_some()
+            && state.reported
+            && (state.root_notice.is_none() || state.root_reported)
+            && state.waiters == 0
     }
 
     /// Applies `change`, then numbers a terminal transition that no waiting
@@ -232,6 +334,9 @@ impl Entry {
             tails: [tail(0), tail(1)],
             tty: self.terminal.is_some(),
             stop_requested: self.stop.requested(),
+            root: outcome
+                .filter(|outcome| outcome.status != "exited")
+                .and_then(|outcome| outcome.root.clone()),
         }
     }
 }
@@ -251,6 +356,29 @@ pub(super) fn bounded_command(command: &str, redactor: &Redactor) -> String {
 }
 
 impl Registry {
+    /// Root exits that no tool result or accepted model request reported.
+    pub(in crate::tools) fn root_notices(&self, redactor: &Redactor) -> Vec<RootNotice> {
+        self.scope()
+            .root_notices_after(0, redactor, |state| !state.root_reported)
+    }
+
+    pub(in crate::tools) fn mark_roots_reported(&self, ids: &[String]) {
+        let scope = self.scope();
+        let entries = scope.entries.lock().unwrap();
+        for entry in entries.iter().filter(|entry| ids.contains(&entry.id)) {
+            entry.state.lock().unwrap().root_reported = true;
+        }
+    }
+
+    pub(in crate::tools) fn root_notice_waiting(&self) -> bool {
+        let scope = self.scope();
+        let entries = scope.entries.lock().unwrap();
+        entries.iter().any(|entry| {
+            let state = entry.state.lock().unwrap();
+            state.root_notice.is_some() && !state.root_reported && !entry.stop.requested()
+        })
+    }
+
     /// Announced completions the model has not seen, in order.
     pub(in crate::tools) fn completions(&self, redactor: &Redactor) -> Vec<Completion> {
         self.scope()
@@ -296,6 +424,7 @@ mod tests {
             tails: ["passed\n".into(), String::new()],
             tty: false,
             stop_requested: false,
+            root: None,
         }
     }
 
@@ -328,5 +457,26 @@ mod tests {
                 .report()
                 .contains("outcome unknown")
         );
+    }
+
+    #[test]
+    fn a_timeout_after_the_root_exited_reports_the_root_outcome() {
+        let mut timed_out = completion("timed_out", None);
+        timed_out.root = Some(crate::process::RootExit {
+            pid: 9,
+            exit_code: Some(1),
+            elapsed: Duration::from_secs(95),
+            remaining: None,
+        });
+        let report = timed_out.report();
+        assert!(
+            report.contains("process-1: timed out after 134s")
+                && report.contains("root process 9 had exited with code 1 after 95s"),
+            "{report}"
+        );
+        let value = timed_out.value();
+        let root = value.get("root_process").unwrap();
+        assert_eq!(root.get("exit_code"), Some(&Value::number(1)));
+        assert!(value.get("waiting_for").is_none());
     }
 }

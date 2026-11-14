@@ -46,6 +46,7 @@ fn open_output(app: &mut App, output: &str) {
         started: std::time::Instant::now(),
         finished: None,
         awaited: false,
+        root: None,
     };
     let mut panel = Panel::new(vec![]);
     panel.logs = Some(Logs {

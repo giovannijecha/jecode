@@ -3,7 +3,7 @@
 use super::Agent;
 use crate::events::{Event, EventSink};
 use crate::json::Value;
-use crate::tools::processes::Completion;
+use crate::tools::processes::{Completion, RootNotice};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Resume {
@@ -43,7 +43,7 @@ impl Agent {
             && self.prepared.is_none()
             && !self.has_pending_question()
             && !self.cancellation.requested()
-            && self.tools.process_completion_waiting()
+            && (self.tools.process_completion_waiting() || self.tools.process_root_notice_waiting())
     }
 
     /// Continue the conversation after a process ended. The completion
@@ -83,6 +83,27 @@ impl Agent {
         Ok(())
     }
 
+    /// Anchor a settled root exit once a request containing it was accepted.
+    /// A later terminal completion remains an independent outcome.
+    pub(super) fn deliver_root_notices(
+        &self,
+        notices: Vec<RootNotice>,
+        emit: &mut impl FnMut(Event) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if notices.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<_> = notices.iter().map(|notice| notice.id.clone()).collect();
+        for notice in &notices {
+            self.save_root_notice(notice, true);
+        }
+        for process in notices {
+            emit(Event::ProcessRootExited { process })?;
+        }
+        self.tools.process_roots_reported(&ids);
+        Ok(())
+    }
+
     /// A saved conversation keeps every outcome known so far, including one
     /// no request has carried: the conversation may end before the next one.
     pub(super) fn save_known_completions(&self) {
@@ -93,6 +114,28 @@ impl Agent {
                 .is_some_and(|handle| handle.active());
         for process in self.tools.process_completions(&self.redactor) {
             self.save_completion(&process, in_turn);
+        }
+        for process in self.tools.process_root_notices(&self.redactor) {
+            self.save_root_notice(&process, in_turn);
+        }
+    }
+
+    fn save_root_notice(&self, process: &RootNotice, in_turn: bool) {
+        let mut event = process.value();
+        if let Value::Object(fields) = &mut event {
+            fields.insert("type".into(), Value::string("process_root_exited"));
+            fields.insert("in_turn".into(), Value::Bool(in_turn));
+            fields.insert(
+                "after_message".into(),
+                Value::number(self.messages.lock().unwrap().len()),
+            );
+        }
+        let mut events = self.events.lock().unwrap();
+        if !events.iter().any(|saved| {
+            saved.get("type").and_then(Value::as_str) == Some("process_root_exited")
+                && saved.get("process_id").and_then(Value::as_str) == Some(process.id.as_str())
+        }) {
+            events.push(event);
         }
     }
 

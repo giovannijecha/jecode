@@ -215,6 +215,7 @@ fn numbering_waits_for_a_reader_already_scanning_the_list() {
         capture_probe: None,
         started: Instant::now(),
         scope: Arc::downgrade(&scope),
+        watch: crate::process::Watch::default(),
     });
     // A reader past this entry must not find a later number on another one.
     let scanning = scope.entries.lock().unwrap();
@@ -253,6 +254,7 @@ fn a_report_that_cannot_read_its_output_still_owes_the_outcome() {
         capture_probe: None,
         started: Instant::now(),
         scope: Arc::downgrade(&scope),
+        watch: crate::process::Watch::default(),
     };
     assert!(
         entry
@@ -271,6 +273,7 @@ fn exited() -> Outcome {
         stdout_bytes: 0,
         stderr_bytes: 0,
         supervised: true,
+        root: None,
     }
 }
 

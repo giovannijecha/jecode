@@ -81,6 +81,10 @@ pub enum Event {
     ProcessFinished {
         process: crate::tools::processes::Completion,
     },
+    /// The root exited but the supervised boundary remains active.
+    ProcessRootExited {
+        process: crate::tools::processes::RootNotice,
+    },
 }
 
 pub trait EventSink {
@@ -294,6 +298,20 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             ),
             "timed_out" => "timed out".into(),
             status => status.into(),
+        };
+    }
+    if name == "exec" && result.get("launch").and_then(Value::as_str) == Some("persistent") {
+        let pid = result
+            .get("pid")
+            .map_or_else(|| "unknown".into(), Value::encode);
+        return match result.get("application").and_then(Value::as_str) {
+            Some("exited") => format!(
+                "launched pid {pid}; exited with code {}",
+                result
+                    .get("exit_code")
+                    .map_or_else(|| "unknown".into(), Value::encode)
+            ),
+            _ => format!("launched pid {pid}; running, not owned by Jecode"),
         };
     }
     if matches!(name, "bash" | "exec") {

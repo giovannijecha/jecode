@@ -11,12 +11,13 @@ pub(super) const NO_INSTRUCTIONS: &str =
 const NO_SKILLS: &str =
     "Personal skills: none are available now; earlier catalog entries no longer apply.";
 
-/// Request instructions, collaborator reports and finished processes, read
+/// Request instructions, collaborator reports and process news, read
 /// before `messages` is locked.
 pub(super) struct Environment(
     String,
     pub(super) Vec<(String, String)>,
     pub(super) Vec<crate::tools::processes::Completion>,
+    pub(super) Vec<crate::tools::processes::RootNotice>,
 );
 
 fn join<const N: usize>(parts: [String; N]) -> String {
@@ -159,6 +160,7 @@ impl Agent {
             ]),
             collaboration_reports(&records),
             self.tools.process_completions(&self.redactor),
+            self.tools.process_root_notices(&self.redactor),
         )
     }
 

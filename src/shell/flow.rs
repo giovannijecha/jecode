@@ -4,7 +4,7 @@ use parser::{AndOr, Item};
 impl Shell {
     pub(super) fn run_list(&mut self, list: &List, io: &Io) -> i32 {
         for item in list {
-            if self.exit.is_some() || self.broken_output {
+            if self.stopped() {
                 break;
             }
             if let Some(source) = &item.background {
@@ -20,7 +20,7 @@ impl Shell {
         self.status = self.pipeline(&and_or.first, io);
         let mut ran_last = and_or.rest.is_empty();
         for (index, (op, pipeline)) in and_or.rest.iter().enumerate() {
-            if self.exit.is_some() || self.broken_output {
+            if self.stopped() {
                 return;
             }
             ran_last = (*op == "&&") == (self.status == 0);
@@ -38,6 +38,30 @@ impl Shell {
         {
             self.exit = Some(self.status);
         }
+    }
+
+    /// Whether the rest of the current list must not run: `exit`, a closed
+    /// output, or a `break` that enclosing loops have not consumed yet.
+    fn stopped(&self) -> bool {
+        self.exit.is_some() || self.broken_output || self.breaking > 0
+    }
+
+    /// After one pass of a loop: whether it ends. A pending `break` ends it
+    /// and leaves any remaining levels to the enclosing loops.
+    fn loop_ends(&mut self) -> bool {
+        if self.breaking > 0 {
+            self.breaking -= 1;
+            return true;
+        }
+        self.exit.is_some() || self.broken_output
+    }
+
+    /// Runs a loop with this scope's loop depth raised for `break`.
+    fn in_loop(&mut self, run: impl FnOnce(&mut Self) -> i32) -> i32 {
+        self.loops += 1;
+        let status = run(self);
+        self.loops -= 1;
+        status
     }
 
     fn pipeline(&mut self, stages: &[Node], io: &Io) -> i32 {
@@ -113,42 +137,49 @@ impl Shell {
             }
         };
         match compound {
-            Compound::For { name, values, body } => self.for_loop(name, values, body, io),
+            Compound::For { name, values, body } => {
+                self.in_loop(|shell| shell.for_loop(name, values, body, io))
+            }
             Compound::CountedFor {
                 init,
                 name,
                 limit,
                 increment,
                 body,
-            } => self.counted_for([init, name, limit, increment], body, io),
+            } => self.in_loop(|shell| shell.counted_for([init, name, limit, increment], body, io)),
             Compound::Loop {
                 until,
                 condition,
                 body,
-            } => {
+            } => self.in_loop(|shell| {
                 let mut last = 0;
                 loop {
-                    let status = self.condition(condition, io);
-                    if self.broken_output {
+                    let status = shell.condition(condition, io);
+                    if shell.broken_output {
                         return status;
                     }
-                    if self.exit.is_some() || (status == 0) == *until {
+                    // A break in the condition belongs to this loop too.
+                    if shell.breaking > 0 {
+                        shell.loop_ends();
+                        return status;
+                    }
+                    if shell.exit.is_some() || (status == 0) == *until {
                         break;
                     }
-                    last = self.body(body, io);
-                    if self.exit.is_some() || self.broken_output {
+                    last = shell.body(body, io);
+                    if shell.loop_ends() {
                         break;
                     }
                 }
                 last
-            }
+            }),
             Compound::If {
                 branches,
                 otherwise,
             } => {
                 for (condition, body) in branches {
                     let status = self.condition(condition, io);
-                    if self.exit.is_some() || self.broken_output {
+                    if self.stopped() {
                         return status;
                     }
                     if status == 0 {
@@ -199,7 +230,7 @@ impl Shell {
         for value in values {
             self.variables.set(&name, value);
             status = self.body(body, io);
-            if self.exit.is_some() || self.broken_output {
+            if self.loop_ends() {
                 break;
             }
         }
@@ -228,7 +259,7 @@ impl Shell {
         for value in start..limit {
             self.variables.set(&name, value.to_string());
             status = self.body(body, io);
-            if self.exit.is_some() || self.broken_output {
+            if self.loop_ends() {
                 break;
             }
         }

@@ -31,18 +31,17 @@ impl Handle {
         // the next main checkpoint will append the in-flight messages/events.
         let insertion = live.document.events.len();
         let mut event = live.redactor.value(&event);
-        // A process may finish while its worker owns the agent. The UI saves
-        // its row immediately; the worker can record the same outcome after
-        // the provider accepts the next request. Keep one durable event.
+        // Root exit and final completion are separate rows; each is saved
+        // once when both the UI and the worker observe it.
+        let process_kind = event
+            .get("type")
+            .and_then(crate::json::Value::as_str)
+            .filter(|kind| matches!(*kind, "process_root_exited" | "process_finished"));
         let process_id =
-            if event.get("type").and_then(crate::json::Value::as_str) == Some("process_finished") {
-                event.get("process_id").and_then(crate::json::Value::as_str)
-            } else {
-                None
-            };
+            process_kind.and_then(|_| event.get("process_id").and_then(crate::json::Value::as_str));
         let existing = process_id.and_then(|id| {
             events.iter().position(|saved| {
-                saved.get("type").and_then(crate::json::Value::as_str) == Some("process_finished")
+                saved.get("type").and_then(crate::json::Value::as_str) == process_kind
                     && saved.get("process_id").and_then(crate::json::Value::as_str) == Some(id)
             })
         });
@@ -143,12 +142,34 @@ mod tests {
         }
         handle.append_event(&archive, visible.clone()).unwrap();
         handle.append_event(&archive, visible).unwrap();
+        let root = Value::object([
+            ("type", Value::string("process_root_exited")),
+            ("process_id", Value::string("process-stable")),
+            ("command", Value::string("launcher")),
+            ("status", Value::string("running")),
+            ("after_message", Value::number(1)),
+            (
+                "root_process",
+                Value::object([
+                    ("pid", Value::number(9)),
+                    ("status", Value::string("exited")),
+                    ("exit_code", Value::number(7)),
+                    ("exited_after_ms", Value::number(100)),
+                ]),
+            ),
+        ]);
+        handle.append_event(&archive, root.clone()).unwrap();
+        handle.append_event(&archive, root).unwrap();
         let saved = handle.snapshot();
-        assert_eq!(saved.events.len(), 1);
-        assert_eq!(archive.events.lock().unwrap().len(), 1);
+        assert_eq!(saved.events.len(), 2);
+        assert_eq!(archive.events.lock().unwrap().len(), 2);
         assert_eq!(
             saved.events[0].get("after_tool").and_then(Value::as_str),
             Some("hold")
+        );
+        assert_eq!(
+            saved.events[1].get("type").and_then(Value::as_str),
+            Some("process_root_exited")
         );
     }
 }

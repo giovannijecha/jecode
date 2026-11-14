@@ -1,11 +1,11 @@
 //! Decode display errors while preserving the original result for expansion.
-use super::{Tool, field, rhythm, streams};
+use super::{Tool, field, rhythm, streams, summary};
 use crate::{
     json::{self, Value},
     tui::{
         line::Line,
         text,
-        theme::{BAD, MUTED},
+        theme::{BAD, DIM, MUTED},
     },
 };
 
@@ -48,6 +48,11 @@ pub(super) fn rows(tool: &Tool<'_>, columns: usize, guide: &str) -> Vec<Line> {
     let Some(result) = tool.result else {
         return Vec::new();
     };
+    if result.get("error").is_none()
+        && let Some(launch) = summary::persistent(tool, result)
+    {
+        return vec![rhythm::one(launch, columns, guide, DIM, 2)];
+    }
     let entries = streams::entries(result, true);
     let error = field(result, "error");
     let position = entries.iter().position(|entry| {

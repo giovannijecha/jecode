@@ -100,7 +100,10 @@ impl Agent {
                 .unwrap()
                 .iter()
                 .filter(|event| {
-                    event.get("type").and_then(Value::as_str) == Some("process_finished")
+                    matches!(
+                        event.get("type").and_then(Value::as_str),
+                        Some("process_finished" | "process_root_exited")
+                    )
                 })
                 .map(Value::encode)
                 .collect::<Vec<_>>()

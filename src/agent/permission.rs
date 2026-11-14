@@ -43,6 +43,7 @@ impl Agent {
     /// parallel batches hold only calls the level allows inside the folder.
     pub(super) fn gated(&self, call: &ToolCall) -> bool {
         self.browser_refused(call, self.permissions.level())
+            || persistent_refused(call, self.permissions.level())
             || self.tools.access(&call.name, &call.arguments).map_or(
                 call.name == "exec",
                 |access| {
@@ -71,6 +72,9 @@ impl Agent {
             return Gate::Done(unavailable(
                 "Browser control is available only at the Full permission level; use web for HTTP retrieval",
             ));
+        }
+        if persistent_refused(call, current_level) {
+            return Gate::Done(unavailable(crate::tools::launch::refusal()));
         }
         let Some(access) = self.tools.access(&call.name, &call.arguments) else {
             return if call.name == "exec" {
@@ -198,7 +202,7 @@ impl Agent {
     pub(super) fn permission_instructions(&self) -> String {
         match self.permissions.level() {
             Level::Read => "Permissions: Read. Edits, commands, outside paths and browser control are unavailable; web GET/HEAD and enabled MCP connections are available. The user can change /permissions.\n",
-            Level::Workspace => "Permissions: Workspace. Bash and exec run confined to the folder where the system supports it, otherwise they need Full; browser control is unavailable, so use web for HTTP retrieval. Outside paths and exec cwd ask the user. On Windows, web and other host clients cannot reach a server started in Workspace: ask the user to choose /permissions full before starting a local server that needs host access. The user can then return to Workspace while the server keeps running. Retrying host clients or changing the URL does not remove that confinement. Confinement causes permission errors outside the folder and when creating junctions, as linked package installs do: report that and ask the user to choose /permissions full rather than installing substitute runtimes or rewriting the project around it.\n",
+            Level::Workspace => "Permissions: Workspace. Bash and exec run confined to the folder where the system supports it, otherwise they need Full; browser control and persistent exec launches are unavailable, so use web for HTTP retrieval. Outside paths and exec cwd ask the user. On Windows, web and other host clients cannot reach a server started in Workspace: ask the user to choose /permissions full before starting a local server that needs host access. The user can then return to Workspace while the server keeps running. Retrying host clients or changing the URL does not remove that confinement. Confinement causes permission errors outside the folder and when creating junctions, as linked package installs do: report that and ask the user to choose /permissions full rather than installing substitute runtimes or rewriting the project around it.\n",
             Level::Full => "Permissions: Full. Bash and exec may work outside the folder.\n",
         }
         .into()
@@ -210,4 +214,14 @@ fn unavailable(reason: &str) -> Value {
         ("outcome", Value::string("unavailable")),
         ("reason", Value::string(reason)),
     ])
+}
+
+/// A persistent launch leaves confinement and process ownership, so only
+/// Full authorizes it; below Full it is refused without asking.
+fn persistent_refused(call: &ToolCall, level: Level) -> bool {
+    call.name == "exec"
+        && level != Level::Full
+        && crate::json::parse(&call.arguments)
+            .ok()
+            .is_some_and(|arguments| arguments.get("persistent") == Some(&Value::Bool(true)))
 }

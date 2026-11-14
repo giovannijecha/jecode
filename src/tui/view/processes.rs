@@ -236,6 +236,22 @@ fn notes(panel: &Panel, logs: &Logs, columns: usize) -> Vec<Line> {
         .flatten()
         .map(|error| panel::indent(Line::new(&single_line(error), BAD), columns))
         .collect();
+    if let Some(process) = process
+        && let Some(root) = &process.root
+    {
+        notes.push(panel::indent(
+            Line::new(&process.label(), status_style(process)),
+            columns,
+        ));
+        if let Some(remaining) = &root.remaining {
+            for (pid, image) in remaining.processes.iter().take(4) {
+                notes.push(panel::indent(
+                    Line::new(&format!("{pid} · {}", single_line(image)), MUTED),
+                    columns,
+                ));
+            }
+        }
+    }
     let empty = rows(&stream(logs), text_width(columns)).is_empty();
     if empty && view.error.is_none() {
         let finished = process.is_none_or(|process| !process.active());
@@ -367,6 +383,15 @@ fn log(panel: &Panel, logs: &Logs, columns: usize, room: usize) -> Vec<(Line, Pa
 }
 
 fn status_style(process: &Process) -> Style {
+    if process.status == "running"
+        && let Some(root) = &process.root
+    {
+        return match root.exit_code {
+            Some(0) => GOOD,
+            Some(_) => BAD,
+            None => WARNING,
+        };
+    }
     match (process.status, process.exit_code) {
         ("running" | "stopping", _) => GOOD,
         ("timed_out", _) => WARNING,
@@ -376,11 +401,15 @@ fn status_style(process: &Process) -> Style {
 }
 
 fn display_status(process: &Process) -> String {
-    if process.active() {
-        "running".into()
-    } else {
-        process.label()
+    if process.status == "running"
+        && let Some(root) = &process.root
+    {
+        return root.exit_code.map_or_else(
+            || "root exited".into(),
+            |code| format!("root exited {code}"),
+        );
     }
+    process.label()
 }
 
 fn single_line(value: &str) -> String {

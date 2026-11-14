@@ -18,6 +18,9 @@ mod lsp;
 mod mcp;
 mod presentation;
 mod rhythm;
+mod root;
+#[cfg(test)]
+mod root_tests;
 mod streams;
 mod summary;
 mod title;
@@ -110,6 +113,10 @@ impl Status {
                     .is_some_and(|code| code != &Value::number(0) && code != &Value::Null)
             // A process that exited with no code was killed by a signal.
             || process == Some("exited") && result.get("exit_code") == Some(&Value::Null)
+            || tool.name == "exec"
+                && result.get("launch").and_then(Value::as_str) == Some("persistent")
+                && result.get("application").and_then(Value::as_str) == Some("exited")
+                && result.get("exit_code") == Some(&Value::Null)
         {
             Self::Failed
         } else {

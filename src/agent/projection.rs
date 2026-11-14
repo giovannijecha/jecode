@@ -8,10 +8,12 @@ use crate::{context::state_message, json::Value};
 const REPORTS: &str = "Collaborator reports, each shown once when it arrives:";
 /// Starts the section of state that carries finished processes.
 const PROCESSES: &str = "Processes that finished, each shown once:";
+/// Starts the section for roots that exited while descendants remain supervised.
+const ROOTS: &str = "Process roots that exited, each shown once:";
 
 /// A state update without the sections shown only once.
 fn lasting_state(text: &str) -> &str {
-    let end = [REPORTS, PROCESSES]
+    let end = [REPORTS, ROOTS, PROCESSES]
         .iter()
         .filter_map(|section| text.find(section))
         .min()
@@ -19,9 +21,13 @@ fn lasting_state(text: &str) -> &str {
     text[..end].trim_end()
 }
 
-/// The finished processes a state update carried; always its last section.
+/// Process news a state update carried, after the lasting state and reports.
 pub(super) fn process_section(text: &str) -> Option<&str> {
-    text.find(PROCESSES).map(|start| text[start..].trim_end())
+    [ROOTS, PROCESSES]
+        .iter()
+        .filter_map(|section| text.find(section))
+        .min()
+        .map(|start| text[start..].trim_end())
 }
 
 pub(super) struct Request {
@@ -34,6 +40,7 @@ pub(super) struct Request {
     pub states: Vec<(usize, String)>,
     /// Finished processes that state carries; delivered once it is accepted.
     pub completions: Vec<crate::tools::processes::Completion>,
+    pub root_notices: Vec<crate::tools::processes::RootNotice>,
 }
 
 impl Agent {
@@ -65,6 +72,7 @@ impl Agent {
                 .map(|text| (original.len(), text))
                 .collect(),
             completions: environment.2,
+            root_notices: environment.3,
         }
     }
 
@@ -167,12 +175,20 @@ impl Agent {
             .latest_state(false)
             .map(|state| lasting_state(&state.text));
         let completions = &environment.2;
-        if reports.is_empty() && completions.is_empty() {
+        let root_notices = &environment.3;
+        if reports.is_empty() && completions.is_empty() && root_notices.is_empty() {
             return (latest != Some(base.trim_end())).then_some(base);
         }
         let mut text = base;
         if !reports.is_empty() {
             text.push_str(&format!("\n\n{REPORTS}\n{}", reports.join("\n")));
+        }
+        if !root_notices.is_empty() {
+            let entries = root_notices
+                .iter()
+                .map(crate::tools::processes::RootNotice::report)
+                .collect::<Vec<_>>();
+            text.push_str(&format!("\n\n{ROOTS}\n{}", entries.join("\n")));
         }
         if !completions.is_empty() {
             let entries = completions

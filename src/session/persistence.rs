@@ -153,7 +153,7 @@ pub(super) fn resume_with_selection(
     for record in document.records() {
         match record {
             Record::Question { .. } => {}
-            Record::ProcessFinished { event } => {
+            Record::ProcessFinished { event } | Record::ProcessRootExited { event } => {
                 writeln!(status, "{}", crate::console::restored_process_line(&event))
                     .map_err(|error| error.to_string())?;
             }

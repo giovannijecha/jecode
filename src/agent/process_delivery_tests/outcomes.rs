@@ -78,6 +78,135 @@ fn resume_can_recover_an_undelivered_real_outcome_without_relaunching_the_comman
 }
 
 #[test]
+fn resume_keeps_an_undelivered_root_exit_as_history_without_relaunching() {
+    let directory = Directory::new();
+    let home = Directory::new();
+    #[cfg(windows)]
+    let launch = tool_call(
+        "start",
+        "exec",
+        Value::object([
+            (
+                "executable",
+                Value::string(std::env::current_exe().unwrap().to_string_lossy()),
+            ),
+            (
+                "args",
+                Value::Array(vec![
+                    Value::string("--exact"),
+                    Value::string("process::tests::exited_root_fixture"),
+                ]),
+            ),
+            (
+                "env",
+                Value::object([
+                    ("JECODE_PROCESS_FIXTURE", Value::string("root")),
+                    (
+                        "JECODE_PROCESS_ROOT_MARKER",
+                        Value::string(directory.path().join("root-started").to_string_lossy()),
+                    ),
+                    (
+                        "JECODE_PROCESS_CHILD_MARKER",
+                        Value::string(directory.path().join("child-started").to_string_lossy()),
+                    ),
+                    (
+                        "JECODE_PROCESS_ROOT_RELEASE",
+                        Value::string(directory.path().join("go").to_string_lossy()),
+                    ),
+                    (
+                        "JECODE_PROCESS_CHILD_RELEASE",
+                        Value::string(directory.path().join("release").to_string_lossy()),
+                    ),
+                    (
+                        "JECODE_PROCESS_MARKER",
+                        Value::string(directory.path().join("survived").to_string_lossy()),
+                    ),
+                    ("JECODE_PROCESS_ROOT_EXIT_CODE", Value::string("7")),
+                ]),
+            ),
+            ("wait_ms", Value::number(0)),
+        ]),
+    );
+    #[cfg(unix)]
+    let launch = start(
+        "start",
+        &format!("{}; (while :; do sleep 0.05; done) & exit 7", gate("go")),
+    );
+    let fixture = HttpFixture::new(vec![
+        (200, completion("", vec![launch])),
+        (200, completion("Started.", vec![])),
+        (
+            200,
+            completion(
+                "",
+                vec![tool_call(
+                    "saved-root",
+                    "read",
+                    Value::object([
+                        ("path", Value::string("history:processes")),
+                        ("byte_offset", Value::number(0)),
+                    ]),
+                )],
+            ),
+        ),
+        (
+            200,
+            completion("The root exited while a child kept running.", vec![]),
+        ),
+    ]);
+    let mut running = agent(&directory, &fixture.endpoint);
+    running.enable_sessions(home.path()).unwrap();
+    running
+        .permissions()
+        .set_level(crate::permissions::Level::Full)
+        .unwrap();
+    running
+        .run_turn("Start the command", &mut |_| Ok(()))
+        .unwrap();
+    #[cfg(windows)]
+    wait_for(|| directory.path().join("child-started").exists());
+    release(&directory, "go");
+    wait_for(|| running.tools.process_root_notice_waiting());
+    let process_id = running.tools.process_root_notices(&running.redactor)[0]
+        .id
+        .clone();
+    running.save_session().unwrap();
+    let id = running.sessions().unwrap().id();
+    drop(running);
+
+    let mut resumed = agent(&directory, &fixture.endpoint);
+    resumed.enable_sessions(home.path()).unwrap();
+    resumed.resume(&id).unwrap();
+    assert!(resumed.processes().processes().unwrap().is_empty());
+    assert!(!resumed.can_continue_processes());
+    assert!(
+        resumed
+            .sessions()
+            .unwrap()
+            .snapshot()
+            .records()
+            .iter()
+            .any(|record| { matches!(record, crate::sessions::Record::ProcessRootExited { .. }) })
+    );
+    resumed
+        .run_turn("What did that process do?", &mut |_| Ok(()))
+        .unwrap();
+    let requests = fixture.finish();
+    let restored_messages = request_messages(&requests[3].body);
+    let message = restored_messages
+        .iter()
+        .find(|message| message.get("tool_call_id").and_then(Value::as_str) == Some("saved-root"))
+        .unwrap();
+    let page = crate::json::parse(message.get("content").and_then(Value::as_str).unwrap()).unwrap();
+    let saved = crate::json::parse(page.get("content").and_then(Value::as_str).unwrap()).unwrap();
+    assert_eq!(
+        saved.get("type").and_then(Value::as_str),
+        Some("process_root_exited")
+    );
+    assert_eq!(saved.get("process_id"), Some(&Value::string(process_id)));
+}
+
+#[test]
 fn a_stop_the_user_asked_for_reaches_the_next_request_without_starting_one() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![

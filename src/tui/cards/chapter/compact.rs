@@ -1,6 +1,6 @@
 //! The bounded WORK view. Selection is by outcome; display stays in call order.
 
-use super::super::{Card, Status, Tool, badge, heading};
+use super::super::{Card, Status, Tool, badge, heading, summary};
 use super::{facts::Outcomes, facts::facts, facts::rows as pack_facts, facts::running, label};
 use crate::tui::{
     activity as timer,
@@ -115,7 +115,10 @@ fn rank(status: Status) -> u8 {
 
 fn member(tool: &Tool<'_>, columns: usize) -> Line {
     let status = Status::of(tool);
-    let detail = match status {
+    let receipt = tool.result.and_then(|result| {
+        summary::persistent(tool, result).or_else(|| super::super::root::line(tool, result))
+    });
+    let detail = receipt.as_ref().map(Line::plain).unwrap_or(match status {
         Status::Failed => tool
             .result
             .and_then(|result| result.get("exit_code"))
@@ -135,12 +138,15 @@ fn member(tool: &Tool<'_>, columns: usize) -> Line {
             .presentation
             .duration()
             .map_or_else(String::new, timer::duration),
-    };
-    let tone = match status {
-        Status::Failed => BAD,
-        Status::Unknown | Status::Stopped => WARNING,
-        _ => DIM,
-    };
+    });
+    let tone = receipt
+        .as_ref()
+        .and_then(|line| line.spans.first().map(|span| span.style))
+        .unwrap_or(match status {
+            Status::Failed => BAD,
+            Status::Unknown | Status::Stopped => WARNING,
+            _ => DIM,
+        });
     let detail = Line::new(&detail, tone);
     let (name, target) = heading(tool);
     let mut left = Line::new(&name.to_uppercase(), badge::ink(name).bold());

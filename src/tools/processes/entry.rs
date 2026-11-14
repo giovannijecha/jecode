@@ -8,26 +8,46 @@ use crate::process::RunError;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+/// How long a tree may keep running after its root exits before a waiting
+/// call reports that instead. Ordinary commands finish within it, including
+/// helpers such as a console host that end right after the root.
+pub(super) const ROOT_SETTLE: Duration = Duration::from_millis(500);
+
 impl Entry {
-    pub(super) fn wait(&self, wait: Duration, cancellation: &Cancellation) -> WaitEnd {
-        let released = self.begin_wait();
-        self.wait_held(wait, cancellation, Some(released))
+    /// Waits as a new caller. `ignore_root` keeps waiting for the whole tree;
+    /// otherwise a root exit first seen during this wait ends it.
+    pub(super) fn wait(
+        &self,
+        wait: Duration,
+        cancellation: &Cancellation,
+        ignore_root: bool,
+    ) -> WaitEnd {
+        let (released, root_known) = self.begin_wait();
+        self.wait_held(
+            wait,
+            cancellation,
+            Some(released),
+            ignore_root || root_known,
+        )
     }
 
     /// Register the waiter and its release generation as one state change.
-    pub(super) fn begin_wait(&self) -> usize {
+    pub(super) fn begin_wait(&self) -> (usize, bool) {
         let mut state = self.state.lock().unwrap();
         state.waiters += 1;
-        state.released
+        (state.released, state.root.is_some())
     }
 
     /// Waits as a call already counted in `waiters`, which stays counted until
     /// it reports, so a process ending in between still belongs to that report.
+    /// Unless `root_known`, the wait also ends once the root process has been
+    /// seen to exit and the tree is still running after `ROOT_SETTLE`.
     pub(super) fn wait_held(
         &self,
         wait: Duration,
         cancellation: &Cancellation,
         released: Option<usize>,
+        root_known: bool,
     ) -> WaitEnd {
         // An unrepresentable deadline waits until completion or cancellation.
         let deadline = Instant::now().checked_add(wait);
@@ -39,17 +59,71 @@ impl Entry {
             if released.is_some_and(|released| state.released != released) {
                 return WaitEnd::Released;
             }
-            let slice = deadline.map_or(Duration::from_millis(20), |deadline| {
+            let mut slice = deadline.map_or(Duration::from_millis(20), |deadline| {
                 deadline
                     .saturating_duration_since(Instant::now())
                     .min(Duration::from_millis(20))
             });
+            if !root_known && let Some(seen) = state.root_seen {
+                let settle = ROOT_SETTLE.saturating_sub(seen.elapsed());
+                if settle.is_zero() {
+                    return WaitEnd::RootExited;
+                }
+                slice = slice.min(settle);
+            }
             if slice.is_zero() {
                 break;
             }
             state = self.changed.wait_timeout(state, slice).unwrap().0;
         }
         WaitEnd::Elapsed
+    }
+
+    /// Copies the latest root report into the state and wakes waiters. A
+    /// finished process keeps the facts its outcome recorded.
+    /// Returns true only for the first root report, to schedule one settle check.
+    pub(super) fn observe_root(&self) -> bool {
+        let root = self.watch.root();
+        let mut first = false;
+        self.transition(|state| {
+            if state.outcome.is_none() && root.is_some() {
+                first = state.root_seen.is_none();
+                state.root_seen.get_or_insert_with(Instant::now);
+                state.root = root;
+            }
+        });
+        self.changed.notify_all();
+        self.notify();
+        first
+    }
+
+    /// A root-only notice is due only after the ordinary completion grace and
+    /// only when no waiting call is about to report the same fact.
+    pub(super) fn settle_root(&self) {
+        let Some(scope) = self.scope.upgrade() else {
+            return;
+        };
+        let _entries = scope.entries.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        if state.outcome.is_some()
+            || !state.returned
+            || state.waiters > 0
+            || state.root_reported
+            || state.root_notice.is_some()
+        {
+            return;
+        }
+        let Some(root) = state.root.clone() else {
+            return;
+        };
+        let sequence = scope
+            .sequence
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        state.root_notice = Some((sequence, root));
+        drop(state);
+        drop(_entries);
+        self.notify();
     }
 
     /// Asks a running process to stop. One that already ended keeps its
@@ -105,6 +179,15 @@ impl Entry {
                 fields.insert("error".into(), Value::string(error));
                 fields.insert("outcome".into(), Value::string("unknown"));
             }
+            // An exited process's code is its root's; otherwise the earlier
+            // root exit explains what the timeout or stop ended.
+            if outcome.status != "exited"
+                && let Some(root) = &outcome.root
+            {
+                fields.extend(super::root::fields(root, false));
+            }
+        } else if let Some(root) = &state.root {
+            fields.extend(super::root::fields(root, true));
         }
         fields
     }
@@ -133,6 +216,10 @@ impl Entry {
                     // This call cannot carry the outcome, so it is still owed.
                     drop(state);
                     self.transition(|_| {});
+                    // A failed output read cannot carry an earlier root exit
+                    // either. The settle timer may have found this waiter
+                    // still active, so publish the now unreported root.
+                    self.settle_root();
                     return Err(format!(
                         "Could not read saved {name} for {}: {error}",
                         self.id
@@ -155,10 +242,11 @@ impl Entry {
         }
         state.cursors = cursors;
         state.reported |= finished;
+        state.root_reported |= finished || fields.contains_key("root_process");
         fields.insert("output_limit_bytes".into(), Value::number(output_limit));
         fields.insert("output_mode".into(), Value::string(output_mode.name()));
         match end {
-            WaitEnd::Elapsed => {}
+            WaitEnd::Elapsed | WaitEnd::RootExited => {}
             WaitEnd::Cancelled => {
                 fields.insert("wait_cancelled".into(), Value::Bool(true));
             }
@@ -204,6 +292,7 @@ impl From<Result<crate::process::Output, RunError>> for Outcome {
             stdout_bytes,
             stderr_bytes,
             supervised,
+            root: None,
         }
     }
 }

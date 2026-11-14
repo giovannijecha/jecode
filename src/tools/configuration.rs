@@ -101,6 +101,22 @@ impl Tools {
         self.processes.completion_waiting()
     }
 
+    /// Settled root exits not yet carried to the model.
+    pub fn process_root_notices(
+        &self,
+        redactor: &crate::redact::Redactor,
+    ) -> Vec<processes::RootNotice> {
+        self.processes.root_notices(redactor)
+    }
+
+    pub fn process_roots_reported(&self, ids: &[String]) {
+        self.processes.mark_roots_reported(ids);
+    }
+
+    pub fn process_root_notice_waiting(&self) -> bool {
+        self.processes.root_notice_waiting()
+    }
+
     #[cfg(test)]
     pub fn set_default_wait(&self, wait: std::time::Duration) {
         self.processes.set_default_wait(wait);

@@ -129,6 +129,15 @@ fn windows(out: &Path, assets: &mut Vec<(String, PathBuf)>) {
         &[],
     );
     compile(
+        "launch",
+        &[
+            "src/tools/launch/windows.cs",
+            "src/tools/launch/windows_nested.cs",
+            "src/process/windows_command.cs",
+        ],
+        &[],
+    );
+    compile(
         "terminal",
         &["src/tui/terminal.cs", "src/native/terminal_entry.cs"],
         &[],

@@ -141,11 +141,17 @@ fn finished(
         ("stdout_file", Value::string(stdout_ref)),
         ("stderr_file", Value::string(stderr_ref)),
     ]);
-    if let Some(error) = &outcome.error
-        && let Value::Object(fields) = &mut result
-    {
-        fields.insert("outcome".into(), Value::string("unknown"));
-        fields.insert("error".into(), Value::string(error));
+    if let Value::Object(fields) = &mut result {
+        if let Some(error) = &outcome.error {
+            fields.insert("outcome".into(), Value::string("unknown"));
+            fields.insert("error".into(), Value::string(error));
+        }
+        // A timeout or stop that ended descendants after their root exited.
+        if outcome.status != "exited"
+            && let Some(root) = &outcome.root
+        {
+            fields.extend(super::processes::root_fields(root));
+        }
     }
     result
 }

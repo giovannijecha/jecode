@@ -24,6 +24,10 @@ public static class JecodeProcess {
     const uint DuplicateSameAccess = 0x00000002;
     const uint HandleFlagInherit = 0x00000001;
     const uint Infinite = 0xffffffff;
+    const uint ProcessQueryLimitedInformation = 0x1000;
+    const int ErrorMoreData = 234;
+    // Remaining processes named after the root exits; the count stays exact.
+    const int ListedProcesses = 32;
 
     [StructLayout(LayoutKind.Sequential)]
     struct SecurityAttributes {
@@ -136,6 +140,14 @@ public static class JecodeProcess {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool QueryInformationJobObject(IntPtr job, int infoClass, out BasicAccountingInformation info, int length, IntPtr returned);
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "QueryInformationJobObject")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool QueryJobProcessIds(IntPtr job, int infoClass, IntPtr info, int length, IntPtr returned);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint id);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder name, ref int size);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool CreateProcess(string application, StringBuilder commandLine, IntPtr processAttributes,
@@ -243,6 +255,47 @@ public static class JecodeProcess {
         IntPtr overlapped;
         // Any job message, or the bounded wait, leads to a fresh accounting query.
         GetQueuedCompletionStatus(port, out message, out key, out overlapped, 100);
+    }
+
+    // Process IDs and image names of the job's processes, one "id\tname\n"
+    // line each. Names are best effort: a process may end while it is read.
+    static byte[] DescribeJob(IntPtr job) {
+        int size = 8 + ListedProcesses * IntPtr.Size;
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        var text = new StringBuilder();
+        try {
+            // ERROR_MORE_DATA still fills the identifiers that fit.
+            if (!QueryJobProcessIds(job, 3, buffer, size, IntPtr.Zero)
+                && Marshal.GetLastWin32Error() != ErrorMoreData)
+                return new byte[0];
+            int listed = Math.Min(Marshal.ReadInt32(buffer, 4), ListedProcesses);
+            for (int i = 0; i < listed; i++) {
+                long id = Marshal.ReadIntPtr(buffer, 8 + i * IntPtr.Size).ToInt64();
+                text.Append(id).Append('\t').Append(ImageName((uint)id)).Append('\n');
+            }
+        } finally { Marshal.FreeHGlobal(buffer); }
+        return Encoding.UTF8.GetBytes(text.ToString());
+    }
+
+    static string ImageName(uint id) {
+        IntPtr handle = OpenProcess(ProcessQueryLimitedInformation, false, id);
+        if (handle == IntPtr.Zero) return "";
+        try {
+            var name = new StringBuilder(1024);
+            int length = name.Capacity;
+            return QueryFullProcessImageName(handle, 0, name, ref length) ? Path.GetFileName(name.ToString()) : "";
+        } finally { CloseHandle(handle); }
+    }
+
+    // Kind 2: the root exited while the job still has processes. Sent again
+    // whenever the remaining processes change, before the final completion.
+    static void SendRootExit(NamedPipeServerStream pipe, uint exitCode, uint active, byte[] processes) {
+        pipe.WriteByte(2);
+        foreach (byte[] field in new[] { BitConverter.GetBytes(exitCode), BitConverter.GetBytes(active),
+            BitConverter.GetBytes(processes.Length) })
+            pipe.Write(field, 0, field.Length);
+        pipe.Write(processes, 0, processes.Length);
+        pipe.Flush();
     }
 
     static void SendCompletion(NamedPipeServerStream pipe, byte kind, byte[] payload) {
@@ -393,11 +446,21 @@ public static class JecodeProcess {
             uint exitCode;
             if (!GetExitCodeProcess(process.Process, out exitCode)) throw Failure("GetExitCodeProcess");
             BasicAccountingInformation accounting;
+            string reported = null;
             do {
                 if (!QueryInformationJobObject(job, 1, out accounting,
                     Marshal.SizeOf(typeof(BasicAccountingInformation)), IntPtr.Zero))
                     throw Failure("QueryInformationJobObject");
-                if (accounting.ActiveProcesses > 0) WaitForJobEvent(jobEvents);
+                if (accounting.ActiveProcesses > 0) {
+                    // The root's outcome is known now; its descendants keep the job open.
+                    byte[] processes = DescribeJob(job);
+                    string current = accounting.ActiveProcesses + "|" + Convert.ToBase64String(processes);
+                    if (current != reported) {
+                        SendRootExit(completion, exitCode, accounting.ActiveProcesses, processes);
+                        reported = current;
+                    }
+                    WaitForJobEvent(jobEvents);
+                }
             } while (accounting.ActiveProcesses > 0);
             SendCompletion(completion, 1, BitConverter.GetBytes(exitCode));
             return unchecked((int)exitCode);

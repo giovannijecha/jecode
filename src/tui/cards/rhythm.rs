@@ -189,9 +189,14 @@ fn collapsed_card(
         .filter(|result| result.get("error").is_none())
         .map(|result| content::render(&tool, result, status, columns, false));
     let mut lead = summary::line(&tool, status, None);
+    let root_fact = tool
+        .result
+        .is_some_and(|result| super::root::line(&tool, result).is_some());
     for span in &mut lead.spans {
         // Running and background facts stay quiet; the badge carries the state.
-        span.style = if matches!(status, Status::Running | Status::Background) {
+        span.style = if root_fact {
+            span.style
+        } else if matches!(status, Status::Running | Status::Background) {
             DIM
         } else {
             MUTED
@@ -249,12 +254,18 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
                 "    ",
                 DIM,
             ));
+        } else if let Some(launch) = summary::persistent(&tool, result) {
+            rows.extend(line_rows(&launch, columns, 2, "    ", "    ", DIM));
+        } else if let Some(root) = super::root::line(&tool, result) {
+            rows.extend(line_rows(&root, columns, 2, "    ", "    ", DIM));
+            rows.extend(content::render(&tool, result, status, columns, true).rows);
         } else {
             rows.extend(content::render(&tool, result, status, columns, true).rows);
         }
         rows.extend(content::notices(tool.name, result, columns, true));
         let mut footer = Line::default();
         if matches!(tool.name, "bash" | "exec" | "process")
+            && field(result, "launch") != "persistent"
             && let Some(code) = result
                 .get("exit_code")
                 .filter(|code| **code != crate::json::Value::Null)

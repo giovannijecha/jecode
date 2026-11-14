@@ -7,6 +7,7 @@ pub(crate) mod edit;
 mod exec;
 mod files;
 mod interactive;
+pub(crate) mod launch;
 mod lsp;
 mod mcp;
 mod network;
@@ -193,6 +194,25 @@ impl Tools {
                 }
                 parallel(&arguments)?;
                 match name {
+                    "list" | "search"
+                        if arguments
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .is_some_and(crate::output::is_reference) =>
+                    {
+                        // The same resolver, ownership and permission as read.
+                        let reference = required_string(&arguments, "path")?;
+                        if name == "list" {
+                            return Err("list needs a directory; an output reference names one saved stream: use read or search on it".into());
+                        }
+                        discovery::search_output(
+                            reference,
+                            &self.outputs.resolve(reference)?,
+                            &arguments,
+                            cancellation,
+                        )
+                        .map(|value| (value, None))
+                    }
                     "list" | "search" => discovery::execute(
                         base.unwrap_or(&self.root),
                         name,
@@ -280,14 +300,28 @@ impl Tools {
                                 cancellation,
                                 self.outputs.redactor(),
                             ),
-                            _ => match arguments.get("tty") {
-                                None | Some(Value::Bool(false)) => {
-                                    exec::execute(context, &arguments, cancellation)
-                                }
-                                Some(Value::Bool(true)) => {
-                                    interactive::execute(context, &arguments, cancellation)
-                                }
-                                _ => Err("tty must be a boolean".into()),
+                            _ => match launch::requested(&arguments) {
+                                Err(error) => Err(error),
+                                Ok(true) => launch::execute(
+                                    &self.root,
+                                    temporary.as_deref(),
+                                    &arguments,
+                                    // Only an explicit Full level authorizes it.
+                                    matches!(
+                                        permission,
+                                        Some((crate::permissions::Level::Full, _))
+                                    ),
+                                    cancellation,
+                                ),
+                                Ok(false) => match arguments.get("tty") {
+                                    None | Some(Value::Bool(false)) => {
+                                        exec::execute(context, &arguments, cancellation)
+                                    }
+                                    Some(Value::Bool(true)) => {
+                                        interactive::execute(context, &arguments, cancellation)
+                                    }
+                                    _ => Err("tty must be a boolean".into()),
+                                },
                             },
                         }
                         .unwrap_or_else(|error| Value::object([("error", Value::string(error))]));

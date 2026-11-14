@@ -12,6 +12,16 @@ use page::Page;
 pub(super) use schema::definitions;
 use walk::Walk;
 
+/// `search` on a saved command stream that the output store resolved.
+pub(super) fn search_output(
+    reference: &str,
+    path: &Path,
+    arguments: &Value,
+    cancellation: &Cancellation,
+) -> Result<Value, String> {
+    search::output(reference, path, arguments, cancellation)
+}
+
 pub(super) fn execute(
     root: &Path,
     name: &str,
@@ -64,6 +74,8 @@ fn string<'a>(arguments: &'a Value, name: &str, default: &'a str) -> Result<&'a 
     }
 }
 
+#[cfg(test)]
+mod output_tests;
 #[cfg(test)]
 mod regression_tests;
 #[cfg(test)]

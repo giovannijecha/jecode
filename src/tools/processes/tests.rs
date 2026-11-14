@@ -418,6 +418,7 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
                 stdout_bytes: 13,
                 stderr_bytes: 13,
                 supervised: true,
+                root: None,
             }),
             waiters: 2,
             ..State::default()
@@ -428,6 +429,7 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
         capture_probe: None,
         started: Instant::now(),
         scope: Weak::new(),
+        watch: crate::process::Watch::default(),
     };
     assert!(
         entry
@@ -461,4 +463,5 @@ fn foreground_bash_without_wait_keeps_its_result_shape() {
 
 mod lifecycle_tests;
 mod observer_tests;
+mod root_tests;
 mod wait_tests;

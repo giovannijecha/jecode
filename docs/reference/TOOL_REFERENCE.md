@@ -199,6 +199,17 @@ Absolute paths inside the project are accepted.
   `errors`. `complete` is `false` when more results exist or errors prevented a
   full search, so an empty result proves absence only within the readable scope.
 
+`search` also accepts an `output:` reference to a saved `stdout` or `stderr`
+stream as its `path`. It resolves the reference exactly as `read` does, with the
+same conversation ownership, link checks and permission (a read at every level),
+and searches the complete saved stream with the same streaming, context, case,
+paging and size rules. Matches, errors and the result `path` name the logical
+reference, never the storage location, and `byte_offset` can be passed to `read`
+on that reference. `pattern` selects project paths, so it is refused for a
+reference; `include_hidden` and `include_ignored` are accepted and have no
+effect, as for any explicitly named path. `list` on a reference is an error,
+and `write` and `edit` still refuse saved output.
+
 ## bash and exec
 
 | Argument | Behavior |
@@ -219,6 +230,24 @@ the command; interrupting a wait the model chose returns `wait_cancelled: true` 
 leaves it running. `moved_to_background: true` means the user released the wait
 from `/process`. In a `steps` call, a command that yielded stops the remaining steps,
 which were planned on its outcome; a step with its own `wait_ms` does not.
+
+A command's process is its root plus every descendant it starts, and it ends
+only when all of them have ended. When the root exits first, for example a
+launcher that starts an application or a build that leaves a daemon, the waiting
+call returns once the rest of the tree is still running half a second later, as a
+`running` result with `yielded: true` and these native facts:
+
+| Field | Meaning |
+| --- | --- |
+| `root_process` | `pid`, `status: "exited"`, `exit_code` (`null` for a Unix signal) and `exited_after_ms`. |
+| `waiting_for` | What keeps the process open: `supervised descendant processes` on Windows; on Unix, `command output held open by descendant processes`. |
+| `descendants` | Windows only: `running`, the Job Object's process count, and up to 16 `processes` with `pid` and `image`. |
+
+Nothing about ownership changes: the descendants stay supervised, and the
+process still ends at its `timeout_seconds`, on `process stop`, on interruption
+and when the conversation ends, stopping them. A process that then times out or
+is stopped keeps `root_process` in its result and completion report. Jecode
+never infers completion from output text.
 
 **bash** runs the [command language](SHELL.md) with closed stdin and a fresh
 state per call. Its environment drops `BASH_ENV`, `ENV` and provider
@@ -241,22 +270,56 @@ quoting or expansion. Details:
   `process_id`. Its stdout combines the program's stdout and stderr. `cols` and
   `rows` default to 80 by 24 (1–1000). `stdin` cannot be combined with `tty`;
   use `process write`. Requires Full.
+- `persistent: true` launches an application the user wants to keep running;
+  see below. Requires Full.
+
+### Persistent launches
+
+An ordinary `exec` belongs to the conversation, like every command. `persistent:
+true` is the explicit exception for an application such as a desktop program:
+
+| | Behavior |
+| --- | --- |
+| Authorization | Only the Full level. Below it the call is refused without a prompt and nothing runs, because the application leaves Workspace confinement and Jecode's process ownership. |
+| Launch | Windows starts the program detached from Jecode's console, in its own process group and outside the host's job. If the host refuses an independent launch, nothing is started and the call reports the error. Unix starts it in a new session through the owned guardian helper. |
+| Result | `launch: "persistent"`, `pid`, `observed_ms` and `application`: `running` when the program was still running at the end of the observation, or `exited` with `exit_code` when it ended first. A launcher that hands off to another instance and exits reports `exited`. |
+| Observation | Up to `wait_ms`, default 2,000 ms, at most 60,000 ms; it ends as soon as the program exits. |
+| Output | stdin, stdout and stderr are the null device; nothing is saved. Use the application's own logs. |
+| Ownership | None after the observation. No `process_id`, timeout, `process stop` or cancellation applies, and the program keeps running after the conversation changes and after Jecode exits. Jecode does not track a later exit. |
+| Cancellation | Before the launch, nothing runs. During the observation it only ends the wait (`wait_cancelled: true`); the program keeps running. |
+| Refused arguments | `tty`, `stdin`, `timeout_seconds` and `output_limit_bytes`, which describe an owned process. |
+
+Windows checks the launch adapter and the suspended application for Job Object
+membership before allowing application code to run. A lost native confirmation
+can instead leave the launch outcome unknown; inspect any reported PID before
+retrying, because the application may already have started.
 
 ## process
 
 | Action | Behavior |
 | --- | --- |
 | `list` | IDs, commands up to 200 characters, statuses, elapsed seconds and output references for this conversation's running and recent processes. The oldest finished ones leave the list once the model has seen them; 32 are kept. |
-| `poll` | New output and status for `process_id`. Optional `wait_ms`, default 0. |
+| `poll` | New output and status for `process_id`. Optional `wait_ms`, default 0. The wait also ends when the root process exits during it while descendants keep running. |
 | `stop` | Stop the process and its descendants, waiting up to 10 seconds. If the status is `stopping`, poll again. |
 | `write` | Send `text`, or one `key`, to an interactive process. Keys: Enter, Tab, Escape, Backspace, Up, Down, Left, Right, Home, End, Delete, Ctrl+C, Ctrl+D, Ctrl+Z. Text of any length is delivered in order, 64 KiB at a time, each part confirmed before the next. If a part is not confirmed or Ctrl+C interrupts the write, the error says how many bytes were confirmed first; no later part is queued. |
 | `resize` | Resize an interactive process to `cols` by `rows` (1–1000). |
 | `interrupt` | Send the terminal interrupt, as Ctrl+C would. |
 
 Statuses are `running`, `stopping`, `exited`, `timed_out`, `stopped` and
-`unknown`. Only `exited` has an `exit_code`. `unknown` means completion or
-cleanup could not be confirmed. An empty output preview says nothing about
-readiness; check `status`.
+`unknown`. Only `exited` has an `exit_code`; it is the root process's code. A
+`running` result with `root_process` means the root has exited and descendants
+keep the process open; see [bash and exec](#bash-and-exec). `unknown` means
+completion or cleanup could not be confirmed. An empty output preview says
+nothing about readiness; check `status`.
+
+If the root exits while the boundary stays open for 500 ms and no waiting call
+reported that fact, a separate root-exit notice joins the next accepted request.
+It carries the root outcome and saved-output references without advancing output
+cursors. It is delivered once, independently of the tree's final outcome, and can
+continue an idle conversation under the same rules as final process notifications.
+`/process` also shows the root's outcome and available remaining-process details.
+On Unix, an open capture pipe establishes only that command output remains open;
+it does not identify or count the processes holding it.
 
 Each result returns the next window of saved output per stream, 16 KiB by
 default (`output_limit_bytes` up to 256 KiB). `*_offset`, `*_next_offset` and

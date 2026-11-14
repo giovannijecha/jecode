@@ -368,6 +368,65 @@ fn exec_cards_keep_structured_target_and_command_status_across_states() {
 }
 
 #[test]
+fn persistent_exec_cards_name_the_launch_or_early_exit_with_pid() {
+    let args = Value::object([
+        ("executable", Value::string("app.exe")),
+        ("args", Value::Array(vec![])),
+        ("persistent", Value::Bool(true)),
+    ]);
+    for (application, exit, expected, failed) in [
+        ("running", None, "Launched · pid 4123", false),
+        (
+            "exited",
+            Some(Value::number(0)),
+            "Exited 0 · pid 4123",
+            false,
+        ),
+        (
+            "exited",
+            Some(Value::number(9)),
+            "Exited 9 · pid 4123",
+            true,
+        ),
+        ("exited", Some(Value::Null), "Exited · pid 4123", true),
+    ] {
+        let mut result = Value::object([
+            ("launch", Value::string("persistent")),
+            ("pid", Value::number(4123)),
+            ("application", Value::string(application)),
+        ]);
+        if let Some(exit) = exit
+            && let Value::Object(fields) = &mut result
+        {
+            fields.insert("exit_code".into(), exit);
+        }
+        for expanded in [false, true] {
+            let shown = Presentation {
+                expanded,
+                ..Presentation::default()
+            };
+            for columns in [44, 80] {
+                let card = draw("exec", &args, Some(&result), &shown, columns);
+                let rows = plain(&card);
+                assert!(rows.contains(expected), "{application} {columns}: {rows}");
+                assert!(!rows.contains("Done"), "{application}: {rows}");
+                assert!(
+                    card.rows
+                        .iter()
+                        .all(|row| text::cells(&row.plain()) <= columns),
+                    "{columns}: {rows}"
+                );
+                if failed {
+                    assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
+                } else {
+                    assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_SHELL)));
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn browser_actions_without_a_payload_open_their_result_on_the_first_tree_row() {
     let result = Value::object([
         ("title", Value::string("Example Domain")),

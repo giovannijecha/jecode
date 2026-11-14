@@ -10,6 +10,7 @@ fn process(status: &'static str) -> Process {
         started: std::time::Instant::now(),
         finished: None,
         awaited: false,
+        root: None,
     }
 }
 
@@ -33,6 +34,38 @@ fn logs(stream: usize) -> Logs {
         views: Default::default(),
         interactive: false,
         input_mode: false,
+    }
+}
+
+#[test]
+fn a_root_exit_keeps_the_running_descendants_visible() {
+    let mut output = logs(0);
+    let running = output.process.as_mut().unwrap();
+    running.root = Some(crate::process::RootExit {
+        pid: 40,
+        exit_code: Some(7),
+        elapsed: std::time::Duration::from_millis(85),
+        remaining: Some(crate::process::Remaining {
+            count: 2,
+            processes: vec![(41, "child.exe".into()), (42, "conhost.exe".into())],
+        }),
+    });
+    let mut panel = Panel::new(vec![running.clone()]);
+    panel.logs = Some(output);
+    for width in [44, 80, 100] {
+        let text = plain(&panel, width, 24);
+        assert!(text.contains("root exited 7"), "{text}");
+        assert!(text.contains("2 descendants"), "{text}");
+        assert!(
+            text.contains("child.exe") && text.contains("conhost.exe"),
+            "{text}"
+        );
+        assert!(!text.contains("exited 0"), "{text}");
+        assert!(
+            render(&panel, width, 24)
+                .iter()
+                .all(|line| panel::cells(line) <= width)
+        );
     }
 }
 

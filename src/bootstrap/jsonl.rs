@@ -66,6 +66,13 @@ pub fn event(event: Event) -> Option<Value> {
                 ("status", Value::string(process.label())),
             ],
         ),
+        Event::ProcessRootExited { process } => {
+            let mut value = process.value();
+            if let Value::Object(fields) = &mut value {
+                fields.insert("type".into(), Value::string("process_root_exited"));
+            }
+            value
+        }
         Event::Collaboration { event } => object("collaboration", vec![("event", event)]),
         Event::Recovering {
             attempt,

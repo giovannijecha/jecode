@@ -102,13 +102,14 @@ fn release_between_registration_and_wait_is_not_lost_or_replayed() {
 
     // Force the scheduler window between a call registering its wait and
     // entering the wait loop. The release must still return that call.
-    let first = entry.begin_wait();
+    let (first, _) = entry.begin_wait();
     observer.move_to_background(&id).unwrap();
     assert_eq!(
         entry.wait_held(
             Duration::from_secs(1),
             &Cancellation::default(),
-            Some(first)
+            Some(first),
+            true
         ),
         WaitEnd::Released
     );
@@ -117,13 +118,14 @@ fn release_between_registration_and_wait_is_not_lost_or_replayed() {
         .unwrap();
 
     // The next call starts after the release and must wait on its own clock.
-    let second = entry.begin_wait();
+    let (second, _) = entry.begin_wait();
     assert_ne!(first, second);
     assert_eq!(
         entry.wait_held(
             Duration::from_millis(30),
             &Cancellation::default(),
-            Some(second)
+            Some(second),
+            true
         ),
         WaitEnd::Elapsed
     );

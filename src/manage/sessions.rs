@@ -144,6 +144,7 @@ fn show(context: &Context, store: &Store, id: &str) -> Result<Report, Failure> {
             Record::Question { .. }
             | Record::Collaboration { .. }
             | Record::ProcessFinished { .. }
+            | Record::ProcessRootExited { .. }
             | Record::TurnStart => {}
         }
     }
