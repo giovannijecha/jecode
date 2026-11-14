@@ -196,10 +196,12 @@ the entry's state, where it ends a waiting call after a short settle and appears
 status, final results and completion reports (`tools/processes/root.rs`).
 After a 500 ms settling period, an unreported root exit also has its own sequenced
 notice. Tool results and accepted request state acknowledge it independently of the
-final completion. `process_root_exited` records and the observer's separate cursor
-keep both facts visible and recoverable without replaying commands; idle continuation
-uses the existing process-resume policy. The Watch state and listener registration
-share one lock, and callbacks run after releasing it.
+final completion. Root notices and final completions share one sequence. Interfaces,
+request snapshots and checkpoints read both in one atomic scan and retain that order;
+each interface's cursor stays independent of delivery to the model. Separate
+`process_root_exited` records keep both outcomes recoverable without replaying
+commands; idle continuation uses the existing process-resume policy. The Watch state
+and listener registration share one lock, and callbacks run after releasing it.
 `exec` with `persistent: true` bypasses this path entirely (`tools/launch.rs`): it
 starts the program outside the boundary and keeps no handle once its observation
 ends. Every other `bash` and `exec` launch is an
@@ -222,7 +224,7 @@ them, so a rejected request sends them again and an accepted one never does. The
 the state's text as a section that is shown once, so later state comparisons ignore
 them; a portion summary reads that section from any state leaving the window.
 `save_session` records outcomes no request has carried yet, and the TUI saves each one
-as it appears; both deduplicate by process ID.
+as it appears; both deduplicate by event type and process ID.
 Each receipt records whether it appeared inside a turn, so restoring an idle
 completion keeps it outside the preceding Work chapter even when the agent saved
 it before the interface observed it.
