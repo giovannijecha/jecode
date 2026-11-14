@@ -52,11 +52,10 @@ reads `Path`.
 
 Quote Windows paths passed through `bash`. Outside quotes a backslash escapes
 the next character, so `C:\Users\me\run.ps1` reaches the program as
-`C:Usersmerun.ps1`. Single quotes preserve backslashes, including the leading
-pair in `'\\server\share'`. In double quotes a backslash stays literal except
-before `$`, `"` and `\`; a
-backslash-newline pair is removed. Thus `"\\server\share"` loses one leading
-backslash. For example, launch a PowerShell script in Windows Terminal with:
+`C:Usersmerun.ps1`. Single quotes keep every backslash, so `'\\server\share'`
+stays intact. In double quotes a backslash escapes only `$`, `"`, `\` and a
+newline, so `"\\server\share"` loses one leading backslash. For example, launch
+a PowerShell script in Windows Terminal with:
 
 ```text
 wt.exe -w new powershell.exe -NoProfile -File 'C:\Users\me\check dir\run.ps1' -Work 'C:\Users\me\check dir\out'

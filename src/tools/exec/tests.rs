@@ -185,6 +185,8 @@ fn passes_exact_arguments_stdin_cwd_and_environment_without_a_shell() {
         "$(echo nope); & | *",
         r"C:\Users\me\check dir\run.ps1",
         r"\\server\share\check dir\run.ps1",
+        r"C:\Users\me\check dir\",
+        r#"C:\Users\me\"quoted" dir\\"#,
     ];
     let arguments = Value::object([
         ("executable", Value::string(executable)),
