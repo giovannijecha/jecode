@@ -119,7 +119,6 @@ struct App {
     process_observer: crate::tools::processes::Observer,
     /// The completions this interface has shown.
     process_cursor: usize,
-    process_root_cursor: usize,
     /// A process that ends by itself may continue the conversation. False
     /// after a stopped or failed turn, until the user sends something.
     process_auto_resume: bool,
@@ -190,7 +189,6 @@ impl App {
             archive: agent.archive(),
             process_observer: agent.processes(),
             process_cursor: 0,
-            process_root_cursor: 0,
             process_auto_resume: true,
             collaboration_observer: agent.collaboration(),
             question_observer: agent.questions(),

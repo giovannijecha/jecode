@@ -260,7 +260,7 @@ impl Scope {
 }
 
 impl Entry {
-    fn root_notice(
+    pub(super) fn root_notice(
         &self,
         sequence: usize,
         root: &crate::process::RootExit,

@@ -18,24 +18,21 @@ impl App {
     /// position, so it never takes anything from the model's delivery.
     pub(in crate::tui) fn poll_processes(&mut self) -> bool {
         self.sync_process_observer();
-        let (root_cursor, roots) = self
-            .process_observer
-            .root_notices_since(self.process_root_cursor);
-        self.process_root_cursor = root_cursor;
-        let (cursor, completions) = self.process_observer.completions_since(self.process_cursor);
+        let (cursor, notices) = self.process_observer.notices_since(self.process_cursor);
         self.process_cursor = cursor;
-        let mut dirty = !roots.is_empty() || !completions.is_empty();
-        for root in roots {
+        let mut dirty = !notices.is_empty();
+        for notice in notices {
+            let (root, value) = match notice {
+                crate::tools::processes::Notice::Root(root) => (true, root.value()),
+                crate::tools::processes::Notice::Finished(done) => (false, done.value()),
+            };
             let in_turn = self.state.tool_details.active;
-            self.state.process_root_exit(root.value());
-            if let Err(error) = self.save_process_event(root.value(), true, in_turn) {
-                self.warn(&format!("Process root result could not be saved: {error}"));
+            if root {
+                self.state.process_root_exit(value.clone());
+            } else {
+                self.state.process_completion(value.clone());
             }
-        }
-        for completion in completions {
-            let in_turn = self.state.tool_details.active;
-            self.state.process_completion(completion.value());
-            if let Err(error) = self.save_process_event(completion.value(), false, in_turn) {
+            if let Err(error) = self.save_process_event(value, root, in_turn) {
                 self.warn(&format!("Process result could not be saved: {error}"));
             }
         }

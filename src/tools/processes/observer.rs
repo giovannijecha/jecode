@@ -5,7 +5,7 @@
 //! The handle is weak: it neither extends processes nor survives the
 //! conversation that owned them.
 
-use super::{Completion, Entry, Scope, complete_prefix};
+use super::{Completion, Entry, RootNotice, Scope, complete_prefix};
 use crate::redact::Redactor;
 use crate::tools::OUTPUT_LIMIT;
 use std::fs::File;
@@ -21,6 +21,22 @@ const STREAMS: [&str; 2] = ["stdout", "stderr"];
 pub struct Observer {
     scope: Weak<Scope>,
     redactor: Redactor,
+}
+
+/// A local transcript update, ordered across root and final outcomes together.
+#[derive(Clone, Debug)]
+pub enum Notice {
+    Root(RootNotice),
+    Finished(Completion),
+}
+
+impl Notice {
+    fn sequence(&self) -> usize {
+        match self {
+            Self::Root(root) => root.sequence,
+            Self::Finished(done) => done.sequence,
+        }
+    }
 }
 
 /// One process as the registry reports it now.
@@ -100,6 +116,34 @@ pub struct Page {
 }
 
 impl Observer {
+    /// One atomic snapshot prevents one kind of news from passing an earlier
+    /// update of the other kind between separate scans.
+    pub fn notices_since(&self, cursor: usize) -> (usize, Vec<Notice>) {
+        let Some(scope) = self.scope.upgrade() else {
+            return (cursor, Vec::new());
+        };
+        let entries = scope.entries.lock().unwrap();
+        let mut notices = Vec::new();
+        for entry in entries.iter() {
+            let state = entry.state.lock().unwrap();
+            if let Some((sequence, root)) = &state.root_notice
+                && *sequence > cursor
+            {
+                notices.push(Notice::Root(entry.root_notice(
+                    *sequence,
+                    root,
+                    &self.redactor,
+                )));
+            }
+            if state.sequence.is_some_and(|sequence| sequence > cursor) {
+                notices.push(Notice::Finished(entry.completion(&state, &self.redactor)));
+            }
+        }
+        notices.sort_by_key(Notice::sequence);
+        let next = notices.last().map_or(cursor, Notice::sequence);
+        (next, notices)
+    }
+
     fn terminal(&self, id: &str) -> Result<std::sync::Arc<crate::pty::Control>, String> {
         let scope = self.scope.upgrade().ok_or(ENDED)?;
         let entries = scope.entries.lock().unwrap();
@@ -176,6 +220,7 @@ impl Observer {
 
     /// Terminal transitions no call reported, after this reader's own
     /// `cursor`; independent of what the model has received.
+    #[cfg(test)]
     pub fn completions_since(&self, cursor: usize) -> (usize, Vec<Completion>) {
         let Some(scope) = self.scope.upgrade() else {
             return (cursor, Vec::new());
@@ -186,6 +231,7 @@ impl Observer {
     }
 
     /// Root exits retained independently of the terminal completion cursor.
+    #[cfg(test)]
     pub fn root_notices_since(&self, cursor: usize) -> (usize, Vec<super::RootNotice>) {
         let Some(scope) = self.scope.upgrade() else {
             return (cursor, Vec::new());

@@ -163,11 +163,19 @@ fn output_between_polls_and_immediately_before_exit_is_retained() {
     release(&directory, "two");
     // The process exits between polls; its final output remains readable.
     wait_for(|| {
-        tools
-            .processes
-            .list(&Redactor::empty())
-            .encode()
-            .contains("exited")
+        let listed = tools.processes.list(&Redactor::empty());
+        listed
+            .get("processes")
+            .and_then(Value::as_array)
+            .and_then(|processes| {
+                processes.iter().find(|process| {
+                    process.get("process_id").and_then(Value::as_str) == Some(id.as_str())
+                })
+            })
+            // The root can exit before the supervised process does.
+            .and_then(|process| process.get("status"))
+            .and_then(Value::as_str)
+            == Some("exited")
     });
     let last = process(&tools, "poll", &id, None);
     assert_eq!(text(&last, "status"), "exited");

@@ -238,12 +238,23 @@ fn notes(panel: &Panel, logs: &Logs, columns: usize) -> Vec<Line> {
         .collect();
     if let Some(process) = process
         && let Some(root) = &process.root
+        && process.status != "exited"
     {
-        notes.push(panel::indent(
-            Line::new(&process.label(), status_style(process)),
-            columns,
-        ));
-        if let Some(remaining) = &root.remaining {
+        let (label, tone) = if process.active() {
+            (process.label(), status_style(process))
+        } else {
+            match root.exit_code {
+                Some(code) => (
+                    format!("Root had exited {code}"),
+                    if code == 0 { MUTED } else { BAD },
+                ),
+                None => ("Root had exited without a code".into(), WARNING),
+            }
+        };
+        notes.push(panel::indent(Line::new(&label, tone), columns));
+        if process.active()
+            && let Some(remaining) = &root.remaining
+        {
             for (pid, image) in remaining.processes.iter().take(4) {
                 notes.push(panel::indent(
                     Line::new(&format!("{pid} · {}", single_line(image)), MUTED),

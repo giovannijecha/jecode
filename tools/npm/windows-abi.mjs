@@ -11,15 +11,25 @@ const SubsystemCeiling = '10.0';
 // library: it is newer than the floor and absence disables Workspace confinement.
 // GetConsoleTitleW and SetConsoleTitleW require Windows 2000; SetLastError
 // requires Windows XP, all below the Windows 10 1809 floor.
+// Additional process/job bindings reviewed against Microsoft Learn:
+// AssignProcessToJobObject: Windows XP (nested jobs: Windows 8)
+// https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject
+// IsProcessInJob: Windows XP
+// https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob
+// OpenProcess: Windows XP
+// https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess
+// QueryFullProcessImageNameW: Windows Vista
+// https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew
 export const reviewedPInvokes = {
   'kernel32.dll': [
-    'CloseHandle', 'ClosePseudoConsole', 'CreateFileW', 'CreateIoCompletionPort',
+    'AssignProcessToJobObject', 'CloseHandle', 'ClosePseudoConsole', 'CreateFileW', 'CreateIoCompletionPort',
     'CreateJobObject', 'CreatePipe', 'CreateProcessW', 'CreatePseudoConsole',
     'DeleteProcThreadAttributeList', 'DuplicateHandle', 'FreeEnvironmentStringsW', 'GetConsoleMode',
     'GetConsoleOutputCP', 'GetConsoleScreenBufferInfo', 'GetConsoleScreenBufferInfoEx', 'GetConsoleTitleW', 'GetCurrentProcess',
     'GetEnvironmentStringsW', 'GetExitCodeProcess', 'GetNamedPipeServerProcessId',
     'GetNumberOfConsoleInputEvents', 'GetQueuedCompletionStatus', 'GetStdHandle',
-    'InitializeProcThreadAttributeList', 'QueryInformationJobObject', 'ReadConsoleInputW',
+    'InitializeProcThreadAttributeList', 'IsProcessInJob', 'OpenProcess', 'QueryFullProcessImageNameW',
+    'QueryInformationJobObject', 'ReadConsoleInputW',
     'ResizePseudoConsole', 'ResumeThread', 'SetConsoleMode', 'SetConsoleOutputCP', 'SetConsoleTitleW', 'SetHandleInformation',
     'SetInformationJobObject', 'SetLastError', 'SetStdHandle', 'TerminateJobObject', 'TerminateProcess',
     'UpdateProcThreadAttribute', 'WaitForSingleObject', 'WriteFile',

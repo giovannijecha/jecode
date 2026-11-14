@@ -70,6 +70,34 @@ fn a_root_exit_keeps_the_running_descendants_visible() {
 }
 
 #[test]
+fn a_timeout_keeps_the_earlier_root_code_without_claiming_live_descendants() {
+    let mut output = logs(0);
+    let process = output.process.as_mut().unwrap();
+    process.status = "timed_out";
+    process.finished = Some(std::time::Instant::now());
+    process.root = Some(crate::process::RootExit {
+        pid: 40,
+        exit_code: Some(7),
+        elapsed: std::time::Duration::from_millis(85),
+        remaining: Some(crate::process::Remaining {
+            count: 1,
+            processes: vec![(41, "child.exe".into())],
+        }),
+    });
+    let mut panel = Panel::new(vec![process.clone()]);
+    panel.logs = Some(output);
+    let shown = plain(&panel, 80, 24);
+    assert!(
+        shown.contains("timed out") && shown.contains("Root had exited 7"),
+        "{shown}"
+    );
+    assert!(
+        !shown.contains("descendants running") && !shown.contains("child.exe"),
+        "{shown}"
+    );
+}
+
+#[test]
 fn long_output_commands_leave_room_for_the_exit_status() {
     let mut panel = Panel::new(vec![]);
     let mut output = logs(0);

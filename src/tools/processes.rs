@@ -29,7 +29,7 @@ mod root;
 pub use lifecycle::{Completion, RootNotice};
 #[cfg(test)]
 use observer::read_window;
-pub use observer::{Observer, Page, Process, Window};
+pub use observer::{Notice, Observer, Page, Process, Window};
 #[cfg(test)]
 use paging::read_after;
 use paging::{OutputMode, complete_prefix};

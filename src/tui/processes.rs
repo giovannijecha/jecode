@@ -138,7 +138,6 @@ impl App {
         if !same {
             self.state.processes = None;
             self.process_cursor = 0;
-            self.process_root_cursor = 0;
             self.watch_processes();
         }
     }
