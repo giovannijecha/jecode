@@ -177,7 +177,17 @@ fn passes_exact_arguments_stdin_cwd_and_environment_without_a_shell() {
     let child = directory.path().join("child");
     std::fs::create_dir(&child).unwrap();
     let executable = fixture().to_string_lossy().into_owned();
-    let args = vec!["", "a b", "\"quote\"", "üñîçødé", "$(echo nope); & | *"];
+    let args = vec![
+        "",
+        "a b",
+        "\"quote\"",
+        "üñîçødé",
+        "$(echo nope); & | *",
+        r"C:\Users\me\check dir\run.ps1",
+        r"\\server\share\check dir\run.ps1",
+        r"C:\Users\me\check dir\",
+        r#"C:\Users\me\"quoted" dir\\"#,
+    ];
     let arguments = Value::object([
         ("executable", Value::string(executable)),
         (

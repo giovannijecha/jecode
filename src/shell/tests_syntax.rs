@@ -433,6 +433,33 @@ fn patterns_accept_named_classes() {
 }
 
 #[test]
+fn windows_paths_follow_shell_quoting_rules() {
+    let (directory, mut shell) = shell();
+    for (argument, expected) in [
+        (r"C:\Users\me\run.ps1", r"C:Usersmerun.ps1"),
+        (
+            r"'C:\Users\me\check dir\run.ps1'",
+            r"C:\Users\me\check dir\run.ps1",
+        ),
+        (
+            r#""C:\Users\me\check dir\run.ps1""#,
+            r"C:\Users\me\check dir\run.ps1",
+        ),
+        (r"'\\server\share'", r"\\server\share"),
+        (r#""\\server\share""#, r"\server\share"),
+        (r#""\\\\server\share""#, r"\\server\share"),
+    ] {
+        let script = format!("printf '%s\\n' {argument} > paths");
+        assert_eq!(shell.run(&script), 0, "{argument}");
+        assert_eq!(
+            read(&directory, "paths"),
+            format!("{expected}\n"),
+            "{argument}"
+        );
+    }
+}
+
+#[test]
 fn unquoted_patterns_expand_to_sorted_paths() {
     let (directory, mut shell) = shell();
     let script = "mkdir -p src/nested test; touch src/b.js src/a.js src/c.rs src/.hidden.js src/nested/d.js test/x.test.js; \
