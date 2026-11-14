@@ -389,3 +389,38 @@ fn expanded_media_read_shows_metadata_without_attachment_json() {
         }
     }
 }
+
+#[test]
+fn a_collapse_key_without_room_beside_the_title_stays_at_the_right_edge() {
+    let arguments = Value::object([("path", Value::string(".design/catalog/screens-cards.js"))]);
+    let result = Value::object([("content", Value::string("33: module.exports = {\n"))]);
+    let expanded = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    for columns in [40, 60] {
+        let open = card(
+            Tool {
+                name: "read",
+                arguments: &arguments,
+                summary: "",
+                result: Some(&result),
+                change: None,
+                presentation: &expanded,
+            },
+            columns,
+            true,
+        );
+        let row = open
+            .rows
+            .iter()
+            .map(Line::plain)
+            .find(|row| row.contains("Ctrl+O collapse"))
+            .unwrap();
+        assert_eq!(
+            text::cells(row.trim_end()),
+            columns - 2,
+            "{columns}: {row:?}"
+        );
+    }
+}

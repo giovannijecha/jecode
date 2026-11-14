@@ -155,3 +155,29 @@ fn node_headline_falls_back_for_incomplete_preambles_and_preserves_plain_errors(
         assert_eq!(streams::headline(&entries, true), Some(0));
     }
 }
+
+#[test]
+fn an_unreadable_question_has_nothing_hidden_to_expand() {
+    let arguments = Value::object([("questions", Value::string("not a list"))]);
+    let result = Value::object([("error", Value::string("Invalid questions"))]);
+    let shown = Presentation::default();
+    let rendered = card(
+        Tool {
+            name: "ask_user",
+            arguments: &arguments,
+            summary: "",
+            result: Some(&result),
+            change: None,
+            presentation: &shown,
+        },
+        80,
+        true,
+    );
+    assert!(!rendered.hidden);
+    let text: Vec<_> = rendered.rows.iter().map(Line::plain).collect();
+    assert!(text.iter().all(|row| !row.contains("Ctrl+O")), "{text:#?}");
+    assert!(
+        text.iter().any(|row| row.contains("Invalid questions")),
+        "{text:#?}"
+    );
+}

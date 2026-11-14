@@ -301,7 +301,8 @@ stderr `MUTED`, and stream labels `DIM` when both streams exist. An expanded
 image Read shows an `Opened image` fact with dimensions and bytes; Web and
 Browser keep their raw results. A standalone last card with hidden content carries the key as text,
 `Ctrl+O` in bold `STRONG` and `expand` in `DIM`, ending two cells from
-the edge of the row reporting it, or on a row of its own when full. A finished
+the edge of the row reporting it, or on a row of its own, still ending two
+cells from the edge, when full. A finished
 WORK block uses its folded-count footer instead. Expanded, the turn's first
 card names `collapse` on its title. Only the latest turn carries it. Tool cards keep the result
 reported when the call returned; `/process` shows the live process list.
@@ -316,16 +317,21 @@ a single call keeps its ordinary card. A missing label displays as **Activity**.
 A compact WORK block takes at most eight physical rows, even at 40 columns.
 Its title has the state badge, the bold `STRONG` label and a `DIM` call count
 ending two cells from the right edge, plus `· N failed` in `BAD` when needed.
-The title has no key. Facts use at most two tree rows; a second row ends in
-` …` when more facts are folded. Among calls needing attention, choose at most three in
-Failed, Unknown, Stopped, Running, Background priority, latest first for ties,
-then display those members in source order. A warning row counts further
-attention calls. The last four completed calls in source order fill remaining
-room. Members use their family text ink and a middle ellipsis at 60/40 to keep
+The title has no key; below about 32 columns the count gives way before the
+badge and label. Facts use at most two tree rows ending two cells from the
+edge, breaking only between whole facts; a second row ends in ` …` when more
+facts are folded. `N running` comes last and joins a row only when it fits, so
+finishing a call never removes a fact row. Among Failed, Unknown, Stopped and
+Background calls, and Running calls older than the latest four, choose at most
+three in that priority, latest first for ties, then display those members in
+source order. A warning row counts further attention calls. The latest four
+running or completed calls in source order fill remaining room: a call that
+finishes keeps its row, so the live block never shrinks. Members use their family text ink and a middle ellipsis at 60/40 to keep
 both ends of the target, with an outcome aligned right. A failed member shows
 only `exit N` when an actual exit code exists, otherwise `failed`; the full
-diagnostic remains in its expanded card. A finished
-block ends with the folded call count. Finished blocks add `Ctrl+O expand`;
+diagnostic remains in its expanded card. At narrow widths a member's outcome
+gives way before its tool name. A block ends with the folded call count in
+words: `1 call folded`, `no calls folded`. Finished blocks add `Ctrl+O expand`;
 running blocks have no fold key. The status row still reports `N tools running` when appropriate.
 
 Ctrl+O on the latest finished turn dissolves WORK: no chapter title, facts or

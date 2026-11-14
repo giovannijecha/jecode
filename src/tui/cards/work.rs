@@ -113,7 +113,11 @@ pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
     for (index, item) in items.into_iter().enumerate() {
         tree(&mut rows, item, index + 1 == count, columns);
     }
-    Card { rows, hidden: true }
+    // Without a readable request, the expanded card adds nothing to expand.
+    Card {
+        rows,
+        hidden: request.is_some(),
+    }
 }
 
 /// The chosen labels, then the typed words after ` · `.

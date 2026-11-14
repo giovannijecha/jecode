@@ -379,10 +379,13 @@ fn hint(row: Line, label: &str, columns: usize) -> Vec<Line> {
         row.push(&" ".repeat(columns - 2 - used - room), MUTED);
         vec![row.append(cap)]
     } else {
+        // No room beside the title: the key takes its own row, still ending
+        // two cells from the edge like every other key.
         let origin = row.origin;
-        let mut cap = cap.indent("    ", MUTED);
-        cap.origin = origin;
-        vec![row, cap]
+        let mut own = Line::new(&" ".repeat(columns.saturating_sub(2 + room)), MUTED);
+        own = own.append(cap).shortened(columns);
+        own.origin = origin;
+        vec![row, own]
     }
 }
 

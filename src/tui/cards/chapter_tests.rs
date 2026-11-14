@@ -1,5 +1,7 @@
 #[path = "chapter_concurrency_tests.rs"]
 mod concurrency;
+#[path = "chapter_stability_tests.rs"]
+mod stability;
 
 use super::*;
 use crate::tui::theme::{BAD, DIM, STRONG, WARNING};
@@ -337,7 +339,7 @@ fn failed_members_only_show_real_exit_codes() {
 }
 
 #[test]
-fn mixed_outcome_facts_follow_running_background_stopped_order() {
+fn mixed_outcome_facts_follow_background_stopped_running_order() {
     let shown = Presentation::default();
     let args = object([("command", "run"), ("work", "Inspect")]);
     let background = object([("status", "running"), ("process_id", "p1")]);
@@ -349,7 +351,7 @@ fn mixed_outcome_facts_follow_running_background_stopped_order() {
     ];
     let snapshot = lines(&chapter::header(&calls, 80, false)).join("\n");
     assert!(
-        snapshot.contains("1 running · 1 in background · 1 stopped"),
+        snapshot.contains("1 in background · 1 stopped · 1 running"),
         "{snapshot}"
     );
 }

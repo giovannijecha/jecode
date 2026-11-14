@@ -1,7 +1,7 @@
 //! The bounded WORK view. Selection is by outcome; display stays in call order.
 
 use super::super::{Card, Status, Tool, badge, heading};
-use super::{facts::Outcomes, facts::facts, label};
+use super::{facts::Outcomes, facts::facts, facts::rows as pack_facts, facts::running, label};
 use crate::tui::{
     activity as timer,
     line::Line,
@@ -22,30 +22,35 @@ pub(super) fn render(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
     }
     let mut title = badge::badge("Work", outcomes.primary());
     title.push(" ", BODY);
+    // The badge and the start of the label outlive the count at narrow widths.
+    let keep = text::cells(&title.plain()) + 6;
     title.push(
         &tools.first().map_or_else(|| "Activity".into(), label),
         STRONG.bold(),
     );
-    let title = right_aligned(title, count, columns).at_source(0);
+    let title = right_aligned(title, count, columns, keep).at_source(0);
 
     let width = columns.saturating_sub(4).max(2);
-    let all_facts = facts(tools, &outcomes).wrap(width, true);
-    let mut fact_rows: Vec<_> = all_facts.iter().take(2).cloned().collect();
-    if all_facts.len() > 2 && fact_rows.len() == 2 {
-        let second = fact_rows.pop().unwrap();
-        let mut second = second
-            .wrap(width.saturating_sub(2), false)
-            .into_iter()
-            .next()
-            .unwrap_or_default();
-        second.push(" …", DIM);
-        fact_rows.push(second);
-    }
+    // Facts end two cells from the edge, like the title count and outcomes.
+    let fact_rows = pack_facts(
+        &facts(tools, &outcomes),
+        running(&outcomes),
+        width.saturating_sub(2).max(2),
+    );
     let room = MAX_ROWS.saturating_sub(2 + fact_rows.len());
+    // Running and completed calls share the window of the latest four, so a
+    // call that finishes keeps its row and the live chapter never shrinks.
+    let flowing = |tool: &&Tool<'_>| matches!(Status::of(tool), Status::Done | Status::Running);
+    let window: Vec<usize> = (0..tools.len())
+        .filter(|index| flowing(&&tools[*index]))
+        .collect();
+    let latest = &window[window.len().saturating_sub(4)..];
     let mut priority: Vec<_> = tools
         .iter()
         .enumerate()
-        .filter(|(_, tool)| Status::of(tool) != Status::Done)
+        .filter(|(index, tool)| {
+            !flowing(tool) || (Status::of(tool) == Status::Running && !latest.contains(index))
+        })
         .collect();
     let attention = priority.len();
     priority.sort_by_key(|(index, tool)| (rank(Status::of(tool)), usize::MAX - *index));
@@ -53,14 +58,10 @@ pub(super) fn render(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
     priority.sort_by_key(|(index, _)| *index);
     let more_attention = attention - priority.len();
     let remaining = room.saturating_sub(priority.len() + usize::from(more_attention > 0));
-    let mut recent: Vec<_> = tools
+    let recent: Vec<_> = window[window.len().saturating_sub(remaining.min(4))..]
         .iter()
-        .enumerate()
-        .filter(|(_, tool)| Status::of(tool) == Status::Done)
-        .rev()
-        .take(remaining.min(4))
+        .map(|index| (*index, &tools[*index]))
         .collect();
-    recent.reverse();
     let hidden = tools.len() - priority.len() - recent.len();
 
     let mut body: Vec<_> = fact_rows;
@@ -84,13 +85,17 @@ pub(super) fn render(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
             .at_source(index + 1)
     }));
 
-    let mut footer = Line::new(&format!("  └ {hidden} calls folded"), DIM);
+    let folded = match hidden {
+        0 => "no calls folded".to_owned(),
+        _ => format!("{} folded", text::counted(hidden, "call")),
+    };
+    let mut footer = Line::new(&format!("  └ {folded}"), DIM);
     if keycap {
         let mut cap = Line::new("Ctrl+O", STRONG.bold());
         if columns >= 19 {
             cap.push(" expand", DIM);
         }
-        footer = right_aligned(footer, cap, columns);
+        footer = right_aligned(footer, cap, columns, 0);
     }
     rows.push(footer.shortened(columns).at_source(rows.len()));
     debug_assert!(rows.len() <= MAX_ROWS);
@@ -140,6 +145,7 @@ fn member(tool: &Tool<'_>, columns: usize) -> Line {
     let (name, target) = heading(tool);
     let mut left = Line::new(&name.to_uppercase(), badge::ink(name).bold());
     left.push(" ", BODY);
+    let keep = text::cells(&left.plain()) + 1;
     let description = super::super::rhythm::description(tool);
     let target = if tool.name == "collaboration" {
         tool.result
@@ -154,7 +160,7 @@ fn member(tool: &Tool<'_>, columns: usize) -> Line {
         .saturating_sub(8 + text::cells(&left.plain()) + text::cells(&detail.plain()))
         .max(1);
     left.push(&middle(&target, width), BODY);
-    right_aligned(left, detail, columns.saturating_sub(4))
+    right_aligned(left, detail, columns.saturating_sub(4), keep)
 }
 
 fn middle(value: &str, width: usize) -> String {
@@ -185,10 +191,15 @@ fn middle(value: &str, width: usize) -> String {
     format!("{first}…{last}")
 }
 
-fn right_aligned(left: Line, right: Line, columns: usize) -> Line {
+/// `right` ends two cells from the edge. When it would leave `left` fewer than
+/// `keep` cells, `right` gives way: the name or badge is never cut for it.
+fn right_aligned(left: Line, right: Line, columns: usize, keep: usize) -> Line {
     let end = columns.saturating_sub(2);
     let right_width = text::cells(&right.plain());
     let room = end.saturating_sub(right_width + 2);
+    if room < keep.min(text::cells(&left.plain())) {
+        return left.shortened(columns);
+    }
     let mut left = left.shortened(room);
     let gap = end.saturating_sub(text::cells(&left.plain()) + right_width);
     left.push(&" ".repeat(gap), MUTED);

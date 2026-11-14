@@ -45,7 +45,7 @@ impl Outcomes {
     }
 }
 
-pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
+pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Vec<String> {
     let mut files = BTreeSet::new();
     let mut other_reads = 0;
     let mut listings = 0;
@@ -158,22 +158,73 @@ pub(super) fn facts(tools: &[Tool<'_>], outcomes: &Outcomes) -> Line {
             text::counted(agents_created, "agent")
         ));
     }
-    let mut line = Line::new(&parts.join(" · "), DIM);
-    for (count, label, style) in [
-        (outcomes.running, "running", DIM),
-        (outcomes.background, "in background", DIM),
-        (outcomes.stopped, "stopped", DIM),
+    for (count, label) in [
+        (outcomes.background, "in background"),
+        (outcomes.stopped, "stopped"),
     ] {
         if count > 0 {
-            if !line.spans.is_empty() {
-                line.push(" · ", DIM);
-            }
-            line.push(&format!("{count} {label}"), style);
+            parts.push(format!("{count} {label}"));
         }
     }
-    if line.spans.is_empty() {
-        Line::new(&format!("{} completed", outcomes.done), DIM)
-    } else {
-        line
+    if parts.is_empty() && outcomes.running == 0 {
+        parts.push(format!("{} completed", outcomes.done));
     }
+    parts
+}
+
+/// `N running`, the one fact that disappears while the chapter is live.
+pub(super) fn running(outcomes: &Outcomes) -> Option<String> {
+    (outcomes.running > 0).then(|| format!("{} running", outcomes.running))
+}
+
+/// Facts packed into rows of `width` cells, breaking only between facts; a
+/// fact wider than a row wraps on its own. The transient `running` fact joins
+/// only a row that has room, so finishing a call never removes a row. At most
+/// two rows: when more are folded, the second ends in ` …`.
+pub(super) fn rows(parts: &[String], running: Option<String>, width: usize) -> Vec<Line> {
+    let fits = |row: &str, part: &str| text::cells(row) + 3 + text::cells(part) <= width;
+    let mut packed: Vec<String> = Vec::new();
+    for part in parts {
+        match packed.last_mut() {
+            Some(row) if fits(row, part) => {
+                row.push_str(" · ");
+                row.push_str(part);
+            }
+            _ => packed.push(part.clone()),
+        }
+    }
+    if let Some(part) = running {
+        let rows = packed.len();
+        match packed.last_mut() {
+            None => packed.push(part),
+            Some(row) if rows <= 2 && fits(row, &part) => {
+                row.push_str(" · ");
+                row.push_str(&part);
+            }
+            Some(_) => {}
+        }
+    }
+    let all: Vec<Line> = packed
+        .iter()
+        .flat_map(|row| Line::new(row, DIM).wrap(width, true))
+        .collect();
+    let mut rows: Vec<Line> = all.iter().take(2).cloned().collect();
+    if all.len() > 2
+        && let Some(second) = rows.pop()
+    {
+        let plain = second.plain();
+        let room = width.saturating_sub(2);
+        // Drop whole trailing facts first, so the ellipsis never splits one.
+        let mut kept = plain.as_str();
+        while text::cells(kept) > room {
+            match kept.rfind(" · ") {
+                Some(at) => kept = &kept[..at],
+                None => break,
+            }
+        }
+        let mut second = Line::new(kept, DIM).shortened(room);
+        second.push(" …", DIM);
+        rows.push(second);
+    }
+    rows
 }
