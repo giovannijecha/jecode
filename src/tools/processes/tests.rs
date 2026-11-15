@@ -163,11 +163,19 @@ fn output_between_polls_and_immediately_before_exit_is_retained() {
     release(&directory, "two");
     // The process exits between polls; its final output remains readable.
     wait_for(|| {
-        tools
-            .processes
-            .list(&Redactor::empty())
-            .encode()
-            .contains("exited")
+        let listed = tools.processes.list(&Redactor::empty());
+        listed
+            .get("processes")
+            .and_then(Value::as_array)
+            .and_then(|processes| {
+                processes.iter().find(|process| {
+                    process.get("process_id").and_then(Value::as_str) == Some(id.as_str())
+                })
+            })
+            // The root can exit before the supervised process does.
+            .and_then(|process| process.get("status"))
+            .and_then(Value::as_str)
+            == Some("exited")
     });
     let last = process(&tools, "poll", &id, None);
     assert_eq!(text(&last, "status"), "exited");
@@ -418,6 +426,7 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
                 stdout_bytes: 13,
                 stderr_bytes: 13,
                 supervised: true,
+                root: None,
             }),
             waiters: 2,
             ..State::default()
@@ -428,6 +437,7 @@ fn a_failed_stream_read_preserves_both_output_cursors() {
         capture_probe: None,
         started: Instant::now(),
         scope: Weak::new(),
+        watch: crate::process::Watch::default(),
     };
     assert!(
         entry
@@ -461,4 +471,5 @@ fn foreground_bash_without_wait_keeps_its_result_shape() {
 
 mod lifecycle_tests;
 mod observer_tests;
+mod root_tests;
 mod wait_tests;

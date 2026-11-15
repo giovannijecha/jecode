@@ -31,6 +31,7 @@ pub(super) fn is_builtin(name: &str) -> bool {
         ":" | "true"
             | "false"
             | "exit"
+            | "break"
             | "set"
             | "pwd"
             | "cd"
@@ -82,6 +83,35 @@ pub(super) fn run(shell: &mut Shell, args: &[String], io: &Io) -> Outcome {
                 .and_then(|v| v.parse::<i32>().ok())
                 .unwrap_or(shell.status);
             shell.exit = Some(code);
+            ok(Vec::new())
+        }
+        "break" => {
+            // Only the loops of this execution scope can be left.
+            if shell.loops == 0 {
+                return Err("break: only meaningful inside a for, while or until loop of the same shell; subshells and pipeline stages start outside it".into());
+            }
+            let count = match args.get(1..) {
+                Some([]) | None => 1,
+                Some([text]) => {
+                    if text.is_empty()
+                        || !text.bytes().all(|byte| byte.is_ascii_digit())
+                        || !text.bytes().any(|byte| byte != b'0')
+                    {
+                        return Err(format!("break: {text}: expected a positive loop count"));
+                    }
+                    // Only the depth matters. Saturate long decimal counts
+                    // instead of rejecting an otherwise valid positive N.
+                    text.bytes().fold(0usize, |count, byte| {
+                        count
+                            .saturating_mul(10)
+                            .saturating_add((byte - b'0') as usize)
+                            .min(shell.loops)
+                    })
+                }
+                Some(_) => return Err("break: expected at most one loop count".into()),
+            };
+            // More levels than there are loops leave the outermost one.
+            shell.breaking = count.min(shell.loops);
             ok(Vec::new())
         }
         "set" => {

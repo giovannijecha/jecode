@@ -115,6 +115,9 @@ fn records_keep_event_order_at_each_boundary_and_match_reused_tool_ids() {
             Record::ProcessFinished { .. } => {
                 panic!("Unexpected process completion in local-command fixture")
             }
+            Record::ProcessRootExited { .. } => {
+                panic!("Unexpected process root exit in local-command fixture")
+            }
             Record::TurnStart => "turn start".into(),
             Record::Text { text, .. } => text,
             Record::Tool { name, .. } => name,

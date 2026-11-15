@@ -81,6 +81,10 @@ pub enum Event {
     ProcessFinished {
         process: crate::tools::processes::Completion,
     },
+    /// The root exited but the supervised boundary remains active.
+    ProcessRootExited {
+        process: crate::tools::processes::RootNotice,
+    },
 }
 
 pub trait EventSink {
@@ -276,6 +280,21 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             .get("process_id")
             .and_then(Value::as_str)
             .unwrap_or("");
+        // A tree whose root already exited says so, live and when restored.
+        let root = result
+            .get("root_process")
+            .filter(|root| root.get("status").and_then(Value::as_str) == Some("exited"))
+            .map(|root| match root.get("exit_code") {
+                Some(code) if *code != Value::Null => {
+                    format!("root exited with code {}", code.encode())
+                }
+                _ => "root exited without an exit code".into(),
+            });
+        if status == "running"
+            && let Some(root) = root
+        {
+            return format!("{root}; tree running · {id}");
+        }
         return match status {
             "running" => format!(
                 "{} · {id}",
@@ -294,6 +313,20 @@ fn outcome_summary(name: &str, result: &Value) -> String {
             ),
             "timed_out" => "timed out".into(),
             status => status.into(),
+        };
+    }
+    if name == "exec" && result.get("launch").and_then(Value::as_str) == Some("persistent") {
+        let pid = result
+            .get("pid")
+            .map_or_else(|| "unknown".into(), Value::encode);
+        return match result.get("application").and_then(Value::as_str) {
+            Some("exited") => format!(
+                "launched pid {pid}; exited with code {}",
+                result
+                    .get("exit_code")
+                    .map_or_else(|| "unknown".into(), Value::encode)
+            ),
+            _ => format!("launched pid {pid}; running, not owned by Jecode"),
         };
     }
     if matches!(name, "bash" | "exec") {

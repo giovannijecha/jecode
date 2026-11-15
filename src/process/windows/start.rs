@@ -81,8 +81,15 @@ pub(super) fn spawn(
                     cancellation,
                 )?;
                 let (report, completion) = mpsc::channel();
+                let watch = super::super::root::Watch::default();
+                let reader_watch = watch.clone();
                 thread::spawn(move || {
-                    let _ = report.send(read_completion(&mut completion_file));
+                    let _ = report.send(read_completion(
+                        &mut completion_file,
+                        &reader_watch,
+                        target_pid,
+                        started,
+                    ));
                 });
                 let retained_input = if persistent {
                     match input_receiver.recv_timeout(Duration::from_secs(1)) {
@@ -107,6 +114,7 @@ pub(super) fn spawn(
                     control: Some(control),
                     target_pid,
                     stdin: retained_input,
+                    watch,
                 });
             }
             Ok(Handshake::Done(_, Err(message))) => {

@@ -156,9 +156,10 @@ Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
 
 #[test]
 fn native_burst_joins_console_reads_and_keeps_keys_in_order() {
+    let adapter = crate::native::helper("terminal").unwrap();
     let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n",
-        include_str!("../terminal.cs")
+        "[void][Reflection.Assembly]::LoadFrom('{}')\n",
+        adapter.to_string_lossy().replace('\'', "''")
     ) + r#"
 function Send([JecodeConsole+Burst]$burst, [IO.StringWriter]$writer, [string]$text, [long]$time) {
     $records = New-Object JecodeConsole+Record[] $text.Length
@@ -265,7 +266,10 @@ Write-Output $writer.ToString().Trim()
     assert_eq!(
         output.exit_code,
         Some(0),
-        "{}",
+        "timed_out={} cancelled={} stdout={} stderr={}",
+        output.timed_out,
+        output.cancelled,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
@@ -357,9 +361,10 @@ Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
 
 #[test]
 fn native_typing_arrives_on_each_read_and_bulk_continues_across_reads() {
+    let adapter = crate::native::helper("terminal").unwrap();
     let script = format!(
-        "Add-Type -TypeDefinition @'\n{}\n'@\n",
-        include_str!("../terminal.cs")
+        "[void][Reflection.Assembly]::LoadFrom('{}')\n",
+        adapter.to_string_lossy().replace('\'', "''")
     ) + r#"
 function Send([JecodeConsole+Burst]$burst, [IO.StringWriter]$writer, [string]$text, [long]$time) {
     $records = New-Object JecodeConsole+Record[] $text.Length
@@ -428,7 +433,10 @@ Write-Output ($writer.ToString().Trim() -replace "`r", '' -replace "`n", ';')
     assert_eq!(
         output.exit_code,
         Some(0),
-        "{}",
+        "timed_out={} cancelled={} stdout={} stderr={}",
+        output.timed_out,
+        output.cancelled,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(

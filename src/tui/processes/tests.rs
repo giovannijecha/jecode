@@ -14,6 +14,7 @@ use std::{thread, time::Instant};
 mod control_tests;
 mod credential_tests;
 mod lifecycle_tests;
+mod root_tests;
 mod view_tests;
 
 const UP: u16 = 38;

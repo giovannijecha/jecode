@@ -36,6 +36,8 @@ pub(super) struct Spawned {
     pub control: Option<File>,
     pub target_pid: u32,
     pub stdin: Option<ChildStdin>,
+    /// The root's exit while descendants remain; empty for a leaf.
+    pub watch: super::root::Watch,
 }
 
 enum Handshake {
@@ -88,6 +90,7 @@ pub(super) fn spawn_leaf(command: &Command, input: Option<Vec<u8>>) -> Result<Sp
         completion: None,
         control: None,
         stdin: None,
+        watch: super::root::Watch::default(),
     })
 }
 
@@ -213,17 +216,67 @@ pub(super) fn completion(report: Report) -> Result<i32, String> {
         .map_err(|_| "Windows process completion worker failed".to_string())?
 }
 
-fn read_completion(file: &mut File) -> Result<i32, String> {
-    let mut flag = [0];
-    file.read_exact(&mut flag)
-        .map_err(|_| COMPLETION_MISSING.to_string())?;
+/// Reads the supervisor's reports until its final status. Root-exit reports
+/// arrive first when descendants outlive the root; they update `watch` only.
+fn read_completion(
+    file: &mut File,
+    watch: &super::root::Watch,
+    pid: u32,
+    started: Instant,
+) -> Result<i32, String> {
+    loop {
+        let mut flag = [0];
+        file.read_exact(&mut flag)
+            .map_err(|_| COMPLETION_MISSING.to_string())?;
+        if flag[0] != 2 {
+            return read_final(file, flag[0]);
+        }
+        watch.record(read_root_exit(file, pid, started.elapsed())?);
+    }
+}
+
+fn read_root_exit(
+    file: &mut File,
+    pid: u32,
+    elapsed: Duration,
+) -> Result<super::root::RootExit, String> {
+    let incomplete = |_| "Windows process supervisor sent an incomplete root report".to_string();
+    let mut fields = [0; 12];
+    file.read_exact(&mut fields).map_err(incomplete)?;
+    let word =
+        |index: usize| u32::from_le_bytes(fields[index * 4..index * 4 + 4].try_into().unwrap());
+    let length = word(2) as usize;
+    if length > 64 * 1024 {
+        return Err("Windows process supervisor sent an oversized root report".into());
+    }
+    let mut listed = vec![0; length];
+    file.read_exact(&mut listed).map_err(incomplete)?;
+    let processes = String::from_utf8_lossy(&listed)
+        .lines()
+        .filter_map(|line| {
+            let (id, image) = line.split_once('\t')?;
+            Some((id.parse().ok()?, image.to_owned()))
+        })
+        .collect();
+    Ok(super::root::RootExit {
+        pid,
+        exit_code: Some(word(0) as i32),
+        elapsed,
+        remaining: Some(super::root::Remaining {
+            count: word(1) as usize,
+            processes,
+        }),
+    })
+}
+
+fn read_final(file: &mut File, flag: u8) -> Result<i32, String> {
     let mut bytes = [0; 4];
     file.read_exact(&mut bytes)
         .map_err(|_| "Windows process supervisor sent incomplete completion status".to_string())?;
-    if flag[0] == 1 {
+    if flag == 1 {
         return Ok(i32::from_le_bytes(bytes));
     }
-    if flag[0] != 0 {
+    if flag != 0 {
         return Err("Windows process supervisor sent invalid completion status".into());
     }
     let length = u32::from_le_bytes(bytes) as usize;

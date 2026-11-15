@@ -165,11 +165,44 @@ static int guard(const char *input, char **argv) {
     return failure == ENOENT ? 127 : 126;
 }
 
+/* A persistent launch: the application leads a new session, so neither Jecode's
+   process group nor its terminal reaches it, and reads and writes the null
+   device. Standard output is the owner's status pipe: a failure is written to a
+   close-on-exec copy, so a successful exec reaches the owner as end of file. */
+static int launch(char **argv) {
+    char *program = resolve(argv[0]);
+    struct stat metadata;
+    if (!program || stat(program, &metadata) < 0 || !S_ISREG(metadata.st_mode) || access(program, X_OK) < 0) {
+        printf("%s: executable not found\n", argv[0]);
+        free(program);
+        return 127;
+    }
+    int status = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
+    int null = open("/dev/null", O_RDWR);
+    if (status < 0 || null < 0 || setsid() < 0) {
+        printf("could not detach the application: %s\n", strerror(errno));
+        free(program);
+        return 125;
+    }
+    for (int stream = STDIN_FILENO; stream <= STDERR_FILENO; stream++) {
+        if (dup2(null, stream) < 0) {
+            dprintf(status, "could not redirect the application's streams: %s\n", strerror(errno));
+            return 125;
+        }
+    }
+    if (null > STDERR_FILENO) close(null);
+    execv(program, argv);
+    dprintf(status, "%s: %s\n", program, strerror(errno));
+    free(program);
+    return 126;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "uid")) {
         return printf("%lu\n", (unsigned long)geteuid()) < 0 ? 1 : 0;
     }
     if (argc >= 4 && !strcmp(argv[1], "guard")) return guard(argv[2], &argv[3]);
+    if (argc >= 3 && !strcmp(argv[1], "launch")) return launch(&argv[2]);
     if (argc == 3 && !strcmp(argv[1], "fifo")) return mkfifo(argv[2], 0600) < 0 ? 1 : 0;
     if (argc == 3 && !strcmp(argv[1], "kill-group")) {
         char *end;

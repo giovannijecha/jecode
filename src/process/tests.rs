@@ -23,17 +23,45 @@ fn exited_root_fixture() {
         if let Some(marker) = std::env::var_os("JECODE_PROCESS_ROOT_MARKER") {
             std::fs::write(marker, b"started").unwrap();
         }
+        fixture_release("JECODE_PROCESS_ROOT_RELEASE");
         std::io::stdout().write_all(b"root finished\n").unwrap();
         std::io::stdout().flush().unwrap();
-        std::process::exit(0);
+        std::process::exit(
+            std::env::var("JECODE_PROCESS_ROOT_EXIT_CODE")
+                .ok()
+                .and_then(|code| code.parse().ok())
+                .unwrap_or(0),
+        );
     }
-    std::thread::sleep(Duration::from_secs(2));
+    if let Some(marker) = std::env::var_os("JECODE_PROCESS_CHILD_MARKER") {
+        std::fs::write(marker, b"started").unwrap();
+    }
+    if std::env::var_os("JECODE_PROCESS_CHILD_RELEASE").is_some() {
+        fixture_release("JECODE_PROCESS_CHILD_RELEASE");
+    } else {
+        std::thread::sleep(Duration::from_secs(2));
+    }
     std::io::stdout().write_all(b"child finished\n").unwrap();
     std::fs::write(
         std::env::var_os("JECODE_PROCESS_MARKER").unwrap(),
         b"survived",
     )
     .unwrap();
+}
+
+#[cfg(windows)]
+fn fixture_release(variable: &str) {
+    let Some(path) = std::env::var_os(variable) else {
+        return;
+    };
+    let started = Instant::now();
+    while !std::path::Path::new(&path).exists() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "fixture release timed out"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[cfg(windows)]

@@ -188,7 +188,23 @@ turn and removing it from the saved queue happen in one save. Local commands
 wait until the interface is idle.
 
 `process::start_logged_input` creates a command handle; `Started::supervise` owns
-its timeout, cancellation, output and cleanup. Every `bash` and `exec` launch is an
+its timeout, cancellation, output and cleanup. `Started::watch` carries the root
+process's own exit (`process/root.rs`) while the boundary stays open: Windows from
+the supervisor's root report, Unix when the root has exited but its output is still
+held open. Supervision and cleanup never depend on it; the registry copies it into
+the entry's state, where it ends a waiting call after a short settle and appears in
+status, final results and completion reports (`tools/processes/root.rs`).
+After a 500 ms settling period, an unreported root exit also has its own sequenced
+notice. Tool results and accepted request state acknowledge it independently of the
+final completion. Root notices and final completions share one sequence. Interfaces,
+request snapshots and checkpoints read both in one atomic scan and retain that order;
+each interface's cursor stays independent of delivery to the model. Separate
+`process_root_exited` records keep both outcomes recoverable without replaying
+commands; idle continuation uses the existing process-resume policy. The Watch state
+and listener registration share one lock, and callbacks run after releasing it.
+`exec` with `persistent: true` bypasses this path entirely (`tools/launch.rs`): it
+starts the program outside the boundary and keeps no handle once its observation
+ends. Every other `bash` and `exec` launch is an
 entry in the conversation's `tools/processes.rs` registry, with a monitor thread and
 a stop token; the launching call only waits for it. `/process` observes the registry
 through a weak handle with its own output cursors, so it cannot keep a process
@@ -208,7 +224,7 @@ them, so a rejected request sends them again and an accepted one never does. The
 the state's text as a section that is shown once, so later state comparisons ignore
 them; a portion summary reads that section from any state leaving the window.
 `save_session` records outcomes no request has carried yet, and the TUI saves each one
-as it appears; both deduplicate by process ID.
+as it appears; both deduplicate by event type and process ID.
 Each receipt records whether it appeared inside a turn, so restoring an idle
 completion keeps it outside the preceding Work chapter even when the agent saved
 it before the interface observed it.
@@ -346,9 +362,9 @@ They call OS APIs directly; the Rust code uses no `unsafe` and no FFI.
 
 | Boundary | Implementation |
 | --- | --- |
-| Windows processes | A C# supervisor creates commands inside Win32 Job Objects and reports completion through a private named pipe. A separate stop channel keeps cancellation independent of blocking reads. |
+| Windows processes | A C# supervisor creates commands inside Win32 Job Objects and reports completion through a private named pipe once the job is empty. When the root process exits first, the same pipe first carries its exit code and the job's remaining process IDs and image names, again whenever they change. Console hosts are left out of that count, so a job holding only them reports no root exit. A separate stop channel keeps cancellation independent of blocking reads. |
 | Command confinement | Workspace commands run under an OS-enforced filesystem policy generated in `sandbox.rs` and `sandbox/`: a Process Security Environment on Windows, and on Unix Landlock or Seatbelt applied by the process guardian just before `exec` (`native/process_confine.h`); see [Permissions](../usage/PERMISSIONS.md#command-confinement). |
-| Unix processes | A C guardian owns a process group, watches a private owner pipe and cleans up descendants on cancellation, timeout or owner loss. Commands with supplied stdin use one extra relay process to forward the private FIFO into an anonymous pipe; reopening `/dev/stdin` then preserves data and EOF. The relay shares the command's process group and holds no owner-control or capture pipe. |
+| Unix processes | A C guardian owns a process group, watches a private owner pipe and cleans up descendants on cancellation, timeout or owner loss. Commands with supplied stdin use one extra relay process to forward the private FIFO into an anonymous pipe; reopening `/dev/stdin` then preserves data and EOF. The relay shares the command's process group and holds no owner-control or capture pipe. A separate `launch` mode starts a persistent application in a new session with null streams; it reports a failed start on a close-on-exec copy of its status pipe, so a successful `exec` reaches the owner as end of file. |
 | Interactive terminals | Windows uses ConPTY with current-user named pipes; Unix uses POSIX PTYs with private Unix-domain sockets. Input and control use separate connections. |
 | HTTPS and cryptography | Windows uses WinHTTP and .NET cryptography; macOS uses CFNetwork, Security and CommonCrypto; Linux uses sockets with the system libssl and libcrypto. Request bodies and tokens travel to the adapter on stdin, never in arguments or files. On Windows, account cryptography and owner-only ACL changes share one helper per process, which exits after 10 idle seconds. Requests support cancellation and a 15-second I/O deadline; an interrupted request discards the helper before another can use it. The HTTP adapter stays alive between requests, one process per request in flight, so all HTTP traffic skips process startup and reuses open connections; it exits after 5 idle minutes or with Jecode, and cancellation discards it. WinHTTP manages its connections; Linux and macOS share an owned HTTP parser and a cache of up to four connections, checked before reuse. Linux uses system OpenSSL, while macOS uses CFStream TLS over an owned socket, preserving OS certificate and hostname checks. macOS resolves system proxy routes, including PAC and SOCKS, before connecting. Only GET and HEAD may be resent transparently after a reused connection fails before response headers; POST failures are returned to the caller because the server may already have applied them. OpenAI conversations use one more adapter in socket mode: WinHTTP and `NSURLSessionWebSocketTask` handle the protocol on Windows and macOS, `native/linux_http_socket.h` on Linux. |
 | Terminal input | Windows reads `CONIN$` through a C# adapter; Unix uses `termios` and `/dev/tty` with a guardian that restores terminal modes. |

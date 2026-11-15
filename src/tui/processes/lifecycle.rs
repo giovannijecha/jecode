@@ -18,13 +18,21 @@ impl App {
     /// position, so it never takes anything from the model's delivery.
     pub(in crate::tui) fn poll_processes(&mut self) -> bool {
         self.sync_process_observer();
-        let (cursor, completions) = self.process_observer.completions_since(self.process_cursor);
+        let (cursor, notices) = self.process_observer.notices_since(self.process_cursor);
         self.process_cursor = cursor;
-        let mut dirty = !completions.is_empty();
-        for completion in completions {
+        let mut dirty = !notices.is_empty();
+        for notice in notices {
+            let (root, value) = match notice {
+                crate::tools::processes::Notice::Root(root) => (true, root.value()),
+                crate::tools::processes::Notice::Finished(done) => (false, done.value()),
+            };
             let in_turn = self.state.tool_details.active;
-            self.state.process_completion(completion.value());
-            if let Err(error) = self.save_process_completion(&completion, in_turn) {
+            if root {
+                self.state.process_root_exit(value.clone());
+            } else {
+                self.state.process_completion(value.clone());
+            }
+            if let Err(error) = self.save_process_event(value, root, in_turn) {
                 self.warn(&format!("Process result could not be saved: {error}"));
             }
         }
@@ -38,25 +46,43 @@ impl App {
 
     /// Save the visible row independently of delivery to the model. The
     /// process registry keeps its separate `reported` flag until acceptance.
-    fn save_process_completion(
+    fn save_process_event(
         &self,
-        completion: &crate::tools::processes::Completion,
+        mut event: Value,
+        root: bool,
         in_turn: bool,
     ) -> Result<(), String> {
-        let mut event = completion.value();
+        let process_id = event
+            .get("process_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let (kind, prefix) = if root {
+            ("process_root_exited", "process-root")
+        } else {
+            ("process_finished", "process")
+        };
         let Value::Object(fields) = &mut event else {
             unreachable!("a process completion is an object")
         };
-        fields.insert("type".into(), Value::string("process_finished"));
+        fields.insert("type".into(), Value::string(kind));
         fields.insert("in_turn".into(), Value::Bool(in_turn));
         // A receipt can be in the live conversation before the worker's
         // checkpoint. The durable event must retain the row it followed.
-        if let Some(at) = self.state.items.iter().position(|item| {
-            matches!(item, Item::Tool { id, .. } if id == &format!("process:{}", completion.id))
-        }) && let Some(id) = self.state.items[..at].iter().rev().find_map(|item| match item {
-            Item::Tool { id, .. } if !id.starts_with("process:") => Some(id),
-            _ => None,
-        }) {
+        if let Some(at) = self.state.items.iter().position(
+            |item| matches!(item, Item::Tool { id, .. } if id == &format!("{prefix}:{process_id}")),
+        ) && let Some(id) = self.state.items[..at]
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                Item::Tool { id, .. }
+                    if !id.starts_with("process:") && !id.starts_with("process-root:") =>
+                {
+                    Some(id)
+                }
+                _ => None,
+            })
+        {
             fields.insert("after_tool".into(), Value::string(id));
         }
         fields.insert(
@@ -68,9 +94,8 @@ impl App {
         } else {
             let mut events = self.archive.events.lock().unwrap();
             if !events.iter().any(|saved| {
-                saved.get("type").and_then(Value::as_str) == Some("process_finished")
-                    && saved.get("process_id").and_then(Value::as_str)
-                        == Some(completion.id.as_str())
+                saved.get("type").and_then(Value::as_str) == Some(kind)
+                    && saved.get("process_id").and_then(Value::as_str) == Some(process_id.as_str())
             }) {
                 events.push(event);
             }

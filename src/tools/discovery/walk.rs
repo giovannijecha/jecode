@@ -44,6 +44,8 @@ struct Pending {
     absolute: PathBuf,
     depth: usize,
     explicit: bool,
+    /// The name results use instead of a workspace-relative path.
+    label: Option<String>,
 }
 
 pub(crate) struct Walk<'a> {
@@ -55,6 +57,8 @@ pub(crate) struct Walk<'a> {
     include_hidden: bool,
     include_ignored: bool,
     recursive: bool,
+    /// A resolved output reference must remain one ordinary stream file.
+    output: bool,
     pub scope: String,
     pub skipped: Skipped,
     pub errors: Vec<Value>,
@@ -102,18 +106,71 @@ impl<'a> Walk<'a> {
                 absolute,
                 depth: 0,
                 explicit: true,
+                label: None,
             }],
             ignore: Ignore::new(root),
             pattern,
             include_hidden: boolean(arguments, "include_hidden", false)?,
             include_ignored: boolean(arguments, "include_ignored", false)?,
             recursive,
+            output: false,
             scope,
             skipped: Skipped::default(),
             errors: Vec::new(),
             errors_count: 0,
             error_bytes: 0,
         })
+    }
+
+    /// One saved command stream, already resolved and checked by the output
+    /// store, named by its logical `reference` in every result and error.
+    /// Hidden and ignored filters concern project paths; like any explicit
+    /// path, the stream is searched regardless. A pattern would select among
+    /// project paths, so it is refused rather than matched against a reference.
+    pub fn output(
+        reference: &str,
+        absolute: PathBuf,
+        arguments: &Value,
+        cancellation: &'a Cancellation,
+    ) -> Result<Self, String> {
+        if cancellation.requested() {
+            return Err("Operation cancelled".into());
+        }
+        if arguments.get("pattern").is_some() {
+            return Err(
+                "pattern selects project paths; it does not apply to an output reference, which is searched as one stream"
+                    .into(),
+            );
+        }
+        boolean(arguments, "include_hidden", false)?;
+        boolean(arguments, "include_ignored", false)?;
+        let root = absolute.parent().ok_or("Invalid saved output location")?;
+        Ok(Self {
+            root: Path::new(""),
+            cancellation,
+            ignore: Ignore::new(root),
+            pending: vec![Pending {
+                absolute,
+                depth: 0,
+                explicit: true,
+                label: Some(reference.into()),
+            }],
+            pattern: None,
+            include_hidden: true,
+            include_ignored: true,
+            recursive: false,
+            output: true,
+            scope: reference.into(),
+            skipped: Skipped::default(),
+            errors: Vec::new(),
+            errors_count: 0,
+            error_bytes: 0,
+        })
+    }
+
+    /// True for one named saved stream rather than a project scope.
+    pub fn named_stream(&self) -> bool {
+        self.output
     }
 
     pub fn selected(&self, entry: &Entry) -> Result<bool, String> {
@@ -141,7 +198,10 @@ impl<'a> Walk<'a> {
             if self.cancellation.requested() {
                 return Err("Operation cancelled".into());
             }
-            let path = match relative(self.root, &pending.absolute) {
+            let path = match pending
+                .label
+                .map_or_else(|| relative(self.root, &pending.absolute), Ok)
+            {
                 Ok(path) => path,
                 Err(error) => {
                     self.skipped.non_utf8 += 1;
@@ -160,6 +220,13 @@ impl<'a> Walk<'a> {
             // (symbolic links, junctions and mount points) as links. Other
             // reparse points, such as cloud-file placeholders, are content.
             let linked = metadata.file_type().is_symlink();
+            if self.output && (linked || !metadata.is_file()) {
+                self.error(
+                    &path,
+                    "Saved output reference no longer names a regular file",
+                );
+                continue;
+            }
             let directory = metadata.is_dir() && !linked;
             let name = pending
                 .absolute
@@ -237,6 +304,7 @@ impl<'a> Walk<'a> {
                 absolute,
                 depth: depth + 1,
                 explicit: false,
+                label: None,
             }));
     }
 }

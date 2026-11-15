@@ -25,10 +25,11 @@ mod entry;
 mod lifecycle;
 mod observer;
 mod paging;
-pub use lifecycle::Completion;
+mod root;
+pub use lifecycle::{Completion, RootNotice};
 #[cfg(test)]
 use observer::read_window;
-pub use observer::{Observer, Page, Process, Window};
+pub use observer::{Notice, Observer, Page, Process, Window};
 #[cfg(test)]
 use paging::read_after;
 use paging::{OutputMode, complete_prefix};
@@ -74,6 +75,8 @@ struct Entry {
     terminal: Option<Arc<crate::pty::Control>>,
     started: Instant,
     scope: Weak<Scope>,
+    /// The root's exit, observed while the boundary stays open.
+    watch: crate::process::Watch,
 }
 
 #[derive(Default)]
@@ -92,6 +95,14 @@ struct State {
     sequence: Option<usize>,
     /// The model has seen the terminal transition.
     reported: bool,
+    /// The root process exited while supervised descendants keep running.
+    root: Option<crate::process::RootExit>,
+    /// When this runtime learned of that exit.
+    root_seen: Option<Instant>,
+    /// One settled root exit, distinct from the final tree completion.
+    root_notice: Option<(usize, crate::process::RootExit)>,
+    /// A tool result or accepted request already told the model about the root.
+    root_reported: bool,
 }
 
 /// How one process ended, once its final output is available.
@@ -104,6 +115,8 @@ pub(super) struct Outcome {
     pub stderr_bytes: usize,
     /// False when supervision itself failed and no output counts exist.
     pub supervised: bool,
+    /// The root's earlier exit when its descendants outlived it.
+    pub root: Option<crate::process::RootExit>,
 }
 
 /// Controls the initial wait and the lifetime of one launched process.
@@ -129,6 +142,8 @@ pub(super) enum Launched {
 enum WaitEnd {
     /// The process finished or the wait elapsed.
     Elapsed,
+    /// The root process exited while its descendants keep the process open.
+    RootExited,
     /// `cancellation` interrupted the wait.
     Cancelled,
     /// The user moved this wait into the background.
@@ -218,6 +233,21 @@ impl Registry {
             terminal,
             started: Instant::now(),
             scope: Arc::downgrade(&scope),
+            watch: started.watch(),
+        });
+        let observed = Arc::downgrade(&entry);
+        entry.watch.on_change(move || {
+            if let Some(entry) = observed.upgrade()
+                && entry.observe_root()
+            {
+                let observed = Arc::downgrade(&entry);
+                thread::spawn(move || {
+                    thread::sleep(entry::ROOT_SETTLE);
+                    if let Some(entry) = observed.upgrade() {
+                        entry.settle_root();
+                    }
+                });
+            }
         });
         // Register before waiting so an interrupted wait leaves a discoverable process.
         scope.adopt(Arc::clone(&entry));
@@ -227,23 +257,26 @@ impl Registry {
             if let Some(terminal) = &owner.terminal {
                 terminal.close();
             }
+            let mut outcome = Outcome::from(result);
+            outcome.root = owner.watch.root();
             owner.transition(|state| {
-                state.outcome = Some(Outcome::from(result));
+                state.outcome = Some(outcome);
                 state.finished = Some(Instant::now());
             });
             owner.changed.notify_all();
             owner.notify();
         });
         *entry.monitor.lock().unwrap() = Some(monitor);
-        // The launching waiter was registered with the entry at generation 0.
-        let end = entry.wait_held(wait, cancellation, Some(0));
+        // The launching waiter was registered with the entry at generation 0,
+        // before the root could have been seen to exit.
+        let end = entry.wait_held(wait, cancellation, Some(0), false);
         if !foreground {
             return Launched::Report(entry.report(end, output_limit, OutputMode::Next));
         }
         if end == WaitEnd::Cancelled {
             // Interrupting a foreground wait ends the command it was waiting for.
             entry.stop.cancel();
-            entry.wait_held(STOP_WAIT, &Cancellation::default(), None);
+            entry.wait_held(STOP_WAIT, &Cancellation::default(), None, true);
         }
         if let Some(outcome) = entry.final_outcome() {
             return Launched::Finished(outcome);
@@ -329,7 +362,8 @@ impl Registry {
         if action == "stop" {
             entry.request_stop();
         }
-        let end = entry.wait(wait, cancellation);
+        // A poll ends early when the root exits during it; a stop waits for the tree.
+        let end = entry.wait(wait, cancellation, action == "stop");
         entry.report(end, output_limit, output_mode)
     }
 
@@ -346,6 +380,8 @@ impl Registry {
                         // A final status here is the model learning the outcome.
                         state.reported |= state.outcome.is_some();
                         let mut fields = entry.status(&state);
+                        let has_root = state.root.is_some();
+                        state.root_reported |= has_root;
                         fields.insert(
                             "command".into(),
                             Value::string(lifecycle::bounded_command(&entry.command, redactor)),
@@ -406,6 +442,11 @@ pub(super) fn wait_argument(arguments: &Value) -> Result<Option<Duration>, Strin
                 .ok_or_else(|| "wait_ms must be a nonnegative integer".to_string())
         })
         .transpose()
+}
+
+/// Root-process facts for a final command result.
+pub(super) fn root_fields(root: &crate::process::RootExit) -> Vec<(String, Value)> {
+    root::fields(root, false)
 }
 
 pub(super) fn output_limit(arguments: &Value) -> Result<usize, String> {

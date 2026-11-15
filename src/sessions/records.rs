@@ -17,6 +17,10 @@ pub enum Record {
     ProcessFinished {
         event: Value,
     },
+    /// A root exit observed while its supervised boundary remained active.
+    ProcessRootExited {
+        event: Value,
+    },
     TurnStart,
     Text {
         role: String,
@@ -219,6 +223,9 @@ fn append_event(records: &mut Vec<Record>, event: &Value, latest_tool: Option<us
             event: event.clone(),
         }),
         Some("process_finished") => records.push(Record::ProcessFinished {
+            event: event.clone(),
+        }),
+        Some("process_root_exited") => records.push(Record::ProcessRootExited {
             event: event.clone(),
         }),
         Some("turn_start") => records.push(Record::TurnStart),

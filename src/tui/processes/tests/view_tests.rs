@@ -14,6 +14,7 @@ fn finished_terminal_keeps_clean_log_and_leaves_direct_input() {
         started: std::time::Instant::now(),
         finished: None,
         awaited: false,
+        root: None,
     };
     let raw = "\x1b]0;private title\x07hello\rDONE\x1b[31m\n";
     let mut output = Stream::default();
@@ -60,6 +61,7 @@ fn selection_follows_process_identity_and_the_draft_survives() {
         started,
         finished: None,
         awaited: false,
+        root: None,
     };
     let mut list = Panel::new(vec![process("a", "running"), process("b", "running")]);
     list.selected = 1;
@@ -119,6 +121,7 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             started: std::time::Instant::now(),
             finished: None,
             awaited: false,
+            root: None,
         },
         Process {
             id: "process-failed".into(),
@@ -129,6 +132,7 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             started: std::time::Instant::now(),
             finished: None,
             awaited: false,
+            root: None,
         },
         Process {
             id: "process-unknown".into(),
@@ -139,6 +143,7 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             started: std::time::Instant::now(),
             finished: None,
             awaited: false,
+            root: None,
         },
     ]));
     let list = frame(&app).join("\n");
@@ -163,6 +168,7 @@ fn finished_error_and_narrow_states_render_within_the_panel() {
             started: std::time::Instant::now(),
             finished: None,
             awaited: false,
+            root: None,
         }),
         stream: 0,
         views: [output, Stream::default()],

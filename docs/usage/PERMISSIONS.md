@@ -36,6 +36,12 @@ can be contacted.
 Read still lets Jecode save the conversation and use its own temporary storage.
 It never asks for permission to edit: switch levels instead.
 
+Two capabilities exist only at Full and are refused below it without a prompt:
+browser control, and [persistent application launches](../reference/TOOL_REFERENCE.md#persistent-launches)
+(`exec` with `persistent: true`). A persistent application runs without
+confinement and outside Jecode's process ownership, so it keeps running after a
+later change to Workspace or Read, after the conversation and after Jecode exits.
+
 ## Choose a level
 
 | Action | Scope |

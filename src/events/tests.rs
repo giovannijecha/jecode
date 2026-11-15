@@ -45,6 +45,46 @@ fn local_web_and_browser_cards_show_actions_and_artifacts() {
 }
 
 #[test]
+fn persistent_launch_summaries_distinguish_running_from_exited() {
+    let running = crate::json::parse(
+        r#"{"launch":"persistent","pid":42,"application":"running","observed_ms":2000}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::tool_summary("exec", &running),
+        "launched pid 42; running, not owned by Jecode"
+    );
+    let exited = crate::json::parse(
+        r#"{"launch":"persistent","pid":42,"application":"exited","exit_code":3}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::tool_summary("exec", &exited),
+        "launched pid 42; exited with code 3"
+    );
+}
+
+#[test]
+fn a_restored_root_notice_keeps_the_root_code() {
+    let notice = crate::json::parse(
+        r#"{"process_id":"process-1","status":"running","root_process":{"pid":40,"status":"exited","exit_code":7,"exited_after_ms":85},"descendants":{"running":2}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::tool_summary("process", &notice),
+        "root exited with code 7; tree running · process-1"
+    );
+    let without = crate::json::parse(
+        r#"{"process_id":"process-1","status":"running","root_process":{"pid":40,"status":"exited","exit_code":null}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        super::tool_summary("process", &without),
+        "root exited without an exit code; tree running · process-1"
+    );
+}
+
+#[test]
 fn several_read_paths_are_named_together() {
     let arguments = Value::object([(
         "paths",

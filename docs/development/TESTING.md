@@ -164,6 +164,24 @@ context serialization and projection before spending live model calls. It does
 not establish model quality, provider cache behavior or ten-hour live
 performance.
 
+## Persistent application launch fixtures
+
+The normal suite tests persistent launch refusals and ordinary managed-process
+cleanup. The Windows successful-launch, early-exit, cancellation and nested-job
+integration fixtures require a host that permits independent process creation.
+They are opt-in because a harness or CI launcher can correctly forbid breakaway
+from its own Job Object. Run them from a permitting Windows host:
+
+```text
+cargo test --locked --offline tools::launch::tests -- --ignored --nocapture --test-threads=1
+```
+
+Check the reported test count. The fixtures use disposable original programs,
+bounded heartbeats and stop markers; they need no real desktop application or
+user data. Unix launch fixtures run in the normal suite. A refusal inside a
+restrictive Windows host is the expected production behavior, not evidence that
+the successful-launch path ran.
+
 ## Native terminal fixtures
 
 These drive the real renderer through a pseudo-terminal and check input,

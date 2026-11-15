@@ -3,7 +3,7 @@
 use super::Agent;
 use crate::events::{Event, EventSink};
 use crate::json::Value;
-use crate::tools::processes::Completion;
+use crate::tools::processes::{Completion, Notice, RootNotice};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Resume {
@@ -43,7 +43,7 @@ impl Agent {
             && self.prepared.is_none()
             && !self.has_pending_question()
             && !self.cancellation.requested()
-            && self.tools.process_completion_waiting()
+            && (self.tools.process_completion_waiting() || self.tools.process_root_notice_waiting())
     }
 
     /// Continue the conversation after a process ended. The completion
@@ -61,25 +61,37 @@ impl Agent {
         self.child || self.process_resume == Resume::None
     }
 
-    /// Saves finished processes, tells the sink, then marks them delivered to
-    /// the model. A sink failure loses the response, so they stay owed. The UI
-    /// may already have saved the transcript event before this point.
-    pub(super) fn deliver_completions(
+    /// Saves all root exits and final outcomes before delivery, in the order
+    /// they happened. A sink failure leaves the batch owed.
+    pub(super) fn deliver_process_notices(
         &self,
         completions: Vec<Completion>,
+        notices: Vec<RootNotice>,
         emit: &mut impl FnMut(Event) -> Result<(), String>,
     ) -> Result<(), String> {
-        if completions.is_empty() {
-            return Ok(());
+        let notices = ordered_notices(completions, notices);
+        let mut roots = Vec::new();
+        let mut finals = Vec::new();
+        for notice in &notices {
+            match notice {
+                Notice::Root(process) => {
+                    self.save_root_notice(process, true);
+                    roots.push(process.id.clone());
+                }
+                Notice::Finished(process) => {
+                    self.save_completion(process, true);
+                    finals.push(process.id.clone());
+                }
+            }
         }
-        let ids: Vec<_> = completions.iter().map(|done| done.id.clone()).collect();
-        for process in &completions {
-            self.save_completion(process, true);
+        for notice in notices {
+            match notice {
+                Notice::Root(process) => emit(Event::ProcessRootExited { process })?,
+                Notice::Finished(process) => emit(Event::ProcessFinished { process })?,
+            }
         }
-        for process in completions {
-            emit(Event::ProcessFinished { process })?;
-        }
-        self.tools.processes_reported(&ids);
+        self.tools.process_roots_reported(&roots);
+        self.tools.processes_reported(&finals);
         Ok(())
     }
 
@@ -91,8 +103,30 @@ impl Agent {
                 .persistence
                 .as_ref()
                 .is_some_and(|handle| handle.active());
-        for process in self.tools.process_completions(&self.redactor) {
-            self.save_completion(&process, in_turn);
+        for notice in self.tools.process_notices(&self.redactor) {
+            match notice {
+                Notice::Root(process) => self.save_root_notice(&process, in_turn),
+                Notice::Finished(process) => self.save_completion(&process, in_turn),
+            }
+        }
+    }
+
+    fn save_root_notice(&self, process: &RootNotice, in_turn: bool) {
+        let mut event = process.value();
+        if let Value::Object(fields) = &mut event {
+            fields.insert("type".into(), Value::string("process_root_exited"));
+            fields.insert("in_turn".into(), Value::Bool(in_turn));
+            fields.insert(
+                "after_message".into(),
+                Value::number(self.messages.lock().unwrap().len()),
+            );
+        }
+        let mut events = self.events.lock().unwrap();
+        if !events.iter().any(|saved| {
+            saved.get("type").and_then(Value::as_str) == Some("process_root_exited")
+                && saved.get("process_id").and_then(Value::as_str) == Some(process.id.as_str())
+        }) {
+            events.push(event);
         }
     }
 
@@ -119,4 +153,11 @@ impl Agent {
     pub fn processes(&self) -> crate::tools::processes::Observer {
         self.tools.observe_processes(self.redactor.clone())
     }
+}
+
+fn ordered_notices(completions: Vec<Completion>, roots: Vec<RootNotice>) -> Vec<Notice> {
+    let mut notices: Vec<_> = roots.into_iter().map(Notice::Root).collect();
+    notices.extend(completions.into_iter().map(Notice::Finished));
+    notices.sort_by_key(Notice::sequence);
+    notices
 }

@@ -17,11 +17,21 @@ fn bash(tools: &Tools, command: &str, limit: Option<usize>) -> Value {
     tools.execute("bash", &arguments.encode())
 }
 
+fn assert_finished(result: &Value) {
+    assert_eq!(
+        result.get("exit_code"),
+        Some(&Value::number(0)),
+        "foreground fixture did not finish: {}",
+        result.encode()
+    );
+}
+
 #[test]
 fn foreground_preview_keeps_head_and_tail_and_full_saved_output() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::empty());
     let result = bash(&tools, "printf HEAD; printf '%20000s' x; printf TAIL", None);
+    assert_finished(&result);
     let preview = result.get("stdout").and_then(Value::as_str).unwrap();
     assert!(preview.starts_with("HEAD"));
     assert!(preview.ends_with("TAIL"));
@@ -50,6 +60,7 @@ fn chosen_budget_can_exceed_the_old_sixty_four_kib_cap() {
     let directory = Directory::new();
     let tools = tools(&directory, Redactor::empty());
     let result = bash(&tools, "printf '%70000s' x", Some(70000));
+    assert_finished(&result);
     assert_eq!(
         result.get("output_limit_bytes"),
         Some(&Value::number(70000))
@@ -70,6 +81,7 @@ fn oversized_foreground_budget_keeps_a_bounded_preview_and_the_complete_log() {
         "printf HEAD; printf '%4999992s' x; printf TAIL",
         Some(100_000_000),
     );
+    assert_finished(&result);
     assert_eq!(result.get("stdout_bytes"), Some(&Value::number(5_000_000)));
     assert_eq!(
         result.get("output_limit_bytes"),
@@ -95,6 +107,7 @@ fn preview_respects_utf8_boundaries_and_masks_credentials() {
         "printf 'é fixture-secret'; printf '%20000s' x; printf '🦀'",
         Some(9),
     );
+    assert_finished(&result);
     let preview = result.get("stdout").and_then(Value::as_str).unwrap();
     assert!(preview.starts_with("é"));
     assert!(preview.ends_with("🦀"));

@@ -40,6 +40,16 @@ interactive terminal; see [Tools](../usage/TOOLS.md#commands).
   done`, `for ((NAME=START; NAME<LIMIT; NAME++)); do …; done`, `while` and
   `until` loops, and `( … )` subshells. They nest, accept redirections after
   their closing word (`done > file`) and work in `&&`/`||` lists and pipelines.
+- **Leaving loops.** `break` leaves the innermost enclosing `for`, `while` or
+  `until` loop; `break N`, with N a positive decimal integer, leaves N loops,
+  and a count above the number of enclosing loops leaves the outermost. Nothing
+  else in the left loops runs, including the rest of an `&&`/`||` list or `if`;
+  a `break` in a `while` or `until` condition leaves that loop. `break` succeeds
+  with status 0, so the loop's status is 0. Subshells, pipeline stages, command
+  substitutions and background commands are separate shells: a `break` there
+  cannot leave the caller's loop. Outside a loop of its own shell, with a count
+  that is not a positive integer, or with more than one argument, `break` writes
+  an error, returns status 1 and leaves no loop. `continue` is not supported.
 - **Braces.** `{}` and braces without a comma or `..` are ordinary characters,
   so `find . -exec cmd {} \;` and `HEAD@{1}` work.
 - **Path patterns.** Unquoted `*`, `?` and bracket classes expand to matching
@@ -69,7 +79,7 @@ does not establish that the child script succeeded; check the child's result.
 `pwd`, `cd`, `echo`, `printf`, `cat`, `ls`, `mkdir`, `cp`, `mv`, `rm`, `touch`,
 `test` and `[`, `sleep`, `env`, `printenv`, `export`, `set -e` and `set +e`,
 `wc -l`, `wc -c`, `seq`, `tr -d`, `head`, `tail`, `grep`, `mktemp`, `wait`, `true`, `false`,
-`:` and `exit`.
+`:`, `break` and `exit`.
 
 Built-ins support only the options they implement; for example, `tr` supports
 only `-d`. A few behaviors to know:

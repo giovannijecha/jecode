@@ -50,6 +50,38 @@ fn labels_are_trimmed_and_skill_reads_stay_outside_chapters() {
 }
 
 #[test]
+fn compact_work_distinguishes_persistent_launches_from_early_exits() {
+    let shown = Presentation::default();
+    let launch_args = Value::object([
+        ("executable", Value::string("worker.exe")),
+        ("persistent", Value::Bool(true)),
+        ("work", Value::string("Start helpers")),
+    ]);
+    let launched = Value::object([
+        ("launch", Value::string("persistent")),
+        ("application", Value::string("running")),
+        ("pid", Value::number(41)),
+    ]);
+    let exited = Value::object([
+        ("launch", Value::string("persistent")),
+        ("application", Value::string("exited")),
+        ("exit_code", Value::number(9)),
+        ("pid", Value::number(42)),
+    ]);
+    let calls = [
+        tool("exec", &launch_args, Some(&launched), &shown),
+        tool("exec", &launch_args, Some(&exited), &shown),
+    ];
+    let card = chapter::header(&calls, 80, false);
+    let rows = lines(&card).join("\n");
+    assert!(rows.contains("Launched · pid 41"), "{rows}");
+    assert!(rows.contains("Exited 9 · pid 42"), "{rows}");
+    assert!(rows.contains("1 failed"), "{rows}");
+    assert!(card.rows.len() <= 8);
+    assert!(card.rows.iter().all(|row| text::cells(&row.plain()) <= 80));
+}
+
+#[test]
 fn compact_has_at_most_eight_physical_rows_at_all_study_widths() {
     let shown = Presentation {
         elapsed: Some(Duration::from_secs(5)),

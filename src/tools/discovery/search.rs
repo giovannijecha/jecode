@@ -33,6 +33,28 @@ pub(super) fn execute(
     arguments: &Value,
     cancellation: &Cancellation,
 ) -> Result<Value, String> {
+    run(arguments, cancellation, || {
+        Walk::new(root, arguments, true, true, cancellation)
+    })
+}
+
+/// Searches one saved command stream that `read` would resolve the same way.
+pub(super) fn output(
+    reference: &str,
+    path: &Path,
+    arguments: &Value,
+    cancellation: &Cancellation,
+) -> Result<Value, String> {
+    run(arguments, cancellation, || {
+        Walk::output(reference, path.to_path_buf(), arguments, cancellation)
+    })
+}
+
+fn run<'a>(
+    arguments: &Value,
+    cancellation: &Cancellation,
+    walk: impl FnOnce() -> Result<Walk<'a>, String>,
+) -> Result<Value, String> {
     let query = super::super::required_string(arguments, "query")?;
     if query.is_empty() || query.contains(['\r', '\n', '\0']) {
         return Err("query must be nonempty single-line literal text without NUL bytes".into());
@@ -41,7 +63,7 @@ pub(super) fn execute(
     let needle = Needle::new(query, sensitive);
     let context = optional_number(arguments, "context", 2, 0, 10)?;
     let mut page = Page::new(arguments, 100, 1000)?;
-    let mut walk = Walk::new(root, arguments, true, true, cancellation)?;
+    let mut walk = walk()?;
     let mut searched = 0;
     'files: while let Some(entry) = walk.next()? {
         match entry.kind {
@@ -91,7 +113,9 @@ pub(super) fn execute(
                     };
                     // A non-text file is outside the text scope. A late failure can
                     // leave valid earlier matches, so its unsearched tail needs a warning.
-                    if valid_lines > 0 || io_error {
+                    // A named saved stream is the whole scope: no match would
+                    // otherwise read as absent text.
+                    if valid_lines > 0 || io_error || walk.named_stream() {
                         walk.error(&entry.relative, message);
                     }
                     break;

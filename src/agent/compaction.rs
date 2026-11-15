@@ -117,7 +117,11 @@ impl Agent {
                     for (before, state) in request.states {
                         self.context.anchor_state(before, state);
                     }
-                    self.deliver_completions(request.completions, &mut emit)?;
+                    self.deliver_process_notices(
+                        request.completions,
+                        request.root_notices,
+                        &mut emit,
+                    )?;
                     if let Some(event) = completion.usage.as_ref().and_then(generated) {
                         emit(event)?;
                     }

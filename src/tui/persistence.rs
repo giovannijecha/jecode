@@ -356,7 +356,7 @@ impl App {
                                 },
                             });
                         }
-                        Record::ProcessFinished { event } => {
+                        Record::ProcessFinished { event } | Record::ProcessRootExited { event } => {
                             let event = self.archive.redactor.value(&event);
                             if event.get("in_turn") == Some(&crate::json::Value::Bool(false)) {
                                 self.state.finish_tool_turn();

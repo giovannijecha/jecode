@@ -84,11 +84,17 @@ impl Tools {
     }
 
     /// Terminal transitions the model has not seen, for the next request.
+    #[cfg(test)]
     pub fn process_completions(
         &self,
         redactor: &crate::redact::Redactor,
     ) -> Vec<processes::Completion> {
         self.processes.completions(redactor)
+    }
+
+    /// Root and final updates pending for the model, in one ordered snapshot.
+    pub fn process_notices(&self, redactor: &crate::redact::Redactor) -> Vec<processes::Notice> {
+        self.processes.pending_notices(redactor)
     }
 
     /// The model received these completions; they are never sent again.
@@ -99,6 +105,23 @@ impl Tools {
     /// A process ended by itself and the model has not been told.
     pub fn process_completion_waiting(&self) -> bool {
         self.processes.completion_waiting()
+    }
+
+    /// Settled root exits not yet carried to the model.
+    #[cfg(test)]
+    pub fn process_root_notices(
+        &self,
+        redactor: &crate::redact::Redactor,
+    ) -> Vec<processes::RootNotice> {
+        self.processes.root_notices(redactor)
+    }
+
+    pub fn process_roots_reported(&self, ids: &[String]) {
+        self.processes.mark_roots_reported(ids);
+    }
+
+    pub fn process_root_notice_waiting(&self) -> bool {
+        self.processes.root_notice_waiting()
     }
 
     #[cfg(test)]

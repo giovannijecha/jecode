@@ -1,6 +1,6 @@
 //! The bounded WORK view. Selection is by outcome; display stays in call order.
 
-use super::super::{Card, Status, Tool, badge, heading};
+use super::super::{Card, Status, Tool, badge, heading, summary};
 use super::{facts::Outcomes, facts::facts, facts::rows as pack_facts, facts::running, label};
 use crate::tui::{
     activity as timer,
@@ -115,33 +115,39 @@ fn rank(status: Status) -> u8 {
 
 fn member(tool: &Tool<'_>, columns: usize) -> Line {
     let status = Status::of(tool);
-    let detail = match status {
-        Status::Failed => tool
-            .result
-            .and_then(|result| result.get("exit_code"))
-            .filter(|value| **value != crate::json::Value::Null)
-            .map_or_else(
-                || "failed".into(),
-                |value| format!("exit {}", value.encode()),
+    let receipt = tool.result.and_then(|result| {
+        summary::persistent(tool, result).or_else(|| super::super::root::line(tool, result))
+    });
+    // A receipt keeps its own tones, as on its full card.
+    let detail = receipt.unwrap_or_else(|| {
+        let text = match status {
+            Status::Failed => tool
+                .result
+                .and_then(|result| result.get("exit_code"))
+                .filter(|value| **value != crate::json::Value::Null)
+                .map_or_else(
+                    || "failed".into(),
+                    |value| format!("exit {}", value.encode()),
+                ),
+            Status::Unknown => "outcome unknown".into(),
+            Status::Stopped => "stopped".into(),
+            Status::Running => format!(
+                "Running · {}",
+                timer::duration(tool.presentation.duration().unwrap_or_default())
             ),
-        Status::Unknown => "outcome unknown".into(),
-        Status::Stopped => "stopped".into(),
-        Status::Running => format!(
-            "Running · {}",
-            timer::duration(tool.presentation.duration().unwrap_or_default())
-        ),
-        Status::Background => "background".into(),
-        Status::Done => tool
-            .presentation
-            .duration()
-            .map_or_else(String::new, timer::duration),
-    };
-    let tone = match status {
-        Status::Failed => BAD,
-        Status::Unknown | Status::Stopped => WARNING,
-        _ => DIM,
-    };
-    let detail = Line::new(&detail, tone);
+            Status::Background => "background".into(),
+            Status::Done => tool
+                .presentation
+                .duration()
+                .map_or_else(String::new, timer::duration),
+        };
+        let tone = match status {
+            Status::Failed => BAD,
+            Status::Unknown | Status::Stopped => WARNING,
+            _ => DIM,
+        };
+        Line::new(&text, tone)
+    });
     let (name, target) = heading(tool);
     let mut left = Line::new(&name.to_uppercase(), badge::ink(name).bold());
     left.push(" ", BODY);

@@ -6,6 +6,9 @@ use super::{
 };
 use crate::{
     context::Status,
+    events::Event,
+    json::Value,
+    process::{Remaining, RootExit},
     tools::processes::{Completion, Page, Process},
     tui::{
         Feedback, Kind,
@@ -56,6 +59,16 @@ pub(super) fn console() {
             paint(columns, sheet(columns, list()), "b background");
             paint(columns, sheet(columns, list()), "exited 1");
             paint(columns, sheet(columns, output()), "following");
+            paint(columns, sheet(columns, root_output()), "root exited 0");
+            if columns >= 80 {
+                paint(
+                    columns,
+                    sheet(columns, root_output()),
+                    "2 descendants running",
+                );
+                paint(columns, sheet(columns, root_output()), "tail.exe");
+                paint(columns, persistent_receipt(columns), "Launched · pid 4123");
+            }
             // Narrower, the aside gives way to the breadcrumb, as every sheet's does.
             if columns >= 80 {
                 paint(columns, sheet(columns, long_output()), "exited 1");
@@ -104,6 +117,7 @@ fn process(id: &str, command: &str, status: &'static str, code: Option<i32>) -> 
         started,
         finished: (status != "running").then_some(started + Duration::from_secs(9)),
         awaited: false,
+        root: None,
     }
 }
 
@@ -138,6 +152,58 @@ fn output() -> Panel {
     let mut panel = list();
     panel.logs = Some(logs);
     panel
+}
+
+fn root_output() -> Panel {
+    let mut process = process("process-5", "launcher.exe", "running", None);
+    process.root = Some(RootExit {
+        pid: 4123,
+        exit_code: Some(0),
+        elapsed: Duration::from_secs(2),
+        remaining: Some(Remaining {
+            count: 2,
+            processes: vec![(4567, "tail.exe".into()), (4890, "worker.exe".into())],
+        }),
+    });
+    let mut panel = Panel::new(vec![process.clone()]);
+    panel.logs = Some(Logs {
+        id: process.id.clone(),
+        process: Some(process),
+        stream: 0,
+        views: Default::default(),
+        interactive: false,
+        input_mode: false,
+    });
+    panel
+}
+
+fn persistent_receipt(columns: usize) -> State {
+    let mut state = State {
+        width: columns,
+        height: 30,
+        ..State::default()
+    };
+    state.message(Kind::User, "Launch the app.");
+    state.event(Event::ToolStarted {
+        id: "persistent-app".into(),
+        name: "exec".into(),
+        arguments: Value::object([
+            ("executable", Value::string("app.exe")),
+            ("args", Value::Array(vec![])),
+            ("persistent", Value::Bool(true)),
+        ]),
+    });
+    state.event(Event::ToolFinished {
+        id: "persistent-app".into(),
+        name: "exec".into(),
+        summary: "app.exe launched".into(),
+        result: Value::object([
+            ("launch", Value::string("persistent")),
+            ("pid", Value::number(4123)),
+            ("application", Value::string("running")),
+        ]),
+    });
+    state
 }
 
 /// A long command with a real process ID, which must not cost it its outcome.
@@ -229,6 +295,7 @@ fn finished(columns: usize, status: &'static str, exit_code: Option<i32>) -> Sta
             tails: [String::new(), String::new()],
             tty: false,
             stop_requested: false,
+            root: None,
         }
         .value(),
     );

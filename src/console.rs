@@ -90,6 +90,12 @@ impl<O: Write, E: Write> EventSink for Console<'_, O, E> {
                 clean(&process.command),
                 process.id
             ),
+            Event::ProcessRootExited { process } => format!(
+                "[process: {}] {} · {}",
+                process.label(),
+                clean(&process.command),
+                process.id
+            ),
             Event::Recovering {
                 attempt,
                 delay,

@@ -11,12 +11,13 @@ pub(super) const NO_INSTRUCTIONS: &str =
 const NO_SKILLS: &str =
     "Personal skills: none are available now; earlier catalog entries no longer apply.";
 
-/// Request instructions, collaborator reports and finished processes, read
+/// Request instructions, collaborator reports and process news, read
 /// before `messages` is locked.
 pub(super) struct Environment(
     String,
     pub(super) Vec<(String, String)>,
     pub(super) Vec<crate::tools::processes::Completion>,
+    pub(super) Vec<crate::tools::processes::RootNotice>,
 );
 
 fn join<const N: usize>(parts: [String; N]) -> String {
@@ -151,6 +152,14 @@ impl Agent {
         } else {
             self.collaboration.snapshot()
         };
+        let mut completions = Vec::new();
+        let mut roots = Vec::new();
+        for notice in self.tools.process_notices(&self.redactor) {
+            match notice {
+                crate::tools::processes::Notice::Root(root) => roots.push(root),
+                crate::tools::processes::Notice::Finished(done) => completions.push(done),
+            }
+        }
         Environment(
             join([
                 self.permission_instructions(),
@@ -158,7 +167,8 @@ impl Agent {
                 collaboration_instructions(&records),
             ]),
             collaboration_reports(&records),
-            self.tools.process_completions(&self.redactor),
+            completions,
+            roots,
         )
     }
 

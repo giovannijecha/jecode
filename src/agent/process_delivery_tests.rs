@@ -179,6 +179,66 @@ fn an_idle_conversation_continues_when_a_process_ends_by_itself() {
 }
 
 #[test]
+fn an_idle_root_exit_reaches_the_model_once_before_its_tree_finishes() {
+    let directory = Directory::new();
+    let fixture = HttpFixture::new(vec![
+        (
+            200,
+            completion(
+                "",
+                vec![start(
+                    "start",
+                    &format!("{}; (while :; do sleep 0.05; done) & exit 7", gate("go")),
+                )],
+            ),
+        ),
+        (200, completion("Started.", vec![])),
+        (
+            200,
+            completion("The root exited; its child is still running.", vec![]),
+        ),
+    ]);
+    let mut agent = agent(&directory, &fixture.endpoint);
+    agent
+        .run_turn("Start the command", &mut |_| Ok(()))
+        .unwrap();
+    release(&directory, "go");
+    wait_for(|| agent.can_continue_processes());
+    let mut roots = Vec::new();
+    assert!(
+        agent
+            .continue_processes(&mut |event| {
+                if let Event::ProcessRootExited { process } = event {
+                    roots.push(process);
+                }
+                Ok(())
+            })
+            .unwrap()
+    );
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].root.exit_code, Some(7));
+    assert!(!agent.can_continue_processes());
+    let archive = agent.archive();
+    let events = archive.events.lock().unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| {
+                event.get("type").and_then(Value::as_str) == Some("process_root_exited")
+            })
+            .count(),
+        1
+    );
+    drop(events);
+    let requests = fixture.finish();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        crate::test_support::latest_state(&requests[2].body)
+            .contains("Process roots that exited, each shown once:")
+    );
+}
+
+#[test]
 fn an_explicit_stop_holds_the_continuation_until_the_user_sends_something() {
     let directory = Directory::new();
     let fixture = HttpFixture::new(vec![

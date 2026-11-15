@@ -5,7 +5,7 @@
 //! The handle is weak: it neither extends processes nor survives the
 //! conversation that owned them.
 
-use super::{Completion, Entry, Scope, complete_prefix};
+use super::{Completion, Entry, Registry, RootNotice, Scope, complete_prefix};
 use crate::redact::Redactor;
 use crate::tools::OUTPUT_LIMIT;
 use std::fs::File;
@@ -23,6 +23,45 @@ pub struct Observer {
     redactor: Redactor,
 }
 
+/// A local transcript update, ordered across root and final outcomes together.
+#[derive(Clone, Debug)]
+pub enum Notice {
+    Root(RootNotice),
+    Finished(Completion),
+}
+
+impl Notice {
+    pub(crate) fn sequence(&self) -> usize {
+        match self {
+            Self::Root(root) => root.sequence,
+            Self::Finished(done) => done.sequence,
+        }
+    }
+}
+
+impl Registry {
+    /// One ordered view of news still owed to the model. Holding the list
+    /// lock keeps a newer final outcome from passing an earlier root exit.
+    pub(in crate::tools) fn pending_notices(&self, redactor: &Redactor) -> Vec<Notice> {
+        let scope = self.scope();
+        let entries = scope.entries.lock().unwrap();
+        let mut notices = Vec::new();
+        for entry in entries.iter() {
+            let state = entry.state.lock().unwrap();
+            if !state.root_reported
+                && let Some((sequence, root)) = &state.root_notice
+            {
+                notices.push(Notice::Root(entry.root_notice(*sequence, root, redactor)));
+            }
+            if !state.reported && state.sequence.is_some() {
+                notices.push(Notice::Finished(entry.completion(&state, redactor)));
+            }
+        }
+        notices.sort_by_key(Notice::sequence);
+        notices
+    }
+}
+
 /// One process as the registry reports it now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Process {
@@ -31,6 +70,8 @@ pub struct Process {
     pub status: &'static str,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
+    /// The root's exit while this supervised process may still be running.
+    pub root: Option<crate::process::RootExit>,
     pub started: Instant,
     pub finished: Option<Instant>,
     /// A tool call is waiting for it, and can be released into the background.
@@ -50,6 +91,16 @@ impl Process {
 
     /// The status, with the exit code when one is known.
     pub fn label(&self) -> String {
+        if self.active()
+            && let Some(root) = &self.root
+        {
+            let code = root.exit_code.map_or_else(
+                || "root exited without code".to_string(),
+                |code| format!("root exited {code}"),
+            );
+            let remaining = root_remaining(root);
+            return format!("{} · {code} · {remaining}", self.status);
+        }
         match (self.status, self.exit_code) {
             ("exited", Some(code)) => format!("exited {code}"),
             ("timed_out", _) => "timed out".into(),
@@ -57,6 +108,13 @@ impl Process {
             (status, _) => status.into(),
         }
     }
+}
+
+fn root_remaining(root: &crate::process::RootExit) -> String {
+    root.remaining.as_ref().map_or_else(
+        || "output still open".into(),
+        |remaining| format!("{} descendants running", remaining.count),
+    )
 }
 
 /// A bounded byte range of a saved stream.
@@ -81,6 +139,34 @@ pub struct Page {
 }
 
 impl Observer {
+    /// One atomic snapshot prevents one kind of news from passing an earlier
+    /// update of the other kind between separate scans.
+    pub fn notices_since(&self, cursor: usize) -> (usize, Vec<Notice>) {
+        let Some(scope) = self.scope.upgrade() else {
+            return (cursor, Vec::new());
+        };
+        let entries = scope.entries.lock().unwrap();
+        let mut notices = Vec::new();
+        for entry in entries.iter() {
+            let state = entry.state.lock().unwrap();
+            if let Some((sequence, root)) = &state.root_notice
+                && *sequence > cursor
+            {
+                notices.push(Notice::Root(entry.root_notice(
+                    *sequence,
+                    root,
+                    &self.redactor,
+                )));
+            }
+            if state.sequence.is_some_and(|sequence| sequence > cursor) {
+                notices.push(Notice::Finished(entry.completion(&state, &self.redactor)));
+            }
+        }
+        notices.sort_by_key(Notice::sequence);
+        let next = notices.last().map_or(cursor, Notice::sequence);
+        (next, notices)
+    }
+
     fn terminal(&self, id: &str) -> Result<std::sync::Arc<crate::pty::Control>, String> {
         let scope = self.scope.upgrade().ok_or(ENDED)?;
         let entries = scope.entries.lock().unwrap();
@@ -157,6 +243,7 @@ impl Observer {
 
     /// Terminal transitions no call reported, after this reader's own
     /// `cursor`; independent of what the model has received.
+    #[cfg(test)]
     pub fn completions_since(&self, cursor: usize) -> (usize, Vec<Completion>) {
         let Some(scope) = self.scope.upgrade() else {
             return (cursor, Vec::new());
@@ -164,6 +251,17 @@ impl Observer {
         let completions = scope.completions_after(cursor, &self.redactor, |_| true);
         let next = completions.last().map_or(cursor, |last| last.sequence);
         (next, completions)
+    }
+
+    /// Root exits retained independently of the terminal completion cursor.
+    #[cfg(test)]
+    pub fn root_notices_since(&self, cursor: usize) -> (usize, Vec<super::RootNotice>) {
+        let Some(scope) = self.scope.upgrade() else {
+            return (cursor, Vec::new());
+        };
+        let notices = scope.root_notices_after(cursor, &self.redactor, |_| true);
+        let next = notices.last().map_or(cursor, |last| last.sequence);
+        (next, notices)
     }
 
     /// Calls `listener` when a process of this conversation starts or ends.
@@ -256,6 +354,11 @@ impl Observer {
             error: outcome
                 .and_then(|outcome| outcome.error.as_deref())
                 .map(|error| self.redactor.text(error)),
+            root: state
+                .root
+                .as_ref()
+                .or_else(|| outcome.and_then(|outcome| outcome.root.as_ref()))
+                .map(|root| super::root::redacted(root, &self.redactor)),
             started: entry.started,
             finished: state.finished,
             awaited: state.outcome.is_none() && state.waiters > 0,

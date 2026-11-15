@@ -114,6 +114,12 @@ struct Shell {
     substitution: Cell<Option<i32>>,
     /// A closed output pipe ends this execution scope even when `set -e` is off.
     broken_output: bool,
+    /// Loops enclosing the running command in this execution scope. A
+    /// subshell or pipeline stage starts with none: `break` cannot leave them.
+    loops: usize,
+    /// Enclosing loops a `break` still has to leave; commands stop until the
+    /// loops have consumed it.
+    breaking: usize,
 }
 
 impl Shell {
@@ -136,6 +142,8 @@ impl Shell {
             last_background: None,
             substitution: Cell::new(None),
             broken_output: false,
+            loops: 0,
+            breaking: 0,
         }
     }
 
@@ -331,6 +339,9 @@ fn assignment(value: &str) -> bool {
 #[cfg(test)]
 #[path = "shell/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "shell/tests_break.rs"]
+mod tests_break;
 #[cfg(test)]
 #[path = "shell/tests_grep.rs"]
 mod tests_grep;
