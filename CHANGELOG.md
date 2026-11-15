@@ -11,10 +11,10 @@ Changes since 0.10.0.
 - **Persistent applications.** With Full permission, the model can explicitly
   launch an application that outlives the conversation and Jecode. These
   applications leave Jecode's process management; see
-  [Exec](docs/reference/TOOL_REFERENCE.md#exec).
+  [Persistent launches](docs/reference/TOOL_REFERENCE.md#persistent-launches).
 - **Saved output.** The model can search complete command stdout or stderr
   through its `output:` reference, with the same access checks and paging as
-  file search. See [Search](docs/reference/TOOL_REFERENCE.md#search).
+  file search. See [Search](docs/reference/TOOL_REFERENCE.md#list-and-search).
 - **Command language.** `break` or `break N` leaves enclosing loops in Jecode's
   shell. The [shell reference](docs/reference/SHELL.md) also explains how to
   quote Windows and UNC paths.
