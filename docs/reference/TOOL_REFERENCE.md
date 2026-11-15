@@ -22,7 +22,7 @@ Neither changes what the call does.
 | `list` | — | `path`, `recursive`, `pattern`, `include_hidden`, `include_ignored`, `offset`, `limit` |
 | `search` | `query` | `path`, `pattern`, `case_sensitive`, `context`, `include_hidden`, `include_ignored`, `offset`, `limit` |
 | `bash` | `command` | `timeout_seconds`, `wait_ms`, `output_limit_bytes` |
-| `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `wait_ms`, `timeout_seconds`, `output_limit_bytes` |
+| `exec` | `executable` | `args`, `cwd`, `env`, `stdin`, `tty`, `cols`, `rows`, `wait_ms`, `timeout_seconds`, `output_limit_bytes`, `persistent` |
 | `process` | `action` | `process_id`, `text`, `key`, `cols`, `rows`, `wait_ms`, `output_limit_bytes`, `output_mode` |
 | `web` | `action`; `url` for `fetch` and `download`; `urls` or `crawl_id` for `crawl` | `method`, `headers`, `body`, `timeout_seconds`, `max_bytes`, `max_pages`, `max_depth`, `same_origin` |
 | `browser` | `action`; `url` for `navigate`; `key` for `press`; `text` for `fill`/`type`; `expression` for `evaluate`; `method` for `cdp` | `url`, `visible`, `profile`, `browser_id`, `tab_id`, `selector`, `text`, `key`, `modifiers`, `params`, `timeout_ms`, `x`, `y`, `delta_y`, `width`, `height`, `filter`, `limit`, `cursor` |

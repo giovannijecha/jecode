@@ -61,9 +61,11 @@ a note such as `stdout trimmed to the last 64 KiB of 89 KiB · full output saved
 says so.
 
 Cards show the result as it was when the call returned. For a process still
-running, use `/process`. When a process that no call is waiting for ends, a
-`PROC` row reports its command and outcome at that point in the conversation;
-Ctrl+O opens the end of its output.
+running, use `/process`. If its root exits while descendants keep it running,
+a separate `PROC` row reports the root's exit; the process remains managed.
+When a process that no call is waiting for ends, another `PROC` row reports
+its command and final outcome at that point in the conversation. Ctrl+O opens
+the end of its output. See [Processes](TOOLS.md#processes) for platform limits.
 
 ## Work chapters
 
@@ -74,18 +76,20 @@ grouped into a **Work chapter**. The agent chooses the label; calls without one
 are grouped as **Activity**. Assistant text, a different label, a skill read or
 any other tool ends the chapter, and a single call keeps its own card.
 
-A chapter's title shows a WORK badge, the label, the number of calls and any
+A compact chapter takes at most eight terminal rows, including its title and
+footer. The title shows a WORK badge, the label, the number of calls and any
 failures. Below it:
 
-- one row counts what was done: files read, searches, commands, web calls and so
-  on, plus running, background and stopped calls;
-- every command keeps its own row, with its running time or a failed exit code;
-- failed or unusual calls keep a row with their error;
-- up to four of the latest completed reads, listings, searches, web and
-  browser calls stay at the bottom.
+- one or two rows count the work and its outcomes, including running calls;
+- failed, unknown and stopped calls, then older running and background calls,
+  take priority, with up to three individual rows; a warning counts further
+  calls that need attention;
+- up to four of the latest running or completed calls fill the remaining room,
+  in call order. A call that finishes keeps its place in this window.
 
-When several calls run in parallel, each running call has its own row, and the
-status row reads `N tools running`.
+The footer counts folded calls. Finished chapters add `Ctrl+O expand`; expanding
+shows every call. When several calls run in parallel, the status row reads
+`N tools running`.
 
 ## Diffs
 
@@ -114,9 +118,10 @@ short notice confirms how many tools were expanded.
 
 Ctrl+O applies only to the latest finished turn and does nothing if that turn
 had no tool calls. The last card with hidden content shows a `Ctrl+O expand`
-key, as text two cells from the edge of its row. Sending a new message
-collapses the expanded turn, and resumed
-conversations start collapsed.
+key, as text two cells from the edge of its row; a finished WORK chapter puts
+it in its folded-count footer. Expansion replaces WORK chapters with each
+call's full card, and the first card shows `Ctrl+O collapse`. Sending a new
+message collapses the expanded turn, and resumed conversations start collapsed.
 
 ## Collaborators
 

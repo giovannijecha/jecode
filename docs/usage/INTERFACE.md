@@ -270,9 +270,12 @@ has ended, and `/process stop ID` stops it. Esc during a turn stops the turn and
 command whose call is still in its default wait; processes already in the background
 keep running.
 
-Tool cards show a process's state when the call returned. When a process that no
-call is waiting for ends, a `PROC` row reports it at that point in the
-conversation. Completion creates no status-row notice: the current activity
+Tool cards show a process's state when the call returned. If its root exits
+while descendants keep it running, a separate `PROC` row reports the root's
+exit; `/process` shows what it is waiting for and, on Windows, the remaining
+programs. When a process that no call is waiting for ends, another `PROC` row
+reports its final outcome at that point in the conversation.
+Completion creates no status-row notice: the current activity
 or the turn's final statistics stay visible. An idle conversation continues from
 there unless the last turn was stopped or failed, or queued messages, a menu, a
 question or a permission prompt come first. See

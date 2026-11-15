@@ -1,5 +1,27 @@
 # Release notes
 
+## 0.10.1
+
+Changes since 0.10.0.
+
+- **Processes.** A command's root exit is reported separately when descendants
+  keep it running, with the root's exit code and remaining programs on Windows.
+  Root-exit and final-outcome notices keep their order after resume. See
+  [Processes](docs/usage/TOOLS.md#processes).
+- **Persistent applications.** With Full permission, the model can explicitly
+  launch an application that outlives the conversation and Jecode. These
+  applications leave Jecode's process management; see
+  [Exec](docs/reference/TOOL_REFERENCE.md#exec).
+- **Saved output.** The model can search complete command stdout or stderr
+  through its `output:` reference, with the same access checks and paging as
+  file search. See [Search](docs/reference/TOOL_REFERENCE.md#search).
+- **Command language.** `break` or `break N` leaves enclosing loops in Jecode's
+  shell. The [shell reference](docs/reference/SHELL.md) also explains how to
+  quote Windows and UNC paths.
+- **Tool activity.** WORK previews fit within eight terminal rows and keep
+  recent call outcomes visible. Ctrl+O opens the complete latest finished turn
+  as individual cards. See [Tool activity](docs/usage/TOOL_ACTIVITY.md).
+
 ## 0.10.0
 
 Changes since 0.7.5.
