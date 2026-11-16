@@ -329,7 +329,10 @@ fn only_missing_file_paths_receive_the_short_not_found_summary() {
         let rows = card(tool("read", &path, &unix_error, &shown), 80, false).rows;
         assert_eq!(
             plain(&rows),
-            ["  READ   a.rs  Could not resolve path \"a.rs\": No such process (os error 3)"]
+            [
+                "  READ   a.rs",
+                "  └ Failed · Could not resolve path \"a.rs\": No such process (os error 3)"
+            ]
         );
     }
     let windows_error = Value::object([(
