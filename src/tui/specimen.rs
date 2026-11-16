@@ -285,6 +285,7 @@ fn specimen() {
 }
 
 mod alignment;
+mod catalog_sheets;
 mod chapter_live;
 mod composer;
 mod diffs;

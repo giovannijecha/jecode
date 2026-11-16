@@ -463,6 +463,14 @@ for example `tui::specimen::chapter_live::chapter_live` or
 `tui::specimen::discovery::discovery_cards`. Run them with
 `-- --exact --ignored --nocapture` to inspect the output.
 
+`tui::specimen::catalog_sheets::catalog_sheets` emits routing, skills,
+temporary-file, copy and Resume sheets at 44, 80 and 120 columns in both
+palettes. The maintainer's local `.design/CHECK_CATALOG_SHEETS.cjs` compares
+their text rows with the catalog; pass `--source PATH` for a separate source
+checkout. This comparison does not check per-cell colours or host key delivery.
+The WORK specimen requires `JECODE_WORK_INPUT`; run it through
+`.design/CHECK_WORK.cjs`, which prepares the synthetic input.
+
 ### Check a terminal host
 
 Synthetic fixtures cannot establish physical input, key interception, font and

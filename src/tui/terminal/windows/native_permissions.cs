@@ -59,7 +59,7 @@ public sealed partial class JecodeTestPty {
         Command("read outside again");
         Wait("Waiting for permission", request);
         Wait("Reads of the outside files above", request);
-        Wait("outside-other.txt", request);
+        WaitWrappedFile("outside-other.txt", request);
         Send("3");
         Wait("Native second read complete.");
 
@@ -81,5 +81,40 @@ public sealed partial class JecodeTestPty {
         Send("\x11");
         Wait("NATIVE_PERMISSIONS_RESTORED");
         Finish(true);
+    }
+
+    // One filename can straddle two rows when the fixture path grows. Verify
+    // every character in order while allowing only that single row break.
+    void WaitWrappedFile(string filename, int after) {
+        var alternatives = new System.Collections.Generic.List<string> {
+            System.Text.RegularExpressions.Regex.Escape(filename)
+        };
+        for (int split = 1; split < filename.Length; split++) {
+            alternatives.Add(
+                System.Text.RegularExpressions.Regex.Escape(filename.Substring(0, split)) +
+                @"\s+" +
+                System.Text.RegularExpressions.Regex.Escape(filename.Substring(split))
+            );
+        }
+        var pattern = new System.Text.RegularExpressions.Regex(
+            string.Join("|", alternatives),
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant
+        );
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        lock (gate) {
+            while (clock.ElapsedMilliseconds < 20000) {
+                string plain = System.Text.RegularExpressions.Regex.Replace(
+                    received.ToString(after, received.Length - after),
+                    "\x1b\\[[0-?]*[ -/]*[@-~]", ""
+                );
+                if (pattern.IsMatch(plain)) return;
+                long remaining = 20000 - clock.ElapsedMilliseconds;
+                if (remaining <= 0) break;
+                Monitor.Wait(gate, (int)remaining);
+            }
+            int length = Math.Min(received.Length, 2000);
+            throw new IOException("ConPTY did not show wrapped file " + filename + ": " +
+                received.ToString(received.Length - length, length));
+        }
     }
 }

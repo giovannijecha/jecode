@@ -238,7 +238,7 @@ fn work_chapters() {
                     );
                 }
             }
-            assert!(unwrapped.contains("UPDATE") && unwrapped.contains("WRITE"));
+            assert!(unwrapped.contains("UPDATE") && unwrapped.contains("SAVE"));
             assert!(
                 unwrapped.contains(if expanded { "exit 101" } else { "Exit 101" }),
                 "{title} at {columns}: {output}"

@@ -90,7 +90,7 @@ pub(crate) fn quantity(count: usize) -> String {
     let (value, unit) = if count >= 1_000_000 {
         (count as f64 / 1_000_000.0, "M")
     } else if count >= 1_000 {
-        (count as f64 / 1_000.0, "K")
+        (count as f64 / 1_000.0, "k")
     } else {
         return count.to_string();
     };

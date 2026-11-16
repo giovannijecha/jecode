@@ -247,7 +247,7 @@ fn cached_input_is_reported_with_the_completion() {
     stream.feed(bytes.as_bytes(), &mut |_| Ok(())).unwrap();
     let charges = stream.finish().unwrap().charges.unwrap();
     assert_eq!((charges.requests, charges.cached), (1, 8192));
-    assert_eq!(charges.describe().as_deref(), Some("8.2K cached"));
+    assert_eq!(charges.describe().as_deref(), Some("8.2k cached"));
 }
 
 #[test]
