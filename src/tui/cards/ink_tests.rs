@@ -278,6 +278,11 @@ fn unstructured_diagnostics_and_refusal_paths_never_receive_state_ink() {
                 expected,
                 "{name}, expanded={expanded}"
             );
+            if name == "lsp" && expanded {
+                let plain = rows.iter().map(Line::plain).collect::<Vec<_>>().join("\n");
+                assert_eq!(plain.matches("src/private.rs: server error").count(), 1);
+                assert_eq!(rows.last().unwrap().plain(), "  └ Failed");
+            }
             assert!(
                 rows.iter()
                     .flat_map(|row| &row.spans)

@@ -51,8 +51,12 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
                     DIM,
                 ));
             }
+            let closing = result.get("error").and_then(Value::as_str).map_or_else(
+                || summary_line(result, tool.arguments, status),
+                |error| super::outcome::marker(error, status),
+            );
             rows.extend(line_rows(
-                &summary_line(result, tool.arguments, status),
+                &closing,
                 columns,
                 rows.len(),
                 "  └ ",
