@@ -3,11 +3,7 @@
 use super::{Body, line_rows};
 use crate::{
     json::Value,
-    tui::{
-        line::Line,
-        text,
-        theme::{BAD, CODE_TEXT, DIM, MUTED, WARNING},
-    },
+    tui::{line::Line, text, theme::DIM},
 };
 
 pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool) -> Body {
@@ -30,7 +26,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
                 .and_then(Value::as_usize)
                 .map_or_else(String::new, |size| format!("  {size} B"));
             let line = format!("{}{}  {path}{size}", "  ".repeat(depth), kind);
-            push(&mut rows, &line, columns, CODE_TEXT);
+            push(&mut rows, &line, columns, DIM);
         }
     } else {
         for matched in array(result, "matches") {
@@ -47,7 +43,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
                 &mut rows,
                 &format!("{path}:{line}: {source}{clipped}"),
                 columns,
-                CODE_TEXT,
+                DIM,
             );
             context(&mut rows, matched, "after", "  >", columns);
         }
@@ -85,7 +81,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
     for error in array(result, "errors") {
         let path = text::clean(field(error, "path"));
         let detail = text::clean(field(error, "error"));
-        push(&mut rows, &format!("Error {path}: {detail}"), columns, BAD);
+        push(&mut rows, &format!("Error {path}: {detail}"), columns, DIM);
     }
     let shown_errors = array(result, "errors").len();
     let total_errors = result
@@ -97,7 +93,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
             &mut rows,
             &format!("{} more errors not shown", total_errors - shown_errors),
             columns,
-            BAD,
+            DIM,
         );
     }
     if result.get("complete") == Some(&Value::Bool(false)) {
@@ -108,7 +104,7 @@ pub(super) fn render(name: &str, result: &Value, columns: usize, expanded: bool)
                 || "Partial result".into(),
                 |next| format!("More from {next}"),
             );
-        push(&mut rows, &continuation, columns, WARNING);
+        push(&mut rows, &continuation, columns, DIM);
     }
     Body::new(rows)
 }
@@ -126,7 +122,7 @@ fn context(rows: &mut Vec<Line>, matched: &Value, key: &str, prefix: &str, colum
             rows,
             &format!("{prefix}{line}: {source}{clipped}"),
             columns,
-            MUTED,
+            DIM,
         );
     }
 }

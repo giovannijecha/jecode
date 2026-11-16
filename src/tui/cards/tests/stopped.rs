@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{BADGE_WARN, MUTED, Style};
+use crate::tui::theme::{BADGE_WARN, Style, WARNING};
 
 const REASON: &str = "The user denied editing session.rs; nothing ran. Continue without it.";
 const TOLD: &str = "Denied · nothing ran; the agent was told";
@@ -73,8 +73,21 @@ fn a_call_that_never_ran_is_stopped_says_why_and_shows_no_work() {
                 );
                 let text = plain(&rows);
                 assert_eq!(rows[0].spans[0].background, Some(BADGE_WARN), "{text}");
-                // The badge carries the state, so the words stay quiet.
-                assert_eq!(ink(&rows, says), Some(MUTED), "{name}: {text}");
+                // The first segment is the marker; its detail remains quiet.
+                let marker = if says.starts_with("Denied") {
+                    "Denied"
+                } else {
+                    "Not run"
+                };
+                assert!(
+                    rows.iter()
+                        .flat_map(|row| &row.spans)
+                        .any(|span| span.style == WARNING && span.text.contains(marker)),
+                    "{name}: {text}"
+                );
+                if says.contains(" · ") {
+                    assert_eq!(ink(&rows, "nothing ran; the agent was told"), Some(DIM));
+                }
                 for invented in [
                     "+1",
                     "−1",

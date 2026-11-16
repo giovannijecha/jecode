@@ -6,7 +6,7 @@ use crate::tui::{
     activity as timer,
     line::Line,
     text,
-    theme::{BAD, BODY, DIM, MUTED, STRONG, WARNING},
+    theme::{BAD, DIM, STRONG, WARNING},
 };
 
 const MAX_ROWS: usize = 8;
@@ -21,7 +21,7 @@ pub(super) fn render(tools: &[Tool<'_>], columns: usize, keycap: bool) -> Card {
         count.push(&format!(" · {} failed", outcomes.failed), BAD);
     }
     let mut title = badge::badge("Work", outcomes.primary());
-    title.push(" ", BODY);
+    title.push(" ", DIM);
     // The badge and the start of the label outlive the count at narrow widths.
     let keep = text::cells(&title.plain()) + 6;
     title.push(
@@ -150,7 +150,7 @@ fn member(tool: &Tool<'_>, columns: usize) -> Line {
     });
     let (name, target) = heading(tool);
     let mut left = Line::new(&name.to_uppercase(), badge::ink(name).bold());
-    left.push(" ", BODY);
+    left.push(" ", DIM);
     let keep = text::cells(&left.plain()) + 1;
     let description = super::super::rhythm::description(tool);
     let target = if tool.name == "collaboration" {
@@ -165,7 +165,7 @@ fn member(tool: &Tool<'_>, columns: usize) -> Line {
     let width = columns
         .saturating_sub(8 + text::cells(&left.plain()) + text::cells(&detail.plain()))
         .max(1);
-    left.push(&middle(&target, width), BODY);
+    left.push(&middle(&target, width), DIM);
     right_aligned(left, detail, columns.saturating_sub(4), keep)
 }
 
@@ -208,6 +208,6 @@ fn right_aligned(left: Line, right: Line, columns: usize, keep: usize) -> Line {
     }
     let mut left = left.shortened(room);
     let gap = end.saturating_sub(text::cells(&left.plain()) + right_width);
-    left.push(&" ".repeat(gap), MUTED);
+    left.push(&" ".repeat(gap), DIM);
     left.append(right).shortened(columns)
 }

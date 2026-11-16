@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{BADGE_WARN, WARNING};
+use crate::tui::theme::{BAD, BADGE_WARN, DIM, WARNING};
 
 fn call() -> Value {
     Value::object([
@@ -13,6 +13,30 @@ fn call() -> Value {
         ),
         ("work", Value::string("Track issues")),
     ])
+}
+
+#[test]
+fn expanded_failed_mcp_keeps_payload_quiet_and_closes_on_failure() {
+    let args = call();
+    let result = Value::object([("error", Value::string("Remote request rejected"))]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = draw("mcp", &args, Some(&result), None, 80, &shown);
+    let payload = rows
+        .iter()
+        .find(|row| row.plain().contains("Remote request rejected"))
+        .unwrap();
+    assert!(payload.spans.iter().all(|span| span.style == DIM));
+    let close = rows.last().unwrap();
+    assert_eq!(close.plain(), "  └ Failed");
+    assert!(
+        close
+            .spans
+            .iter()
+            .any(|span| span.text == "Failed" && span.style == BAD)
+    );
 }
 
 #[test]

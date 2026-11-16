@@ -49,8 +49,8 @@ Text roles, with the ink for each kind of terminal:
 | --- | --- | --- | --- |
 | `STRONG` | `#EFF0F3` | `#191B1D` | Requests, drafts, the product name, titles, option names, field values, keys, the footer percent, labels on quiet badges. |
 | `LIT` | `#DACEFF` | `#48198A` | The caret's blinking `_`, background badge names, command names in Work chapters, `new output`, attachment chips. |
-| `BODY` | `#D1D2D6` | `#2C2E31` | Assistant prose, tool targets, diagnostics. |
-| `CODE_TEXT` | `#D1D2D6` | `#2C2E31` | Default code, inline code, command output, diff context. |
+| `BODY` | `#D1D2D6` | `#2C2E31` | Assistant prose and diagnostics outside tool cards. |
+| `CODE_TEXT` | `#D1D2D6` | `#2C2E31` | Default code, inline code, changed diff rows and new-file source. |
 | `GOOD` | `#7CD992` | `#066F32` | The `Done` and `✓` marks, the done Todo and Markdown task `◉`, added lines. |
 | `ACCENT` | `#C7AFFF` | `#552B9A` | The `>_` mark, `›` and `●` markers, matches, level 1 headings, links, the words `current` and `recommended`, the active tab mark, the gauge fill. |
 | `KEYWORD` | `#C8B7FF` | `#553494` | Code keywords. |
@@ -59,7 +59,7 @@ Text roles, with the ink for each kind of terminal:
 | `WARNING` | `#EDC06B` | `#875500` | Retry, stopped and warning glyphs, `paused`, the gauge and its percent near compaction. |
 | `BAD` | `#F48684` | `#B32228` | Failures, removed lines, destructive questions. |
 | `MUTED` | `#A4A6AA` | `#515256` | Secondary facts, field labels, link hosts, quotes, list markers, the model and effort in the footer; `DIM` text on a selected row. |
-| `DIM` | `#8C8E92` | `#616367` | Status-row facts, key labels, the footer path, tree gutters, group headings, line numbers, placeholders, struck text. |
+| `DIM` | `#8C8E92` | `#616367` | Tool-card details, status-row facts, key labels, the footer path, tree gutters, group headings, line numbers, placeholders, struck text. |
 | `FAINT` | `#6D6F72` | `#84868A` | Marks only, never text: table borders, scrollbar and gauge tracks, thematic breaks. |
 | `HAIRLINE` | `#3B3D40` | `#CFD1D5` | Decorative rules and tab dividers, which carry no meaning. |
 
@@ -220,7 +220,7 @@ its diagnostic as the turn's last row: `✕` in bold `BAD`, then the text in
 
 ## Tool rows
 
-Each call opens with a badge, then the target one space after in `BODY`. The
+Each call opens with a badge, then the target one space after in regular `DIM`. The
 badge fills exactly eight cells with its name centred in bold. Tool labels have
 even widths of at most eight cells, leaving equal padding on both sides. Every
 target starts on column 9, where diff code starts when line numbers have two
@@ -245,6 +245,27 @@ change, keep SAVE. The same rule applies when expanding a card or restoring
 its saved history; the renderer does not inspect the current file to choose
 the earlier operation's label.
 
+Badges identify the operation; the brighter assistant prose carries the narration.
+Targets, paths, descriptions, commands, results, durations and counts use regular
+`DIM` in compact and expanded cards. This also applies to Ask User answers, Todo
+plans, agent reports, MCP/LSP payloads and numbered Read source. Changed diff rows
+and captured new-file source retain their syntax colours and surfaces. Prose,
+requests, badge states and the `Ctrl+O` key hints keep their existing roles.
+
+An unsuccessful outcome keeps one short state-coloured marker, with its
+diagnostic and location in `DIM`: red for failure, amber for cancellation,
+timeout or an unknown outcome. On a compact result it is the leading segment
+before ` · `, such as `Exit 101`; expanded command output keeps that marker on
+its closing row, such as `exit 101 · 6.0s`. Expanded failed non-shell receipts
+also retain an explicit outcome. A partial multi-file edit marks `N failed`
+and `not changed` in red; a batched Read marks `N not read` in amber. Paths
+remain `DIM`, including paths in failed entries. Line-change counts remain
+`DIM`; the changed source itself carries the diff colours.
+An unstructured diagnostic without a short outcome gets `Failed` or `Not run`
+before its quiet original text. Expanded command and non-shell errors keep
+their complete diagnostic once in the body and a short marker in the closing
+row; failed persistent EXEC receipts keep their exit and pid there once.
+
 Collaboration creation, sent/received assignments, returned reports, review and
 closure use immutable chronological receipts. Every collaborator badge reads
 `AGENTS`, with the display number outside its surface, such as `#1`. The number
@@ -261,43 +282,43 @@ than 24 columns would remain, and keep three rows with a closing `…` until
 expanded. When the result fits beside a one-row title it joins that row;
 otherwise it hangs below. Bash, Exec and Process prefer the optional
 `description` argument as the target; the command then follows on the tree as
-`$ command`, shell-highlighted, or `> program args` for Exec, limited to two
+`$ command` or `> program args` for Exec in `DIM`, limited to two
 compact rows. Without a description the command or process target is the
-title's target. A Bash or Process title ends in a bold `LIT` ` &` only while
+title's target. A Bash or Process title ends in a regular `DIM` ` &` only while
 its process runs in the background. Browser shows its action as the target and
-the JavaScript-coloured payload below; an action without one, such as
+the payload below in `DIM`; an action without one, such as
 `snapshot` or `stop`, opens its result on the first tree row, never on an
 empty one.
 
-The result names what came back as `Subject · detail`, `MUTED` once finished
-and `DIM` while running:
+The result names what came back as `Subject · detail` in regular `DIM`, apart
+from its short outcome marker when unsuccessful:
 
 | Call | Result |
 | --- | --- |
 | Running | The elapsed time, after `Running` for routine calls, and any note. |
 | Read | `9 lines · from line 33 of 212`, or `9 lines · from line 33 · more from 42` when the total is unknown. Narrow rows drop the start clause; split lines keep `continues at byte N`. Skill reads `Loaded skill · …`. |
 | List, Search | Entry or matching-line counts, searched files, errors and `more from N` when paged. Expanded cards show structured paths, source context and exclusions. |
-| Update (`edit` or an existing-file `write`) | `+N −M lines` in `GOOD` and `BAD`, or explicit text for no-op edits, final newlines and line endings. |
+| Update (`edit` or an existing-file `write`) | `+N −M lines` in `DIM`, or explicit text for no-op edits, final newlines and line endings. |
 | New Write | `New file · N lines`, then the first six numbered source rows. |
 | Bash, Exec, Process | The last output line with the duration from one second, `Done in 1.2s`, or `Done`; `+N lines` follows in `DIM`. |
-| Failed command | `Exit N · diagnostic` in `BAD` on at most two rows, a muted position, up to two more `BAD` stderr rows. Recognized Node uncaught-exception headers give way to the actual error. |
+| Failed command | `Exit N` in `BAD`, then ` · diagnostic`, its position and up to two more stderr rows in `DIM`. Recognized Node uncaught-exception headers give way to the actual error. |
 | Stopped command | `Cancelled after 6.0s` or `Timed out after …`, `· partial output` when some was captured, and the hidden line count. |
 | Background | `p3 running · latest line`; Process reports `stopping`, `stopped` or `status unknown`. A process list shows the total and the running count. |
 | Web | The page title, size and host. |
 | Browser | Where it landed or what it saved, such as `Screenshot 1280×720 · path`. |
-| Error | The decoded message in `BAD`; a missing path reads `Not found`. |
+| Error | The decoded outcome marker in `BAD`, its diagnostic in `DIM`; a missing path reads `Not found`. |
 
 Compact cards skip blank output lines and fold the hidden count into the
 result. Node exception logs render terminal controls as a readable transcript;
 Ctrl+O retains the complete diagnostic, including the runtime header. Saved
 output bytes and the program or wrapper's reported exit code remain intact.
-Capture limits stay visible as muted notes, such as `stdout trimmed to
+Capture limits stay visible as `DIM` notes, such as `stdout trimmed to
 the last 64 KiB of 89 KiB · full output saved`.
 
 `Ctrl+O` expands every call of the latest finished turn into its full card:
 the full command and exact output, numbered source for Read, all diff hunks,
-and `exit N · duration` for commands. Stdout uses `CODE_TEXT`, successful
-stderr `MUTED`, and stream labels `DIM` when both streams exist. An expanded
+and `exit N · duration` for commands. Both output streams and their labels use
+regular `DIM`; a failed exit marker uses `BAD`. An expanded
 image Read shows an `Opened image` fact with dimensions and bytes; Web and
 Browser keep their raw results. A standalone last card with hidden content carries the key as text,
 `Ctrl+O` in bold `STRONG` and `expand` in `DIM`, ending two cells from
@@ -326,7 +347,9 @@ Background calls, and Running calls older than the latest four, choose at most
 three in that priority, latest first for ties, then display those members in
 source order. A warning row counts further attention calls. The latest four
 running or completed calls in source order fill remaining room: a call that
-finishes keeps its row, so the live block never shrinks. Members use their family text ink and a middle ellipsis at 60/40 to keep
+finishes keeps its row, so the live block never shrinks. Member tool names keep
+their family text ink and bold weight; facts, targets and durations use regular
+`DIM`. Targets use a middle ellipsis at 60/40 to keep
 both ends of the target, with an outcome aligned right. A failed member shows
 only `exit N` when an actual exit code exists, otherwise `failed`; the full
 diagnostic remains in its expanded card. At narrow widths a member's outcome
@@ -347,7 +370,8 @@ full results. Standalone cards in the same turn follow this grammar.
 Update and existing-file Write show contextual diffs with three surrounding
 lines: original coordinates on removals, resulting coordinates on additions
 and context. Rows run from column 2 to the edge; added and removed rows are
-tinted, context rows stay on the terminal's background in `CODE_TEXT`. Line numbers are `DIM`,
+tinted, context rows stay on the terminal's background in regular `DIM`, without
+syntax highlighting. Line numbers are `DIM`,
 marks `GOOD` `+` and `BAD` `−`. Paired changed fragments alone use bold
 `GOOD`/`BAD` on the stronger surface; other changed code keeps its syntax
 colours; fragments snap to whole words, and in markup to whole tags and

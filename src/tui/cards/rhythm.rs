@@ -5,9 +5,8 @@ use super::{
 };
 use crate::tui::{
     line::Line,
-    syntax::Highlighter,
     text,
-    theme::{BAD, BODY, CODE_TEXT, DIM, LIT, MUTED, Style},
+    theme::{DIM, Style},
 };
 
 pub(super) fn description<'a>(tool: &Tool<'a>) -> &'a str {
@@ -53,16 +52,7 @@ pub(super) fn payload(tool: &Tool<'_>) -> String {
 }
 
 pub(super) fn code(tool: &Tool<'_>) -> Line {
-    let mut line = if tool.name == "exec" {
-        Line::new(&payload(tool), CODE_TEXT)
-    } else {
-        Highlighter::new(if tool.name == "browser" { "js" } else { "sh" }).line(&payload(tool))
-    };
-    line.background = None;
-    for span in &mut line.spans {
-        span.background = None;
-    }
-    line
+    Line::new(&payload(tool), DIM)
 }
 
 pub(super) fn one(line: Line, columns: usize, prefix: &str, style: Style, source: usize) -> Line {
@@ -83,13 +73,13 @@ pub(super) fn limited(
     if rows.len() > limit {
         rows.truncate(limit);
         let last = rows.last_mut().unwrap();
-        last.push("…", MUTED);
+        last.push("…", DIM);
         *last = last.shortened(columns);
     }
     rows
 }
 
-/// ` NAME ` and the description or target in BODY; commands and discovery
+/// ` NAME ` and the description or target in DIM; commands and discovery
 /// targets follow on the tree when a description is supplied. Returns the
 /// rows, how many belong to the title, and the gutter the result row takes.
 fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, &'static str) {
@@ -105,7 +95,7 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, 
         command_tool && !description(tool).is_empty()
     };
     let mut head = badge::badge(name, status);
-    head.push(" ", BODY);
+    head.push(" ", DIM);
     let display_target = if (command_tool && command) || discovery_note {
         description(tool)
     } else if tool.name == "browser" {
@@ -113,16 +103,16 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, 
     } else {
         &target
     };
-    head.push(&inline(display_target), BODY);
-    // A call still running in the background ends its target in a bold ` &`.
+    head.push(&inline(display_target), DIM);
+    // A call still running in the background keeps its trailing ` &`.
     if status == Status::Background {
-        head.push(" &", LIT.bold());
+        head.push(" &", DIM);
     }
     let mut rows = if tool.presentation.expanded {
         let mut wrapped = head.at_source(0).into_wrapped(columns.max(1), true);
         let mut rows: Vec<_> = wrapped.next().into_iter().collect();
         wrapped.set_columns(columns.saturating_sub(2).max(1));
-        rows.extend(wrapped.map(|row| row.indent("  ", BODY)));
+        rows.extend(wrapped.map(|row| row.indent("  ", DIM)));
         rows
     } else {
         vec![head.at_source(0).shortened(columns)]
@@ -130,7 +120,7 @@ fn title(tool: &Tool<'_>, columns: usize, status: Status) -> (Vec<Line>, usize, 
     let titled = rows.len();
     if command {
         let command = if discovery_note {
-            Line::new(&inline(&target), CODE_TEXT)
+            Line::new(&inline(&target), DIM)
         } else {
             Line::new(
                 if tool.name == "exec" {
@@ -189,19 +179,6 @@ fn collapsed_card(
         .filter(|result| result.get("error").is_none())
         .map(|result| content::render(&tool, result, status, columns, false));
     let mut lead = summary::line(&tool, status, None);
-    let root_fact = tool
-        .result
-        .is_some_and(|result| super::root::line(&tool, result).is_some());
-    for span in &mut lead.spans {
-        // Running and background facts stay quiet; the badge carries the state.
-        span.style = if root_fact {
-            span.style
-        } else if matches!(status, Status::Running | Status::Background) {
-            DIM
-        } else {
-            MUTED
-        };
-    }
     let hidden = body.as_ref().is_some_and(|body| body.hidden > 0)
         || matches!(tool.name, "list" | "search") && tool.result.is_some();
     let mut suffix = Vec::new();
@@ -238,7 +215,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
     if let Some(result) = tool.result {
         if let Some(reason) = crate::events::not_run(result) {
             rows.extend(line_rows(
-                &Line::new(&text::clean(reason), MUTED),
+                &Line::new(&text::clean(reason), DIM),
                 columns,
                 3,
                 "    ",
@@ -247,7 +224,7 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
             ));
         } else if let Some(error) = result.get("error").and_then(crate::json::Value::as_str) {
             rows.extend(line_rows(
-                &Line::new(&text::clean(error), BAD),
+                &Line::new(&text::clean(error), DIM),
                 columns,
                 3,
                 "    ",
@@ -255,7 +232,9 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
                 DIM,
             ));
         } else if let Some(launch) = summary::persistent(&tool, result) {
-            rows.extend(line_rows(&launch, columns, 2, "    ", "    ", DIM));
+            if status != Status::Failed {
+                rows.extend(line_rows(&launch, columns, 2, "    ", "    ", DIM));
+            }
         } else if let Some(root) = super::root::line(&tool, result) {
             rows.extend(line_rows(&root, columns, 2, "    ", "    ", DIM));
             rows.extend(content::render(&tool, result, status, columns, true).rows);
@@ -263,16 +242,37 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
             rows.extend(content::render(&tool, result, status, columns, true).rows);
         }
         rows.extend(content::notices(tool.name, result, columns, true));
-        let mut footer = Line::default();
-        if matches!(tool.name, "bash" | "exec" | "process")
-            && field(result, "launch") != "persistent"
-            && let Some(code) = result
-                .get("exit_code")
-                .filter(|code| **code != crate::json::Value::Null)
+        let raw = crate::events::not_run(result)
+            .or_else(|| result.get("error").and_then(crate::json::Value::as_str));
+        let mut footer = if let Some(raw) = raw {
+            super::outcome::marker(raw, status)
+        } else if matches!(status, Status::Failed | Status::Stopped | Status::Unknown)
+            && (result.get("error").is_some()
+                || !matches!(tool.name, "bash" | "exec" | "process")
+                || status != Status::Failed
+                || field(result, "launch") == "persistent")
         {
-            footer.push(&format!("exit {}", code.encode()), DIM);
+            summary::line(&tool, status, None)
+        } else {
+            Line::default()
+        };
+        if footer.spans.is_empty()
+            && matches!(tool.name, "bash" | "exec" | "process")
+            && field(result, "launch") != "persistent"
+        {
+            let code = result
+                .get("exit_code")
+                .filter(|code| **code != crate::json::Value::Null);
+            if code.is_some() || status == Status::Failed {
+                let code = code.map_or_else(|| "unknown".into(), crate::json::Value::encode);
+                footer = super::outcome::line(&format!("exit {code}"), status);
+            }
         }
-        if let Some(elapsed) = tool.presentation.duration() {
+        let timed_outcome = status == Status::Stopped
+            && (super::flag(result, "cancelled")
+                || super::flag(result, "timed_out")
+                || crate::events::process_status(result) == Some("timed_out"));
+        if let Some(elapsed) = tool.presentation.duration().filter(|_| !timed_outcome) {
             if !footer.spans.is_empty() {
                 footer.push(" · ", DIM);
             }

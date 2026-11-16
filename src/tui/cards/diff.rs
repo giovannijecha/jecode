@@ -5,7 +5,7 @@ use crate::{
         line::{Fold, Line},
         syntax::Highlighter,
         text,
-        theme::{BAD, CODE_TEXT, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, DIM, GOOD, MUTED},
+        theme::{BAD, DIFF_ADDED_SURFACE, DIFF_REMOVED_SURFACE, DIM, GOOD},
     },
 };
 
@@ -175,7 +175,7 @@ fn render_inner(
                 };
                 rows.extend(wrapped(
                     &format!("… {} {kind} lines", end - at - run_shown),
-                    MUTED,
+                    DIM,
                     columns,
                     origin - (end - at - run_shown),
                     "    ",
@@ -194,7 +194,7 @@ fn render_inner(
             } else {
                 "Removed final newline"
             },
-            MUTED,
+            DIM,
             columns,
             origin,
             "    ",
@@ -208,7 +208,7 @@ fn render_inner(
     {
         rows.extend(wrapped(
             &format!("Line endings changed · {ending}"),
-            MUTED,
+            DIM,
             columns,
             origin,
             "    ",
@@ -220,7 +220,7 @@ fn render_inner(
     if coordinate_notice && digits == 0 && !change.hunks.is_empty() {
         rows.extend(wrapped(
             "Original file coordinates unavailable.",
-            MUTED,
+            DIM,
             columns,
             origin,
             "    ",
@@ -260,7 +260,7 @@ fn highlighted(
             let old = (entry.kind != Kind::Added).then(|| old_lexer.line(&source));
             let new = (entry.kind != Kind::Removed).then(|| new_lexer.line(&source));
             if entry.kind == Kind::Context {
-                return (Line::new(&source, CODE_TEXT), None);
+                return (Line::new(&source, DIM), None);
             }
             let range = partner
                 .map(|other| fragments::changed(&source, &text::clean(&hunk[other].text), markup));
@@ -289,6 +289,11 @@ fn entry_rows(
     let mut label = Line::new(&format!("{coordinate} "), DIM);
     label.push(&format!("{mark} "), style);
     let mut rows = code_rows(code, &label, "  ", columns, source, fold);
+    if entry.kind == Kind::Context {
+        for span in rows.iter_mut().flat_map(|row| &mut row.spans) {
+            span.style = DIM;
+        }
+    }
     if let Some(surface) = match entry.kind {
         Kind::Removed => Some(DIFF_REMOVED_SURFACE),
         Kind::Added => Some(DIFF_ADDED_SURFACE),
@@ -301,7 +306,7 @@ fn entry_rows(
     if entry.no_newline {
         rows.extend(wrapped(
             "No newline at end of file",
-            MUTED,
+            DIM,
             columns,
             source,
             "    ",

@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     cards::Presentation,
-    theme::{BAD, BADGE_IDLE, WARNING},
+    theme::{BAD, BADGE_IDLE, DIM},
 };
 
 #[test]
@@ -74,7 +74,7 @@ fn narrow_card_keeps_action_and_expanded_arguments_wrap() {
 }
 
 #[test]
-fn diagnostic_findings_are_successful_with_colored_counts() {
+fn successful_diagnostic_counts_stay_quiet() {
     let arguments = Value::object([("action", Value::string("diagnostics"))]);
     let result = Value::object([
         ("status", Value::string("ready")),
@@ -105,15 +105,7 @@ fn diagnostic_findings_are_successful_with_colored_counts() {
             .unwrap()
             .spans
             .iter()
-            .any(|span| span.style == BAD)
-    );
-    assert!(
-        card.rows
-            .last()
-            .unwrap()
-            .spans
-            .iter()
-            .any(|span| span.style == WARNING)
+            .all(|span| span.style == DIM)
     );
     assert!(card.rows.last().unwrap().plain().contains("current"));
 }
@@ -172,9 +164,54 @@ fn failed_call_shows_its_error_instead_of_an_empty_result() {
     let row = last_row(&arguments, &result);
     assert_eq!(
         row.plain().trim_start_matches(['└', ' ']),
-        "LSP configuration must contain a servers array"
+        "Failed · LSP configuration must contain a servers array"
     );
     assert!(row.spans.iter().any(|span| span.style == BAD));
+}
+
+#[test]
+fn expanded_lsp_failure_keeps_raw_result_quiet_and_marks_the_closure() {
+    let arguments = Value::object([("action", Value::string("definition"))]);
+    let result = Value::object([
+        ("status", Value::string("server_error")),
+        ("detail", Value::string("content modified")),
+    ]);
+    let shown = Presentation {
+        expanded: true,
+        ..Presentation::default()
+    };
+    let rows = card(
+        Tool {
+            name: "lsp",
+            arguments: &arguments,
+            summary: "",
+            result: Some(&result),
+            change: None,
+            presentation: &shown,
+        },
+        80,
+        false,
+    )
+    .rows;
+    let payload = rows
+        .iter()
+        .find(|row| row.plain().contains("\"content modified\""))
+        .unwrap();
+    assert!(payload.spans.iter().all(|span| span.style == DIM));
+    let close = rows.last().unwrap();
+    assert!(close.plain().contains("Server error · content modified"));
+    assert!(
+        close
+            .spans
+            .iter()
+            .any(|span| span.text == "Server error" && span.style == BAD)
+    );
+    assert!(
+        close
+            .spans
+            .iter()
+            .any(|span| span.text.contains("content modified") && span.style == DIM)
+    );
 }
 
 #[test]

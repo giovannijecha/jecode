@@ -3,11 +3,7 @@ use super::{Card, Status, Tool, badge, hint, line_rows};
 use crate::{
     events::diagnostic_counts,
     json::Value,
-    tui::{
-        line::Line,
-        text,
-        theme::{BAD, BODY, CODE_TEXT, DIM, MUTED, WARNING},
-    },
+    tui::{line::Line, text, theme::DIM},
 };
 
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
@@ -19,7 +15,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         0
     };
     let target_width = columns.saturating_sub(text::cells(&title.plain()) + 1 + cap);
-    title.push(&format!(" {}", target(&tool, target_width)), BODY);
+    title.push(&format!(" {}", target(&tool, target_width)), DIM);
     let mut rows = if tool.presentation.expanded {
         super::title::rows(
             "LSP call",
@@ -36,7 +32,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     if tool.presentation.expanded {
         for line in expanded_arguments(&tool).pretty().lines() {
             rows.extend(line_rows(
-                &Line::new(line, CODE_TEXT),
+                &Line::new(line, DIM),
                 columns,
                 rows.len(),
                 "  │ ",
@@ -47,7 +43,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         if let Some(result) = tool.result {
             for line in result.pretty().lines() {
                 rows.extend(line_rows(
-                    &Line::new(line, tone(status)),
+                    &Line::new(line, DIM),
                     columns,
                     rows.len(),
                     "  │ ",
@@ -68,7 +64,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
         let arguments = compact_arguments(tool.arguments);
         if !arguments.is_empty() {
             rows.push(
-                Line::new(&arguments, MUTED)
+                Line::new(&arguments, DIM)
                     .shortened(columns.saturating_sub(4))
                     .gutter("  │ ", DIM)
                     .shortened(columns),
@@ -101,14 +97,6 @@ fn expanded_arguments(tool: &Tool<'_>) -> Value {
         fields.insert("resolved_server_id".into(), Value::string(server));
     }
     arguments
-}
-
-fn tone(status: Status) -> crate::tui::theme::Style {
-    match status {
-        Status::Failed => BAD,
-        Status::Stopped | Status::Unknown => WARNING,
-        _ => MUTED,
-    }
 }
 
 /// The action and Ctrl+O survive narrow rows; the server name yields space first.
@@ -168,34 +156,26 @@ fn summary_line(result: &Value, arguments: &Value, status: Status) -> Line {
         || status != Status::Done
         || result.get("status").and_then(Value::as_str) != Some("ready")
     {
-        return Line::new(&summary_for(result, action), tone(status));
+        let summary = summary_for(result, action);
+        return if result.get("error").and_then(Value::as_str).is_some() {
+            super::outcome::diagnostic(&summary, status)
+        } else {
+            super::outcome::line(&summary, status)
+        };
     }
     let freshness = result
         .get("freshness")
         .and_then(Value::as_str)
         .unwrap_or("unavailable");
     if freshness != "current" {
-        return Line::new(
-            &summary_for(result, action),
-            if matches!(freshness, "stale" | "sync_gap") {
-                WARNING
-            } else {
-                MUTED
-            },
-        );
+        return Line::new(&summary_for(result, action), DIM);
     }
     let Some((errors, warnings, _)) = diagnostic_counts(result) else {
-        return Line::new(&summary_for(result, action), MUTED);
+        return Line::new(&summary_for(result, action), DIM);
     };
-    let mut line = Line::new(
-        &format!("{errors} errors"),
-        if errors > 0 { BAD } else { MUTED },
-    );
-    line.push(" · ", MUTED);
-    line.push(
-        &format!("{warnings} warnings"),
-        if warnings > 0 { WARNING } else { MUTED },
-    );
+    let mut line = Line::new(&format!("{errors} errors"), DIM);
+    line.push(" · ", DIM);
+    line.push(&format!("{warnings} warnings"), DIM);
     line.push(
         &format!(
             " · {}",
@@ -204,13 +184,13 @@ fn summary_line(result: &Value, arguments: &Value, status: Status) -> Line {
                 .and_then(Value::as_str)
                 .unwrap_or("unverified")
         ),
-        MUTED,
+        DIM,
     );
     if result.get("complete") == Some(&Value::Bool(false)) {
-        line.push(" · partial, incomplete", WARNING);
+        line.push(" · partial, incomplete", DIM);
     }
     if result.get("truncated") == Some(&Value::Bool(true)) {
-        line.push(" · more in result file", MUTED);
+        line.push(" · more in result file", DIM);
     }
     line
 }

@@ -2,11 +2,7 @@
 use super::{Tool, field, rhythm, streams, summary};
 use crate::{
     json::{self, Value},
-    tui::{
-        line::Line,
-        text,
-        theme::{BAD, DIM, MUTED},
-    },
+    tui::{line::Line, text, theme::DIM},
 };
 
 fn browser(error: &str) -> Option<(String, String)> {
@@ -100,9 +96,13 @@ pub(super) fn rows(tool: &Tool<'_>, columns: usize, guide: &str) -> Vec<Line> {
             headline.map_or(0, |index| index + 1),
         )
     };
-    let mut lead = Line::new(&text::clean(&message), BAD);
+    let mut lead = if error.is_empty() {
+        super::outcome::line(&message, super::Status::Failed)
+    } else {
+        super::outcome::diagnostic(&message, super::Status::Failed)
+    };
     if !location.is_empty() {
-        lead.push(&format!(" · {}", text::clean(&location)), MUTED);
+        lead.push(&format!(" · {}", text::clean(&location)), DIM);
     }
     let mut rows = rhythm::limited(&lead, columns, guide, 2, 2);
     rows.extend(
@@ -115,10 +115,10 @@ pub(super) fn rows(tool: &Tool<'_>, columns: usize, guide: &str) -> Vec<Line> {
             .enumerate()
             .map(|(index, (_, entry))| {
                 rhythm::one(
-                    Line::new(entry.text.trim(), BAD),
+                    Line::new(entry.text.trim(), DIM),
                     columns,
                     "    ",
-                    MUTED,
+                    DIM,
                     3 + index,
                 )
             }),

@@ -1,7 +1,6 @@
 use super::*;
 use crate::tui::theme::{
-    BAD, BADGE_BAD, BADGE_IDLE, BADGE_SHELL, BADGE_TEXT, BODY, CODE_STRING, KEYWORD, LIT, Style,
-    Surface,
+    BAD, BADGE_BAD, BADGE_IDLE, BADGE_SHELL, BADGE_TEXT, DIM, LIT, Style, Surface,
 };
 
 fn object<const N: usize>(fields: [(&str, &str); N]) -> Value {
@@ -41,7 +40,7 @@ fn plain(card: &Card) -> String {
 }
 
 #[test]
-fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
+fn described_commands_keep_two_quiet_rows_and_quiet_inline_result() {
     let command = format!("printf 'two  spaces' -- {}", "long-argument ".repeat(24));
     let args = object([
         ("command", &command),
@@ -75,13 +74,13 @@ fn described_commands_use_shell_colours_two_rows_and_quiet_inline_result() {
             card.rows[0]
                 .spans
                 .iter()
-                .any(|span| span.text.ends_with("Inspect the renderer") && span.style == BODY)
+                .any(|span| span.text.ends_with("Inspect the renderer") && span.style == DIM)
         );
         assert!(
             card.rows[1]
                 .spans
                 .iter()
-                .any(|span| span.style == CODE_STRING && span.background.is_none())
+                .any(|span| span.style == DIM && span.background.is_none())
         );
         assert!(
             card.rows
@@ -153,14 +152,14 @@ fn expanded_command_preserves_captured_line_breaks() {
 }
 
 #[test]
-fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
+fn blank_description_uses_quiet_target_and_background_process_keeps_ampersand() {
     let result = Value::object([("exit_code", Value::number(0))]);
     for description in ["", "  \n "] {
         let args = object([("command", "cargo test"), ("description", description)]);
         let card = draw("bash", &args, Some(&result), &Presentation::default(), 80);
         assert_eq!(plain(&card), "  BASH   cargo test\n  └ Done");
         assert_eq!(badge(&card), (BADGE_TEXT.bold(), Some(BADGE_SHELL)));
-        assert_eq!(card.rows[0].spans.last().unwrap().style, BODY);
+        assert_eq!(card.rows[0].spans.last().unwrap().style, DIM);
     }
     let args = object([
         ("action", "poll"),
@@ -179,10 +178,10 @@ fn blank_description_uses_body_target_and_background_process_keeps_ampersand() {
         &Presentation::default(),
         80,
     );
-    // The background call ends its title target in a bold `&`.
+    // The background call retains its quiet trailing `&`.
     assert_eq!(card.rows[0].plain(), "  PROC   Serve preview &");
-    assert_eq!(card.rows[0].spans.last().unwrap().text, " &");
-    assert_eq!(card.rows[0].spans.last().unwrap().style, LIT.bold());
+    assert!(card.rows[0].spans.last().unwrap().text.ends_with(" &"));
+    assert_eq!(card.rows[0].spans.last().unwrap().style, DIM);
     assert_eq!(badge(&card), (LIT.bold(), Some(BADGE_IDLE)));
     assert_eq!(card.rows[1].plain(), "  │ $ node preview.js");
     // Background facts stay quiet; the badge carries the state.
@@ -218,7 +217,7 @@ fn browser_decodes_cdp_exception_in_its_card() {
         card.rows[1]
             .spans
             .iter()
-            .any(|span| span.style == KEYWORD && span.text == "const")
+            .any(|span| span.style == DIM && span.text.contains("const"))
     );
     assert!(plain(&card).contains("TypeError: missing title · at <anonymous>:1:10"));
     assert!(!plain(&card).contains("exception") && !plain(&card).contains("ignored"));
@@ -226,13 +225,13 @@ fn browser_decodes_cdp_exception_in_its_card() {
         card.rows[2]
             .spans
             .iter()
-            .any(|span| span.style == BAD && span.text.contains("TypeError"))
+            .any(|span| span.style == BAD && span.text == "Failed")
     );
     assert!(
         card.rows[2]
             .spans
             .iter()
-            .any(|span| span.style == MUTED && span.text.contains("at <anonymous>"))
+            .any(|span| span.style == DIM && span.text.contains("at <anonymous>"))
     );
 }
 
@@ -278,7 +277,7 @@ fn cdp_stack_frames_supply_a_muted_position_at_both_widths() {
             card.rows
                 .iter()
                 .flat_map(|line| &line.spans)
-                .any(|span| span.style == MUTED && span.text.contains("at app.js:3:4"))
+                .any(|span| span.style == DIM && span.text.contains("at app.js:3:4"))
         );
         assert!(!plain(&card).contains("stackTrace"));
     }

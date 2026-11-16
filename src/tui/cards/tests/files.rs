@@ -128,7 +128,7 @@ fn file_changes_survive_collapse_and_errors_do_not_show_success_diffs() {
         &Presentation::default(),
     );
     assert!(!plain(&rows).contains("new();") && !plain(&rows).contains("+2"));
-    assert!(plain(&rows).contains("src/auth.rs  File is read-only"));
+    assert!(plain(&rows).contains("src/auth.rs  Failed · File is read-only"));
 }
 
 #[test]

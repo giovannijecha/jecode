@@ -1,5 +1,5 @@
 use super::{Body, diff, field, wrapped};
-use crate::{file_change::Change, json::Value, tui::theme::MUTED};
+use crate::{file_change::Change, json::Value, tui::theme::DIM};
 
 fn snippet_change(old: &str, new: &str) -> Option<Change> {
     let mut change = Change::between(Some(old), new)?;
@@ -56,7 +56,7 @@ pub(super) fn body(
     for (index, (old, new)) in edits.iter().copied().take(shown).enumerate() {
         body.rows.extend(wrapped(
             &format!("Replacement {} · supplied snippets", index + 1),
-            MUTED,
+            DIM,
             columns,
             origin,
             "    ",
@@ -85,7 +85,7 @@ pub(super) fn body(
         } else {
             body.rows.extend(wrapped(
                 "Snippet diff unavailable within display limits.",
-                MUTED,
+                DIM,
                 columns,
                 origin,
                 "    ",
@@ -106,7 +106,7 @@ pub(super) fn body(
                     "replacements"
                 }
             ),
-            MUTED,
+            DIM,
             columns,
             origin,
             "    ",
@@ -117,7 +117,7 @@ pub(super) fn body(
     }
     body.rows.extend(wrapped(
         "Original file coordinates unavailable.",
-        MUTED,
+        DIM,
         columns,
         origin,
         "    ",

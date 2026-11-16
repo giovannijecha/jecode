@@ -14,7 +14,7 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        theme::{BAD, DIM, MUTED},
+        theme::{BAD, DIM},
     },
 };
 
@@ -49,7 +49,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
             if text::cells(&title.plain()) + 2 + text::cells(&fact.plain()) <= columns
                 && !fact.plain().contains('\n') =>
         {
-            title.push("  ", MUTED);
+            title.push("  ", DIM);
             title.spans.extend(fact.spans);
         }
         _ => rows.extend(line_rows(&fact, columns, 1, "  ⎿ ", "    ", DIM)),
@@ -82,7 +82,7 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
 
 /// `3 files · +9 −1 lines`, ` · N failed` in `bad`; one file keeps today's
 /// fact, and a call that changed nothing says so on the failed card. A call
-/// that never ran gives its reason in `muted`: the badge carries the state.
+/// that never ran keeps a short outcome marker beside its quiet reason.
 fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line {
     let Some(result) = tool.result else {
         let elapsed = summary::line(tool, Status::Running, None);
@@ -97,7 +97,7 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
         return line;
     };
     if let Some(reason) = crate::events::not_run(result) {
-        return Line::new(&text::clean(reason), MUTED);
+        return super::outcome::diagnostic(reason, Status::Stopped);
     }
     if result.get("error").is_some() {
         return summary::line(tool, Status::Failed, None);
@@ -108,19 +108,21 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
         .count();
     if written == 0 {
         return if failed > 0 {
-            Line::new(&format!("No files changed · {failed} failed"), BAD)
+            let mut line = Line::new("No files changed", DIM);
+            line.push(&format!(" · {failed} failed"), BAD);
+            line
         } else {
-            Line::new("No changes", MUTED)
+            Line::new("No changes", DIM)
         };
     }
     let mut line = if files == 1 {
         match tool.change.and_then(|change| change.files.first()) {
             Some((_, change)) => summary::changed(change),
-            None => Line::new(&replacements(tool.arguments.get("files")), MUTED),
+            None => Line::new(&replacements(tool.arguments.get("files")), DIM),
         }
     } else {
         let noun = if written == 1 { "file" } else { "files" };
-        let mut line = Line::new(&format!("{written} {noun}"), MUTED);
+        let mut line = Line::new(&format!("{written} {noun}"), DIM);
         // A file over the diff limits has no counts, and a sum of the others
         // would read as the whole call.
         let unknown = entries
@@ -130,7 +132,7 @@ fn fact(tool: &Tool<'_>, files: usize, entries: &[Value], failed: usize) -> Line
             .change
             .filter(|change| !unknown && change.added + change.removed > 0)
         {
-            line.push(" · ", MUTED);
+            line.push(" · ", DIM);
             line = line.append(summary::changed(change));
         }
         line
@@ -236,9 +238,9 @@ fn sections(
 /// A section's heading: the path clipped first so its counts stay.
 fn heading(path: &str, tail: Line, columns: usize, origin: usize, expanded: bool) -> Vec<Line> {
     if expanded {
-        let mut line = Line::new(&text::clean(path), MUTED);
+        let mut line = Line::new(&text::clean(path), DIM);
         if !tail.spans.is_empty() {
-            line.push("  ", MUTED);
+            line.push("  ", DIM);
             line = line.append(tail);
         }
         let mut wrapped = line
@@ -256,9 +258,9 @@ fn heading(path: &str, tail: Line, columns: usize, origin: usize, expanded: bool
     let room = columns
         .saturating_sub(4 + text::cells(&tail.plain()))
         .max(1);
-    let mut line = Line::new(&text::clean(path), MUTED).shortened(room);
+    let mut line = Line::new(&text::clean(path), DIM).shortened(room);
     if !tail.spans.is_empty() {
-        line.push("  ", MUTED);
+        line.push("  ", DIM);
         line = line.append(tail);
     }
     vec![line.at_source(origin).gutter("  ", DIM).shortened(columns)]
@@ -266,27 +268,22 @@ fn heading(path: &str, tail: Line, columns: usize, origin: usize, expanded: bool
 
 fn tail(written: bool, change: Option<&Change>, arguments: Option<&Value>) -> Line {
     match change {
-        _ if !written => Line::new("No changes", MUTED),
+        _ if !written => Line::new("No changes", DIM),
         Some(change) if change.added + change.removed > 0 => {
             summary::counts(change.added, change.removed)
         }
-        Some(change) => Line::new(&diff::summary(change), MUTED),
-        None => Line::new(&replacements(arguments), MUTED),
+        Some(change) => Line::new(&diff::summary(change), DIM),
+        None => Line::new(&replacements(arguments), DIM),
     }
 }
 
-/// `path · not changed · error` in `bad`: clipped collapsed, wrapped under
+/// `path · not changed · error`, with only `not changed` in red: clipped collapsed, wrapped under
 /// the path expanded.
 fn failure(path: &str, error: &str, columns: usize, expanded: bool, origin: usize) -> Vec<Line> {
-    let line = Line::new(
-        &format!(
-            "{} · not changed · {}",
-            text::clean(path),
-            text::clean(error)
-        ),
-        BAD,
-    )
-    .at_source(origin);
+    let mut line = Line::new(&format!("{} · ", text::clean(path)), DIM);
+    line.push("not changed", BAD);
+    line.push(&format!(" · {}", text::clean(error)), DIM);
+    let line = line.at_source(origin);
     if !expanded {
         return vec![line.gutter("  ", DIM).shortened(columns)];
     }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::{
     cards::{Presentation, card as render},
-    theme::{BADGE_BAD, BADGE_EDIT, BADGE_WARN, MUTED},
+    theme::{BADGE_BAD, BADGE_EDIT, BADGE_WARN, DIM},
 };
 use std::time::Duration;
 
@@ -134,7 +134,7 @@ fn three_files_are_one_card_with_a_section_per_file() {
             .iter()
             .find(|row| row.plain().starts_with(&format!("  {SESSION}  ")))
             .unwrap();
-        assert_eq!(styled(std::slice::from_ref(heading), SESSION), Some(MUTED));
+        assert_eq!(styled(std::slice::from_ref(heading), SESSION), Some(DIM));
         assert!(rows.iter().any(|row| row.contains("2 + y")));
         assert!(!card.hidden && !rows.iter().any(|row| row.contains("Ctrl+O")));
         assert!(rows.iter().all(|row| text::cells(row) <= columns));
@@ -164,6 +164,9 @@ fn a_failed_file_is_one_row_in_call_order_on_a_failed_card() {
         let fact = rows.iter().find(|row| row.contains("2 files")).unwrap();
         assert!(fact.ends_with("2 files · +2 −1 lines · 1 failed"), "{fact}");
         assert_eq!(styled(&collapsed.rows, " · 1 failed"), Some(BAD));
+        assert_eq!(styled(&collapsed.rows, "not changed"), Some(BAD));
+        assert_eq!(styled(&collapsed.rows, "src/auth/token.ts · "), Some(DIM));
+        assert_eq!(styled(&collapsed.rows, " · edit 1:"), Some(DIM));
         let failed = rows
             .iter()
             .position(|row| row.starts_with("  src/auth/token.ts · not changed · edit 1:"))
@@ -201,7 +204,7 @@ fn a_failed_file_is_one_row_in_call_order_on_a_failed_card() {
         rows.contains(&"  └ No files changed · 3 failed".to_owned()),
         "{rows:#?}"
     );
-    assert_eq!(styled(&card.rows, "No files changed"), Some(BAD));
+    assert_eq!(styled(&card.rows, "No files changed"), Some(DIM));
     assert_eq!(card.rows[0].spans[0].background, Some(BADGE_BAD));
     assert_eq!(
         rows.iter()
@@ -417,9 +420,17 @@ fn a_call_that_never_ran_is_stopped_and_says_why() {
                 "{outcome}: {rows:#?}"
             );
             assert!(!rows.iter().any(|row| row.contains("No ")), "{rows:#?}");
-            let opening = says.split(' ').next().unwrap();
-            // The badge carries the state, so the words stay quiet.
-            assert_eq!(styled(&collapsed.rows, opening), Some(MUTED), "{rows:#?}");
+            let opening = if says.starts_with("Denied") {
+                "Denied"
+            } else {
+                "Not run"
+            };
+            // The unsuccessful outcome keeps its marker beside quiet details.
+            assert_eq!(
+                styled(&collapsed.rows, opening),
+                Some(crate::tui::theme::WARNING),
+                "{rows:#?}"
+            );
             assert!(rows.iter().all(|row| text::cells(row) <= columns));
             // Clipped, the rest waits for Ctrl+O; expanded, all of it shows.
             let whole = said(&rows).contains(says);

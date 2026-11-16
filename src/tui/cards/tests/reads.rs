@@ -111,7 +111,7 @@ fn chapter_expansion_keeps_distinct_windows_read_targets() {
 }
 
 #[test]
-fn read_expansion_preserves_numbered_source_and_syntax() {
+fn read_expansion_preserves_numbered_source_without_syntax() {
     let result = Value::object([
         (
             "content",
@@ -149,7 +149,7 @@ fn read_expansion_preserves_numbered_source_and_syntax() {
     assert!(
         rows.iter()
             .flat_map(|row| &row.spans)
-            .any(|span| span.style == KEYWORD && span.text == "pub")
+            .any(|span| span.style == DIM && span.text.contains("pub fn login()"))
     );
     assert!(!plain(&rows).contains("41:"));
     assert!(rows.iter().all(|row| text::cells(&row.plain()) <= 40));
@@ -265,7 +265,7 @@ fn compact_read_pagination_stays_on_one_quiet_row() {
                 plain(&rows)
             );
             let fact = facts(&rows);
-            assert!(fact.spans.iter().all(|span| span.style == MUTED));
+            assert!(fact.spans.iter().all(|span| span.style == DIM));
             assert!(!plain(&rows).contains("More lines available"));
             assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
             let fact = fact.plain();

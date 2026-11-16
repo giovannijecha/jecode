@@ -1,11 +1,7 @@
 use super::{Body, content, field, line_rows, preview};
 use crate::{
     json::Value,
-    tui::{
-        line::Line,
-        terminal_output, text,
-        theme::{BODY, CODE_TEXT, DIM, MUTED},
-    },
+    tui::{line::Line, terminal_output, text, theme::DIM},
 };
 
 pub(super) struct Entry {
@@ -122,20 +118,13 @@ pub(super) fn render(
                 index * 2 + 2,
                 "    ",
                 "    ",
-                MUTED,
+                DIM,
             ));
         }
         previous = entry.stream;
-        let style = if entry.stream == "stderr" && !failed {
-            MUTED
-        } else if entry.stream == "stdout" {
-            CODE_TEXT
-        } else {
-            BODY
-        };
         rows.extend(line_rows(
             &preview(
-                Line::new(&entry.text, style),
+                Line::new(&entry.text, DIM),
                 columns.saturating_sub(4),
                 expanded,
             ),
@@ -143,7 +132,7 @@ pub(super) fn render(
             index * 2 + 3,
             "    ",
             "    ",
-            MUTED,
+            DIM,
         ));
     }
     Body {

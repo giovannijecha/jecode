@@ -1,7 +1,7 @@
 use super::{
     line::Line,
     text,
-    theme::{DIM, MUTED, STRONG, Style},
+    theme::{DIM, STRONG, Style},
 };
 use crate::{file_change::Change, json::Value};
 
@@ -14,8 +14,11 @@ mod discovery;
 mod edit_fallback;
 mod edits;
 mod failure;
+#[cfg(test)]
+mod ink_tests;
 mod lsp;
 mod mcp;
+mod outcome;
 mod presentation;
 mod rhythm;
 mod root;
@@ -255,7 +258,7 @@ fn file_card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     // The facts join a one-row title when they fit; otherwise they hang.
     match rows.as_mut_slice() {
         [title] if text::cells(&title.plain()) + 2 + text::cells(&fact.plain()) <= columns => {
-            title.push("  ", MUTED);
+            title.push("  ", DIM);
             title.spans.extend(fact.spans);
         }
         _ => rows.extend(line_rows(&fact, columns, 1, "  ⎿ ", "    ", DIM)),
@@ -383,13 +386,13 @@ fn hint(row: Line, label: &str, columns: usize) -> Vec<Line> {
     let room = text::cells(&cap.plain());
     if used + 4 + room <= columns {
         let mut row = row;
-        row.push(&" ".repeat(columns - 2 - used - room), MUTED);
+        row.push(&" ".repeat(columns - 2 - used - room), DIM);
         vec![row.append(cap)]
     } else {
         // No room beside the title: the key takes its own row, still ending
         // two cells from the edge like every other key.
         let origin = row.origin;
-        let mut own = Line::new(&" ".repeat(columns.saturating_sub(2 + room)), MUTED);
+        let mut own = Line::new(&" ".repeat(columns.saturating_sub(2 + room)), DIM);
         own = own.append(cap).shortened(columns);
         own.origin = origin;
         vec![row, own]

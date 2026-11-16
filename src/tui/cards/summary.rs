@@ -1,5 +1,6 @@
 use super::{
-    Status, Tool, content, diff, edit_fallback, field, flag, plural, root, skill_name, streams,
+    Status, Tool, content, diff, edit_fallback, field, flag, outcome, plural, root, skill_name,
+    streams,
 };
 use crate::{
     file_change::Change,
@@ -8,7 +9,7 @@ use crate::{
         activity,
         line::Line,
         text,
-        theme::{BAD, BODY, DIM, GOOD, LIT, MUTED, STRONG, WARNING},
+        theme::{BAD, DIM, WARNING},
     },
 };
 use std::time::Duration;
@@ -19,10 +20,10 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         return running(tool);
     };
     if let Some(reason) = crate::events::not_run(result) {
-        return Line::new(&short_error(reason), MUTED);
+        return outcome::diagnostic(&short_error(reason), status);
     }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
-        return Line::new(&short_error(error), BAD);
+        return outcome::diagnostic(&short_error(error), status);
     }
     if let Some(launch) = persistent(tool, result) {
         return launch;
@@ -48,7 +49,7 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
             WARNING,
         );
         if output {
-            line.push(" · partial output", MUTED);
+            line.push(" · partial output", DIM);
         }
         return line;
     }
@@ -64,23 +65,23 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         };
         return Line::new(
             &format!("{} {noun} · {running} running", processes.len()),
-            MUTED,
+            DIM,
         );
     }
     if let Some((state, style)) = process.and_then(|process| match process {
-        "running" => Some((" running", LIT)),
+        "running" => Some((" running", DIM)),
         "stopping" => Some((" stopping", WARNING)),
         "stopped" => Some((" stopped", WARNING)),
-        "unknown" => Some((" status unknown", MUTED)),
+        "unknown" => Some((" status unknown", DIM)),
         _ => None,
     }) {
-        let mut line = Line::new(field(result, "process_id"), STRONG);
+        let mut line = Line::new(field(result, "process_id"), DIM);
         line.push(state, style);
         let entries = streams::entries(result, false);
         if let Some(index) =
             streams::headline(&entries, false).filter(|_| !tool.presentation.expanded)
         {
-            line.push(&format!(" · {}", entries[index].text), MUTED);
+            line.push(&format!(" · {}", entries[index].text), DIM);
         }
         return line;
     }
@@ -90,7 +91,7 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
     if tool.name == "edit"
         && let Some(summary) = edit_fallback::summary(tool.arguments, result)
     {
-        return Line::new(&summary, MUTED);
+        return Line::new(&summary, DIM);
     }
     match tool.name {
         "bash" | "exec" | "process" => command(
@@ -102,18 +103,18 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
         "read" => {
             let read = read(tool.arguments, result);
             match skill_name(field(tool.arguments, "path")) {
-                Some(_) => Line::new(&format!("Loaded skill · {read}"), MUTED),
-                None => Line::new(&read, MUTED),
+                Some(_) => Line::new(&format!("Loaded skill · {read}"), DIM),
+                None => read_line(&read),
             }
         }
         "write" => {
             let count = content::payload(field(tool.arguments, "content")).len();
-            Line::new(&format!("Wrote {count} {}", plural(count)), MUTED)
+            Line::new(&format!("Wrote {count} {}", plural(count)), DIM)
         }
         "web" => web(result, tool.summary),
-        "list" | "search" => Line::new(&crate::events::tool_summary(tool.name, result), MUTED),
+        "list" | "search" => Line::new(&crate::events::tool_summary(tool.name, result), DIM),
         "browser" => browser(result, tool.summary),
-        _ => Line::new(tool.summary, MUTED),
+        _ => Line::new(tool.summary, DIM),
     }
 }
 
@@ -126,21 +127,37 @@ pub(super) fn persistent(tool: &Tool<'_>, result: &Value) -> Option<Line> {
     let pid = result.get("pid").and_then(Value::as_usize)?;
     let application = field(result, "application");
     let (label, style) = match application {
-        "running" => ("Launched".to_owned(), MUTED),
+        "running" => ("Launched".to_owned(), DIM),
         "exited" => match result.get("exit_code") {
             Some(code) if *code != Value::Null => (
                 format!("Exited {}", code.encode()),
-                if *code == Value::number(0) {
-                    MUTED
-                } else {
-                    BAD
-                },
+                if *code == Value::number(0) { DIM } else { BAD },
             ),
             _ => ("Exited".to_owned(), BAD),
         },
         _ => return None,
     };
-    Some(Line::new(&format!("{label} · pid {pid}"), style))
+    let mut line = Line::new(&label, style);
+    line.push(&format!(" · pid {pid}"), DIM);
+    Some(line)
+}
+
+fn read_line(value: &str) -> Line {
+    let mut line = Line::default();
+    for (index, fact) in value.split(" · ").enumerate() {
+        if index > 0 {
+            line.push(" · ", DIM);
+        }
+        line.push(
+            fact,
+            if fact.ends_with(" not read") {
+                WARNING
+            } else {
+                DIM
+            },
+        );
+    }
+    line
 }
 
 fn running(tool: &Tool<'_>) -> Line {
@@ -157,9 +174,9 @@ fn running(tool: &Tool<'_>) -> Line {
     }
     if let Some(note) = &tool.presentation.note {
         if !line.spans.is_empty() {
-            line.push(" · ", MUTED);
+            line.push(" · ", DIM);
         }
-        line.push(&text::clean(note), MUTED);
+        line.push(&text::clean(note), DIM);
     }
     line
 }
@@ -193,22 +210,22 @@ fn command(result: &Value, failed: bool, elapsed: Option<Duration>, expanded: bo
             .map_or_else(|| "unknown".into(), Value::encode);
         let mut line = Line::new(&format!("Exit {code}"), BAD);
         match (headline, elapsed) {
-            (Some(headline), _) => line.push(&format!(" · {headline}"), BODY),
-            (None, Some(elapsed)) => line.push(&format!(" · {elapsed}"), MUTED),
+            (Some(headline), _) => line.push(&format!(" · {headline}"), DIM),
+            (None, Some(elapsed)) => line.push(&format!(" · {elapsed}"), DIM),
             (None, None) => {}
         }
         return line;
     }
     match (headline, elapsed) {
         (Some(headline), elapsed) => {
-            let mut line = Line::new(headline, BODY);
+            let mut line = Line::new(headline, DIM);
             if let Some(elapsed) = elapsed {
-                line.push(&format!(" · {elapsed}"), MUTED);
+                line.push(&format!(" · {elapsed}"), DIM);
             }
             line
         }
-        (None, Some(elapsed)) => Line::new(&format!("Done in {elapsed}"), MUTED),
-        (None, None) => Line::new("Done", MUTED),
+        (None, Some(elapsed)) => Line::new(&format!("Done in {elapsed}"), DIM),
+        (None, None) => Line::new("Done", DIM),
     }
 }
 
@@ -216,17 +233,14 @@ pub(super) fn changed(change: &Change) -> Line {
     if change.created {
         return Line::new(
             &format!("New file · {} {}", change.added, plural(change.added)),
-            MUTED,
+            DIM,
         );
     }
     if change.added == 0 && change.removed == 0 {
-        return Line::new(&diff::summary(change), MUTED);
+        return Line::new(&diff::summary(change), DIM);
     }
     let mut line = counts(change.added, change.removed);
-    line.push(
-        &format!(" {}", plural(change.added + change.removed)),
-        MUTED,
-    );
+    line.push(&format!(" {}", plural(change.added + change.removed)), DIM);
     line
 }
 
@@ -234,13 +248,13 @@ pub(super) fn changed(change: &Change) -> Line {
 pub(super) fn counts(added: usize, removed: usize) -> Line {
     let mut line = Line::default();
     if added > 0 {
-        line.push(&format!("+{added}"), GOOD);
+        line.push(&format!("+{added}"), DIM);
     }
     if removed > 0 {
         if added > 0 {
-            line.push(" ", MUTED);
+            line.push(" ", DIM);
         }
-        line.push(&format!("−{removed}"), BAD);
+        line.push(&format!("−{removed}"), DIM);
     }
     line
 }
@@ -390,9 +404,9 @@ pub(super) fn lines(result: &Value) -> usize {
 }
 
 fn pair(subject: &str, details: &[String]) -> Line {
-    let mut line = Line::new(&text::clean(subject), STRONG);
+    let mut line = Line::new(&text::clean(subject), DIM);
     for detail in details.iter().filter(|detail| !detail.is_empty()) {
-        line.push(&format!(" · {}", text::clean(detail)), MUTED);
+        line.push(&format!(" · {}", text::clean(detail)), DIM);
     }
     line
 }
@@ -402,7 +416,7 @@ fn web(result: &Value, summary: &str) -> Line {
         .get("status")
         .filter(|_| result.get("pages").is_none())
     else {
-        return Line::new(summary, MUTED);
+        return Line::new(summary, DIM);
     };
     let url = Some(field(result, "final_url"))
         .filter(|url| !url.is_empty())

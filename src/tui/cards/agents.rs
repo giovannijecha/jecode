@@ -5,11 +5,7 @@
 use super::{Card, Status, Tool, badge, field, hint, line_rows, rhythm};
 use crate::{
     json::Value,
-    tui::{
-        line::Line,
-        text,
-        theme::{BAD, BODY, CODE_TEXT, DIM, GOOD, MUTED, STRONG, Style, WARNING},
-    },
+    tui::{line::Line, text, theme::DIM},
 };
 
 fn number(value: &Value, key: &str) -> usize {
@@ -151,27 +147,27 @@ pub(super) fn subject(event: &Value) -> String {
 }
 
 /// The outcome fact on the compact receipt's tree.
-fn fact(event: &Value) -> Option<(String, Style)> {
+fn fact(event: &Value) -> Option<Line> {
     match field(event, "kind") {
         "returned" => Some(if let Some(error) = strings(event, "details").first() {
-            (format!("failed · {}", inline(error)), BAD)
+            super::outcome::line(&format!("failed · {}", inline(error)), Status::Failed)
         } else if let Some(check) = record(event).and_then(crate::tui::agents::failed_check) {
-            (format!("check failed · {}", inline(check)), BAD)
+            super::outcome::line(&format!("check failed · {}", inline(check)), Status::Failed)
         } else if record(event).is_some_and(reviewed) {
-            ("reviewed by main agent".into(), MUTED)
+            Line::new("reviewed by main agent", DIM)
         } else {
-            ("pending review by main agent".into(), MUTED)
+            Line::new("pending review by main agent", DIM)
         }),
-        "unknown" => Some(("inspect in /agents".into(), WARNING)),
+        "unknown" => Some(Line::new("inspect in /agents", DIM)),
         _ => None,
     }
 }
 
 fn file_row(path: &str, counts: Option<(usize, usize)>) -> Line {
-    let mut line = Line::new(&inline(path), CODE_TEXT);
+    let mut line = Line::new(&inline(path), DIM);
     if let Some((added, removed)) = counts {
-        line.push(&format!("  +{added}"), GOOD);
-        line.push(&format!(" −{removed}"), BAD);
+        line.push(&format!("  +{added}"), DIM);
+        line.push(&format!(" −{removed}"), DIM);
     }
     line
 }
@@ -195,8 +191,8 @@ pub(super) fn receipts(tool: &Tool<'_>, columns: usize) -> Vec<Line> {
             ));
         }
     }
-    if let Some((fact, style)) = fact(event) {
-        rows.push(Line::new(&fact, style));
+    if let Some(fact) = fact(event) {
+        rows.push(fact);
     }
     rows.into_iter()
         .enumerate()
@@ -218,11 +214,8 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
     match field(event, "kind") {
         "created" => {
             for record in created(event) {
-                let mut head = Line::new(
-                    &format!("AGENT {}", number(record, "number")),
-                    badge::ink("Agents").bold(),
-                );
-                head.push(&format!(" {}", inline(field(record, "title"))), STRONG);
+                let mut head = Line::new(&format!("AGENT {}", number(record, "number")), DIM);
+                head.push(&format!(" {}", inline(field(record, "title"))), DIM);
                 head.push(&format!("  {}", workspace(record)), DIM);
                 lines.push(head);
                 let instruction = if number(record, "received_version") == 0 {
@@ -231,7 +224,7 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
                     field(record, "instructions")
                 };
                 if !instruction.is_empty() {
-                    lines.push(Line::new(&text::clean(instruction), MUTED));
+                    lines.push(Line::new(&text::clean(instruction), DIM));
                 }
             }
         }
@@ -245,7 +238,7 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
                     ""
                 };
                 if !instruction.is_empty() {
-                    lines.push(Line::new(&text::clean(instruction), MUTED));
+                    lines.push(Line::new(&text::clean(instruction), DIM));
                 }
                 lines.push(assignment(record));
             }
@@ -261,15 +254,15 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
                 {
                     let report = field(report, "text");
                     if !report.trim().is_empty() {
-                        lines.push(Line::new(&text::clean(report.trim()), MUTED));
+                        lines.push(Line::new(&text::clean(report.trim()), DIM));
                     }
                 }
             }
             for error in strings(event, "details") {
-                lines.push(Line::new(&text::clean(error), BAD));
+                lines.push(Line::new(&text::clean(error), DIM));
             }
             if let Some(check) = record.and_then(crate::tui::agents::failed_check) {
-                lines.push(Line::new(&format!("Check failed · {}", inline(check)), BAD));
+                lines.push(Line::new(&format!("Check failed · {}", inline(check)), DIM));
             }
             lines.push(Line::new(
                 if record.is_some_and(reviewed) {
@@ -277,21 +270,26 @@ fn details(event: &Value, columns: usize) -> Vec<Line> {
                 } else {
                     "Pending review by main agent"
                 },
-                MUTED,
+                DIM,
             ));
         }
         "reviewed" => {
             for note in strings(event, "details") {
-                lines.push(Line::new(&text::clean(note), MUTED));
+                lines.push(Line::new(&text::clean(note), DIM));
             }
         }
         "unknown" => {
             for message in strings(event, "details") {
-                lines.push(Line::new(&text::clean(message), MUTED));
+                lines.push(Line::new(&text::clean(message), DIM));
             }
-            lines.push(Line::new("Inspect in /agents", WARNING));
+            lines.push(Line::new("Inspect in /agents", DIM));
         }
         "stopped" | "closed" => lines.extend(record.map(assignment)),
+        _ => {}
+    }
+    match status(event) {
+        Status::Failed => lines.push(super::outcome::line("Failed", Status::Failed)),
+        Status::Unknown => lines.push(super::outcome::line("Outcome unknown", Status::Unknown)),
         _ => {}
     }
     let mut source = 1;
@@ -310,13 +308,26 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let expanded = tool.presentation.expanded;
     let mut title = badge::agent(name, tool.result.map_or(Status::Running, status));
     let subject = tool.result.map_or_else(|| "Running".into(), subject);
-    title.push(&format!(" {subject}"), BODY);
+    if !expanded
+        && tool
+            .result
+            .is_some_and(|event| status(event) == Status::Unknown)
+    {
+        title.push(" ", DIM);
+        title = title.append(super::outcome::line("Outcome unknown", Status::Unknown));
+        title.push(
+            subject.strip_prefix("Outcome unknown").unwrap_or_default(),
+            DIM,
+        );
+    } else {
+        title.push(&format!(" {subject}"), DIM);
+    }
     let title = title.at_source(0);
     let mut rows = if expanded {
         let mut wrapped = title.into_wrapped(columns.max(1), true);
         let mut rows: Vec<_> = wrapped.next().into_iter().collect();
         wrapped.set_columns(columns.saturating_sub(2).max(1));
-        rows.extend(wrapped.map(|row| row.indent("  ", BODY)));
+        rows.extend(wrapped.map(|row| row.indent("  ", DIM)));
         rows
     } else {
         vec![title.shortened(columns)]
@@ -340,4 +351,52 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     });
     badge::hang(&mut rows[titled..], true);
     Card { rows, hidden }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::{cards::Presentation, theme::BAD};
+
+    #[test]
+    fn expanded_failed_agent_keeps_diagnostic_quiet_and_closes_on_failure() {
+        let arguments = Value::object([("label", Value::string("AGENTS"))]);
+        let event = Value::object([
+            ("kind", Value::string("returned")),
+            (
+                "details",
+                Value::Array(vec![Value::string("Agent report failed to load")]),
+            ),
+        ]);
+        let shown = Presentation {
+            expanded: true,
+            ..Presentation::default()
+        };
+        let rows = card(
+            Tool {
+                name: "collaboration",
+                arguments: &arguments,
+                summary: "",
+                result: Some(&event),
+                change: None,
+                presentation: &shown,
+            },
+            80,
+            false,
+        )
+        .rows;
+        let diagnostic = rows
+            .iter()
+            .find(|row| row.plain().contains("Agent report failed to load"))
+            .unwrap();
+        assert!(diagnostic.spans.iter().all(|span| span.style == DIM));
+        let close = rows.last().unwrap();
+        assert_eq!(close.plain(), "  └ Failed");
+        assert!(
+            close
+                .spans
+                .iter()
+                .any(|span| span.text == "Failed" && span.style == BAD)
+        );
+    }
 }
