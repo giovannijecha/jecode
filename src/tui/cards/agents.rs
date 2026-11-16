@@ -308,17 +308,15 @@ pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let expanded = tool.presentation.expanded;
     let mut title = badge::agent(name, tool.result.map_or(Status::Running, status));
     let subject = tool.result.map_or_else(|| "Running".into(), subject);
-    if !expanded
-        && tool
-            .result
-            .is_some_and(|event| status(event) == Status::Unknown)
-    {
+    // Collapsed, an unknown outcome marks its leading words; the rest stays quiet.
+    let unknown = tool
+        .result
+        .filter(|event| !expanded && status(event) == Status::Unknown)
+        .and_then(|_| subject.strip_prefix("Outcome unknown"));
+    if let Some(rest) = unknown {
         title.push(" ", DIM);
         title = title.append(super::outcome::line("Outcome unknown", Status::Unknown));
-        title.push(
-            subject.strip_prefix("Outcome unknown").unwrap_or_default(),
-            DIM,
-        );
+        title.push(rest, DIM);
     } else {
         title.push(&format!(" {subject}"), DIM);
     }

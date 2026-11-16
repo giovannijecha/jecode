@@ -80,21 +80,20 @@ fn contents(
                     DIM,
                 ));
             }
-            let text = if status == Status::Unknown {
-                "Outcome unknown. The service may already have acted; check its state before retrying."
-            } else if status == Status::Stopped {
-                "Cancelled before dispatch. The service did not receive this call."
-            } else {
-                ""
+            let note = match status {
+                Status::Unknown => Some((
+                    "Outcome unknown",
+                    ". The service may already have acted; check its state before retrying.",
+                )),
+                Status::Stopped => Some((
+                    "Cancelled before dispatch",
+                    ". The service did not receive this call.",
+                )),
+                _ => None,
             };
-            if !text.is_empty() {
-                let marker = if status == Status::Unknown {
-                    "Outcome unknown"
-                } else {
-                    "Cancelled before dispatch"
-                };
+            if let Some((marker, detail)) = note {
                 let mut outcome = Line::new(marker, WARNING);
-                outcome.push(text.strip_prefix(marker).unwrap_or_default(), DIM);
+                outcome.push(detail, DIM);
                 rows.extend(line_rows(
                     &outcome,
                     columns,

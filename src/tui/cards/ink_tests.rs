@@ -329,3 +329,17 @@ fn an_unknown_agent_marks_the_outcome_and_keeps_the_recovery_instruction_quiet()
         );
     }
 }
+
+#[test]
+fn expanded_failed_command_with_a_null_error_closes_on_one_exit_row() {
+    let command = Value::object([("command", Value::string("cargo test"))]);
+    let result = Value::object([
+        ("stderr", Value::string("error: test failed\n")),
+        ("exit_code", Value::number(101)),
+        ("error", Value::Null),
+    ]);
+    let rows = draw("bash", &command, &result, 80, true);
+    let close = rows.last().unwrap().plain();
+    assert_eq!(close.trim_start_matches(['└', ' ']), "exit 101 · 6.0s");
+    assert_eq!(colored(&rows, BAD), "exit 101");
+}

@@ -242,24 +242,22 @@ fn expanded_card(tool: Tool<'_>, columns: usize, status: Status, mut rows: Vec<L
             rows.extend(content::render(&tool, result, status, columns, true).rows);
         }
         rows.extend(content::notices(tool.name, result, columns, true));
+        // A failed command closes on its exit row; other unsuccessful calls
+        // close on their summary outcome.
+        let command = matches!(tool.name, "bash" | "exec" | "process")
+            && field(result, "launch") != "persistent";
         let raw = crate::events::not_run(result)
             .or_else(|| result.get("error").and_then(crate::json::Value::as_str));
         let mut footer = if let Some(raw) = raw {
             super::outcome::marker(raw, status)
         } else if matches!(status, Status::Failed | Status::Stopped | Status::Unknown)
-            && (result.get("error").is_some()
-                || !matches!(tool.name, "bash" | "exec" | "process")
-                || status != Status::Failed
-                || field(result, "launch") == "persistent")
+            && !(command && status == Status::Failed)
         {
             summary::line(&tool, status, None)
         } else {
             Line::default()
         };
-        if footer.spans.is_empty()
-            && matches!(tool.name, "bash" | "exec" | "process")
-            && field(result, "launch") != "persistent"
-        {
+        if footer.spans.is_empty() && command {
             let code = result
                 .get("exit_code")
                 .filter(|code| **code != crate::json::Value::Null);
