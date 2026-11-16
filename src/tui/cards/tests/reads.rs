@@ -2,7 +2,10 @@ use super::*;
 
 #[test]
 fn a_partial_read_keeps_completed_content_visible_beside_its_error() {
-    let arguments = Value::object([("paths", Value::Array(vec![Value::string("a.txt")]))]);
+    let arguments = Value::object([(
+        "paths",
+        Value::Array(vec![Value::string("a.txt"), Value::string("b.txt")]),
+    )]);
     let result = Value::object([
         (
             "error",
@@ -10,26 +13,55 @@ fn a_partial_read_keeps_completed_content_visible_beside_its_error() {
         ),
         (
             "files",
-            Value::Array(vec![Value::object([
-                ("path", Value::string("a.txt")),
-                ("content", Value::string("1: retained content\n")),
-            ])]),
+            Value::Array(vec![
+                Value::object([
+                    ("path", Value::string("a.txt")),
+                    ("content", Value::string("1: retained content\n")),
+                ]),
+                Value::object([
+                    ("path", Value::string("b.txt")),
+                    ("error", Value::string("Not found")),
+                ]),
+            ]),
         ),
     ]);
-    let rows = draw(
-        "read",
-        &arguments,
-        Some(&result),
-        None,
-        100,
-        &Presentation {
-            expanded: true,
-            ..Presentation::default()
-        },
-    );
-    let text = plain(&rows);
-    assert!(text.contains("retained content"), "{text}");
-    assert!(text.contains("storage unavailable"), "{text}");
+    for columns in [40, 44, 80, 120] {
+        for expanded in [false, true] {
+            let rows = draw(
+                "read",
+                &arguments,
+                Some(&result),
+                None,
+                columns,
+                &Presentation {
+                    expanded,
+                    ..Presentation::default()
+                },
+            );
+            let text = plain(&rows);
+            assert!(
+                text.contains("1 file") && text.contains("1 line") && text.contains("1 not read"),
+                "{text}"
+            );
+            let ink_text = |style| {
+                rows.iter()
+                    .flat_map(|row| &row.spans)
+                    .filter(|span| span.style == style && span.background.is_none())
+                    .map(|span| span.text.as_str())
+                    .collect::<String>()
+            };
+            assert_eq!(ink_text(crate::tui::theme::BAD), "Failed");
+            assert_eq!(ink_text(crate::tui::theme::WARNING), "1 not read");
+            assert!(rows.iter().all(|row| text::cells(&row.plain()) <= columns));
+            if expanded {
+                let retained = text.find("retained content").unwrap();
+                let diagnostic = text.find("Could not save").unwrap();
+                assert!(retained < diagnostic, "{text}");
+                assert_eq!(text.matches("Could not save").count(), 1);
+                assert_eq!(rows.last().unwrap().plain(), "  └ Failed");
+            }
+        }
+    }
 }
 
 /// A compact read's facts: after the badge and path when they join the

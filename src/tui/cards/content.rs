@@ -322,7 +322,8 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
             }
         }
     }
-    notices
+    let next_origin = usize::MAX - 100 + notices.len();
+    let mut rows: Vec<_> = notices
         .into_iter()
         .enumerate()
         .flat_map(|(index, (style, message))| {
@@ -335,5 +336,39 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
                 DIM,
             )
         })
-        .collect()
+        .collect();
+    if name == "read"
+        && result.get("files").and_then(Value::as_array).is_some()
+        && let Some(error) = result.get("error").and_then(Value::as_str)
+    {
+        let diagnostic = if expanded {
+            Line::new(&text::clean(error), DIM)
+        } else {
+            preview(
+                super::outcome::diagnostic(error, Status::Failed),
+                columns.saturating_sub(4),
+                false,
+            )
+        };
+        rows.extend(line_rows(
+            &diagnostic,
+            columns,
+            next_origin,
+            "    ",
+            "    ",
+            DIM,
+        ));
+        if expanded {
+            let marker = super::outcome::marker(error, Status::Failed);
+            rows.extend(line_rows(
+                &marker,
+                columns,
+                next_origin + 1,
+                "    ",
+                "    ",
+                DIM,
+            ));
+        }
+    }
+    rows
 }

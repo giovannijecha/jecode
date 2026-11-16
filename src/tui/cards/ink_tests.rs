@@ -343,3 +343,56 @@ fn expanded_failed_command_with_a_null_error_closes_on_one_exit_row() {
     assert_eq!(close.trim_start_matches(['└', ' ']), "exit 101 · 6.0s");
     assert_eq!(colored(&rows, BAD), "exit 101");
 }
+
+#[test]
+fn partial_read_keeps_a_long_storage_error_compact_and_expands_it_completely() {
+    let arguments = Value::object([("paths", Value::Array(vec![Value::string("a.rs")]))]);
+    let result = Value::object([
+        (
+            "files",
+            Value::Array(vec![Value::object([
+                ("path", Value::string("a.rs")),
+                ("content", Value::string("1: retained content\n")),
+            ])]),
+        ),
+        (
+            "error",
+            Value::string(format!(
+                "Could not save read results: {}final diagnostic",
+                "storage detail ".repeat(200)
+            )),
+        ),
+    ]);
+    let compact = draw("read", &arguments, &result, 44, false);
+    assert!(compact.len() < 10);
+    assert!(compact.iter().any(|row| row.plain().contains('…')));
+    assert_eq!(colored(&compact, BAD), "Failed");
+    let expanded = draw("read", &arguments, &result, 44, true);
+    let text = expanded
+        .iter()
+        .map(Line::plain)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let start = expanded
+        .iter()
+        .position(|row| row.plain().contains("Could not save"))
+        .unwrap();
+    let diagnostic = expanded[start..expanded.len() - 1]
+        .iter()
+        .map(|row| {
+            row.plain()
+                .chars()
+                .skip(4)
+                .collect::<String>()
+                .trim()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        diagnostic,
+        result.get("error").and_then(Value::as_str).unwrap()
+    );
+    assert!(text.find("retained content").unwrap() < text.find("Could not save").unwrap());
+    assert_eq!(expanded.last().unwrap().plain(), "  └ Failed");
+}

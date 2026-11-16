@@ -22,6 +22,9 @@ pub(super) fn line(tool: &Tool<'_>, status: Status, change: Option<&Change>) -> 
     if let Some(reason) = crate::events::not_run(result) {
         return outcome::diagnostic(&short_error(reason), status);
     }
+    if tool.name == "read" && result.get("files").and_then(Value::as_array).is_some() {
+        return read_line(&read(tool.arguments, result));
+    }
     if let Some(error) = result.get("error").and_then(Value::as_str) {
         return outcome::diagnostic(&short_error(error), status);
     }
