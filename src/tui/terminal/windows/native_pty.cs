@@ -163,19 +163,24 @@ public sealed partial class JecodeTestPty : IDisposable {
     // Reader wakeups locate the first matching VT bytes without a 10 ms
     // polling floor. This observes the stream, not terminal pixels or keys.
     public void WaitFast(string text, int after = 0) {
+        WaitPlain(plain => plain.Contains(text), text, after);
+    }
+
+    // Waits until the CSI-stripped stream after `after` satisfies `shows`.
+    void WaitPlain(Func<string, bool> shows, string label, int after) {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         lock (gate) {
             while (clock.ElapsedMilliseconds < 20000) {
                 string plain = System.Text.RegularExpressions.Regex.Replace(
                     received.ToString(after, received.Length - after),
                     "\x1b\\[[0-?]*[ -/]*[@-~]", "");
-                if (plain.Contains(text)) return;
+                if (shows(plain)) return;
                 long remaining = 20000 - clock.ElapsedMilliseconds;
                 if (remaining <= 0) break;
                 Monitor.Wait(gate, (int)remaining);
             }
             int length = Math.Min(received.Length, 2000);
-            throw new IOException("ConPTY did not show " + text + ": " + received.ToString(received.Length - length, length));
+            throw new IOException("ConPTY did not show " + label + ": " + received.ToString(received.Length - length, length));
         }
     }
 
