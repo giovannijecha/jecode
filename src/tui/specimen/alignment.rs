@@ -131,7 +131,7 @@ fn alignment() {
     let mut done = state(80);
     done.notify(Feedback::ending(
         Ending::Done,
-        "1m 04s · 4 tools · ↑ 48.2k · ↓ 3.2k · 41K cached",
+        "1m 04s · 4 tools · ↑ 48.2k · ↓ 3.2k · 41k cached",
     ));
     let mut permissions = state(80);
     permissions.selector = Some(Selector::permissions(Level::Workspace, Level::Workspace, 0));

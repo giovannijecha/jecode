@@ -176,7 +176,7 @@ mod tests {
         charges.record(Some(" baidu "), Some(&usage(r#"{"cost":0.001}"#)));
         assert_eq!(
             charges.describe().unwrap(),
-            "Served by Baidu · $0.0031 charged · 12K cached"
+            "Served by Baidu · $0.0031 charged · 12k cached"
         );
         // Missing or invalid costs stay unknown and are not counted as free.
         charges.record(Some("DeepInfra"), Some(&usage(r#"{"cost":"0.5"}"#)));
@@ -185,7 +185,7 @@ mod tests {
         charges.record(Some("Groq"), Some(&usage("{}")));
         assert_eq!(
             charges.describe().unwrap(),
-            "Served by Baidu, DeepInfra +2 · $0.0031 charged for 2 of 6 requests · 12K cached"
+            "Served by Baidu, DeepInfra +2 · $0.0031 charged for 2 of 6 requests · 12k cached"
         );
     }
 
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!((total.cached, total.cache_written), (1024, 2048));
         assert_eq!(
             total.describe().unwrap(),
-            "1K cached · 2K cache write tokens"
+            "1k cached · 2k cache write tokens"
         );
     }
 }

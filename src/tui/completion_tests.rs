@@ -84,7 +84,7 @@ fn returned_collaborator_already_reviewed_does_not_replace_completion_statistics
     assert!(ending.contains("1m 04s"), "{ending}");
     assert!(ending.contains("2 tools"), "{ending}");
     assert!(ending.contains("↓ 4.0k"), "{ending}");
-    assert!(ending.contains("11K cached"), "{ending}");
+    assert!(ending.contains("11k cached"), "{ending}");
     let drawn = view::composer_frame(&app.state, "fixture/model", "fixture")
         .live
         .iter()

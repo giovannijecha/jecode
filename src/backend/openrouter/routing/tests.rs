@@ -331,11 +331,11 @@ fn descriptions_keep_unknown_values_visible() {
     };
     assert_eq!(
         describe(&free, true),
-        "no reasoning · $0/? · no stats · 164K ctx"
+        "no reasoning · $0/? · no stats · 164k ctx"
     );
     assert_eq!(price(Some(12.5)), "$12.5");
     assert_eq!(price(Some(150.0)), "$150");
-    assert_eq!(quantity(12_345), "12.3K");
+    assert_eq!(quantity(12_345), "12.3k");
 }
 
 #[test]
