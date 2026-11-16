@@ -77,7 +77,7 @@ pub(super) fn console() {
             .get("cols")
             .and_then(crate::json::Value::as_usize)
             .unwrap();
-        assert!(matches!(columns, 40 | 80 | 120));
+        assert!(matches!(columns, 40 | 44 | 80 | 120));
         theme::set_light(case.get("light") == Some(&crate::json::Value::Bool(true)));
         let rows = work_catalog::rows(case);
         if rows.is_empty() {

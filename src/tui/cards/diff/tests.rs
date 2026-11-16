@@ -61,14 +61,14 @@ fn context_changes_keep_coordinates_and_syntax_on_tinted_rows() {
     assert_eq!(body.rows[3].background, None);
     assert_eq!(highlighted(&body.rows, DIFF_REMOVED_STRONG), "3");
     assert_eq!(highlighted(&body.rows, DIFF_ADDED_STRONG), "12");
-    // Context keeps its coordinates quiet and its code in the code colour.
+    // Context coordinates and source are equally quiet.
     assert_eq!(body.rows[0].spans[1].style, DIM);
     assert!(
         body.rows[0]
             .spans
             .iter()
             .skip(2)
-            .all(|span| span.style == CODE_TEXT)
+            .all(|span| span.style == DIM)
     );
     assert!(
         body.rows[2]

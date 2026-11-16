@@ -1,7 +1,5 @@
 use super::*;
-use crate::tui::theme::{
-    BADGE_IDLE, BADGE_SHELL, BADGE_TEXT, CODE_TEXT, DIFF_ADDED_SURFACE, KEYWORD,
-};
+use crate::tui::theme::{BADGE_IDLE, BADGE_SHELL, BADGE_TEXT, DIFF_ADDED_SURFACE};
 
 mod files;
 mod mcp;
@@ -270,7 +268,7 @@ fn failed_commands_prioritize_errors_and_expand_both_streams() {
     assert!(
         rows.iter()
             .flat_map(|row| &row.spans)
-            .any(|span| span.text == "compiled one" && span.style == CODE_TEXT)
+            .any(|span| span.text == "compiled one" && span.style == DIM)
     );
 }
 

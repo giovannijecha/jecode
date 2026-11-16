@@ -5,15 +5,14 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        text,
-        theme::{BAD, BODY, CODE_TEXT, DIM, MUTED, WARNING},
+        theme::{BAD, DIM, WARNING},
     },
 };
 
 pub(super) fn card(tool: Tool<'_>, columns: usize, keycap: bool) -> Card {
     let status = Status::of(&tool);
     let mut title = badge::badge("MCP call", status);
-    title.push(&format!(" {}", target(&tool)), BODY);
+    title.push(&format!(" {}", target(&tool)), DIM);
     let mut rows = if tool.presentation.expanded {
         super::title::rows("MCP call", &target(&tool), status, columns, true)
     } else if keycap && tool.result.is_some() {
@@ -61,7 +60,7 @@ fn contents(
     if tool.presentation.expanded {
         for line in arguments.pretty().lines() {
             rows.extend(line_rows(
-                &Line::new(line, CODE_TEXT),
+                &Line::new(line, DIM),
                 columns,
                 rows.len(),
                 "  │ ",
@@ -70,15 +69,10 @@ fn contents(
             ));
         }
         if let Some(result) = tool.result {
-            let style = match status {
-                Status::Unknown | Status::Stopped => WARNING,
-                Status::Failed => BAD,
-                _ => MUTED,
-            };
             let source = result.get("result").unwrap_or(result).pretty();
             for line in source.lines() {
                 rows.extend(line_rows(
-                    &Line::new(line, style),
+                    &Line::new(line, DIM),
                     columns,
                     rows.len(),
                     "  │ ",
@@ -86,16 +80,31 @@ fn contents(
                     DIM,
                 ));
             }
-            let text = if status == Status::Unknown {
-                "Outcome unknown. The service may already have acted; check its state before retrying."
-            } else if status == Status::Stopped {
-                "Cancelled before dispatch. The service did not receive this call."
-            } else {
-                ""
+            let note = match status {
+                Status::Unknown => Some((
+                    "Outcome unknown",
+                    ". The service may already have acted; check its state before retrying.",
+                )),
+                Status::Stopped => Some((
+                    "Cancelled before dispatch",
+                    ". The service did not receive this call.",
+                )),
+                _ => None,
             };
-            if !text.is_empty() {
+            if let Some((marker, detail)) = note {
+                let mut outcome = Line::new(marker, WARNING);
+                outcome.push(detail, DIM);
                 rows.extend(line_rows(
-                    &Line::new(text, WARNING),
+                    &outcome,
+                    columns,
+                    rows.len(),
+                    "  └ ",
+                    "    ",
+                    DIM,
+                ));
+            } else if status == Status::Failed {
+                rows.extend(line_rows(
+                    &Line::new("Failed", BAD),
                     columns,
                     rows.len(),
                     "  └ ",
@@ -114,19 +123,20 @@ fn contents(
                 .map(|(name, value)| format!("{name} {}", value.encode()))
                 .collect::<Vec<_>>()
                 .join(" · ");
-            let line = Line::new(&super::rhythm::inline(&text), MUTED)
+            let line = Line::new(&super::rhythm::inline(&text), DIM)
                 .shortened(columns.saturating_sub(4))
                 .gutter("  │ ", DIM);
             rows.push(line.shortened(columns));
         }
         if let Some(result) = tool.result {
-            let style = match status {
-                Status::Unknown | Status::Stopped => WARNING,
-                Status::Failed => BAD,
-                _ => MUTED,
+            let summary = crate::mcp::summary(result);
+            let outcome = if status == Status::Failed {
+                super::outcome::diagnostic(&summary, status)
+            } else {
+                super::outcome::line(&summary, status)
             };
             rows.push(
-                Line::new(&text::clean(&crate::mcp::summary(result)), style)
+                outcome
                     .shortened(columns.saturating_sub(4))
                     .gutter("  └ ", DIM)
                     .shortened(columns),

@@ -5,7 +5,7 @@ use crate::{
     json::Value,
     tui::{
         line::Line,
-        theme::{BAD, MUTED},
+        theme::{BAD, DIM},
     },
 };
 
@@ -23,11 +23,7 @@ pub(super) fn line(tool: &Tool<'_>, result: &Value) -> Option<Line> {
         return None;
     }
     let code = root.get("exit_code")?;
-    let style = if *code == Value::number(0) {
-        MUTED
-    } else {
-        BAD
-    };
+    let style = if *code == Value::number(0) { DIM } else { BAD };
     let label = if *code == Value::Null {
         "Root exited without code".to_owned()
     } else {
@@ -44,13 +40,13 @@ pub(super) fn line(tool: &Tool<'_>, result: &Value) -> Option<Line> {
         } else {
             "descendants"
         };
-        line.push(&format!(" · {count} {noun} running"), MUTED);
+        line.push(&format!(" · {count} {noun} running"), DIM);
     } else if result
         .get("waiting_for")
         .and_then(Value::as_str)
         .is_some_and(|waiting| waiting.contains("output"))
     {
-        line.push(" · output still open", MUTED);
+        line.push(" · output still open", DIM);
     }
     Some(line)
 }

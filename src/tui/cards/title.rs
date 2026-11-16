@@ -2,10 +2,10 @@ use super::{Status, badge};
 use crate::tui::{
     line::{Line, Origin},
     text,
-    theme::{BODY, MUTED},
+    theme::DIM,
 };
 
-/// File cards open on ` NAME ` and the path in BODY, one space after the
+/// File cards open on ` NAME ` and the path in DIM, one space after the
 /// badge; wrapped rows hang under the path while it has room, else at
 /// column 2. Collapsed, the path keeps three rows.
 pub(super) fn rows(
@@ -16,7 +16,7 @@ pub(super) fn rows(
     expanded: bool,
 ) -> Vec<Line> {
     let mut head = badge::badge(name, status);
-    head.push(" ", BODY);
+    head.push(" ", DIM);
     let hang = text::cells(&head.plain());
     let indent = if columns.saturating_sub(hang) >= 24 {
         hang
@@ -57,7 +57,7 @@ pub(super) fn rows(
             let room = if index == 0 { first } else { rest };
             if cut && index + 1 == count {
                 if text::cells(&body) + 1 > room {
-                    body = Line::new(&body, BODY)
+                    body = Line::new(&body, DIM)
                         .shortened(room.saturating_sub(1))
                         .plain();
                     body.pop();
@@ -67,9 +67,9 @@ pub(super) fn rows(
             let mut line = if index == 0 {
                 head.clone()
             } else {
-                Line::new(&" ".repeat(indent), MUTED)
+                Line::new(&" ".repeat(indent), DIM)
             };
-            line.push(&body, BODY);
+            line.push(&body, DIM);
             line.origin = Some(Origin { line: 0, character });
             character += body.chars().count() + usize::from(newline_after);
             line.shortened(columns)
@@ -79,7 +79,7 @@ pub(super) fn rows(
 
 /// Word-wrapped rows: the first `first` cells wide, the rest `rest` cells.
 fn words(value: &str, first: usize, rest: usize) -> Vec<String> {
-    let mut wrapped = Line::new(value, BODY).into_wrapped(first, true);
+    let mut wrapped = Line::new(value, DIM).into_wrapped(first, true);
     let mut rows = Vec::new();
     if let Some(row) = wrapped.next() {
         rows.push(row.plain());

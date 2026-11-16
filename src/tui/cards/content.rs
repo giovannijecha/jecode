@@ -9,7 +9,7 @@ use crate::{
         line::{Fold, Line},
         syntax::Highlighter,
         text,
-        theme::{CODE_TEXT, DIM, MUTED, Style, WARNING},
+        theme::{DIM, Style},
     },
 };
 
@@ -92,7 +92,7 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
         .filter_map(|(number, _)| *number)
         .max()
         .map_or(0, |number| number.to_string().len());
-    let mut lexer = Highlighter::for_path(field(arguments, "path"));
+    let lexer = Highlighter::for_path(field(arguments, "path"));
     let fold = Fold {
         markup: lexer.markup(),
         ..Fold::default()
@@ -110,13 +110,20 @@ fn read(arguments: &Value, result: &Value, columns: usize) -> Vec<Line> {
                 )
             };
             diff::code_rows(
-                lexer.line(source),
+                Line::new(source, DIM),
                 &Line::new(&label, DIM),
                 "    ",
                 columns,
                 index + 2,
                 fold,
             )
+            .into_iter()
+            .map(|mut row| {
+                for span in &mut row.spans {
+                    span.style = DIM;
+                }
+                row
+            })
         })
         .collect()
 }
@@ -131,9 +138,9 @@ fn files(result: &Value, columns: usize) -> Vec<Line> {
         let label = match error {
             Some(error) => Line::new(
                 &format!("{} · {}", text::clean(path), text::clean(error)),
-                WARNING,
+                DIM,
             ),
-            None => Line::new(&text::clean(path), MUTED),
+            None => Line::new(&text::clean(path), DIM),
         };
         rows.extend(line_rows(&label, columns, origin, "    ", "    ", DIM));
         origin += 1;
@@ -147,7 +154,7 @@ fn files(result: &Value, columns: usize) -> Vec<Line> {
     }
     if let Some(saved) = result.get("saved_files").and_then(Value::as_usize) {
         let reference = text::clean(field(result, "result_file"));
-        let label = Line::new(&format!("{saved} saved · {reference}"), MUTED);
+        let label = Line::new(&format!("{saved} saved · {reference}"), DIM);
         rows.extend(line_rows(&label, columns, origin, "    ", "    ", DIM));
     }
     rows
@@ -259,16 +266,12 @@ fn selected(lines: &[String], columns: usize, expanded: bool, preview_rows: usiz
         .enumerate()
         .flat_map(|(index, line)| {
             line_rows(
-                &preview(
-                    Line::new(line, CODE_TEXT),
-                    columns.saturating_sub(4),
-                    expanded,
-                ),
+                &preview(Line::new(line, DIM), columns.saturating_sub(4), expanded),
                 columns,
                 index + 2,
                 "    ",
                 "    ",
-                MUTED,
+                DIM,
             )
         })
         .collect();
@@ -289,14 +292,14 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
         && (result.get("attachment").is_some() || result.get("view").is_some())
         && let Some(note) = result.get("note").and_then(Value::as_str)
     {
-        notices.push((MUTED, note.into()));
+        notices.push((DIM, note.into()));
     }
     if matches!(name, "bash" | "exec" | "process") {
         for stream in ["stdout", "stderr"] {
             let skipped = number(&format!("{stream}_skipped_bytes"));
             if skipped > 0 {
                 notices.push((
-                    MUTED,
+                    DIM,
                     format!(
                         "{stream} skipped the first {} · full output saved",
                         size(skipped)
@@ -307,10 +310,10 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
                 let bytes = size(number(&format!("{stream}_bytes")));
                 let limit = size(number("output_limit_bytes"));
                 notices.push(if field(result, &format!("{stream}_file")).is_empty() {
-                    (WARNING, format!("{stream} capture kept {limit} of {bytes}"))
+                    (DIM, format!("{stream} capture kept {limit} of {bytes}"))
                 } else {
                     (
-                        MUTED,
+                        DIM,
                         format!(
                             "{stream} trimmed to the last {limit} of {bytes} · full output saved"
                         ),
@@ -319,7 +322,8 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
             }
         }
     }
-    notices
+    let next_origin = usize::MAX - 100 + notices.len();
+    let mut rows: Vec<_> = notices
         .into_iter()
         .enumerate()
         .flat_map(|(index, (style, message))| {
@@ -329,8 +333,42 @@ pub(super) fn notices(name: &str, result: &Value, columns: usize, expanded: bool
                 usize::MAX - 100 + index,
                 "    ",
                 "    ",
-                MUTED,
+                DIM,
             )
         })
-        .collect()
+        .collect();
+    if name == "read"
+        && result.get("files").and_then(Value::as_array).is_some()
+        && let Some(error) = result.get("error").and_then(Value::as_str)
+    {
+        let diagnostic = if expanded {
+            Line::new(&text::clean(error), DIM)
+        } else {
+            preview(
+                super::outcome::diagnostic(error, Status::Failed),
+                columns.saturating_sub(4),
+                false,
+            )
+        };
+        rows.extend(line_rows(
+            &diagnostic,
+            columns,
+            next_origin,
+            "    ",
+            "    ",
+            DIM,
+        ));
+        if expanded {
+            let marker = super::outcome::marker(error, Status::Failed);
+            rows.extend(line_rows(
+                &marker,
+                columns,
+                next_origin + 1,
+                "    ",
+                "    ",
+                DIM,
+            ));
+        }
+    }
+    rows
 }

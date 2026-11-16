@@ -245,7 +245,7 @@ stopped states. It verifies eight-cell background runs in the emitted VT and
 reads the displayed text back from the native console.
 
 The WORK matrix fixture paints complete synthetic transcripts through the same
-renderer at 40, 80 and 120 logical columns, in both palettes. It probes every
+renderer at 40, 44, 80 and 120 logical columns, in both palettes. It probes every
 page in a physical 120-column console and checks that cells outside owned
 surfaces keep the terminal background. Set `JECODE_WORK_INPUT` to an absolute
 JSON fixture path; `src/tui/specimen/work_catalog.rs` defines the case schema

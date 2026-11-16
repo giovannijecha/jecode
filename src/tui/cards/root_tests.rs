@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{BAD, MUTED};
+use crate::tui::theme::BAD;
 
 fn receipt(code: Value, descendants: Option<usize>) -> Value {
     let mut fields = vec![
@@ -58,7 +58,7 @@ fn active_process_receipts_name_root_outcome_and_open_boundary() {
             Value::number(0),
             Some(2),
             "Root exited 0 · 2 descendants running",
-            MUTED,
+            DIM,
         ),
         (
             Value::number(7),

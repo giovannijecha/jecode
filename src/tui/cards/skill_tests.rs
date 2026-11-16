@@ -51,7 +51,7 @@ fn skill_root_reads_use_tool_card_states_and_resource_reads_keep_their_path() {
     let failed_result = Value::object([("error", Value::string("Skill unavailable"))]);
     let failed = draw("skill:review", Some(&failed_result), false);
     assert_eq!(badge(&failed), (BADGE_TEXT.bold(), Some(BADGE_BAD)));
-    assert!(plain(&failed).contains("review  Skill unavailable"));
+    assert!(plain(&failed).contains("review  Failed · Skill unavailable"));
     assert!(!plain(&failed).contains("Loaded skill"));
 
     let resource = draw("skill:review/references/CHECKLIST.md", Some(&result), false);

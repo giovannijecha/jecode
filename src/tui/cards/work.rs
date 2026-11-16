@@ -6,7 +6,7 @@ use crate::{
     tui::{
         line::Line,
         text,
-        theme::{BAD, BODY, DIM, MUTED, STRONG, Style},
+        theme::{DIM, Style},
     },
 };
 
@@ -29,15 +29,15 @@ pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
         _ => Status::Stopped,
     };
     let mut head = super::badge::badge("Ask user", status);
-    head.push(" ", BODY);
+    head.push(" ", DIM);
     let subject = request.as_ref().map_or("Question".into(), Request::subject);
-    head.push(&text::clean(&subject).replace('\n', " "), BODY);
+    head.push(&text::clean(&subject).replace('\n', " "), DIM);
     let mut rows = if tool.presentation.expanded {
         super::title::rows("Ask user", &subject, status, columns, true)
     } else {
         vec![head.shortened(columns)]
     };
-    let items: Vec<Vec<(String, Style)>> = match (reply.as_ref(), &request) {
+    let mut items: Vec<Vec<(String, Style)>> = match (reply.as_ref(), &request) {
         (Some(Reply::Answered(answers)), Some(request)) => {
             let several = request.questions.len() > 1;
             request
@@ -47,9 +47,9 @@ pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
                 .map(|(question, answer)| {
                     let mut item = Vec::new();
                     if several {
-                        item.push((format!("{}  ", question.title), MUTED));
+                        item.push((format!("{}  ", question.title), DIM));
                     }
-                    item.push((answer_text(question, answer), STRONG));
+                    item.push((answer_text(question, answer), DIM));
                     item
                 })
                 .collect()
@@ -65,19 +65,31 @@ pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
                 (None, Some("unavailable")) => "Interactive input unavailable".into(),
                 _ => tool.summary.into(),
             },
-            if error.is_some() { BAD } else { MUTED },
+            DIM,
         )]],
     };
+    if !matches!(reply.as_ref(), Some(Reply::Answered(_))) {
+        let line = if status == Status::Failed {
+            super::outcome::diagnostic(&items[0][0].0, status)
+        } else {
+            super::outcome::line(&items[0][0].0, status)
+        };
+        items[0] = line
+            .spans
+            .into_iter()
+            .map(|span| (span.text, span.style))
+            .collect();
+    }
     if tool.presentation.expanded {
         let mut details = Vec::new();
         if let Some(request) = &request {
             for (index, question) in request.questions.iter().enumerate() {
                 details.push(vec![(
                     format!("{}: {}", question.title, question.question),
-                    BODY,
+                    DIM,
                 )]);
                 if !question.context.is_empty() {
-                    details.push(vec![(question.context.clone(), MUTED)]);
+                    details.push(vec![(question.context.clone(), DIM)]);
                 }
                 for option in &question.options {
                     let mut choice = option.label.clone();
@@ -85,14 +97,14 @@ pub(super) fn ask(tool: Tool<'_>, columns: usize) -> Card {
                         choice.push_str(" · ");
                         choice.push_str(&option.description);
                     }
-                    details.push(vec![(choice, MUTED)]);
+                    details.push(vec![(choice, DIM)]);
                 }
                 if let Some(Reply::Answered(answers)) = &reply
                     && let Some(answer) = answers.get(index)
                 {
                     details.push(vec![
-                        ("Answer · ".into(), MUTED),
-                        (answer_text(question, answer), STRONG),
+                        ("Answer · ".into(), DIM),
+                        (answer_text(question, answer), DIM),
                     ]);
                 }
             }
@@ -172,14 +184,14 @@ pub(super) fn todo(tool: Tool<'_>, columns: usize) -> Card {
     let status = super::Status::of(&tool);
     let mut head = super::badge::badge("Todo", status);
     let name = text::cells(&head.plain());
-    head.push(" ", BODY);
-    head.push(&text::clean(super::field(tool.arguments, "title")), BODY);
+    head.push(" ", DIM);
+    head.push(&text::clean(super::field(tool.arguments, "title")), DIM);
     let count = tool
         .arguments
         .get("tasks")
         .and_then(crate::json::Value::as_array)
         .map_or(0, <[crate::json::Value]>::len);
-    let fact = Line::new(&format!("  {}", text::counted(count, "task")), MUTED);
+    let fact = Line::new(&format!("  {}", text::counted(count, "task")), DIM);
     if tool.presentation.expanded {
         let tasks = tool
             .result
@@ -193,19 +205,19 @@ pub(super) fn todo(tool: Tool<'_>, columns: usize) -> Card {
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| super::field(tool.arguments, "title"));
         let mut rows = super::title::rows("Todo", title, status, columns, true);
-        let count = Line::new(&text::counted(tasks.len(), "task"), MUTED);
+        let count = Line::new(&text::counted(tasks.len(), "task"), DIM);
         rows.extend(super::line_rows(&count, columns, 1, "  ⎿ ", "    ", DIM));
         for (index, task) in tasks.iter().enumerate() {
             let status = super::field(task, "status");
             let title = super::field(task, "title");
             let note = super::field(task, "note");
             let agent = super::field(task, "agent");
-            let mut item = vec![(format!("{status} · {title}"), BODY)];
+            let mut item = vec![(format!("{status} · {title}"), DIM)];
             if !note.is_empty() {
-                item.push((format!(" · {note}"), MUTED));
+                item.push((format!(" · {note}"), DIM));
             }
             if !agent.is_empty() {
-                item.push((format!(" · {agent}"), MUTED));
+                item.push((format!(" · {agent}"), DIM));
             }
             tree(&mut rows, item, index + 1 == tasks.len(), columns);
         }

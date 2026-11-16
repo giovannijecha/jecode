@@ -3,7 +3,7 @@ use crate::tui::line::Span;
 use crate::tui::motion;
 use crate::tui::theme::{
     BAD, BADGE_BAD, BADGE_COORD, BADGE_EDIT, BADGE_IDLE, BADGE_READ, BADGE_SHELL, BADGE_TEXT,
-    BADGE_WARN, BODY, LIT, Surface,
+    BADGE_WARN, DIM, LIT, Surface,
 };
 use std::time::Duration;
 
@@ -66,14 +66,11 @@ fn names_take_their_family_colour_while_the_marker_keeps_the_status() {
         let result = Value::object([("exit_code", Value::number(0))]);
         let rows = card(tool(name, &arguments, &result, &shown), 80, false).rows;
         let spans = &rows[0].spans;
-        // Done is the family surface under the badge; the target stays BODY.
+        // Done is the family surface under the badge; the target stays DIM.
         assert_eq!(spans[0].text, label);
         assert_eq!(badge(&rows), (BADGE_TEXT.bold(), Some(family)));
-        assert_eq!(spans[1].style, BODY);
-        assert_eq!(
-            spans.last().unwrap().style,
-            if name == "bash" { BODY } else { MUTED }
-        );
+        assert_eq!(spans[1].style, DIM);
+        assert_eq!(spans.last().unwrap().style, DIM);
     }
 }
 
@@ -152,7 +149,7 @@ fn every_running_tool_pulses_only_its_marker_and_keeps_the_timer_and_note() {
                 spans[width..].iter().all(|span| span.background.is_none()),
                 "{name}"
             );
-            assert_eq!(spans[width].style, BODY, "{name}");
+            assert_eq!(spans[width].style, DIM, "{name}");
             bands.push(shimmer);
             let expected = crate::tui::activity::duration(shown.elapsed.unwrap());
             if matches!(name, "read" | "write" | "edit") {
@@ -321,7 +318,7 @@ fn only_missing_file_paths_receive_the_short_not_found_summary() {
     let rows = card(tool("bash", &command, &failed, &shown), 80, false).rows;
     assert_eq!(
         plain(&rows)[1],
-        "  └ Invalid working directory: No such file (os error 2)"
+        "  └ Failed · Invalid working directory: No such file (os error 2)"
     );
 
     let unix_error = Value::object([(
@@ -332,7 +329,10 @@ fn only_missing_file_paths_receive_the_short_not_found_summary() {
         let rows = card(tool("read", &path, &unix_error, &shown), 80, false).rows;
         assert_eq!(
             plain(&rows),
-            ["  READ   a.rs  Could not resolve path \"a.rs\": No such process (os error 3)"]
+            [
+                "  READ   a.rs",
+                "  └ Failed · Could not resolve path \"a.rs\": No such process (os error 3)"
+            ]
         );
     }
     let windows_error = Value::object([(

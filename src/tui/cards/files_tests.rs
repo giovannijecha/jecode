@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::theme::{BAD, BODY, CODE_TEXT};
+use crate::tui::theme::BAD;
 use std::time::Duration;
 
 fn object<const N: usize>(fields: [(&str, &str); N]) -> Value {
@@ -65,9 +65,9 @@ fn expanded_streams_keep_blank_lines_styles_complete_command_and_closing_facts()
         for (label, style) in [
             ("stdout", DIM),
             ("stderr", DIM),
-            ("first", CODE_TEXT),
-            ("last", CODE_TEXT),
-            ("note", MUTED),
+            ("first", DIM),
+            ("last", DIM),
+            ("note", DIM),
         ] {
             assert!(
                 rows.iter()
@@ -151,7 +151,7 @@ fn new_file_preview_uses_retained_source_not_mutated_arguments_and_expands_all_l
 }
 
 #[test]
-fn file_paths_use_body_and_read_facts_do_not_repeat_the_verb() {
+fn file_paths_are_quiet_and_read_facts_do_not_repeat_the_verb() {
     let args = Value::object([
         ("path", Value::string("src/a.rs")),
         ("offset", Value::number(33)),
@@ -168,7 +168,7 @@ fn file_paths_use_body_and_read_facts_do_not_repeat_the_verb() {
         rows[0]
             .spans
             .iter()
-            .any(|span| span.text.trim() == "src/a.rs" && span.style == BODY)
+            .any(|span| span.text.trim() == "src/a.rs" && span.style == DIM)
     );
     let skill = card(
         tool(
@@ -203,13 +203,14 @@ fn expanded_command_errors_keep_the_complete_error_without_a_stdout_payload() {
         .filter(|row| row.origin.is_some_and(|origin| origin.line == 3))
         .map(Line::plain)
         .collect();
-    // The wrapped error hangs on the tree and closes the card.
+    // The complete error stays quiet on the tree; its closing outcome follows.
     assert!(
         error[..error.len() - 1]
             .iter()
             .all(|row| row.starts_with("  │ "))
     );
-    assert!(error.last().unwrap().starts_with("  └ "));
+    assert!(error.last().unwrap().starts_with("  │ "));
+    assert!(rows.last().unwrap().plain().starts_with("  └ "));
     let message = error
         .iter()
         .map(|row| row.chars().skip(4).collect::<String>().trim().to_owned())
@@ -219,7 +220,7 @@ fn expanded_command_errors_keep_the_complete_error_without_a_stdout_payload() {
     assert!(
         rows.iter()
             .flat_map(|row| &row.spans)
-            .any(|span| span.style == BAD && span.text.contains("Could not launch"))
+            .any(|span| span.style == BAD && span.text == "Failed")
     );
 }
 
@@ -474,8 +475,8 @@ fn expanded_multi_path_reads_keep_every_row_clean_and_on_the_tree() {
                 .find(|span| span.text.contains(needle))
                 .map(|span| span.style)
         };
-        assert_eq!(span("evil.rs"), Some(MUTED));
-        assert_eq!(span("gone.rs · "), Some(crate::tui::theme::WARNING));
+        assert_eq!(span("evil.rs"), Some(DIM));
+        assert_eq!(span("gone.rs · "), Some(DIM));
         // The files' source lines follow each other, as one card's rows do.
         let lines: Vec<_> = rows[first..]
             .iter()
