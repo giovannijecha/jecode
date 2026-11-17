@@ -89,6 +89,19 @@ Check the reported count: a command that matched no tests verified nothing. Use
 Keep credentials, logs, screenshots and temporary drivers out of tracked files;
 use the ignored `.tmp/` or `target` directories.
 
+For session-title shutdown, run `cargo test --locked --offline agent::naming_tests`
+and `cargo test --locked --offline bootstrap::single`. The first uses gated,
+original backends for late replies, partial or missing usage, provider and
+storage errors, panic, cancellation and session disposal. They also check
+redaction in memory, failed resume of an unselected draft, transition retries
+and the final save after interactive title cleanup. The second runs the
+one-shot entry path in an owned subprocess with piped stdin, JSON and plain
+output, and native HTTP against a loopback fixture. It holds the title reply
+until the main answer is observed, then checks the saved attempt and released
+lease after process exit. It reads no personal configuration and contacts no
+provider. The private ignored child runs through its parent test in the normal
+suite.
+
 For a real-task study, capture the delivered files and journal before repairs;
 see [Real-task evidence](PERFORMANCE.md#real-task-evidence).
 

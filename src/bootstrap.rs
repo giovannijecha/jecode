@@ -2,7 +2,6 @@ use crate::agent::Agent;
 use crate::attachments::Prompt;
 use crate::cli::{Failure, Resume, Run, Selection, Start, usage};
 use crate::config::{self, Settings, Store};
-use crate::console::Console;
 use crate::session::{self, SessionConfig};
 use crate::{setup, tools::Tools};
 use std::io::{self, IsTerminal, Write};
@@ -10,6 +9,7 @@ use std::path::Path;
 
 mod input;
 mod jsonl;
+mod single;
 mod startup;
 
 pub fn configure() -> Result<(), String> {
@@ -172,43 +172,17 @@ pub fn run(run: Run) -> Result<(), Failure> {
             .collect::<Vec<_>>(),
     )?;
     if let Some(message) = message {
-        agent.set_single_run();
         if let Some(Some(id)) = &resume {
             crate::selection::resume(&mut agent, id, &run.selection, &settings, &store)?;
         }
         let prompt = Prompt::new(message, attachments);
-        if !run.json {
-            return Ok(agent.run_turn(prompt, &mut Console::new(&mut output, &mut status))?);
-        }
-        let mut lines = jsonl::Lines::new(&mut output, agent.redactor());
-        let result = agent.run_turn(prompt, &mut lines);
-        let mut fields = vec![
-            ("type", crate::json::Value::string("result")),
-            (
-                "status",
-                crate::json::Value::string(if result.is_ok() {
-                    "completed"
-                } else {
-                    "failed"
-                }),
-            ),
-            (
-                "session_id",
-                crate::json::Value::optional(agent.sessions().map(|handle| handle.id())),
-            ),
-            ("provider", crate::json::Value::string(agent.backend_id())),
-            ("model", crate::json::Value::string(agent.model())),
-            ("effort", crate::json::Value::string(agent.effort().name())),
-            (
-                "permissions",
-                crate::json::Value::string(agent.permissions().level().id()),
-            ),
-        ];
-        if let Err(error) = &result {
-            fields.push(("error", crate::json::Value::string(agent.redact(error))));
-        }
-        lines.write(crate::json::Value::entries(fields))?;
-        return Ok(result?);
+        return Ok(single::run(
+            &mut agent,
+            prompt,
+            run.json,
+            &mut output,
+            &mut status,
+        )?);
     }
     let mut session_config = SessionConfig { store, settings };
     if tui {

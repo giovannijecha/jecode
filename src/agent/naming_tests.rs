@@ -5,7 +5,7 @@ use crate::{
         backend_tests::fixture::{Account, Reply},
     },
     attachments::{Inputs, Pool},
-    backend::{Backend, Completion, Failure, Limits, Model, Service, Services, Update},
+    backend::{Backend, Completion, Failure, Limits, Model, Service, Services, Update, Usage},
     cancel::Cancellation,
     effort::Effort,
     redact::Redactor,
@@ -22,10 +22,77 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod failures;
+mod lifecycle;
+
+struct Fixture {
+    agent: Option<Agent>,
+    gate: Arc<Gate>,
+    _project: Directory,
+    _home: Directory,
+}
+
+impl Fixture {
+    fn new(outcome: TitleOutcome) -> Self {
+        Self::with_model(outcome, "shared-model-name")
+    }
+
+    fn with_model(outcome: TitleOutcome, model: &str) -> Self {
+        let project = Directory::new();
+        let home = Directory::new();
+        let gate = Arc::new(Gate::default());
+        let service = BlockingService {
+            account: Account::new(
+                "alpha",
+                vec![Reply::text("Main answer"), Reply::text("Generated title")],
+            ),
+            gate: gate.clone(),
+            outcome,
+        };
+        let mut client = service.client(false);
+        client.inner = service.account.services().create(model.into()).unwrap();
+        let mut agent = Agent::new(client, Tools::new(project.path()).unwrap());
+        agent.set_effort(Effort::High);
+        agent.enable_sessions(home.path()).unwrap();
+        agent.name_sessions();
+        Self {
+            agent: Some(agent),
+            gate,
+            _project: project,
+            _home: home,
+        }
+    }
+}
+
+fn title_event(document: &Document) -> &crate::json::Value {
+    let events = document
+        .events
+        .iter()
+        .filter(|event| {
+            event.get("operation").and_then(crate::json::Value::as_str) == Some("session_title")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 1, "{events:?}");
+    events[0]
+}
+
 #[derive(Default)]
 struct Gate {
     state: Mutex<GateState>,
     changed: Condvar,
+    /// Run once when the title client is created and when the main client
+    /// first prepares its request.
+    before_create: Hook,
+    before_main_request: Hook,
+    after_title: Hook,
+}
+
+type Hook = Mutex<Option<Box<dyn FnOnce() + Send>>>;
+
+fn run_hook(hook: &Hook) {
+    if let Some(hook) = hook.lock().unwrap().take() {
+        hook();
+    }
 }
 
 #[derive(Default)]
@@ -67,6 +134,29 @@ impl Gate {
 struct BlockingService {
     account: Account,
     gate: Arc<Gate>,
+    outcome: TitleOutcome,
+}
+
+#[derive(Clone, Copy)]
+enum TitleOutcome {
+    Inner,
+    Complete(Option<Usage>),
+    Failed(Option<Usage>),
+    PrepareFailure,
+    CreateFailure,
+    Panic,
+}
+
+impl BlockingService {
+    fn client(&self, title: bool) -> BlockingBackend {
+        BlockingBackend {
+            inner: Box::new(self.account.client()),
+            service: self.clone(),
+            title_sampled: AtomicBool::new(false),
+            cancellation: Cancellation::default(),
+            title,
+        }
+    }
 }
 
 impl Service for BlockingService {
@@ -92,11 +182,13 @@ impl Service for BlockingService {
         Redactor::empty()
     }
     fn create(&self, model: String) -> Result<Box<dyn Backend>, String> {
-        Ok(Box::new(BlockingBackend {
-            inner: self.account.services().create(model)?,
-            service: self.clone(),
-            title_sampled: AtomicBool::new(false),
-        }))
+        run_hook(&self.gate.before_create);
+        if matches!(self.outcome, TitleOutcome::CreateFailure) {
+            return Err("fixture title client creation failed".into());
+        }
+        let mut client = self.client(true);
+        client.inner = self.account.services().create(model)?;
+        Ok(Box::new(client))
     }
 }
 
@@ -104,11 +196,14 @@ struct BlockingBackend {
     inner: Box<dyn Backend>,
     service: BlockingService,
     title_sampled: AtomicBool,
+    cancellation: Cancellation,
+    title: bool,
 }
 
 impl Drop for BlockingBackend {
     fn drop(&mut self) {
         if self.title_sampled.load(Ordering::Acquire) {
+            run_hook(&self.service.gate.after_title);
             self.service.gate.state.lock().unwrap().finished = true;
             self.service.gate.changed.notify_all();
         }
@@ -137,6 +232,15 @@ impl Backend for BlockingBackend {
     fn known_limits(&self) -> Option<Limits> {
         self.inner.known_limits()
     }
+    fn prepare_turn(&mut self) -> Result<Option<Limits>, Failure> {
+        if self.title && matches!(self.service.outcome, TitleOutcome::PrepareFailure) {
+            return Err("fixture title preparation failed".into());
+        }
+        if !self.title {
+            run_hook(&self.service.gate.before_main_request);
+        }
+        self.inner.prepare_turn()
+    }
     fn sample(
         &self,
         messages: &[crate::json::Value],
@@ -147,12 +251,44 @@ impl Backend for BlockingBackend {
     ) -> Result<Completion, Failure> {
         if !with_tools {
             self.title_sampled.store(true, Ordering::Release);
+            emit(Update::Waiting { request_bytes: 123 })?;
+            let usage = match self.service.outcome {
+                TitleOutcome::Complete(usage) | TitleOutcome::Failed(usage) => usage,
+                _ => None,
+            };
+            if let Some(usage) = usage {
+                emit(Update::Usage(usage))?;
+            }
             let gate = &self.service.gate;
             let mut state = gate.state.lock().unwrap();
             state.entered = true;
             gate.changed.notify_all();
-            while !state.released {
-                state = gate.changed.wait(state).unwrap();
+            while !state.released && !self.cancellation.requested() {
+                state = gate
+                    .changed
+                    .wait_timeout(state, Duration::from_millis(20))
+                    .unwrap()
+                    .0;
+            }
+            drop(state);
+            if self.cancellation.requested() {
+                return Err("Operation cancelled".into());
+            }
+            match self.service.outcome {
+                TitleOutcome::Complete(usage) => {
+                    let mut completion = self.inner.sample(
+                        messages,
+                        with_tools,
+                        output_tokens,
+                        pool,
+                        &mut |_| Ok(()),
+                    )?;
+                    completion.usage = usage;
+                    return Ok(completion);
+                }
+                TitleOutcome::Failed(_) => return Err("fixture title provider failed".into()),
+                TitleOutcome::Panic => panic!("fixture title panic"),
+                _ => {}
             }
         }
         self.inner
@@ -162,6 +298,7 @@ impl Backend for BlockingBackend {
         self.inner.redactor()
     }
     fn set_cancellation(&mut self, cancellation: Cancellation) {
+        self.cancellation = cancellation.clone();
         self.inner.set_cancellation(cancellation);
     }
     fn set_conversation(&mut self, id: Option<String>) {
@@ -252,6 +389,7 @@ fn an_in_flight_title_does_not_keep_a_switched_session_open_or_recreate_it() {
     let service = BlockingService {
         account,
         gate: gate.clone(),
+        outcome: TitleOutcome::Inner,
     };
     let client = service.create("shared-model-name".into()).unwrap();
     let mut agent = Agent::with_backend(client, Tools::new(directory.path()).unwrap());
@@ -267,8 +405,21 @@ fn an_in_flight_title_does_not_keep_a_switched_session_open_or_recreate_it() {
     agent
         .start_new("shared-model-name".into(), Effort::Default)
         .unwrap();
+    gate.wait_for(|state| state.finished);
     let (reopened, _) = Handle::open(store.clone(), &id, Redactor::empty()).unwrap();
     assert!(!reopened.titled());
+    let saved = reopened.snapshot();
+    let event = saved
+        .events
+        .iter()
+        .find(|event| {
+            event.get("operation").and_then(crate::json::Value::as_str) == Some("session_title")
+        })
+        .unwrap();
+    assert_eq!(
+        event.get("status").and_then(crate::json::Value::as_str),
+        Some("cancelled")
+    );
     drop(reopened);
     store.delete(&id).unwrap();
     gate.release();
