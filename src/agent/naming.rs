@@ -18,10 +18,15 @@ const REQUEST_LIMIT: usize = 2000;
 pub(super) struct Task {
     cancellation: Cancellation,
     worker: Option<JoinHandle<Result<(), String>>>,
+    /// A failed attempt that could not be saved before any worker started.
+    failure: Option<String>,
 }
 
 impl Task {
     fn join(&mut self) -> Result<(), String> {
+        if let Some(error) = self.failure.take() {
+            return Err(error);
+        }
         self.worker.take().map_or(Ok(()), |worker| {
             worker
                 .join()
@@ -70,13 +75,14 @@ impl Agent {
     }
 
     /// Names the session in the background after its first request is saved.
-    /// A failed request keeps the title taken from the request itself.
-    pub(super) fn name_session(&mut self, prompt: &Prompt, first: bool) -> Result<(), String> {
+    /// A failed request keeps the title taken from the request itself. Title
+    /// errors surface when the task is joined, never before the main request.
+    pub(super) fn name_session(&mut self, prompt: &Prompt, first: bool) {
         let Some(handle) = self.persistence.as_ref() else {
-            return Ok(());
+            return;
         };
         if !self.naming || self.child || !first || handle.titled() {
-            return Ok(());
+            return;
         }
         let cancellation = self.cancellation.child();
         let mut client = match self
@@ -86,7 +92,7 @@ impl Agent {
             .create(self.client.model().into())
         {
             Ok(client) => client,
-            Err(error) => return self.naming_failure(&error),
+            Err(error) => return self.naming_failure(cancellation, &error),
         };
         client.set_cancellation(cancellation.clone());
         client.clone_routing_from(self.client.as_ref());
@@ -109,11 +115,12 @@ impl Agent {
             ]),
         ];
         let token = cancellation.clone();
+        let redactor = self.redactor.clone();
         match std::thread::Builder::new()
             .name("jecode-session-title".into())
             .spawn(move || {
                 let (title, event, panicked) = generate(client.as_mut(), &messages, &token);
-                name(title.as_deref(), event)?;
+                name(title.as_deref(), redactor.value(&event))?;
                 if panicked {
                     Err("Session title worker failed".into())
                 } else {
@@ -124,14 +131,17 @@ impl Agent {
                 self.naming_task = Some(Task {
                     cancellation,
                     worker: Some(worker),
+                    failure: None,
                 });
-                Ok(())
             }
-            Err(error) => self.naming_failure(&format!("Could not start session title: {error}")),
+            Err(error) => self.naming_failure(
+                cancellation,
+                &format!("Could not start session title: {error}"),
+            ),
         }
     }
 
-    fn naming_failure(&self, error: &str) -> Result<(), String> {
+    fn naming_failure(&mut self, cancellation: Cancellation, error: &str) {
         let event = RequestTiming::start().event(
             "session_title",
             (self.backend_id(), self.model(), Effort::Low),
@@ -140,11 +150,18 @@ impl Agent {
             None,
             0,
         );
+        let event = self.redactor.value(&with_error(event, error));
+        let Some(handle) = self.persistence.as_ref() else {
+            return;
+        };
         let archive = self.archive();
-        self.persistence
-            .as_ref()
-            .unwrap()
-            .namer(archive.messages, archive.events)(None, with_error(event, error))
+        if let Err(error) = handle.namer(archive.messages, archive.events)(None, event) {
+            self.naming_task = Some(Task {
+                cancellation,
+                worker: None,
+                failure: Some(error),
+            });
+        }
     }
 }
 

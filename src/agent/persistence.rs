@@ -131,7 +131,7 @@ impl Agent {
             self.withdraw_event(&start);
             return Err(error);
         }
-        self.name_session(&prompt, first)?;
+        self.name_session(&prompt, first);
         self.prepared = Some(prompt);
         Ok(())
     }

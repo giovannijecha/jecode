@@ -212,6 +212,52 @@ fn a_main_output_error_still_waits_for_and_saves_the_title() {
 }
 
 #[test]
+fn a_setup_failure_that_cannot_be_saved_still_lets_the_main_answer_run() {
+    let mut fixture = Fixture::new(TitleOutcome::CreateFailure);
+    let mut agent = fixture.agent.take().unwrap();
+    let handle = agent.sessions().unwrap();
+    let journal = handle
+        .store()
+        .session_directory(&handle.id())
+        .join("session.jsonl");
+    let retained = journal.with_extension("retained");
+    let (from, to) = (journal.clone(), retained.clone());
+    *fixture.gate.before_create.lock().unwrap() = Some(Box::new(move || {
+        std::fs::rename(&from, &to).unwrap();
+        std::fs::create_dir(&from).unwrap();
+    }));
+    *fixture.gate.before_main_request.lock().unwrap() = Some(Box::new(move || {
+        std::fs::remove_dir(&journal).unwrap();
+        std::fs::rename(&retained, &journal).unwrap();
+    }));
+    let mut answered = false;
+    let error = agent
+        .run_single_turn("First request", &mut |event| {
+            answered |= matches!(event, Event::Message { .. });
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(answered, "{error}");
+    assert!(error.contains("regular files"), "{error}");
+    let saved = handle.store().read(&handle.id()).unwrap();
+    assert!(
+        saved
+            .messages
+            .iter()
+            .any(|message| message.get("content").and_then(Value::as_str) == Some("Main answer"))
+    );
+    let event = title_event(&saved);
+    assert_eq!(event.get("status").and_then(Value::as_str), Some("failed"));
+    assert!(
+        event
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("fixture title client creation failed")
+    );
+}
+
+#[test]
 fn cancellation_saves_streamed_usage_before_the_turn_token_can_be_reset() {
     let mut fixture = Fixture::new(TitleOutcome::Failed(Some(partial_usage())));
     let agent = fixture.agent.as_mut().unwrap();

@@ -28,6 +28,18 @@ mod lifecycle;
 struct Gate {
     state: Mutex<GateState>,
     changed: Condvar,
+    /// Run once when the title client is created and when the main client
+    /// first prepares its request.
+    before_create: Hook,
+    before_main_request: Hook,
+}
+
+type Hook = Mutex<Option<Box<dyn FnOnce() + Send>>>;
+
+fn run_hook(hook: &Hook) {
+    if let Some(hook) = hook.lock().unwrap().take() {
+        hook();
+    }
 }
 
 #[derive(Default)]
@@ -117,6 +129,7 @@ impl Service for BlockingService {
         Redactor::empty()
     }
     fn create(&self, model: String) -> Result<Box<dyn Backend>, String> {
+        run_hook(&self.gate.before_create);
         if matches!(self.outcome, TitleOutcome::CreateFailure) {
             return Err("fixture title client creation failed".into());
         }
@@ -168,6 +181,9 @@ impl Backend for BlockingBackend {
     fn prepare_turn(&mut self) -> Result<Option<Limits>, Failure> {
         if self.title && matches!(self.service.outcome, TitleOutcome::PrepareFailure) {
             return Err("fixture title preparation failed".into());
+        }
+        if !self.title {
+            run_hook(&self.service.gate.before_main_request);
         }
         self.inner.prepare_turn()
     }
