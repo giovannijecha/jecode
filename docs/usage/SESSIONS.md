@@ -60,8 +60,18 @@ conversation instead.
 
 After your first request is saved, Jecode asks the conversation's model, at low
 effort, for a short title in the language of your request. Until it arrives, or
-if it fails, the title is the first request itself. A single prompt can exit
-before the title request finishes.
+if it fails, the title is the first request itself. The title runs concurrently
+with the main answer. A single prompt, including piped input and `--json`, waits
+for the title attempt to be saved before exiting or printing the final JSON
+`result`. A slow title can therefore extend the command after the answer arrives.
+
+Cancelling a turn, leaving an interactive conversation or switching sessions
+cancels unfinished title work and waits for it to stop before releasing the
+session's writer lease. Title provider failures keep the fallback title; a
+one-shot reports title storage or worker failures as errors. Normal shutdown
+saves the attempt as complete, failed or cancelled, keeping any reported usage.
+Usage the provider does not report stays unknown. Forced process termination
+can still interrupt recording.
 
 ## When a conversation is saved
 

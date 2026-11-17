@@ -41,6 +41,7 @@ pub struct Agent {
     process_resume: processes::Resume,
     /// Generate a title after the first request (`name_sessions`).
     naming: bool,
+    naming_task: Option<naming::Task>,
     inherited_project_instructions: Option<String>,
     collaboration_seen: usize,
     /// The `steps` call now running; its steps' results collect here.
@@ -104,6 +105,7 @@ impl Agent {
             child: false,
             process_resume: processes::Resume::Automatic,
             naming: false,
+            naming_task: None,
             inherited_project_instructions: None,
             collaboration_seen: 0,
             chain: None,
@@ -241,7 +243,12 @@ impl Agent {
             self.record_turn_error(error, "");
             let _ = self.checkpoint(crate::sessions::Stage::Ready);
         }
-        result.and(saved)
+        let naming = if self.cancellation.requested() {
+            self.stop_naming()
+        } else {
+            Ok(())
+        };
+        naming::finish_result(result.and(saved), naming)
     }
 
     fn turn(
@@ -401,6 +408,7 @@ impl Agent {
 
 impl Drop for Agent {
     fn drop(&mut self) {
+        let _ = self.stop_naming();
         self.collaboration.stop_all();
         self.tools.stop_processes();
     }

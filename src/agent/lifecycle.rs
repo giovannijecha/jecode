@@ -52,6 +52,7 @@ impl Agent {
     ) -> Result<(), String> {
         let routing = self.selection_routing(backend, &model);
         let client = self.connection(backend, model.clone(), effort, routing.clone())?;
+        self.stop_naming()?;
         self.save_session()?;
         let next = if let Some(old) = &self.persistence {
             let input = old.snapshot().input;
@@ -177,6 +178,7 @@ impl Agent {
             .transpose()?;
         let document = handle.snapshot();
         let temporary = handle.store().temporary_area(&document.id)?;
+        self.stop_naming()?;
         self.collaboration.stop_all();
         self.questions.bind(self.archive(), None);
         if let Some(client) = client {
@@ -265,7 +267,7 @@ impl Agent {
     ) -> Result<(crate::sessions::DeleteReport, bool), String> {
         let current = self
             .persistence
-            .as_ref()
+            .clone()
             .ok_or("Session storage is unavailable")?;
         if current.id() != id {
             return current.store().delete(id).map(|report| (report, false));
@@ -287,6 +289,7 @@ impl Agent {
         let outputs = store.outputs(&document.id, self.redactor.clone())?;
         let next = Handle::new(store, document, self.redactor.clone());
         let live_attachments = next.snapshot().input.attachment_ids();
+        self.stop_naming()?;
         self.collaboration.stop_all();
         self.tools.stop_browsers();
         let report = current.delete(&live_attachments, || self.tools.stop_processes())?;

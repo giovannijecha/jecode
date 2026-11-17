@@ -1,6 +1,6 @@
 use super::{Handle, Live};
 use crate::{export::Messages, json::Value};
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 
 impl Handle {
     /// Whether the session already has a generated title.
@@ -8,26 +8,15 @@ impl Handle {
         self.0.live.lock().unwrap().document.title.is_some()
     }
 
-    /// The naming request may outlive the active session. Its writer must not
-    /// keep the session lease while the provider is still responding.
+    /// The owner must join or cancel the title task before releasing this
+    /// session. Retain its writer lease and history until the result is saved.
     pub(crate) fn namer(
         &self,
         messages: Messages,
         events: Messages,
-    ) -> impl FnOnce(Option<&str>, Value) + Send + 'static {
-        let shared = Arc::downgrade(&self.0);
-        let messages = Arc::downgrade(&messages);
-        let events = Arc::downgrade(&events);
-        move |title, event| {
-            if let Some(shared) = shared.upgrade() {
-                let _ = Handle(shared).naming_result(
-                    title,
-                    event,
-                    messages.upgrade(),
-                    events.upgrade(),
-                );
-            }
-        }
+    ) -> impl FnOnce(Option<&str>, Value) -> Result<(), String> + Send + 'static {
+        let handle = self.clone();
+        move |title, event| handle.naming_result(title, event, messages, events)
     }
 
     /// Save a background naming attempt with the title. When the active agent
@@ -36,34 +25,27 @@ impl Handle {
         &self,
         title: Option<&str>,
         mut event: Value,
-        messages: Option<Messages>,
-        events: Option<Messages>,
+        messages: Messages,
+        events: Messages,
     ) -> Result<(), String> {
         let _io = self.0.io.lock().unwrap();
-        let messages = messages.as_ref().map(|messages| messages.lock().unwrap());
-        let mut events = events.as_ref().map(|events| events.lock().unwrap());
+        let messages = messages.lock().unwrap();
+        let mut events = events.lock().unwrap();
         let mut live = self.0.live.lock().unwrap();
         if live.deleted {
             return Ok(());
         }
-        let linked = messages
-            .as_ref()
-            .zip(events.as_ref())
-            .is_some_and(|(messages, events)| {
-                messages.len() >= live.document.messages.len()
-                    && events.len() >= live.document.events.len()
-                    && messages
-                        .iter()
-                        .zip(&live.document.messages)
-                        .all(|(current, saved)| live.redactor.value(current) == *saved)
-                    && events
-                        .iter()
-                        .zip(&live.document.events)
-                        .all(|(current, saved)| live.redactor.value(current) == *saved)
-            });
+        let linked = messages.len() >= live.document.messages.len()
+            && events.len() >= live.document.events.len()
+            && messages
+                .iter()
+                .zip(&live.document.messages)
+                .all(|(current, saved)| live.redactor.value(current) == *saved)
+            && events
+                .iter()
+                .zip(&live.document.events)
+                .all(|(current, saved)| live.redactor.value(current) == *saved);
         if linked {
-            let messages = messages.as_ref().unwrap();
-            let events = events.as_mut().unwrap();
             let new_messages = messages
                 .iter()
                 .skip(live.document.messages.len())
@@ -84,7 +66,7 @@ impl Handle {
             );
         }
         if linked {
-            events.as_mut().unwrap().push(event.clone());
+            events.push(event.clone());
         }
         let event = live.redactor.value(&event);
         live.document.events.push(event);
