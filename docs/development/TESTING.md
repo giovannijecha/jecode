@@ -92,7 +92,9 @@ use the ignored `.tmp/` or `target` directories.
 For session-title shutdown, run `cargo test --locked --offline agent::naming_tests`
 and `cargo test --locked --offline bootstrap::single`. The first uses gated,
 original backends for late replies, partial or missing usage, provider and
-storage errors, panic, cancellation and session disposal. The second runs the
+storage errors, panic, cancellation and session disposal. They also check
+redaction in memory, failed resume of an unselected draft, transition retries
+and the final save after interactive title cleanup. The second runs the
 one-shot entry path in an owned subprocess with piped stdin, JSON and plain
 output, and native HTTP against a loopback fixture. It holds the title reply
 until the main answer is observed, then checks the saved attempt and released

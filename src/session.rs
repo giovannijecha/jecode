@@ -125,7 +125,7 @@ fn chat_inner(
             .and_then(|_| output.flush())
             .map_err(|error| error.to_string())?;
         let Some(raw_line) = read_line(input)? else {
-            return agent.save_session();
+            return agent.finish_session();
         };
         let line = raw_line.trim();
         if line.is_empty() && staged.is_empty() {
@@ -152,7 +152,7 @@ fn chat_inner(
             arguments
         };
         let result = match (name.as_str(), arguments) {
-            ("/exit", "") => return agent.save_session(),
+            ("/exit", "") => return agent.finish_session(),
             ("/help", "") => {
                 agent.record_local_details(
                     "/help",

@@ -22,7 +22,59 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod failures;
 mod lifecycle;
+
+struct Fixture {
+    agent: Option<Agent>,
+    gate: Arc<Gate>,
+    _project: Directory,
+    _home: Directory,
+}
+
+impl Fixture {
+    fn new(outcome: TitleOutcome) -> Self {
+        Self::with_model(outcome, "shared-model-name")
+    }
+
+    fn with_model(outcome: TitleOutcome, model: &str) -> Self {
+        let project = Directory::new();
+        let home = Directory::new();
+        let gate = Arc::new(Gate::default());
+        let service = BlockingService {
+            account: Account::new(
+                "alpha",
+                vec![Reply::text("Main answer"), Reply::text("Generated title")],
+            ),
+            gate: gate.clone(),
+            outcome,
+        };
+        let mut client = service.client(false);
+        client.inner = service.account.services().create(model.into()).unwrap();
+        let mut agent = Agent::new(client, Tools::new(project.path()).unwrap());
+        agent.set_effort(Effort::High);
+        agent.enable_sessions(home.path()).unwrap();
+        agent.name_sessions();
+        Self {
+            agent: Some(agent),
+            gate,
+            _project: project,
+            _home: home,
+        }
+    }
+}
+
+fn title_event(document: &Document) -> &crate::json::Value {
+    let events = document
+        .events
+        .iter()
+        .filter(|event| {
+            event.get("operation").and_then(crate::json::Value::as_str) == Some("session_title")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 1, "{events:?}");
+    events[0]
+}
 
 #[derive(Default)]
 struct Gate {
@@ -32,6 +84,7 @@ struct Gate {
     /// first prepares its request.
     before_create: Hook,
     before_main_request: Hook,
+    after_title: Hook,
 }
 
 type Hook = Mutex<Option<Box<dyn FnOnce() + Send>>>;
@@ -150,6 +203,7 @@ struct BlockingBackend {
 impl Drop for BlockingBackend {
     fn drop(&mut self) {
         if self.title_sampled.load(Ordering::Acquire) {
+            run_hook(&self.service.gate.after_title);
             self.service.gate.state.lock().unwrap().finished = true;
             self.service.gate.changed.notify_all();
         }

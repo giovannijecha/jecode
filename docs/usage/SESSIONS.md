@@ -68,8 +68,11 @@ for the title attempt to be saved before exiting or printing the final JSON
 Cancelling a turn, leaving an interactive conversation or switching sessions
 cancels unfinished title work and waits for it to stop before releasing the
 session's writer lease. Title provider failures keep the fallback title; a
-one-shot reports title storage or worker failures as errors. Normal shutdown
-saves the attempt as complete, failed or cancelled, keeping any reported usage.
+one-shot reports title storage or worker failures as errors. If a session switch
+reports a title error, the current conversation stays open; retry after storage
+is available. Interactive exit finishes title work before the final save and
+reports save errors. Normal shutdown saves the attempt as complete, failed or
+cancelled, keeping any reported usage.
 Usage the provider does not report stays unknown. Forced process termination
 can still interrupt recording.
 

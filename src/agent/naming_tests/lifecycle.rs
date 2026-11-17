@@ -2,49 +2,6 @@ use super::*;
 use crate::{events::Event, json::Value};
 use std::sync::mpsc;
 
-struct Fixture {
-    agent: Option<Agent>,
-    gate: Arc<Gate>,
-    _project: Directory,
-    _home: Directory,
-}
-
-impl Fixture {
-    fn new(outcome: TitleOutcome) -> Self {
-        let project = Directory::new();
-        let home = Directory::new();
-        let gate = Arc::new(Gate::default());
-        let service = BlockingService {
-            account: Account::new(
-                "alpha",
-                vec![Reply::text("Main answer"), Reply::text("Generated title")],
-            ),
-            gate: gate.clone(),
-            outcome,
-        };
-        let mut agent = Agent::new(service.client(false), Tools::new(project.path()).unwrap());
-        agent.set_effort(Effort::High);
-        agent.enable_sessions(home.path()).unwrap();
-        agent.name_sessions();
-        Self {
-            agent: Some(agent),
-            gate,
-            _project: project,
-            _home: home,
-        }
-    }
-}
-
-fn title_event(document: &Document) -> &Value {
-    let events = document
-        .events
-        .iter()
-        .filter(|event| event.get("operation").and_then(Value::as_str) == Some("session_title"))
-        .collect::<Vec<_>>();
-    assert_eq!(events.len(), 1, "{events:?}");
-    events[0]
-}
-
 fn partial_usage() -> Usage {
     Usage {
         input_tokens: Some(17),

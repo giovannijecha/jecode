@@ -289,6 +289,11 @@ impl App {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn close_fixture(agent: Agent, config: SessionConfig) {
+    drop(App::new(agent, config, None));
+}
+
 /// Opens the TUI; a non-empty `draft` starts the composer, as `--attach` does.
 /// Run options apply to a conversation resumed at launch; a new conversation
 /// already starts with them.
@@ -455,6 +460,10 @@ impl Drop for App {
         self.reconcile_accepted();
         drop(self.job.take());
         let deletion_error = self.finish_delete(true).err();
+        let title_error = self
+            .agent
+            .as_mut()
+            .and_then(|agent| agent.finish_session().err());
         self.persist_input(true);
         self.collect_attachments();
         let fullscreen = self.terminal.is_some();
@@ -464,6 +473,9 @@ impl Drop for App {
             self.print_exit();
         }
         if let Some(error) = deletion_error {
+            eprintln!("{}", self.archive.redactor.text(&error));
+        }
+        if let Some(error) = title_error {
             eprintln!("{}", self.archive.redactor.text(&error));
         }
         if let Some(error) = &self.save_error {

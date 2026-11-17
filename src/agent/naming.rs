@@ -67,6 +67,13 @@ impl Agent {
             .map_or(Ok(()), |mut task| task.join())
     }
 
+    /// Join cancelled title work before the caller's final session save.
+    pub fn finish_session(&mut self) -> Result<(), String> {
+        let naming = self.stop_naming();
+        let saved = self.save_session();
+        finish_result(saved, naming)
+    }
+
     pub(super) fn stop_naming(&mut self) -> Result<(), String> {
         if let Some(task) = &self.naming_task {
             task.cancellation.cancel();

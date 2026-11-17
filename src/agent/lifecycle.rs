@@ -132,22 +132,6 @@ impl Agent {
         let (handle, status) = Handle::open(current.store(), id, self.redactor.clone())?;
         let document = handle.snapshot();
         let unselected = document.model.is_none();
-        if unselected {
-            // Bind only the saved draft, before changing the live agent. A
-            // failed selection save must leave the current conversation intact.
-            let mut archive = self.archive();
-            archive.messages =
-                std::sync::Arc::new(std::sync::Mutex::new(document.messages.clone()));
-            archive.events = std::sync::Arc::new(std::sync::Mutex::new(document.events.clone()));
-            handle.checkpoint(
-                &archive,
-                document.compatible_from,
-                &document.context,
-                &self.routing(),
-                self.has_model(),
-                crate::sessions::Stage::Selection,
-            )?;
-        }
         let unavailable = !self.has_backend(&document.backend);
         let mut used_replacement = false;
         let saved_backend = document.backend.clone();
@@ -176,9 +160,25 @@ impl Agent {
                 })
             })
             .transpose()?;
+        self.stop_naming()?;
+        if unselected {
+            // Finish old title work before selecting the saved draft. A failed
+            // title or selection save must leave both conversations intact.
+            let mut archive = self.archive();
+            archive.messages =
+                std::sync::Arc::new(std::sync::Mutex::new(document.messages.clone()));
+            archive.events = std::sync::Arc::new(std::sync::Mutex::new(document.events.clone()));
+            handle.checkpoint(
+                &archive,
+                document.compatible_from,
+                &document.context,
+                &self.routing(),
+                self.has_model(),
+                crate::sessions::Stage::Selection,
+            )?;
+        }
         let document = handle.snapshot();
         let temporary = handle.store().temporary_area(&document.id)?;
-        self.stop_naming()?;
         self.collaboration.stop_all();
         self.questions.bind(self.archive(), None);
         if let Some(client) = client {
