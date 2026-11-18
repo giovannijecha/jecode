@@ -132,6 +132,41 @@ input fails. Attributing the official failure to that mechanism requires the
 original failing input or equivalent verifier diagnostics. Compare the evidence
 across harnesses before proposing a harness change.
 
+### Reproduce a flight-planning boundary
+
+Use a synthetic round trip with refueling at the delivery stop and fixed flight
+times of 100 and 40 minutes. Set cruise flow to 60 gal/h, holding flow to
+42 gal/h and reserve duration to 45 minutes. The outbound leg burns 100 gal,
+the planning reserve is 31.5 gal and the minimum landing fuel is 20 gal.
+
+Use an operating empty weight of 4,756 lb, a fuel density of 6 lb/gal, a fuel
+capacity of 420 gal and weight limits of 8,600 lb at takeoff and 8,500 lb at
+landing. Check each weight limit independently with fixed loads. With 3,064 lb
+of cargo and a 90 gal burn, increasing departure fuel from 130 to 131 gal
+raises takeoff weight from 8,600 to 8,606 lb. With 3,066 lb of cargo and 120 gal
+of departure fuel, decreasing the burn from 7 to 6 gal raises landing weight
+from 8,500 to 8,506 lb. In each pair, the other limit still passes.
+
+Return to the 100 gal outbound burn. A full reserve requires 131.5 gal at
+departure. Vary the cargo and compare the full-reserve load with the weight cap.
+
+| Outbound cargo (lb) | Takeoff fuel cap (gal) | Arrival fuel at the cap (gal) |
+| ---: | ---: | ---: |
+| 3,044 | 133.33 | 33.33 |
+| 3,064 | 130 | 30 |
+| 3,124 | 120 | 20 |
+| 3,130 | 119 | 19 |
+
+A hard reserve permits only the first row. A policy that reduces fuel to the
+weight cap and accepts arrivals at or above 20 gal permits the first three.
+Record whether the contract specifies which policy applies where they disagree.
+
+Use the feasible 3,044 lb case to vary turnaround at the delivery stop from 0
+to 25 minutes. Airborne time stays at 140 minutes. Elapsed time increases from
+140 to 165 minutes. Check the assigned meaning of `total_time_min` and any
+separate elapsed-time field. Compare the saved user task, harness instructions
+and tool results across attempts, and record which request details were captured.
+
 ## Documentation checks
 
 The normal suite checks inline Markdown links and heading anchors in the root,
