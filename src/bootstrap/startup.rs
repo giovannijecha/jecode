@@ -4,14 +4,17 @@ use crate::{
     tui::StartupNotice,
 };
 
+const SETUP_REQUIRED: &str = "Jecode needs provider credentials and a default model. \
+                              Run jecode setup in a terminal, then retry your task.";
+
 pub(super) fn needs_setup(store: &Store, settings: &Settings) -> bool {
     !settings.has_model()
         || settings
-            .services(
+            .service_status(
                 store.path().parent().expect("configuration directory"),
                 &settings.backend_id,
             )
-            .is_err()
+            .is_err_and(|error| error.settings.is_some())
 }
 
 /// `lenient` is true for the TUI, which reports an unavailable default
@@ -31,8 +34,8 @@ pub(super) fn client(
             None,
         ));
     }
-    if !lenient && needs_setup(store, settings) {
-        return Err("Jecode needs provider credentials and a default model. Run jecode setup in a terminal, then retry your task.".into());
+    if !lenient && !settings.has_model() {
+        return Err(SETUP_REQUIRED.into());
     }
     let model_override = selection.model.clone();
     let model = model_override
@@ -61,6 +64,13 @@ pub(super) fn client(
                     action: ("/model", "choose model"),
                 }),
             ));
+        }
+        Err(error) if !lenient => {
+            return Err(if error.settings.is_some() {
+                SETUP_REQUIRED.into()
+            } else {
+                error.diagnostic
+            });
         }
         Err(error) => error,
     };

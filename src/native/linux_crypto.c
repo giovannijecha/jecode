@@ -1,5 +1,6 @@
 // Linux OS libcrypto boundary for OAuth randomness, hashing and RSA verification.
 // Input: op byte, then big-endian u32 length + bytes per field.
+// Exit with 0 on success, 1 on operation failure and 2 when libcrypto is unavailable.
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -49,7 +50,7 @@ static int field(unsigned char **result, uint32_t *length) {
 }
 
 int main(void) {
-    if (!load_crypto()) { fputs("OS libcrypto unavailable\n", stderr); return 1; }
+    if (!load_crypto()) { fputs("OS libcrypto unavailable\n", stderr); return 2; }
     int op = getchar();
     unsigned char *data = NULL, *signature = NULL, *modulus = NULL, *exponent = NULL;
     uint32_t data_len = 0, sig_len = 0, n_len = 0, e_len = 0;

@@ -1,4 +1,5 @@
 use crate::cancel::Cancellation;
+use crate::process::Output;
 use std::process::Command;
 use std::time::Duration;
 
@@ -23,10 +24,26 @@ fn operation(op: u8, fields: &[&[u8]], cancel: &Cancellation) -> Result<Vec<u8>,
         None,
         &mut |_| Ok(()),
     )?;
+    checked_output(output, cancel)
+}
+
+fn checked_output(output: Output, cancel: &Cancellation) -> Result<Vec<u8>, String> {
     if output.cancelled || cancel.requested() {
         return Err("Operation cancelled".into());
     }
-    if output.timed_out || output.exit_code != Some(0) || output.stdout_truncated {
+    if output.timed_out {
+        return Err("Native cryptography operation timed out".into());
+    }
+    // linux_crypto.c reserves this status for a libcrypto load failure.
+    #[cfg(target_os = "linux")]
+    if output.exit_code == Some(2) {
+        return Err(
+            "OS libcrypto unavailable. Install or repair the system OpenSSL runtime \
+             (libcrypto.so.3 or libcrypto.so.1.1)."
+                .into(),
+        );
+    }
+    if output.exit_code != Some(0) || output.stdout_truncated {
         return Err("Native cryptography operation failed".into());
     }
     Ok(output.stdout)
@@ -61,5 +78,65 @@ pub fn verify_rs256(
         [0] => Ok(false),
         [1] => Ok(true),
         _ => Err("Native RSA verifier returned invalid data".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn failed_output(exit_code: i32) -> Output {
+        let stderr = b"OS libcrypto unavailable\nsynthetic-secret\n".to_vec();
+        Output {
+            stdout: Vec::new(),
+            stderr_bytes: stderr.len(),
+            stderr,
+            exit_code: Some(exit_code),
+            input_error: None,
+            timed_out: false,
+            stdout_bytes: 0,
+            stdout_truncated: false,
+            cancelled: false,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn libcrypto_load_failure_uses_a_fixed_local_diagnostic() {
+        let error = checked_output(failed_output(2), &Cancellation::default()).unwrap_err();
+        assert!(error.starts_with("OS libcrypto unavailable."));
+        assert!(error.contains("libcrypto.so.3"));
+        assert!(!error.contains("synthetic-secret"));
+    }
+
+    #[test]
+    fn other_failures_return_a_generic_diagnostic() {
+        let error = checked_output(failed_output(1), &Cancellation::default()).unwrap_err();
+        assert_eq!(error, "Native cryptography operation failed");
+    }
+
+    #[test]
+    fn timeout_and_cancellation_take_precedence_over_failure_status() {
+        let mut timed_out = failed_output(2);
+        timed_out.timed_out = true;
+        assert_eq!(
+            checked_output(timed_out, &Cancellation::default()).unwrap_err(),
+            "Native cryptography operation timed out"
+        );
+
+        let mut cancelled = failed_output(2);
+        cancelled.timed_out = true;
+        cancelled.cancelled = true;
+        assert_eq!(
+            checked_output(cancelled, &Cancellation::default()).unwrap_err(),
+            "Operation cancelled"
+        );
+
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        assert_eq!(
+            sha256(b"abc", &cancellation).unwrap_err(),
+            "Operation cancelled"
+        );
     }
 }

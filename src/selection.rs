@@ -46,6 +46,9 @@ pub fn provider_model(
 /// does not fall back to a different billing or account route.
 pub fn services(settings: &Settings, home: &Path, provider: &str) -> Result<Services, String> {
     settings.service_status(home, provider).map_err(|error| {
+        if error.settings.is_none() {
+            return error.diagnostic;
+        }
         let info = crate::backend::info(provider);
         let hint = if info.is_some_and(|info| info.uses_api_key()) {
             format!("save a key with jecode providers login {provider}")

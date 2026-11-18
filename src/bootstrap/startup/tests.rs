@@ -16,7 +16,7 @@ fn explicit_provider_without_credentials_never_falls_back() {
     let settings = Settings::new("isolated-fixture-key".into(), "fixture/saved".into()).unwrap();
     store.save(&settings).unwrap();
     let original = fs::read(store.path()).unwrap();
-    for provider in ["openai", "anthropic-api"] {
+    for provider in ["openai", "anthropic", "anthropic-api"] {
         let selection = Selection {
             provider: Some(provider.into()),
             model: Some("chosen-model".into()),
@@ -37,6 +37,34 @@ fn explicit_provider_without_credentials_never_falls_back() {
     );
     assert!(notice.is_none());
     assert_eq!(fs::read(store.path()).unwrap(), original);
+}
+
+#[test]
+fn account_store_failures_reach_explicit_and_default_startup() {
+    for (provider, message) in [
+        ("openai", "Invalid active OpenAI account"),
+        ("anthropic", "Invalid active Claude account"),
+    ] {
+        let directory = Directory::new();
+        let store = Store::new(directory.path().to_path_buf());
+        let settings = Settings::selected(provider, String::new(), "fixture-model".into()).unwrap();
+        let accounts = directory.path().join("accounts").join(provider);
+        fs::create_dir_all(&accounts).unwrap();
+        fs::write(accounts.join("active.json"), "{}").unwrap();
+
+        let explicit = Selection {
+            provider: Some(provider.into()),
+            model: Some("fixture-model".into()),
+            ..Selection::default()
+        };
+        assert!(!needs_setup(&store, &settings));
+        for selection in [&explicit, &Selection::default()] {
+            let error = client(&store, &settings, selection, false).err().unwrap();
+            assert_eq!(error, message);
+        }
+        let (_, notice) = client(&store, &settings, &Selection::default(), true).unwrap();
+        assert!(notice.unwrap().text.contains(message));
+    }
 }
 
 #[test]
