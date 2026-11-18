@@ -64,6 +64,7 @@ Contributor procedures and implementation details in `development/`:
 | [Development and testing](development/TESTING.md) | Toolchain, checks, fixtures, terminal-host checklist and CI. |
 | [TUI theme](development/TUI_THEME.md) | Colour tokens, grid and drawing rules. |
 | [Performance measurement](development/PERFORMANCE.md) | Measurement rules and reproducible probes. |
+| [Benchmark native readiness](development/BENCHMARK_NATIVE_READINESS.md) | Offline startup checks for staged pilots in the local lab. |
 | [Context checks](development/CONTEXT_CHECKS.md) | Offline replay and the limits of context screening. |
 | [OpenAI backend](development/OPENAI.md) | API-key and ChatGPT account authentication and Responses translation. |
 | [Anthropic backend](development/ANTHROPIC.md) | API-key and Claude account authentication and Messages translation. |
