@@ -105,6 +105,33 @@ suite.
 For a real-task study, capture the delivered files and journal before repairs;
 see [Real-task evidence](PERFORMANCE.md#real-task-evidence).
 
+### Reproduce a failed task check
+
+Use the public task contract and replay the delivered code in a disposable
+workspace. Vary one part of the input at a time. Check both the result and
+persisted side effects. In each transcript, find the contract read, the
+implementation choice, and the input and result of the agent's local test.
+
+For a lead intake task, seed the CRM ledger with two valid website leads in
+reverse timestamp order. Seed the incomplete ledger with a distinct website
+lead, a lead sharing the first CRM lead's identity, and a lead with the exact
+source `" Partner Desk "`. Submit the first CRM lead again. The website group
+should contain the two CRM records in ledger order followed by the distinct
+incomplete record. Check the exact custom key, the default groups, and the
+saved objects, including `missingFields` on incomplete entries.
+
+| Change to the saved source view | What to check |
+| --- | --- |
+| Move a complete record to the wrong group, duplicate it, or reverse the website array. | The rebuilt view follows ledger order, gives CRM records precedence for shared identities, and preserves the quarantine history. |
+| Replace a group with an array holding a partial record such as `{"email":"old@example.com","source":"website"}`. | If the saved view accepts arrays of objects, expect silent repair. Compare the projected output and any quarantine record separately. |
+| Use invalid JSON, a non-array group, or a null entry. | The view is rebuilt and the malformed input is recorded in the quarantine history and reconciliation output. |
+
+Change only the suspected validator in a copy and rerun the same cases,
+including the malformed controls. A public example can establish why a specific
+input fails. Attributing the official failure to that mechanism requires the
+original failing input or equivalent verifier diagnostics. Compare the evidence
+across harnesses before proposing a harness change.
+
 ## Documentation checks
 
 The normal suite checks inline Markdown links and heading anchors in the root,
