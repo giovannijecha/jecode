@@ -28,6 +28,7 @@ native version and ACP checks for its own runtime.
 
 Use `Run` as the launch entry point for a fresh, reviewed pilot. It runs the
 same offline probe and invokes the local pilot launcher only after a pass.
+The staged Harbor configuration must point to the checked task and one attempt.
 The local pilot selects the task network and starts Harbor after the campaign's
 account and quota checks.
 
@@ -39,10 +40,14 @@ The readiness sandbox uses Docker's `none` network, local images, and a scratch
 home. Receipts are written to a new directory per check under
 `/var/lib/jecode-benchmark/native-readiness/` inside WSL. They include the
 staging and runtime digests, effective UID and GID, individual outcomes, and the
-probe container's retirement status. `public_https: "not_run"`,
-`account_access: false`, and `model_requests: 0` describe the offline phase.
+probe container's retirement status. If Docker loses the create response, the
+launcher checks the expected name, image and ownership label to recover the
+exact ID for cleanup. `public_https: "not_run"`, `account_access: false`, and
+`model_requests: 0` describe the offline phase.
 Record any authorized public HTTPS diagnostic separately from offline readiness
 and any later model-access check.
+
+Run the focused driver tests with `python3 -B tools/benchmark-native-readiness.tests.py`.
 
 For a regression check, probe the original React staging, a disposable copy
 with the OS libraries and only the system CA path, and the corrected staging

@@ -34,6 +34,7 @@ CODEX_HOST = "/opt/benchmark/codex-code-mode-host"
 CRYPTO = "/opt/benchmark/openai_crypto"
 VENV = "/opt/harbor-acp-venv"
 PROBE = "/opt/benchmark/readiness.py"
+PROBE_OWNER = "benchmark-native-readiness"
 SHA_ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
 
@@ -138,11 +139,16 @@ def staged_runtime(run_id, mode, report):
     image = task["docker_image"]
     uid = record["agent_uid"]
     environment = config["environment"]
-    local = config["agents"][0]["kwargs"]["registry_entry"]["distribution"]["local"]
+    tasks, agents = config["tasks"], config["agents"]
+    require(len(tasks) == 1 and tasks[0]["path"] == str(root / "task")
+            and len(agents) == 1 and config["n_attempts"] == 1,
+            "Staged Harbor config must reference the checked task and one agent attempt.")
+    agent = agents[0]
+    local = agent["kwargs"]["registry_entry"]["distribution"]["local"]
     harness = record["profile"].split("-")[0]
     require(image == record["agent_image"] and re.fullmatch(r"sha256:[0-9a-f]{64}", image)
             and type(uid) is int and uid >= 0 and config["job_name"] == run_id
-            and environment["type"] == "docker" and config["agents"][0]["name"] == "acp"
+            and environment["type"] == "docker" and agent["name"] == "acp"
             and local["cmd"] == BRIDGE and local["args"][:4] == ["--harness", harness, "--executable", NATIVE],
             "Staged image, user or agent runtime differs from the pilot checkpoint.")
     report.update(image=image, expected_uid=uid)
@@ -185,6 +191,28 @@ def invoke(arguments, timeout=15, **options):
         raise ReadinessError(f"Process could not complete ({type(error).__name__}).") from None
 
 
+def retire_container(report):
+    try:
+        container = report.get("container_id")
+        if container is None:
+            # The daemon can create the container before the client receives the ID.
+            name = report["container_name"]
+            fields = '{{.Id}} {{.Name}} {{.Image}} {{index .Config.Labels "jecode.owner"}}'
+            inspected = invoke(DOCKER + ["container", "inspect", "--format", fields, name])
+            if inspected.returncode != 0:
+                return
+            identity = inspected.stdout.decode(errors="replace").split()
+            require(identity and re.fullmatch(r"[0-9a-f]{64}", identity[0])
+                    and identity[1:] == [f"/{name}", report["image"], PROBE_OWNER],
+                    "Could not confirm ownership of the interrupted readiness container.")
+            container = report["container_id"] = identity[0]
+        removed = invoke(DOCKER + ["rm", "-fv", container])
+        report["container_removed"] = removed.returncode == 0
+    except ReadinessError as error:
+        report["container_removed"] = False
+        report["container_cleanup_error"] = str(error)
+
+
 def check_container(report, mounts, task):
     name = "jecode-readiness-" + Path(report["receipt"]).parent.name
     report["container_name"] = name
@@ -193,18 +221,18 @@ def check_container(report, mounts, task):
         "--cap-drop=ALL", "--security-opt=no-new-privileges",
         "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=64m",
         "--cpus", str(task["cpus"]), "--memory", f'{task["memory_mb"]}m',
-        "--label", "jecode.owner=benchmark-native-readiness",
+        "--label", f"jecode.owner={PROBE_OWNER}",
         "--entrypoint", f"{VENV}/bin/python",
     ]
     for target, source in mounts.items():
         arguments += ["--mount", f"type=bind,src={source},dst={target},readonly"]
     arguments += [report["image"], "-I", "-B", PROBE, "--inside"]
-    creation = invoke(DOCKER + arguments)
-    container = creation.stdout.decode(errors="replace").strip()
-    require(creation.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", container),
-            "Could not create the offline container from the local quota-daemon image.")
-    report["container_id"] = container
     try:
+        creation = invoke(DOCKER + arguments)
+        container = creation.stdout.decode(errors="replace").strip()
+        require(creation.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", container),
+                "Could not create the offline container from the local quota-daemon image.")
+        report["container_id"] = container
         spec = {key: report[key] for key in ("expected_uid", "profile", "runtime")}
         started = invoke(DOCKER + ["start", "-ai", container], timeout=60,
                          input=json.dumps(spec).encode())
@@ -216,8 +244,7 @@ def check_container(report, mounts, task):
         require(started.returncode == 0 and report["observed"]["passed"] is True,
                 "One or more functional startup checks failed.")
     finally:
-        removed = invoke(DOCKER + ["rm", "-fv", container])
-        report["container_removed"] = removed.returncode == 0
+        retire_container(report)
     require(report["container_removed"], "Readiness container could not be retired by exact ID.")
 
 
