@@ -39,8 +39,10 @@ covers `jecode update`, `jecode uninstall`, and existing standalone installation
    that provider's key. **Credentials** offers ChatGPT sign-in and the
    documented Claude compatibility route.
 3. Choose a model when the selector opens. This saves your configuration.
-4. Type your task and press Enter. The default level, Workspace, confines the
-   agent's commands to this folder; see [Permissions](docs/usage/PERMISSIONS.md).
+4. Type your task and press Enter. The default permission level, Workspace,
+   asks for approval for file access outside the project. See
+   [Permissions](docs/usage/PERMISSIONS.md) for command confinement and platform
+   requirements.
 
 Instead of steps 2 and 3, you can run `jecode setup` for a guided prompt.
 
@@ -57,8 +59,8 @@ then works through the task in the same window:
   card, and edits appear as diffs;
 - you can keep typing to add instructions, which it picks up before its next
   step, or press Esc to stop it;
-- at the default permission level, it asks you before touching anything outside
-  the project directory;
+- `/permissions` changes the conversation's permission level and lets you
+  review remembered approvals;
 - `/` lists commands as you type, and Ctrl+G opens them without touching your
   draft;
 - `$` picks one of your personal skills and `@` a project file, written into the
@@ -103,22 +105,19 @@ jecode update
 
 ## Status
 
-Jecode is usable and still evolving. Commands, settings and storage formats may
-change between releases; the [release notes](CHANGELOG.md) list what changed.
-This build resumes only conversations saved in its current format; it reports
-older ones and leaves their files unchanged, without migrating them. See
-[Sessions](docs/usage/SESSIONS.md) and the
-[0.5.5 upgrade notes](CHANGELOG.md#upgrading-from-045). The
-[0.4.5 notes](CHANGELOG.md#upgrading-from-035) cover the Claude prompt-cache
-default.
+Jecode is experimental. The [release notes](CHANGELOG.md) track changes to
+commands, settings and storage. Jecode resumes conversations saved in its
+current format and preserves files from older formats. See
+[Sessions](docs/usage/SESSIONS.md) for recovery and upgrade behavior.
 
-- Windows x64, Linux x64, and macOS on Apple silicon and Intel have native
-  builds and terminal fixtures in CI. Interactive use on macOS has not been
-  verified. See [Platform support](docs/usage/PLATFORMS.md).
-- Command confinement in the Workspace permission level needs Landlock on Linux and a
-  recent Windows, and uses Seatbelt on macOS. Hosts without confinement need the
-  Full level; macOS terminal hosts still need manual validation.
-- API keys use the provider's API billing, separately from subscription plans.
+CI builds and exercises terminal fixtures for Windows x64, Linux x64, and
+macOS on Apple silicon and Intel. Windows and Linux have recorded live-provider
+use. Interactive use on macOS still needs verification. See
+[Platform support](docs/usage/PLATFORMS.md) for requirements and coverage.
+
+The [performance measurement guide](docs/development/PERFORMANCE.md) explains
+how to measure Jecode's components and compare agent runs. The
+[report index](docs/reports/README.md) lists dated results and their scope.
 
 ## Privacy and security
 

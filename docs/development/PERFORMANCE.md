@@ -6,10 +6,10 @@ and interpret their scope. The latest recorded measurements are in
 [Historical performance results](../reports/PERFORMANCE_RESULTS.md); each
 section identifies its measured date and host.
 
-For comparisons with other coding agents, see the
-[historical Jecode vs Codex and Claude Code benchmark](../reports/AGENT_BENCHMARK_2026-11.md). It
-records coding work with earlier Jecode account routes; the probes below measure
-separate parts of Jecode and do not establish a lead over another harness.
+For measurements of completed coding tasks, see the
+[historical Jecode, Codex and Claude Code benchmark](../reports/AGENT_BENCHMARK_2026-11.md).
+The probes below measure individual components. Task comparisons need a shared
+workload and evaluator.
 
 ## Measurement rules
 
@@ -129,6 +129,19 @@ reasoning or working activity rather than visible text. A yielded command can
 keep running after its tool invocation ends, so use its process outcome too.
 
 Review the original delivery against the requested behavior, then record
-repairs separately. For efficiency comparisons, hold quality criteria and
-loaded inputs steady across matched runs and keep raw totals. Proposals from
-one trace remain hypotheses until a comparable run supports them.
+repairs separately. Proposals from one trace remain hypotheses until a
+comparable run supports them.
+
+## Comparing coding agents
+
+- Record each harness build, the primary model and effort, provider route,
+  task revision, evaluator, resource limits and run order. Use the same task
+  inputs and acceptance criteria for both harnesses in a pair.
+- Count solves by the evaluator's full-success criterion and give the
+  denominator. Retain failed attempts and report the reason for any exclusion
+  or retry. Identify which tasks were already used for development. Use a
+  fresh task sample to assess performance beyond those cases.
+- For elapsed-time and usage comparisons at matched quality, use pairs where
+  both harnesses solved the task. State the phases included in the timing.
+  Report how many pairs have complete usage, and record the rates and date used
+  for any API-equivalent estimate.

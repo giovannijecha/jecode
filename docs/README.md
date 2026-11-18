@@ -1,12 +1,13 @@
 # Jecode documentation
 
 Start with the [project README](../README.md) for installation and a first task.
-Run Jecode commands from your project directory; run Cargo commands and repository
-scripts from the Jecode repository root.
+Run Jecode commands from the project you want to work on. Run Cargo commands and
+repository scripts from the Jecode repository root.
 
 For project policies, see [Contributing](../CONTRIBUTING.md),
 [Security](../SECURITY.md) and the [Code of conduct](../CODE_OF_CONDUCT.md).
-Changes between versions are in the [release notes](../CHANGELOG.md).
+Check [platform support](usage/PLATFORMS.md) for verified behavior on your host
+and the [release notes](../CHANGELOG.md) for changes between versions.
 
 ## Get started
 
@@ -64,7 +65,7 @@ Contributor procedures and implementation details in `development/`:
 | [Development and testing](development/TESTING.md) | Toolchain, checks, fixtures, terminal-host checklist and CI. |
 | [TUI theme](development/TUI_THEME.md) | Colour tokens, grid and drawing rules. |
 | [Performance measurement](development/PERFORMANCE.md) | Measurement rules and reproducible probes. |
-| [Benchmark native readiness](development/BENCHMARK_NATIVE_READINESS.md) | Offline startup checks for staged pilots in the local lab. |
+| [Benchmark native readiness](development/BENCHMARK_NATIVE_READINESS.md) | Offline checks of staged agent, ACP, crypto and certificate readiness. |
 | [Context checks](development/CONTEXT_CHECKS.md) | Offline replay and the limits of context screening. |
 | [OpenAI backend](development/OPENAI.md) | API-key and ChatGPT account authentication and Responses translation. |
 | [Anthropic backend](development/ANTHROPIC.md) | API-key and Claude account authentication and Messages translation. |
@@ -82,7 +83,9 @@ Operations in `maintainers/` that require maintainer accounts or permissions:
 
 ## Reports
 
-Dated evidence in `reports/`; results apply to the builds and hosts recorded there:
+The [performance measurement guide](development/PERFORMANCE.md) covers probes
+and task comparisons. The reports give the workload and the recorded build and
+host details.
 
 | Report | Contents |
 | --- | --- |
