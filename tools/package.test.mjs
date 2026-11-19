@@ -8,6 +8,10 @@ import {fileURLToPath} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const scratch = path.join(root, '.tmp');
 const windows = process.platform === 'win32';
+const publicDocs = {
+  'PUBLIC.md': '# Public guide\n\n[Details](usage/DETAILS.md)\n',
+  'usage/DETAILS.md': '# Details\n\n[Public guide](../PUBLIC.md)\n',
+};
 
 function fixture(t) {
   fs.mkdirSync(scratch, {recursive: true});
@@ -33,12 +37,18 @@ function fixture(t) {
     'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md']) {
     fs.writeFileSync(path.join(directory, name), `fixture ${name}\n`);
   }
-  const docs = path.join(directory, 'docs/development');
-  fs.mkdirSync(docs, {recursive: true});
-  for (const name of ['PUBLIC.md', 'CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'Harness_Draft.md',
+  const docs = path.join(directory, 'docs');
+  fs.mkdirSync(path.join(docs, 'usage'), {recursive: true});
+  for (const [name, content] of Object.entries(publicDocs)) {
+    fs.writeFileSync(path.join(docs, name), content);
+  }
+  for (const name of ['BENCHMARK_LOCAL_NOTE.md', 'CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'Harness_Draft.md',
     'AGENTS.md', 'CLAUDE.md']) {
     fs.writeFileSync(path.join(docs, name), `fixture ${name}\n`);
   }
+  const manifest = path.join(directory, 'tools/package-docs.txt');
+  fs.mkdirSync(path.dirname(manifest));
+  fs.writeFileSync(manifest, `${Object.keys(publicDocs).join('\n')}\n`);
   const outside = path.join(directory, 'outside');
   fs.mkdirSync(outside);
   fs.writeFileSync(path.join(outside, 'LINKED.md'), 'fixture linked\n');
@@ -47,10 +57,10 @@ function fixture(t) {
   fs.mkdirSync(release, {recursive: true});
   fs.writeFileSync(path.join(release, windows ? 'jecode.exe' : 'jecode'), 'fixture binary');
   const platform = windows ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
-  return {directory, bin, script, packageRoot: path.join(directory, `target/package/jecode-${platform}-x86_64`)};
+  return {directory, outside, bin, script, manifest, packageRoot: path.join(directory, `target/package/jecode-${platform}-x86_64`)};
 }
 
-function run({directory, bin, script}) {
+function run({directory, outside, bin, script}) {
   const command = windows ? 'powershell.exe' : 'sh';
   const args = windows ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(directory, script)] :
     [path.join(directory, script)];
@@ -65,22 +75,27 @@ function run({directory, bin, script}) {
     env.PSMODULEPATH = path.join(env.SYSTEMROOT, 'System32/WindowsPowerShell/v1.0/Modules');
   }
   return spawnSync(command, args, {
-    cwd: directory, encoding: 'utf8', timeout: 30_000,
+    cwd: outside, encoding: 'utf8', timeout: 30_000,
     env,
   });
 }
 
-test('standalone packaging excludes private docs and refuses an existing destination', t => {
+test('standalone packaging copies the listed guides and refuses an existing destination', t => {
   const item = fixture(t);
   const first = run(item);
   assert.equal(first.status, 0, first.stderr || first.error?.message);
   assert.ok(fs.existsSync(path.join(item.packageRoot, 'CODE_OF_CONDUCT.md')));
-  const docs = path.join(item.packageRoot, 'docs/development');
-  assert.ok(fs.existsSync(path.join(docs, 'PUBLIC.md')));
-  for (const name of ['CODEX_HARNESS_STUDY.md', 'HARNESS_NOTES.md', 'Harness_Draft.md', 'AGENTS.md', 'CLAUDE.md']) {
-    assert.ok(!fs.existsSync(path.join(docs, name)), `${name} entered the package`);
+  const docs = path.join(item.packageRoot, 'docs');
+  assert.deepEqual(fs.readdirSync(docs).sort(), ['PUBLIC.md', 'usage']);
+  assert.deepEqual(fs.readdirSync(path.join(docs, 'usage')), ['DETAILS.md']);
+  for (const [name, expected] of Object.entries(publicDocs)) {
+    const file = path.join(docs, name);
+    const content = fs.readFileSync(file, 'utf8');
+    assert.equal(content, expected);
+    for (const [, href] of content.matchAll(/\]\(([^)]+)\)/g)) {
+      assert.ok(fs.statSync(path.resolve(path.dirname(file), href)).isFile(), `${name}: ${href}`);
+    }
   }
-  assert.ok(!fs.existsSync(path.join(item.packageRoot, 'docs/linked')), 'a linked directory entered the package');
 
   const stale = path.join(docs, 'STALE.md');
   fs.writeFileSync(stale, 'preserve existing package contents');
@@ -88,4 +103,20 @@ test('standalone packaging excludes private docs and refuses an existing destina
   assert.notEqual(second.status, 0, 'packaging reused an existing destination');
   assert.match(`${second.stdout}\n${second.stderr}`, /package destination already exists/i);
   assert.equal(fs.readFileSync(stale, 'utf8'), 'preserve existing package contents');
+});
+
+test('standalone packaging rejects unavailable or linked documentation before creating a package', t => {
+  const item = fixture(t);
+  const allowed = fs.readFileSync(item.manifest, 'utf8');
+  for (const [entry, error] of [
+    ['../outside/LINKED.md', /invalid package documentation path/i],
+    ['MISSING.md', /missing package documentation file/i],
+    ['linked/LINKED.md', /linked package documentation path/i],
+  ]) {
+    fs.writeFileSync(item.manifest, `${allowed}${entry}\n`);
+    const result = run(item);
+    assert.notEqual(result.status, 0, entry);
+    assert.match(result.stderr, error);
+    assert.ok(!fs.existsSync(item.packageRoot));
+  }
 });

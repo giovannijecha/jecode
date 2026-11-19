@@ -596,9 +596,13 @@ On Linux or macOS, run `sh PACKAGE.sh`, then
 Packaging stops when its output directory exists; remove
 `target/package/jecode-<platform>-<arch>` before a second run.
 
-To check the package scripts without building or installing, run
-`node --test tools/package.test.mjs`. It uses an isolated source tree with stub
-build commands and verifies the document exclusions and existing-output refusal.
+Both standalone package scripts use `tools/package-docs.txt`. Add a public
+guide and any linked files under `docs/` to this list when they should ship in
+the standalone package. Entries are paths relative to `docs/`, one per line.
+
+Run `node --test tools/package.test.mjs` to check packaging with stub build
+commands. The fixture checks the documentation inventory, links between the
+included guides and refusal of an existing output directory.
 
 ## npm distribution checks
 

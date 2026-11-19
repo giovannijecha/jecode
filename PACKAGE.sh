@@ -16,19 +16,42 @@ if [ -e "$package" ] || [ -L "$package" ]; then
     printf 'Package destination already exists: %s\n' "$package" >&2
     exit 1
 fi
+
+set --
+while IFS= read -r relative || [ -n "$relative" ]; do
+    case "/$relative/" in
+        *//*|*/./*|*/../*|*\\*|*:*)
+            printf 'Invalid package documentation path: %s\n' "$relative" >&2
+            exit 1 ;;
+    esac
+    entry=$script_dir/docs/$relative
+    if [ ! -f "$entry" ]; then
+        printf 'Missing package documentation file: %s\n' "$relative" >&2
+        exit 1
+    fi
+    while [ "$entry" != "$script_dir" ]; do
+        if [ -L "$entry" ]; then
+            printf 'Linked package documentation path: %s\n' "$relative" >&2
+            exit 1
+        fi
+        entry=${entry%/*}
+    done
+    set -- "$@" "$relative"
+done < "$script_dir/tools/package-docs.txt"
+if [ "$#" -eq 0 ]; then
+    printf 'Package documentation list is empty.\n' >&2
+    exit 1
+fi
+
 mkdir -p "$(dirname "$package")"
 mkdir "$package"
 cp "$target_root/release/jecode" "$package/jecode"
 cp "$script_dir/INSTALL.sh" "$script_dir/LICENSE" "$script_dir/README.md" \
     "$script_dir/CHANGELOG.md" "$script_dir/SECURITY.md" "$script_dir/CONTRIBUTING.md" \
     "$script_dir/CODE_OF_CONDUCT.md" "$package/"
-mkdir -p "$package/docs"
-# Without -L, find neither follows nor matches symbolic links. Names match
-# without case, as they do in PACKAGE.ps1.
-find "$script_dir/docs" -type f ! -iname 'HARNESS*' ! -iname AGENTS.md ! -iname CLAUDE.md ! -iname CODEX_HARNESS_STUDY.md | while IFS= read -r document; do
-    relative=${document#"$script_dir/docs/"}
+for relative in "$@"; do
     mkdir -p "$package/docs/$(dirname "$relative")"
-    cp "$document" "$package/docs/$relative"
+    cp "$script_dir/docs/$relative" "$package/docs/$relative"
 done
 chmod 755 "$package/jecode"
 if command -v sha256sum >/dev/null 2>&1; then
