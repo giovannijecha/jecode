@@ -17,20 +17,32 @@ try {
     $hostTriple = ([string]($hostInfo | Where-Object { $_ -like 'host: *' })).Substring(6)
     $package = Join-Path $targetRoot ('package/jecode-windows-' + $hostTriple.Split('-')[0])
     if (Test-Path -LiteralPath $package) { throw "Package destination already exists: $package" }
+
+    $docsRoot = Join-Path $PSScriptRoot 'docs'
+    $documents = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'tools/package-docs.txt'))
+    if ($documents.Count -eq 0) { throw 'Package documentation list is empty.' }
+    foreach ($relative in $documents) {
+        if ($relative -match '(^|/)\.{0,2}(/|$)|[\\:]') { throw "Invalid package documentation path: $relative" }
+        $entry = Join-Path $docsRoot $relative
+        if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { throw "Missing package documentation file: $relative" }
+        while ($entry -ne $PSScriptRoot) {
+            if ((Get-Item -LiteralPath $entry -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Linked package documentation path: $relative"
+            }
+            $entry = Split-Path -Parent $entry
+        }
+    }
+
     New-Item -ItemType Directory -Path (Split-Path -Parent $package) -Force | Out-Null
     New-Item -ItemType Directory -Path $package -ErrorAction Stop | Out-Null
     Copy-Item -LiteralPath $binary -Destination (Join-Path $package 'jecode.exe') -Force
     foreach ($name in @('INSTALL.ps1', 'LICENSE', 'README.md', 'CHANGELOG.md', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $package $name) -Force
     }
-    $docsRoot = Join-Path $PSScriptRoot 'docs'
-    foreach ($document in Get-ChildItem -LiteralPath $docsRoot -Recurse -File) {
-        if ($document.Name -like 'HARNESS*' -or $document.Name -in @('AGENTS.md', 'CLAUDE.md', 'CODEX_HARNESS_STUDY.md') -or
-            ($document.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
-        $relative = $document.FullName.Substring($docsRoot.Length).TrimStart('\', '/')
+    foreach ($relative in $documents) {
         $destination = Join-Path (Join-Path $package 'docs') $relative
         [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
-        Copy-Item -LiteralPath $document.FullName -Destination $destination -Force
+        Copy-Item -LiteralPath (Join-Path $docsRoot $relative) -Destination $destination
     }
     $digest = (Get-FileHash -LiteralPath (Join-Path $package 'jecode.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $package 'SHA256SUMS'), $digest + '  jecode.exe' + "`n")
